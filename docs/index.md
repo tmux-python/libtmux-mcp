@@ -32,3 +32,4 @@ history
 glossary
 GitHub <https://github.com/tmux-python/libtmux-mcp>
 ```
+
