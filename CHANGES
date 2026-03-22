@@ -1,0 +1,16 @@
+# Changelog
+
+## libtmux-mcp 0.1.0a0 (unreleased)
+
+### New features
+
+- Initial release as standalone package
+- 25 MCP tools across 6 modules (server, session, window, pane, options, environment)
+- 6 `tmux://` URI resources for browsing tmux hierarchy
+- Safety tier middleware (`readonly`, `mutating`, `destructive`)
+- Socket isolation via `LIBTMUX_SOCKET` / `LIBTMUX_SOCKET_PATH` env vars
+- Agent self-awareness via `TMUX_PANE` detection
+- Server caching with `is_alive()` eviction
+- Pydantic models for all tool outputs
+- Full type safety (mypy strict)
+- 58 tests

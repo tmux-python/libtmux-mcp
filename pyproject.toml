@@ -1,0 +1,245 @@
+[project]
+name = "libtmux-mcp"
+version = "0.1.0a0"
+description = "MCP server for tmux, powered by libtmux"
+requires-python = ">=3.10,<4.0"
+authors = [
+  {name = "Tony Narlock", email = "tony@git-pull.com"}
+]
+license = { text = "MIT" }
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS :: MacOS X",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: PyPy",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Utilities",
+  "Topic :: System :: Shells",
+  "Typing :: Typed",
+]
+
+keywords = ["tmux", "mcp", "model-context-protocol", "terminal", "ai"]
+homepage = "http://github.com/tmux-python/libtmux-mcp/"
+readme = "README.md"
+packages = [
+  { include = "*", from = "src" },
+]
+include = [
+  { path = "CHANGES", format = "sdist" },
+  { path = "tests", format = "sdist" },
+  { path = "docs", format = "sdist" },
+  { path = "conftest.py", format = "sdist" },
+]
+
+dependencies = [
+  "libtmux>=0.55.0,<1.0",
+  "fastmcp>=3.1.0,<4.0.0",
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/tmux-python/libtmux-mcp/issues"
+Documentation = "https://libtmux-mcp.git-pull.com"
+Repository = "https://github.com/tmux-python/libtmux-mcp"
+Changes = "https://github.com/tmux-python/libtmux-mcp/blob/master/CHANGES"
+
+[project.scripts]
+libtmux-mcp = "libtmux_mcp:main"
+
+[dependency-groups]
+dev = [
+  # Docs
+  "sphinx<9",
+  "furo",
+  "gp-libs",
+  "sphinx-autobuild",
+  "sphinx-autodoc-typehints",
+  "sphinx-inline-tabs",
+  "sphinxext-opengraph",
+  "sphinx-copybutton",
+  "sphinxext-rediraffe",
+  "myst-parser",
+  "linkify-it-py",
+  # Testing
+  "typing-extensions; python_version < '3.11'",
+  "gp-libs",
+  "pytest",
+  "pytest-rerunfailures",
+  "pytest-mock",
+  "pytest-watcher",
+  "pytest-xdist",
+  # Coverage
+  "codecov",
+  "coverage",
+  "pytest-cov",
+  # Lint
+  "ruff",
+  "mypy",
+]
+
+docs = [
+  "sphinx<9",
+  "furo",
+  "gp-libs",
+  "sphinx-autobuild",
+  "sphinx-autodoc-typehints",
+  "sphinx-inline-tabs",
+  "sphinxext-opengraph",
+  "sphinx-copybutton",
+  "sphinxext-rediraffe",
+  "myst-parser",
+  "linkify-it-py",
+]
+testing = [
+  "typing-extensions; python_version < '3.11'",
+  "gp-libs",
+  "pytest",
+  "pytest-rerunfailures",
+  "pytest-mock",
+  "pytest-watcher",
+]
+coverage =[
+  "codecov",
+  "coverage",
+  "pytest-cov",
+]
+lint = [
+  "typing-extensions; python_version < '3.11'",
+  "ruff",
+  "mypy",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+files = [
+  "src",
+  "tests",
+]
+
+[[tool.mypy.overrides]]
+module = ["sphinx_fonts"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+parallel = true
+omit = [
+  "docs/conf.py",
+  "tests/test_*.py",
+  "tests/*/test_*.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "return NotImplemented",
+  "def parse_args",
+  "if TYPE_CHECKING:",
+  "if t.TYPE_CHECKING:",
+  "@overload( |$)",
+  'class .*\bProtocol\):',
+  "from __future__ import annotations",
+  "import typing as t",
+  "^\\s*\\.\\.\\.$",
+  "^\\s*pass$",
+  "^\\s*assert ",
+  "^\\s*logger\\s*=",
+  "^import ",
+  "^from .* import",
+  ": TypeAlias = ",
+  "= t\\.TypeVar\\(",
+]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "E", # pycodestyle
+  "F", # pyflakes
+  "I", # isort
+  "UP", # pyupgrade
+  "A", # flake8-builtins
+  "B", # flake8-bugbear
+  "C4", # flake8-comprehensions
+  "COM", # flake8-commas
+  "EM", # flake8-errmsg
+  "Q", # flake8-quotes
+  "PTH", # flake8-use-pathlib
+  "SIM", # flake8-simplify
+  "TRY", # Trycertatops
+  "PERF", # Perflint
+  "RUF", # Ruff-specific rules
+  "D", # pydocstyle
+  "FA100",  # future annotations
+]
+ignore = [
+  "COM812", # missing trailing comma, ruff format conflict
+]
+extend-safe-fixes = [
+  "UP006",
+  "UP007",
+]
+pyupgrade.keep-runtime-typing = false
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "libtmux_mcp",
+]
+combine-as-imports = true
+required-imports = [
+  "from __future__ import annotations",
+]
+
+[tool.ruff.lint.flake8-builtins]
+builtins-allowed-modules = [
+  "dataclasses",
+  "random",
+  "types",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+"*/__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+addopts = [
+  "--tb=short",
+  "--no-header",
+  "--showlocals",
+  "--doctest-docutils-modules",
+  "-p no:doctest",
+  "--reruns=2"
+]
+doctest_optionflags = [
+  "ELLIPSIS",
+  "NORMALIZE_WHITESPACE"
+]
+testpaths = [
+  "src/libtmux_mcp",
+  "tests",
+]
+filterwarnings = [
+  "ignore:The frontend.Option(Parser)? class.*:DeprecationWarning::",
+  "ignore::DeprecationWarning:libtmux.*:",
+  "ignore::DeprecationWarning:libtmux_mcp.*:",
+  "ignore::DeprecationWarning:tests:",
+]
