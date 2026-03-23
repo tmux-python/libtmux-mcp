@@ -16,8 +16,8 @@ This file provides guidance to AI agents (including Claude Code, Cursor, and oth
 libtmux-mcp is an MCP (Model Context Protocol) server for tmux, powered by [libtmux](https://github.com/tmux-python/libtmux). It gives AI agents (Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor) programmatic control over tmux sessions.
 
 Key features:
-- 25 MCP tools across 6 modules: server, session, window, pane, options, environment
-- 6 `tmux://` URI resources for browsing tmux hierarchy
+- MCP tools across 6 modules: server, session, window, pane, options, environment
+- `tmux://` URI resources for browsing tmux hierarchy
 - Safety tier middleware (readonly, mutating, destructive)
 - Socket isolation for multi-server safety
 - Pydantic models for all tool outputs

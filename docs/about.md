@@ -38,7 +38,7 @@ Server (tmux server instance)
 
 ## Tools
 
-### 25 tools across 6 modules
+### Tools
 
 | Module | Tools |
 |--------|-------|
@@ -51,7 +51,7 @@ Server (tmux server instance)
 
 ## Resources
 
-### 6 `tmux://` URI resources
+### `tmux://` URI resources
 
 - `tmux://sessions` — All sessions
 - `tmux://sessions/{name}` — Session detail with windows

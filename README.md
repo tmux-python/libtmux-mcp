@@ -157,7 +157,7 @@ args = ["--directory", "~/work/python/libtmux-mcp", "run", "libtmux-mcp"]
 
 ## What's included
 
-### 25 tools across 6 modules
+### Tools
 
 | Module | Tools |
 |--------|-------|
@@ -168,7 +168,7 @@ args = ["--directory", "~/work/python/libtmux-mcp", "run", "libtmux-mcp"]
 | **Options** | `show_option`, `set_option` |
 | **Environment** | `show_environment`, `set_environment` |
 
-### 6 `tmux://` resources
+### `tmux://` resources
 
 Browse the tmux hierarchy via URI patterns:
 
