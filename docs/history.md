@@ -2,8 +2,6 @@
 (changelog)=
 (history)=
 
-# Changelog
-
 ```{currentmodule} libtmux_mcp
 
 ```
