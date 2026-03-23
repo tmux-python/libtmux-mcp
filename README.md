@@ -187,11 +187,11 @@ args = ["--directory", "~/work/python/libtmux-mcp", "run", "libtmux-mcp"]
 Browse the tmux hierarchy via URI patterns:
 
 - `tmux://sessions` - All sessions
-- `tmux://sessions/{name}` - Session detail with windows
-- `tmux://sessions/{name}/windows` - Session's windows
-- `tmux://sessions/{name}/windows/{index}` - Window detail with panes
-- `tmux://panes/{id}` - Pane details
-- `tmux://panes/{id}/content` - Pane captured content
+- `tmux://sessions/{session_name}` - Session detail with windows
+- `tmux://sessions/{session_name}/windows` - Session's windows
+- `tmux://sessions/{session_name}/windows/{window_index}` - Window detail with panes
+- `tmux://panes/{pane_id}` - Pane details
+- `tmux://panes/{pane_id}/content` - Pane captured content
 
 ### Safety tiers
 

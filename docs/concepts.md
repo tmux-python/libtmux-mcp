@@ -80,8 +80,8 @@ Supported operators: `exact`, `contains`, `startswith`, `endswith`, `regex`, `ic
 In addition to tools, the MCP server exposes `tmux://` URI resources for browsing the hierarchy:
 
 - `tmux://sessions` — All sessions
-- `tmux://sessions/{name}` — Session detail with windows
-- `tmux://sessions/{name}/windows` — Session's windows
-- `tmux://sessions/{name}/windows/{index}` — Window detail with panes
-- `tmux://panes/{id}` — Pane details
-- `tmux://panes/{id}/content` — Pane captured content
+- `tmux://sessions/{session_name}` — Session detail with windows
+- `tmux://sessions/{session_name}/windows` — Session's windows
+- `tmux://sessions/{session_name}/windows/{window_index}` — Window detail with panes
+- `tmux://panes/{pane_id}` — Pane details
+- `tmux://panes/{pane_id}/content` — Pane captured content
