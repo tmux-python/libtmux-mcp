@@ -125,7 +125,11 @@ Point your tool at the local checkout via `uv --directory`:
 **Claude Code:**
 
 ```console
-$ claude mcp add --scope user libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
+$ claude mcp add \
+    --scope user \
+    libtmux -- \
+    uv --directory ~/work/python/libtmux-mcp \
+    run libtmux-mcp
 ```
 
 <details>
@@ -134,13 +138,19 @@ $ claude mcp add --scope user libtmux -- uv --directory ~/work/python/libtmux-mc
 **Codex CLI:**
 
 ```console
-$ codex mcp add libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
+$ codex mcp add libtmux -- \
+    uv --directory ~/work/python/libtmux-mcp \
+    run libtmux-mcp
 ```
 
 **Gemini CLI:**
 
 ```console
-$ gemini mcp add --scope user libtmux uv -- --directory ~/work/python/libtmux-mcp run libtmux-mcp
+$ gemini mcp add \
+    --scope user \
+    libtmux uv -- \
+    --directory ~/work/python/libtmux-mcp \
+    run libtmux-mcp
 ```
 
 **Cursor** — add to `~/.cursor/mcp.json`:
