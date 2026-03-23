@@ -11,6 +11,13 @@ MCP (Model Context Protocol) server for tmux, powered by [libtmux](https://githu
 
 Give AI agents (Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor) programmatic control over tmux sessions - list, create, send keys, capture output, resize, and more.
 
+## Use cases
+
+- **Terminal automation** — Send commands, wait for output, capture results across panes
+- **Session management** — Create, organize, and monitor tmux workspaces
+- **Multi-pane orchestration** — Split windows, route commands to different panes in parallel
+- **Environment inspection** — Search pane contents, read tmux options and environment variables
+
 ## Quick start
 
 ### One-liner setup
