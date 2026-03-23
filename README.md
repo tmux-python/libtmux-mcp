@@ -30,6 +30,9 @@ Give AI agents (Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor) prog
 $ claude mcp add libtmux -- uvx libtmux-mcp
 ```
 
+<details>
+<summary>Codex CLI / Gemini CLI</summary>
+
 **Codex CLI:**
 
 ```console
@@ -41,6 +44,8 @@ $ codex mcp add libtmux -- uvx libtmux-mcp
 ```console
 $ gemini mcp add libtmux uvx -- libtmux-mcp
 ```
+
+</details>
 
 **Cursor** does not have an `mcp add` CLI command - use the JSON config below.
 
@@ -123,6 +128,9 @@ Point your tool at the local checkout via `uv --directory`:
 $ claude mcp add --scope user libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
 ```
 
+<details>
+<summary>Codex CLI / Gemini CLI / Cursor</summary>
+
 **Codex CLI:**
 
 ```console
@@ -135,7 +143,7 @@ $ codex mcp add libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-
 $ gemini mcp add --scope user libtmux uv -- --directory ~/work/python/libtmux-mcp run libtmux-mcp
 ```
 
-**Cursor** - add to `~/.cursor/mcp.json`:
+**Cursor** — add to `~/.cursor/mcp.json`:
 
 ```json
 {
@@ -151,8 +159,7 @@ $ gemini mcp add --scope user libtmux uv -- --directory ~/work/python/libtmux-mc
 }
 ```
 
-<details>
-<summary>Codex CLI config.toml format (local checkout)</summary>
+**Codex CLI** — `config.toml` format:
 
 ```toml
 [mcp_servers.libtmux]
