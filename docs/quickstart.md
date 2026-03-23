@@ -2,145 +2,37 @@
 
 # Quickstart
 
-## Requirements
+One happy path from zero to a working tool invocation.
 
-- Python 3.10+
-- tmux >= 3.2a
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-
-## Installation
-
-### One-liner with uvx
-
-**Claude Code:**
+## 1. Install
 
 ```console
 $ claude mcp add libtmux -- uvx libtmux-mcp
 ```
 
-**Codex CLI:**
+Using a different client? See {ref}`installation` and {ref}`clients`.
 
-```console
-$ codex mcp add libtmux -- uvx libtmux-mcp
-```
+## 2. Verify
 
-**Gemini CLI:**
+Ask your LLM:
 
-```console
-$ gemini mcp add libtmux uvx -- libtmux-mcp
-```
+> List all my tmux sessions and show me what's running in each pane.
 
-### pip / uv pip
+The agent will call `list_sessions`, then `list_panes` and `capture_pane` to inspect your workspace. You should see your tmux sessions, windows, and pane contents in the response.
 
-```console
-$ uv pip install libtmux-mcp
-```
+## 3. Try it
 
-```console
-$ pip install libtmux-mcp
-```
+Here are a few things to try:
 
-### Development install
+> Create a new tmux session called "workspace" with a window named "build".
 
-```console
-$ git clone https://github.com/tmux-python/libtmux-mcp.git
-```
+> Send `make test` to the pane in my build window, then wait for it to finish and capture the output.
 
-```console
-$ cd libtmux-mcp
-```
+> Search all my panes for the word "error".
 
-```console
-$ uv pip install -e "."
-```
+## Next steps
 
-## Configuration
-
-### JSON config (all MCP clients)
-
-```json
-{
-    "mcpServers": {
-        "libtmux": {
-            "command": "uvx",
-            "args": ["libtmux-mcp"],
-            "env": {
-                "LIBTMUX_SOCKET": "ai_workspace"
-            }
-        }
-    }
-}
-```
-
-| Tool | Config file | Format |
-|------|-------------|--------|
-| Claude Code | `.mcp.json` (project) or `~/.claude.json` (global) | JSON |
-| Claude Desktop | `claude_desktop_config.json` | JSON |
-| Codex CLI | `~/.codex/config.toml` | TOML |
-| Gemini CLI | `~/.gemini/settings.json` | JSON |
-| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) | JSON |
-
-### Local checkout setup
-
-Point your tool at a local checkout for live development:
-
-**Claude Code:**
-
-```console
-$ claude mcp add --scope user libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
-```
-
-**Codex CLI:**
-
-```console
-$ codex mcp add libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
-```
-
-**Gemini CLI:**
-
-```console
-$ gemini mcp add --scope user libtmux uv -- --directory ~/work/python/libtmux-mcp run libtmux-mcp
-```
-
-**Cursor** — add to `~/.cursor/mcp.json`:
-
-```json
-{
-    "mcpServers": {
-        "libtmux": {
-            "command": "uv",
-            "args": [
-                "--directory", "~/work/python/libtmux-mcp",
-                "run", "libtmux-mcp"
-            ]
-        }
-    }
-}
-```
-
-## Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `LIBTMUX_SOCKET` | tmux socket name (`-L`). Isolates the MCP server to a specific socket. |
-| `LIBTMUX_SOCKET_PATH` | tmux socket path (`-S`). Alternative to socket name. |
-| `LIBTMUX_TMUX_BIN` | Path to tmux binary. Useful for testing with different tmux versions. |
-| `LIBTMUX_SAFETY` | Safety tier: `readonly`, `mutating` (default), or `destructive`. |
-
-## Running the server
-
-```console
-$ libtmux-mcp
-```
-
-Or via Python module:
-
-```console
-$ python -m libtmux_mcp
-```
-
-## Testing with MCP Inspector
-
-```console
-$ npx @modelcontextprotocol/inspector
-```
+- {ref}`concepts` — Understand the tmux hierarchy and how tools target panes
+- {ref}`configuration` — Environment variables and socket isolation
+- {ref}`safety` — Control which tools are available
+- {ref}`tools <tools-overview>` — Browse all available tools
