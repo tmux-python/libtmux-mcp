@@ -8,6 +8,6 @@
 
 ```
 
-```{include} ../../CHANGES
+```{include} ../CHANGES
 :parser: markdown
 ```
