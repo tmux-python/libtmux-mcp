@@ -13,7 +13,7 @@ Give AI agents (Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor) prog
 
 ## Quick start
 
-### One-liner setup (no clone needed)
+### One-liner setup
 
 `uvx` handles install, deps, and execution automatically:
 

@@ -10,7 +10,7 @@
 
 ## Installation
 
-### One-liner with uvx (no clone needed)
+### One-liner with uvx
 
 **Claude Code:**
 
