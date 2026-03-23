@@ -363,7 +363,23 @@ Bad:
 uv run pytest
 ```
 
-**Split long commands with `\` for readability.**
+**Split long commands with `\` for readability.** Each flag or flag+value pair gets its own continuation line, indented. Positional parameters go on the final line.
+
+Good:
+
+```console
+$ claude mcp add \
+    --scope user \
+    libtmux -- \
+    uv --directory ~/work/python/libtmux-mcp \
+    run libtmux-mcp
+```
+
+Bad:
+
+```console
+$ claude mcp add --scope user libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
+```
 
 ## Debugging Tips
 
