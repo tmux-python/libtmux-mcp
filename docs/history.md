@@ -2,10 +2,12 @@
 (changelog)=
 (history)=
 
+# Changelog
+
 ```{currentmodule} libtmux_mcp
 
 ```
 
-```{include} ../CHANGES
+```{include} ../../CHANGES
 :parser: markdown
 ```
