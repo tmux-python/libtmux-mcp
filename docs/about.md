@@ -191,6 +191,40 @@ The safety middleware:
 - **Blocks** execution of tools above the tier with clear error messages
 - **Fail-closed**: tools without a recognized tier tag are denied
 
+### Tool annotations
+
+Each tool carries MCP tool annotations that hint at its behavior:
+
+| Tool | Tier | readOnly | destructive | idempotent |
+|------|------|----------|-------------|------------|
+| `list_sessions` | readonly | true | false | true |
+| `get_server_info` | readonly | true | false | true |
+| `list_windows` | readonly | true | false | true |
+| `list_panes` | readonly | true | false | true |
+| `capture_pane` | readonly | true | false | true |
+| `get_pane_info` | readonly | true | false | true |
+| `search_panes` | readonly | true | false | true |
+| `wait_for_text` | readonly | true | false | true |
+| `show_option` | readonly | true | false | true |
+| `show_environment` | readonly | true | false | true |
+| `create_session` | mutating | false | false | false |
+| `create_window` | mutating | false | false | false |
+| `split_window` | mutating | false | false | false |
+| `send_keys` | mutating | false | false | false |
+| `rename_session` | mutating | false | false | true |
+| `rename_window` | mutating | false | false | true |
+| `resize_pane` | mutating | false | false | true |
+| `resize_window` | mutating | false | false | true |
+| `set_pane_title` | mutating | false | false | true |
+| `clear_pane` | mutating | false | false | true |
+| `select_layout` | mutating | false | false | true |
+| `set_option` | mutating | false | false | true |
+| `set_environment` | mutating | false | false | true |
+| `kill_server` | destructive | false | true | false |
+| `kill_session` | destructive | false | true | false |
+| `kill_window` | destructive | false | true | false |
+| `kill_pane` | destructive | false | true | false |
+
 ## Agent self-awareness
 
 When the MCP server runs inside a tmux pane (detected via `TMUX_PANE` env var), it includes the caller's pane context in server instructions and annotates the caller's own pane with `is_caller=true` in tool results. This prevents agents from accidentally killing their own pane.
