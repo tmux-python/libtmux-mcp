@@ -4,6 +4,53 @@
 
 All tools accept an optional `socket_name` parameter for multi-server support. It defaults to the `LIBTMUX_SOCKET` env var. See {ref}`configuration`.
 
+::::{grid} 1 1 2 2
+:gutter: 2 2 3 3
+
+:::{grid-item-card} Discovery
+Find and inspect tmux objects.
+^^^
+`list_sessions` `list_windows` `list_panes` `get_server_info` `get_pane_info`
+:::
+
+:::{grid-item-card} Capture & Search
+Read and search terminal output.
+^^^
+`capture_pane` `search_panes` `wait_for_text`
+:::
+
+:::{grid-item-card} Session Lifecycle
+Create and manage sessions.
+^^^
+`create_session` `rename_session` `kill_session`
+:::
+
+:::{grid-item-card} Windows & Panes
+Create, split, and organize.
+^^^
+`create_window` `split_window` `rename_window` `select_layout` `resize_window` `resize_pane` `kill_window` `kill_pane`
+:::
+
+:::{grid-item-card} Execution
+Send commands and interact with terminals.
+^^^
+`send_keys` `set_pane_title` `clear_pane`
+:::
+
+:::{grid-item-card} Options & Environment
+Read and set tmux configuration.
+^^^
+`show_option` `set_option` `show_environment` `set_environment`
+:::
+
+:::{grid-item-card} Server Management
+Destructive server operations.
+^^^
+`kill_server`
+:::
+
+::::
+
 ## Discovery
 
 Find and inspect tmux objects.
@@ -66,6 +113,5 @@ Read and set tmux configuration.
 
 ## Tool parameter reference
 
-For full parameter documentation (types, defaults, descriptions), see the {ref}`about <about>` page.
-
-For API-level documentation, see the {ref}`API reference <api>`.
+For full parameter documentation (types, defaults, descriptions), see the
+[API reference](../reference/api/index.md).
