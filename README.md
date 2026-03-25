@@ -38,6 +38,18 @@ uvx libtmux-mcp
 claude mcp add tmux -- uvx libtmux-mcp
 ```
 
+### Codex CLI
+
+```bash
+codex mcp add tmux -- uvx libtmux-mcp
+```
+
+### Gemini CLI
+
+```bash
+gemini mcp add tmux uvx -- libtmux-mcp
+```
+
 ### Claude Desktop
 
 Add to `claude_desktop_config.json`:
@@ -53,7 +65,7 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-More clients (Codex CLI, Gemini CLI, Cursor): [client setup docs](https://libtmux-mcp.git-pull.com/clients/)
+More clients and JSON config: [client setup docs](https://libtmux-mcp.git-pull.com/clients/)
 
 ## What it feels like
 
