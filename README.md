@@ -1,6 +1,6 @@
 # libtmux-mcp
 
-MCP (Model Context Protocol) server for tmux, powered by [libtmux](https://github.com/tmux-python/libtmux).
+A [Model Context Protocol](https://modelcontextprotocol.io) server for [tmux](https://github.com/tmux/tmux), built on [libtmux](https://libtmux.git-pull.com).
 
 [![Python Version](https://img.shields.io/pypi/pyversions/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
 [![PyPI Version](https://img.shields.io/pypi/v/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
@@ -9,179 +9,9 @@ MCP (Model Context Protocol) server for tmux, powered by [libtmux](https://githu
 > [!WARNING]
 > **Pre-alpha.** APIs may change. Contributions and feedback welcome.
 
-Give AI agents (Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor) programmatic control over tmux sessions - list, create, send keys, capture output, resize, and more.
+Give your AI agent hands inside the terminal — create sessions, run commands, read output, orchestrate panes.
 
-## Use cases
-
-- **Terminal automation** — Send commands, wait for output, capture results across panes
-- **Session management** — Create, organize, and monitor tmux workspaces
-- **Multi-pane orchestration** — Split windows, route commands to different panes in parallel
-- **Environment inspection** — Search pane contents, read tmux options and environment variables
-
-## Quick start
-
-### One-liner setup
-
-`uvx` handles install, deps, and execution automatically:
-
-**Claude Code:**
-
-```console
-$ claude mcp add libtmux -- uvx libtmux-mcp
-```
-
-<details>
-<summary>Codex CLI / Gemini CLI</summary>
-
-**Codex CLI:**
-
-```console
-$ codex mcp add libtmux -- uvx libtmux-mcp
-```
-
-**Gemini CLI:**
-
-```console
-$ gemini mcp add libtmux uvx -- libtmux-mcp
-```
-
-</details>
-
-**Cursor** does not have an `mcp add` CLI command - use the JSON config below.
-
-### JSON config (all tools)
-
-```json
-{
-    "mcpServers": {
-        "libtmux": {
-            "command": "uvx",
-            "args": ["libtmux-mcp"],
-            "env": {
-                "LIBTMUX_SOCKET": "ai_workspace"
-            }
-        }
-    }
-}
-```
-
-| Tool | Config file | Format |
-|------|-------------|--------|
-| Claude Code | `.mcp.json` (project) or `~/.claude.json` (global) | JSON |
-| Claude Desktop | `claude_desktop_config.json` | JSON |
-| Codex CLI | `~/.codex/config.toml` | TOML (see below) |
-| Gemini CLI | `~/.gemini/settings.json` | JSON |
-| Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) | JSON |
-
-<details>
-<summary>Codex CLI config.toml format</summary>
-
-```toml
-[mcp_servers.libtmux]
-command = "uvx"
-args = ["libtmux-mcp"]
-```
-
-</details>
-
-### Install with pip / uv
-
-```console
-$ uv pip install libtmux-mcp
-```
-
-```console
-$ pip install libtmux-mcp
-```
-
-## Development install
-
-Clone and install in editable mode:
-
-```console
-$ git clone https://github.com/tmux-python/libtmux-mcp.git
-```
-
-```console
-$ cd libtmux-mcp
-```
-
-```console
-$ uv pip install -e "."
-```
-
-Run the server:
-
-```console
-$ libtmux-mcp
-```
-
-Code changes take effect immediately - no reinstall needed.
-
-### Local checkout CLI setup
-
-Point your tool at the local checkout via `uv --directory`:
-
-**Claude Code:**
-
-```console
-$ claude mcp add \
-    --scope user \
-    libtmux -- \
-    uv --directory ~/work/python/libtmux-mcp \
-    run libtmux-mcp
-```
-
-<details>
-<summary>Codex CLI / Gemini CLI / Cursor</summary>
-
-**Codex CLI:**
-
-```console
-$ codex mcp add libtmux -- \
-    uv --directory ~/work/python/libtmux-mcp \
-    run libtmux-mcp
-```
-
-**Gemini CLI:**
-
-```console
-$ gemini mcp add \
-    --scope user \
-    libtmux uv -- \
-    --directory ~/work/python/libtmux-mcp \
-    run libtmux-mcp
-```
-
-**Cursor** — add to `~/.cursor/mcp.json`:
-
-```json
-{
-    "mcpServers": {
-        "libtmux": {
-            "command": "uv",
-            "args": [
-                "--directory", "~/work/python/libtmux-mcp",
-                "run", "libtmux-mcp"
-            ]
-        }
-    }
-}
-```
-
-**Codex CLI** — `config.toml` format:
-
-```toml
-[mcp_servers.libtmux]
-command = "uv"
-args = ["--directory", "~/work/python/libtmux-mcp", "run", "libtmux-mcp"]
-```
-
-</details>
-
-## What's included
-
-### Tools
+## Tools
 
 | Module | Tools |
 |--------|-------|
@@ -192,71 +22,87 @@ args = ["--directory", "~/work/python/libtmux-mcp", "run", "libtmux-mcp"]
 | **Options** | `show_option`, `set_option` |
 | **Environment** | `show_environment`, `set_environment` |
 
-### `tmux://` resources
+## Quickstart
 
-Browse the tmux hierarchy via URI patterns:
+**Requirements:** Python 3.10+, tmux installed and on `$PATH`.
 
-- `tmux://sessions` - All sessions
-- `tmux://sessions/{session_name}` - Session detail with windows
-- `tmux://sessions/{session_name}/windows` - Session's windows
-- `tmux://sessions/{session_name}/windows/{window_index}` - Window detail with panes
-- `tmux://panes/{pane_id}` - Pane details
-- `tmux://panes/{pane_id}/content` - Pane captured content
+Install and run:
 
-### Safety tiers
-
-Control which tools are available via `LIBTMUX_SAFETY` env var:
-
-| Tier | Tools | Use case |
-|------|-------|----------|
-| `readonly` | List, capture, search, info | Monitoring, browsing |
-| `mutating` (default) | + create, send_keys, rename, resize | Normal agent workflow |
-| `destructive` | + kill_server, kill_session, kill_window, kill_pane | Full control |
-
-### Architecture
-
-```
-src/libtmux_mcp/
-    __init__.py           # Entry point: main()
-    __main__.py           # python -m libtmux_mcp support
-    server.py             # FastMCP instance
-    _utils.py             # Server caching, resolvers, serializers, error handling
-    models.py             # Pydantic output models
-    middleware.py         # Safety tier middleware
-    tools/
-        server_tools.py   # list_sessions, create_session, kill_server, get_server_info
-        session_tools.py  # list_windows, create_window, rename_session, kill_session
-        window_tools.py   # list_panes, split_window, rename_window, kill_window, select_layout, resize_window
-        pane_tools.py     # send_keys, capture_pane, resize_pane, kill_pane, set_pane_title, get_pane_info, clear_pane, search_panes, wait_for_text
-        option_tools.py   # show_option, set_option
-        env_tools.py      # show_environment, set_environment
-    resources/
-        hierarchy.py      # tmux:// URI resources
+```bash
+uvx libtmux-mcp
 ```
 
-## Environment variables
+### Claude Code
 
-| Variable | Purpose |
-|----------|---------|
-| `LIBTMUX_SOCKET` | tmux socket name (`-L`). Isolates the MCP server to a specific socket. |
-| `LIBTMUX_SOCKET_PATH` | tmux socket path (`-S`). Alternative to socket name. |
-| `LIBTMUX_TMUX_BIN` | Path to tmux binary. Useful for testing with different tmux versions. |
-| `LIBTMUX_SAFETY` | Safety tier: `readonly`, `mutating` (default), or `destructive`. |
+```bash
+claude mcp add tmux -- uvx libtmux-mcp
+```
 
-## Requirements
+### Claude Desktop
 
-- Python 3.10+
-- tmux >= 3.2a
-- [libtmux](https://github.com/tmux-python/libtmux) >= 0.55.0
-- [fastmcp](https://github.com/jlowin/fastmcp) >= 3.1.0
+Add to `claude_desktop_config.json`:
 
-## Links
+```json
+{
+  "mcpServers": {
+    "tmux": {
+      "command": "uvx",
+      "args": ["libtmux-mcp"]
+    }
+  }
+}
+```
 
-- **Documentation**: <https://libtmux-mcp.git-pull.com>
-- **libtmux** (core library): <https://libtmux.git-pull.com>
-- **tmuxp** (workspace manager): <https://tmuxp.git-pull.com>
-- **Source**: <https://github.com/tmux-python/libtmux-mcp>
-- **Issues**: <https://github.com/tmux-python/libtmux-mcp/issues>
+More clients (Codex CLI, Gemini CLI, Cursor): [client setup docs](https://libtmux-mcp.git-pull.com/clients/)
+
+## What it feels like
+
+> **You:** Create a session called "api" and run `pytest tests/api/ -x` in it.
+>
+> **Agent:** Created session `api` with window `tests`. Running pytest now.
+> Here's the output — 14 passed, 2 failed. The failures are in
+> `test_auth.py::test_token_refresh` and `test_auth.py::test_expired_session`.
+> Want me to open those files?
+
+The agent manages tmux directly. No copy-pasting terminal output. No switching windows to check on long-running processes.
+
+## Documentation
+
+Full docs, guides, and tool reference: **[libtmux-mcp.git-pull.com](https://libtmux-mcp.git-pull.com)**
+
+## Development
+
+Clone and install:
+
+```bash
+git clone https://github.com/tmux-python/libtmux-mcp.git
+```
+
+```bash
+cd libtmux-mcp
+```
+
+```bash
+uv sync --dev
+```
+
+Run the server locally:
+
+```bash
+uv run libtmux-mcp
+```
+
+Run tests:
+
+```bash
+uv run pytest
+```
+
+## Related projects
+
+- [libtmux](https://libtmux.git-pull.com) — Python API for tmux
+- [tmuxp](https://tmuxp.git-pull.com) — tmux session manager
+- [The Tao of tmux](https://leanpub.com/the-tao-of-tmux) — the book
 
 ## License
 

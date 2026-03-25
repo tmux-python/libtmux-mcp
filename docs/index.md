@@ -2,94 +2,119 @@
 
 # libtmux-mcp
 
-MCP server for tmux, powered by [libtmux](https://libtmux.git-pull.com/).
+Terminal control for AI agents, built on [libtmux](https://libtmux.git-pull.com) and [FastMCP](https://gofastmcp.com).
+
+This server maps tmux's object hierarchy — sessions, windows, panes — into MCP tools. Some tools read state. Some mutate it. Some destroy. The distinction is explicit and enforced.
 
 ```{warning}
 **Pre-alpha.** APIs may change. [Feedback welcome](https://github.com/tmux-python/libtmux-mcp/issues).
 ```
 
-## Get started in one command
+---
 
-```console
-$ claude mcp add libtmux -- uvx libtmux-mcp
-```
-
-Then ask your agent:
-
-```
-> List all tmux sessions and show the panes in the first one.
-```
-
-::::{grid} 1 2 3 3
-:gutter: 2 2 3 3
+::::{grid} 1 1 2 2
+:gutter: 3
 
 :::{grid-item-card} Quickstart
 :link: quickstart
 :link-type: doc
-Zero to a working tool invocation in 5 minutes.
+
+Install, connect, get a first result. Under 2 minutes.
 :::
 
 :::{grid-item-card} Tools
 :link: tools/index
 :link-type: doc
-30+ tools for sessions, windows, panes, capture, and more.
+
+Every tool, grouped by intent and safety tier.
 :::
 
-:::{grid-item-card} Configuration
-:link: configuration
+:::{grid-item-card} Safety tiers
+:link: topics/safety
 :link-type: doc
-Environment variables, safety tiers, socket selection.
+
+Readonly, mutating, destructive. Know what changes state.
 :::
 
-::::
-
-::::{grid} 1 2 3 3
-:gutter: 2 2 3 3
-
-:::{grid-item-card} MCP Clients
+:::{grid-item-card} Client setup
 :link: clients
 :link-type: doc
-Copy-pasteable config for Claude Code, Cursor, VS Code, and more.
-:::
 
-:::{grid-item-card} Topics
-:link: topics/index
-:link-type: doc
-Architecture, concepts, safety tiers, troubleshooting.
-:::
-
-:::{grid-item-card} Contributing
-:link: project/index
-:link-type: doc
-Development setup, code style, release process.
+Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 :::
 
 ::::
 
-## Install
+---
 
-```console
-$ uvx libtmux-mcp
-```
+## What you can do
 
-```console
-$ pip install libtmux-mcp
-```
+### Inspect (readonly)
 
-See [Installation](installation.md) for all methods and options.
+Read tmux state without changing anything.
+
+`list_sessions` · `capture_pane` · `get_pane_info` · `search_panes` · `wait_for_text`
+
+### Act (mutating)
+
+Create or modify tmux objects.
+
+`create_session` · `send_keys` · `create_window` · `split_window` · `resize_pane` · `set_option`
+
+### Destroy (destructive)
+
+Tear down tmux objects. Not reversible.
+
+`kill_session` · `kill_window` · `kill_pane` · `kill_server`
+
+[Browse all tools →](tools/index)
+
+---
+
+## Mental model
+
+- **Object hierarchy** — sessions contain windows, windows contain panes ({doc}`topics/concepts`)
+- **Read vs. mutate** — some tools observe, some act, some destroy ({doc}`topics/safety`)
+- **tmux is the source of truth** — the server reads from it and writes to it, never caches or abstracts
+
+---
 
 ```{toctree}
 :hidden:
+:caption: Get started
 
-installation
 quickstart
+installation
 clients
-configuration
+```
+
+```{toctree}
+:hidden:
+:caption: Use it
+
 tools/index
+configuration
+```
+
+```{toctree}
+:hidden:
+:caption: Understand it
+
 topics/index
+```
+
+```{toctree}
+:hidden:
+:caption: Reference
+
 reference/api/index
 reference/compatibility
+```
+
+```{toctree}
+:hidden:
+:caption: Project
+
 project/index
 history
-glossary
 ```
