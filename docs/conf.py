@@ -43,6 +43,7 @@ extensions = [
     "sphinx_design",
     "myst_parser",
     "linkify_issues",
+    "fastmcp_autodoc",
 ]
 
 myst_heading_anchors = 4

@@ -232,3 +232,8 @@ img[src*="codecov.io"] {
 ::view-transition-new(root) {
   animation-duration: 150ms;
 }
+
+/* ── MCP Tool safety badges ──────────────────────────────
+ * Badge sits inline next to the tool name in the heading.
+ * Slight vertical offset for alignment with the code text.
+ * ────────────────────────────────────────────────────────── */

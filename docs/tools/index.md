@@ -4,114 +4,200 @@
 
 All tools accept an optional `socket_name` parameter for multi-server support. It defaults to the `LIBTMUX_SOCKET` env var. See {ref}`configuration`.
 
-::::{grid} 1 1 2 2
+## Inspect
+
+Read tmux state without changing anything.
+
+::::{grid} 1 2 3 3
 :gutter: 2 2 3 3
 
-:::{grid-item-card} Discovery
-Find and inspect tmux objects.
-^^^
-`list_sessions` `list_windows` `list_panes` `get_server_info` `get_pane_info`
+:::{grid-item-card} list_sessions
+:link: sessions
+:link-type: doc
+List all active sessions.
 :::
 
-:::{grid-item-card} Capture & Search
-Read and search terminal output.
-^^^
-`capture_pane` `search_panes` `wait_for_text`
+:::{grid-item-card} list_windows
+:link: windows
+:link-type: doc
+List windows in a session.
 :::
 
-:::{grid-item-card} Session Lifecycle
-Create and manage sessions.
-^^^
-`create_session` `rename_session` `kill_session`
+:::{grid-item-card} list_panes
+:link: windows
+:link-type: doc
+List panes in a window.
 :::
 
-:::{grid-item-card} Windows & Panes
-Create, split, and organize.
-^^^
-`create_window` `split_window` `rename_window` `select_layout` `resize_window` `resize_pane` `kill_window` `kill_pane`
+:::{grid-item-card} capture_pane
+:link: panes
+:link-type: doc
+Read visible content of a pane.
 :::
 
-:::{grid-item-card} Execution
-Send commands and interact with terminals.
-^^^
-`send_keys` `set_pane_title` `clear_pane`
+:::{grid-item-card} get_pane_info
+:link: panes
+:link-type: doc
+Get detailed pane metadata.
 :::
 
-:::{grid-item-card} Options & Environment
-Read and set tmux configuration.
-^^^
-`show_option` `set_option` `show_environment` `set_environment`
+:::{grid-item-card} search_panes
+:link: panes
+:link-type: doc
+Search text across panes.
 :::
 
-:::{grid-item-card} Server Management
-Destructive server operations.
-^^^
-`kill_server`
+:::{grid-item-card} wait_for_text
+:link: panes
+:link-type: doc
+Wait for text to appear in a pane.
+:::
+
+:::{grid-item-card} get_server_info
+:link: sessions
+:link-type: doc
+Get tmux server info.
+:::
+
+:::{grid-item-card} show_option
+:link: options
+:link-type: doc
+Query a tmux option value.
+:::
+
+:::{grid-item-card} show_environment
+:link: options
+:link-type: doc
+Show tmux environment variables.
 :::
 
 ::::
 
-## Discovery
+## Act
 
-Find and inspect tmux objects.
+Create or modify tmux objects.
 
-- **`list_sessions`** — List all sessions (with optional filters)
-- **`list_windows`** — List windows in a session or across all sessions
-- **`list_panes`** — List panes in a window or across all windows
-- **`get_server_info`** — Server status: version, socket path, session count, alive status
-- **`get_pane_info`** — Pane metadata: size, title, current command, PID
+::::{grid} 1 2 3 3
+:gutter: 2 2 3 3
 
-## Capture and search
+:::{grid-item-card} create_session
+:link: sessions
+:link-type: doc
+Start a new tmux session.
+:::
 
-Read and search terminal output.
+:::{grid-item-card} create_window
+:link: windows
+:link-type: doc
+Add a window to a session.
+:::
 
-- **`capture_pane`** — Capture pane content as text (visible area or scrollback)
-- **`search_panes`** — Search across all pane contents for text or regex
-- **`wait_for_text`** — Wait for text to appear in a pane (polling with timeout)
+:::{grid-item-card} split_window
+:link: windows
+:link-type: doc
+Split a window into panes.
+:::
 
-## Session lifecycle
+:::{grid-item-card} send_keys
+:link: panes
+:link-type: doc
+Send commands or keystrokes to a pane.
+:::
 
-Create and manage sessions.
+:::{grid-item-card} rename_session
+:link: sessions
+:link-type: doc
+Rename a session.
+:::
 
-- **`create_session`** — Create a new session with optional window name, size, and env vars
-- **`rename_session`** — Rename an existing session
-- **`kill_session`** — Kill a session (destructive)
+:::{grid-item-card} rename_window
+:link: windows
+:link-type: doc
+Rename a window.
+:::
 
-## Windows and panes
+:::{grid-item-card} resize_pane
+:link: panes
+:link-type: doc
+Adjust pane dimensions.
+:::
 
-Create, split, and organize.
+:::{grid-item-card} resize_window
+:link: windows
+:link-type: doc
+Adjust window dimensions.
+:::
 
-- **`create_window`** — Create a new window in a session
-- **`split_window`** — Split a window to create a new pane (horizontal or vertical)
-- **`rename_window`** — Rename a window
-- **`select_layout`** — Set layout: `even-horizontal`, `even-vertical`, `main-horizontal`, `main-vertical`, `tiled`
-- **`resize_window`** — Resize a window (width and/or height)
-- **`resize_pane`** — Resize a pane (width, height, or zoom toggle)
-- **`kill_window`** — Kill a window (destructive)
-- **`kill_pane`** — Kill a pane (destructive)
+:::{grid-item-card} select_layout
+:link: windows
+:link-type: doc
+Set window layout.
+:::
 
-## Execution
+:::{grid-item-card} set_pane_title
+:link: panes
+:link-type: doc
+Set pane title.
+:::
 
-Send commands and interact with terminals.
+:::{grid-item-card} clear_pane
+:link: panes
+:link-type: doc
+Clear pane content.
+:::
 
-- **`send_keys`** — Send keys or text to a pane (with optional Enter, literal mode, history suppression)
-- **`set_pane_title`** — Set a pane's title
-- **`clear_pane`** — Clear pane content and scrollback history
+:::{grid-item-card} set_option
+:link: options
+:link-type: doc
+Set a tmux option.
+:::
 
-## Options and environment
+:::{grid-item-card} set_environment
+:link: options
+:link-type: doc
+Set a tmux environment variable.
+:::
 
-Read and set tmux configuration.
+::::
 
-- **`show_option`** — Query a tmux option value (server, session, window, or pane scope)
-- **`set_option`** — Set a tmux option
-- **`show_environment`** — Show tmux environment variables
-- **`set_environment`** — Set a tmux environment variable
+## Destroy
 
-## Server management
+Tear down tmux objects. Not reversible.
 
-- **`kill_server`** — Kill the tmux server (destructive)
+::::{grid} 1 2 3 3
+:gutter: 2 2 3 3
 
-## Tool parameter reference
+:::{grid-item-card} kill_session
+:link: sessions
+:link-type: doc
+Destroy a session and all its windows.
+:::
 
-For full parameter documentation (types, defaults, descriptions), see the
-[API reference](../reference/api/index.md).
+:::{grid-item-card} kill_window
+:link: windows
+:link-type: doc
+Destroy a window and all its panes.
+:::
+
+:::{grid-item-card} kill_pane
+:link: panes
+:link-type: doc
+Destroy a pane.
+:::
+
+:::{grid-item-card} kill_server
+:link: sessions
+:link-type: doc
+Kill the entire tmux server.
+:::
+
+::::
+
+```{toctree}
+:hidden:
+
+sessions
+windows
+panes
+options
+```
