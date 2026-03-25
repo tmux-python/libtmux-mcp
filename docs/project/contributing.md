@@ -1,9 +1,9 @@
 # Development
 
-Install [git] and [uv]
+Install [git] and [uv] ([install](https://docs.astral.sh/uv/getting-started/installation/))
 
 [git]: https://git-scm.com/
-[uv]: https://docs.astral.sh/uv/getting-started/installation/
+[uv]: https://github.com/astral-sh/uv
 
 Clone:
 

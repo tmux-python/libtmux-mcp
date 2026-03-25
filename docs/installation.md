@@ -6,31 +6,42 @@
 
 - Python 3.10+
 - tmux >= 3.2a
-- [uv](https://docs.astral.sh/uv/) ([install](https://docs.astral.sh/uv/getting-started/installation/)) — recommended, or pip
 
-## Recommended: uvx
+## Run without installing
 
-`uvx` handles install, deps, and execution in one step — no persistent install needed:
+No persistent install needed — run directly with a package executor:
 
+`````{tab} uvx
 ```console
 $ uvx libtmux-mcp
 ```
+`````
+
+`````{tab} pipx
+```console
+$ pipx run libtmux-mcp
+```
+`````
 
 To wire it into your MCP client, see {ref}`clients`.
 
-## pip / uv pip
+## Install the package
 
+`````{tab} uv
 ```console
 $ uv pip install libtmux-mcp
 ```
+`````
 
+`````{tab} pip
 ```console
 $ pip install libtmux-mcp
 ```
+`````
 
 ## Development install
 
-Clone and install in editable mode:
+Install [uv](https://github.com/astral-sh/uv) ([install](https://docs.astral.sh/uv/getting-started/installation/)), then clone and install in editable mode:
 
 ```console
 $ git clone https://github.com/tmux-python/libtmux-mcp.git
@@ -60,8 +71,16 @@ $ python -m libtmux_mcp
 
 ## Upgrading
 
+`````{tab} uv
 ```console
 $ uv pip install --upgrade libtmux-mcp
 ```
+`````
 
-With `uvx`, you always get the latest version automatically.
+`````{tab} pip
+```console
+$ pip install --upgrade libtmux-mcp
+```
+`````
+
+With `uvx` or `pipx run`, you always get the latest version automatically.
