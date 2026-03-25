@@ -6,9 +6,23 @@ Copy-pasteable configuration for every supported MCP client. If your client isn'
 
 ## Claude Code
 
+`````{tab} uvx
 ```console
 $ claude mcp add libtmux -- uvx libtmux-mcp
 ```
+`````
+
+`````{tab} pipx
+```console
+$ claude mcp add libtmux -- pipx run libtmux-mcp
+```
+`````
+
+`````{tab} pip install
+```console
+$ claude mcp add libtmux -- libtmux-mcp
+```
+`````
 
 Config file: `.mcp.json` (project) or `~/.claude.json` (global).
 
@@ -16,25 +30,63 @@ Config file: `.mcp.json` (project) or `~/.claude.json` (global).
 
 Add to `claude_desktop_config.json`:
 
+`````{tab} uvx
 ```json
 {
     "mcpServers": {
         "libtmux": {
             "command": "uvx",
-            "args": ["libtmux-mcp"],
-            "env": {
-                "LIBTMUX_SOCKET": "ai_workspace"
-            }
+            "args": ["libtmux-mcp"]
         }
     }
 }
 ```
+`````
+
+`````{tab} pipx
+```json
+{
+    "mcpServers": {
+        "libtmux": {
+            "command": "pipx",
+            "args": ["run", "libtmux-mcp"]
+        }
+    }
+}
+```
+`````
+
+`````{tab} pip install
+```json
+{
+    "mcpServers": {
+        "libtmux": {
+            "command": "libtmux-mcp"
+        }
+    }
+}
+```
+`````
 
 ## Codex CLI
 
+`````{tab} uvx
 ```console
 $ codex mcp add libtmux -- uvx libtmux-mcp
 ```
+`````
+
+`````{tab} pipx
+```console
+$ codex mcp add libtmux -- pipx run libtmux-mcp
+```
+`````
+
+`````{tab} pip install
+```console
+$ codex mcp add libtmux -- libtmux-mcp
+```
+`````
 
 <details>
 <summary>config.toml format</summary>
@@ -51,9 +103,23 @@ args = ["libtmux-mcp"]
 
 ## Gemini CLI
 
+`````{tab} uvx
 ```console
 $ gemini mcp add libtmux uvx -- libtmux-mcp
 ```
+`````
+
+`````{tab} pipx
+```console
+$ gemini mcp add libtmux pipx -- run libtmux-mcp
+```
+`````
+
+`````{tab} pip install
+```console
+$ gemini mcp add libtmux libtmux-mcp
+```
+`````
 
 Config file: `~/.gemini/settings.json` (JSON format, same schema as Claude Desktop).
 
@@ -61,6 +127,7 @@ Config file: `~/.gemini/settings.json` (JSON format, same schema as Claude Deskt
 
 Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 
+`````{tab} uvx
 ```json
 {
     "mcpServers": {
@@ -71,6 +138,32 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
     }
 }
 ```
+`````
+
+`````{tab} pipx
+```json
+{
+    "mcpServers": {
+        "libtmux": {
+            "command": "pipx",
+            "args": ["run", "libtmux-mcp"]
+        }
+    }
+}
+```
+`````
+
+`````{tab} pip install
+```json
+{
+    "mcpServers": {
+        "libtmux": {
+            "command": "libtmux-mcp"
+        }
+    }
+}
+```
+`````
 
 ## MCP Inspector
 
@@ -146,5 +239,5 @@ $ gemini mcp add \
 ## Common pitfalls
 
 - **Absolute paths**: Some clients require absolute paths in config. Use `$HOME/...` or the full path instead of `~/...`.
-- **Virtual environments**: If using pip install (not uvx), ensure the venv is activated or use `uv run`.
+- **Virtual environments**: If using pip install, ensure the venv is activated or the `libtmux-mcp` binary is on your PATH.
 - **Socket isolation**: Set `LIBTMUX_SOCKET` in the `env` block to isolate the MCP server from your default tmux. See {ref}`configuration`.
