@@ -34,6 +34,7 @@ from sphinx.application import Sphinx
 from sphinx.util.docutils import SphinxDirective
 
 if t.TYPE_CHECKING:
+    from sphinx.domains.std import StandardDomain
     from sphinx.util.typing import ExtensionMetadata
 
 # ---------------------------------------------------------------------------
@@ -705,9 +706,30 @@ class FastMCPToolSummaryDirective(SphinxDirective):
 # ---------------------------------------------------------------------------
 
 
+def _register_tool_labels(app: Sphinx, doctree: nodes.document) -> None:
+    """Register tool sections with StandardDomain for site-wide {ref} links.
+
+    ``note_explicit_target()`` only registers with docutils, not with Sphinx's
+    StandardDomain.  This hook mirrors the pattern used by
+    ``sphinx.ext.autosectionlabel`` so that ``{ref}`list-sessions``` works
+    from any page.
+    """
+    domain = t.cast("StandardDomain", app.env.get_domain("std"))
+    docname = app.env.docname
+    for section in doctree.findall(nodes.section):
+        if not section["ids"]:
+            continue
+        section_id = section["ids"][0]
+        if section.children and isinstance(section[0], nodes.title):
+            title = section[0].astext()
+            domain.anonlabels[section_id] = (docname, section_id)
+            domain.labels[section_id] = (docname, section_id, title)
+
+
 def setup(app: Sphinx) -> ExtensionMetadata:
     """Register the fastmcp_autodoc extension."""
     app.connect("builder-inited", _collect_tools)
+    app.connect("doctree-read", _register_tool_labels)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)
     app.add_directive("fastmcp-toolsummary", FastMCPToolSummaryDirective)
