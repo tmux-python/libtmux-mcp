@@ -134,6 +134,14 @@ files = [
 module = ["sphinx_fonts"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["fastmcp_autodoc", "docutils", "docutils.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.docs.*"]
+disable_error_code = ["untyped-decorator"]
+
 [tool.coverage.run]
 branch = true
 parallel = true
