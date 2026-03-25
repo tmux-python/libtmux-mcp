@@ -24,7 +24,7 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 
 ## Quickstart
 
-**Requirements:** Python 3.10+, tmux installed and on `$PATH`.
+**Requirements:** Python 3.10+, tmux on `$PATH`, [uv](https://docs.astral.sh/uv/) ([install](https://docs.astral.sh/uv/getting-started/installation/)).
 
 Install and run:
 

@@ -3,7 +3,7 @@
 Install [git] and [uv]
 
 [git]: https://git-scm.com/
-[uv]: https://docs.astral.sh/uv/
+[uv]: https://docs.astral.sh/uv/getting-started/installation/
 
 Clone:
 

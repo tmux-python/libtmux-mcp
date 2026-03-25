@@ -19,7 +19,7 @@ Symptom-based guide. Find your problem, follow the steps.
    You should see no output (it's waiting for stdio input). Press Ctrl+C to stop.
 
 2. Check your client config points to the right command. Common issues:
-   - `uvx` not in PATH — install [uv](https://docs.astral.sh/uv/)
+   - `uvx` not in PATH — [install uv](https://docs.astral.sh/uv/getting-started/installation/)
    - Typo in `"command"` or `"args"` in JSON config
    - TOML config syntax errors (Codex CLI)
 

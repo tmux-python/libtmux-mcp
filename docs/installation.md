@@ -6,7 +6,7 @@
 
 - Python 3.10+
 - tmux >= 3.2a
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [uv](https://docs.astral.sh/uv/) ([install](https://docs.astral.sh/uv/getting-started/installation/)) — recommended, or pip
 
 ## Recommended: uvx
 
