@@ -237,8 +237,28 @@ img[src*="codecov.io"] {
  * Badges appear inline in both h2/h3 headings and body text.
  * Pin size to body-text scale so they don't inflate in headings.
  * Vertical-align keeps them centered with adjacent text.
+ *
+ * Links containing badges: underline only the code text, not
+ * the gap or badge itself. Achieved by moving text-decoration
+ * from the <a> to its <code> child.
  * ────────────────────────────────────────────────────────── */
 .sd-badge {
   font-size: 0.75rem;
   vertical-align: middle;
+}
+
+a.reference .sd-badge {
+  text-decoration: none;
+}
+
+a.reference:has(.sd-badge) {
+  text-decoration: none;
+}
+
+a.reference:has(.sd-badge) code {
+  text-decoration: none;
+}
+
+a.reference:has(.sd-badge):hover code {
+  text-decoration: underline;
 }
