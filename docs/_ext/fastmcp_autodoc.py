@@ -50,6 +50,12 @@ AREA_MAP: dict[str, str] = {
     "env_tools": "options",
 }
 
+SECTION_BADGE_MAP: dict[str, str] = {
+    "Inspect": "readonly",
+    "Act": "mutating",
+    "Destroy": "destructive",
+}
+
 TAG_READONLY = "readonly"
 TAG_MUTATING = "mutating"
 TAG_DESTRUCTIVE = "destructive"
@@ -739,6 +745,26 @@ def _register_tool_labels(app: Sphinx, doctree: nodes.document) -> None:
             domain.labels[section_id] = (docname, section_id, tool_name)
 
 
+def _add_section_badges(
+    app: Sphinx,
+    doctree: nodes.document,
+    fromdocname: str,
+) -> None:
+    """Append safety badges to Inspect/Act/Destroy section headings.
+
+    Runs at ``doctree-resolved`` — section IDs are already frozen, so
+    appending nodes to the title doesn't affect anchors or cross-refs.
+    """
+    for section in doctree.findall(nodes.section):
+        if not section.children or not isinstance(section[0], nodes.title):
+            continue
+        title_text = section[0].astext().strip()
+        safety = SECTION_BADGE_MAP.get(title_text)
+        if safety is not None:
+            section[0] += nodes.Text(" ")
+            section[0] += _safety_badge(safety)
+
+
 class _tool_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):
     """Placeholder node for ``{tool}`` role, resolved at doctree-resolved."""
 
@@ -809,6 +835,7 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     """Register the fastmcp_autodoc extension."""
     app.connect("builder-inited", _collect_tools)
     app.connect("doctree-read", _register_tool_labels)
+    app.connect("doctree-resolved", _add_section_badges)
     app.connect("doctree-resolved", _resolve_tool_refs)
     app.add_role("tool", _tool_role)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
