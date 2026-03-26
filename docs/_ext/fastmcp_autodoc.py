@@ -713,6 +713,10 @@ def _register_tool_labels(app: Sphinx, doctree: nodes.document) -> None:
     StandardDomain.  This hook mirrors the pattern used by
     ``sphinx.ext.autosectionlabel`` so that ``{ref}`list-sessions``` works
     from any page.
+
+    The primary label uses just the tool name (no safety badge) so that
+    ``{ref}`` renders a clean ``tool_name`` link.  Use ``{tool}`` role
+    for a link that includes the colored safety badge.
     """
     domain = t.cast("StandardDomain", app.env.get_domain("std"))
     docname = app.env.docname
@@ -721,15 +725,92 @@ def _register_tool_labels(app: Sphinx, doctree: nodes.document) -> None:
             continue
         section_id = section["ids"][0]
         if section.children and isinstance(section[0], nodes.title):
-            title = section[0].astext()
+            # Extract just the tool name from the first literal child,
+            # ignoring the safety badge that follows it.
+            title_node = section[0]
+            tool_name = ""
+            for child in title_node.children:
+                if isinstance(child, nodes.literal):
+                    tool_name = child.astext()
+                    break
+            if not tool_name:
+                tool_name = title_node.astext()
             domain.anonlabels[section_id] = (docname, section_id)
-            domain.labels[section_id] = (docname, section_id, title)
+            domain.labels[section_id] = (docname, section_id, tool_name)
+
+
+class _tool_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):
+    """Placeholder node for ``{tool}`` role, resolved at doctree-resolved."""
+
+
+def _resolve_tool_refs(
+    app: Sphinx,
+    doctree: nodes.document,
+    fromdocname: str,
+) -> None:
+    """Resolve ``{tool}`` placeholders into links with safety badges.
+
+    Runs at ``doctree-resolved`` — after all labels are registered and
+    standard ``{ref}`` resolution is done.
+    """
+    domain = t.cast("StandardDomain", app.env.get_domain("std"))
+    builder = app.builder
+    tool_data: dict[str, ToolInfo] = getattr(app.env, "fastmcp_tools", {})
+
+    for node in list(doctree.findall(_tool_ref_placeholder)):
+        target = node.get("reftarget", "")
+        label_info = domain.labels.get(target)
+        if label_info is None:
+            node.replace_self(nodes.literal("", target.replace("-", "_")))
+            continue
+
+        todocname, labelid, _title = label_info
+        tool_name = target.replace("-", "_")
+
+        newnode = nodes.reference("", "", internal=True)
+        try:
+            newnode["refuri"] = builder.get_relative_uri(fromdocname, todocname)
+            if labelid:
+                newnode["refuri"] += "#" + labelid
+        except Exception:
+            newnode["refuri"] = "#" + labelid
+        newnode["classes"].append("reference")
+        newnode["classes"].append("internal")
+
+        newnode += nodes.literal("", tool_name)
+
+        tool_info = tool_data.get(tool_name)
+        if tool_info:
+            newnode += nodes.Text(" ")
+            newnode += _safety_badge(tool_info.safety)
+
+        node.replace_self(newnode)
+
+
+def _tool_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:tool:`capture-pane``` → linked tool name + safety badge.
+
+    Creates a placeholder node resolved later by ``_resolve_tool_refs``.
+    """
+    target = text.strip().replace("_", "-")
+    node = _tool_ref_placeholder(rawtext, reftarget=target)
+    return [node], []
 
 
 def setup(app: Sphinx) -> ExtensionMetadata:
     """Register the fastmcp_autodoc extension."""
     app.connect("builder-inited", _collect_tools)
     app.connect("doctree-read", _register_tool_labels)
+    app.connect("doctree-resolved", _resolve_tool_refs)
+    app.add_role("tool", _tool_role)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)
     app.add_directive("fastmcp-toolsummary", FastMCPToolSummaryDirective)
