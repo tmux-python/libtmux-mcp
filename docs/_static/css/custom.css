@@ -247,6 +247,11 @@ img[src*="codecov.io"] {
   vertical-align: middle;
 }
 
+.sd-badge.sd-bg-warning {
+  background-color: #e67e22 !important;
+  color: #fff !important;
+}
+
 a.reference .sd-badge {
   text-decoration: none;
 }
