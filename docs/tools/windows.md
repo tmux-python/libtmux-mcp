@@ -23,6 +23,37 @@ session before selecting a window to work with.
 }
 ```
 
+Response:
+
+```json
+[
+  {
+    "window_id": "@0",
+    "window_name": "editor",
+    "window_index": "1",
+    "session_id": "$0",
+    "session_name": "dev",
+    "pane_count": 2,
+    "window_layout": "c195,80x24,0,0[80x12,0,0,0,80x11,0,13,1]",
+    "window_active": "1",
+    "window_width": "80",
+    "window_height": "24"
+  },
+  {
+    "window_id": "@1",
+    "window_name": "server",
+    "window_index": "2",
+    "session_id": "$0",
+    "session_name": "dev",
+    "pane_count": 1,
+    "window_layout": "b25f,80x24,0,0,2",
+    "window_active": "0",
+    "window_width": "80",
+    "window_height": "24"
+  }
+]
+```
+
 ```{fastmcp-tool-input} session_tools.list_windows
 ```
 
@@ -60,6 +91,23 @@ sending keys or capturing output.
 }
 ```
 
+Response:
+
+```json
+{
+  "window_id": "@2",
+  "window_name": "logs",
+  "window_index": "3",
+  "session_id": "$0",
+  "session_name": "dev",
+  "pane_count": 1,
+  "window_layout": "b25f,80x24,0,0,5",
+  "window_active": "1",
+  "window_width": "80",
+  "window_height": "24"
+}
+```
+
 ```{fastmcp-tool-input} session_tools.create_window
 ```
 
@@ -80,8 +128,27 @@ window.
   "tool": "split_window",
   "arguments": {
     "session_name": "dev",
-    "direction": "horizontal"
+    "direction": "right"
   }
+}
+```
+
+Response:
+
+```json
+{
+  "pane_id": "%4",
+  "pane_index": "1",
+  "pane_width": "39",
+  "pane_height": "24",
+  "pane_current_command": "zsh",
+  "pane_current_path": "/home/user/myproject",
+  "pane_pid": "3732",
+  "pane_title": "",
+  "pane_active": "0",
+  "window_id": "@0",
+  "session_id": "$0",
+  "is_caller": null
 }
 ```
 

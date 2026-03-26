@@ -20,10 +20,24 @@ after running a command, checking output, or verifying state.
 {
   "tool": "capture_pane",
   "arguments": {
-    "session_name": "dev",
+    "pane_id": "%0",
     "start": -50
   }
 }
+```
+
+Response (string):
+
+```text
+$ echo "Running tests..."
+Running tests...
+$ echo "PASS: test_auth (0.3s)"
+PASS: test_auth (0.3s)
+$ echo "FAIL: test_upload (AssertionError)"
+FAIL: test_upload (AssertionError)
+$ echo "3 tests: 2 passed, 1 failed"
+3 tests: 2 passed, 1 failed
+$
 ```
 
 ```{fastmcp-tool-input} pane_tools.capture_pane
@@ -64,10 +78,31 @@ directly.
 {
   "tool": "search_panes",
   "arguments": {
-    "query": "error",
+    "pattern": "FAIL",
     "session_name": "dev"
   }
 }
+```
+
+Response:
+
+```json
+[
+  {
+    "pane_id": "%0",
+    "pane_current_command": "zsh",
+    "pane_current_path": "/home/user/myproject",
+    "window_id": "@0",
+    "window_name": "editor",
+    "session_id": "$0",
+    "session_name": "dev",
+    "matched_lines": [
+      "FAIL: test_upload (AssertionError)",
+      "3 tests: 2 passed, 1 failed"
+    ],
+    "is_caller": null
+  }
+]
 ```
 
 ```{fastmcp-tool-input} pane_tools.search_panes
@@ -92,10 +127,24 @@ expected text may never appear (set a timeout).
 {
   "tool": "wait_for_text",
   "arguments": {
-    "text": "Server started",
-    "session_name": "dev",
+    "pattern": "Server listening",
+    "pane_id": "%2",
     "timeout": 30
   }
+}
+```
+
+Response:
+
+```json
+{
+  "found": true,
+  "matched_lines": [
+    "Server listening on port 8000"
+  ],
+  "pane_id": "%2",
+  "elapsed_seconds": 0.002,
+  "timed_out": false
 }
 ```
 
@@ -123,9 +172,15 @@ the command executes.
   "tool": "send_keys",
   "arguments": {
     "keys": "npm start",
-    "session_name": "dev"
+    "pane_id": "%2"
   }
 }
+```
+
+Response (string):
+
+```text
+Keys sent to pane %2
 ```
 
 ```{fastmcp-tool-input} pane_tools.send_keys

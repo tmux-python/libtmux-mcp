@@ -22,6 +22,20 @@ which session to target.
 }
 ```
 
+Response:
+
+```json
+[
+  {
+    "session_id": "$0",
+    "session_name": "myproject",
+    "window_count": 2,
+    "session_attached": "0",
+    "session_created": "1774521871"
+  }
+]
+```
+
 ```{fastmcp-tool-input} server_tools.list_sessions
 ```
 
@@ -64,6 +78,18 @@ container — create one before creating windows or panes.
 }
 ```
 
+Response:
+
+```json
+{
+  "session_id": "$1",
+  "session_name": "dev",
+  "window_count": 1,
+  "session_attached": "0",
+  "session_created": "1774521872"
+}
+```
+
 ```{fastmcp-tool-input} server_tools.create_session
 ```
 
@@ -85,6 +111,18 @@ container — create one before creating windows or panes.
     "session_name": "old-name",
     "new_name": "new-name"
   }
+}
+```
+
+Response:
+
+```json
+{
+  "session_id": "$0",
+  "session_name": "new-name",
+  "window_count": 2,
+  "session_attached": "0",
+  "session_created": "1774521871"
 }
 ```
 

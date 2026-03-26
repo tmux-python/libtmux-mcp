@@ -21,6 +21,15 @@ history size, status bar settings, etc.
 }
 ```
 
+Response:
+
+```json
+{
+  "option": "history-limit",
+  "value": "2000"
+}
+```
+
 ```{fastmcp-tool-input} option_tools.show_option
 ```
 
@@ -55,6 +64,16 @@ enabling mouse support, changing status bar format.
     "option": "history-limit",
     "value": "50000"
   }
+}
+```
+
+Response:
+
+```json
+{
+  "option": "history-limit",
+  "value": "50000",
+  "status": "set"
 }
 ```
 
