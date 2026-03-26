@@ -234,6 +234,11 @@ img[src*="codecov.io"] {
 }
 
 /* ── MCP Tool safety badges ──────────────────────────────
- * Badge sits inline next to the tool name in the heading.
- * Slight vertical offset for alignment with the code text.
+ * Badges appear inline in both h2/h3 headings and body text.
+ * Pin size to body-text scale so they don't inflate in headings.
+ * Vertical-align keeps them centered with adjacent text.
  * ────────────────────────────────────────────────────────── */
+.sd-badge {
+  font-size: 0.75rem;
+  vertical-align: middle;
+}

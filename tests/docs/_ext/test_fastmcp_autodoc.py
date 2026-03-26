@@ -6,6 +6,7 @@ import typing as t
 
 import fastmcp_autodoc
 import pytest
+from docutils import nodes
 
 # ---------------------------------------------------------------------------
 # _parse_numpy_params
@@ -455,25 +456,31 @@ def test_section_badge_map_headings() -> None:
     assert m["Destroy"] == "destructive"
 
 
-def test_add_section_badges_appends_badge_to_title() -> None:
-    """_add_section_badges appends a safety badge to matching titles."""
+def _make_doc_with_section(
+    section_id: str, title_text: str
+) -> tuple[nodes.document, nodes.section, nodes.title]:
+    """Build a minimal doctree with one section."""
     from docutils import nodes
     from docutils.frontend import OptionParser
     from docutils.utils import new_document
 
     settings = OptionParser(components=()).get_default_values()
     doc = new_document("test", settings)
-
-    section = nodes.section(ids=["inspect"])
-    title = nodes.title("", "Inspect")
+    section = nodes.section(ids=[section_id])
+    title = nodes.title("", title_text)
     section += title
     doc += section
+    return doc, section, title
 
-    # Simulate the handler — it expects (app, doctree, fromdocname)
-    # but only uses doctree, so pass None for the others.
-    fastmcp_autodoc._add_section_badges(None, doc, "")
 
-    # Title should now have 3 children: Text("Inspect"), Text(" "), inline(badge)
+def test_add_section_badges_appends_badge_on_tools_index() -> None:
+    """_add_section_badges appends badge when fromdocname is tools/index."""
+    from docutils import nodes
+
+    doc, _section, title = _make_doc_with_section("inspect", "Inspect")
+
+    fastmcp_autodoc._add_section_badges(None, doc, "tools/index")
+
     assert len(title.children) == 3
     badge = title.children[2]
     assert isinstance(badge, nodes.inline)
@@ -483,39 +490,29 @@ def test_add_section_badges_appends_badge_to_title() -> None:
 
 def test_add_section_badges_preserves_section_id() -> None:
     """_add_section_badges does not change the section ID."""
-    from docutils import nodes
-    from docutils.frontend import OptionParser
-    from docutils.utils import new_document
+    doc, section, _title = _make_doc_with_section("inspect", "Inspect")
 
-    settings = OptionParser(components=()).get_default_values()
-    doc = new_document("test", settings)
-
-    section = nodes.section(ids=["inspect"])
-    section += nodes.title("", "Inspect")
-    doc += section
-
-    fastmcp_autodoc._add_section_badges(None, doc, "")
+    fastmcp_autodoc._add_section_badges(None, doc, "tools/index")
 
     assert section["ids"] == ["inspect"]
 
 
+def test_add_section_badges_skips_non_index_pages() -> None:
+    """_add_section_badges skips individual tool pages (redundant)."""
+    doc, _section, title = _make_doc_with_section("inspect", "Inspect")
+
+    fastmcp_autodoc._add_section_badges(None, doc, "tools/sessions")
+
+    assert len(title.children) == 1
+    assert title.astext() == "Inspect"
+
+
 def test_add_section_badges_ignores_non_matching() -> None:
     """_add_section_badges leaves non-matching headings untouched."""
-    from docutils import nodes
-    from docutils.frontend import OptionParser
-    from docutils.utils import new_document
+    doc, _section, title = _make_doc_with_section("overview", "Overview")
 
-    settings = OptionParser(components=()).get_default_values()
-    doc = new_document("test", settings)
+    fastmcp_autodoc._add_section_badges(None, doc, "tools/index")
 
-    section = nodes.section(ids=["overview"])
-    title = nodes.title("", "Overview")
-    section += title
-    doc += section
-
-    fastmcp_autodoc._add_section_badges(None, doc, "")
-
-    # Title should still have only the original text child
     assert len(title.children) == 1
     assert title.astext() == "Overview"
 

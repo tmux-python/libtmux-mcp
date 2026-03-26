@@ -752,9 +752,14 @@ def _add_section_badges(
 ) -> None:
     """Append safety badges to Inspect/Act/Destroy section headings.
 
+    Only applied to the tools index page — individual tool pages already
+    have per-tool badges, making section-level badges redundant.
+
     Runs at ``doctree-resolved`` — section IDs are already frozen, so
     appending nodes to the title doesn't affect anchors or cross-refs.
     """
+    if fromdocname != "tools/index":
+        return
     for section in doctree.findall(nodes.section):
         if not section.children or not isinstance(section[0], nodes.title):
             continue
