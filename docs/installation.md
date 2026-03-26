@@ -6,6 +6,7 @@
 
 - Python 3.10+
 - tmux >= 3.2a
+- [uv](https://github.com/astral-sh/uv) ([install](https://docs.astral.sh/uv/getting-started/installation/)) or [pipx](https://github.com/pypa/pipx) ([install](https://pipx.pypa.io/stable/installation/)) — for running without a persistent install
 
 ## Run without installing
 
