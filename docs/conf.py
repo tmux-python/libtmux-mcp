@@ -202,6 +202,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/", None),
     "pytest": ("https://docs.pytest.org/en/stable/", None),
     "libtmux": ("https://libtmux.git-pull.com/", None),
+    "pydantic": ("https://docs.pydantic.dev/latest/", None),
 }
 
 
