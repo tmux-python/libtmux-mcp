@@ -29,6 +29,12 @@ Three-tier safety system for controlling tool access.
 Symptom-based guide for common issues.
 :::
 
+:::{grid-item-card} Gotchas
+:link: gotchas
+:link-type: doc
+Things that will bite you if you don't know about them.
+:::
+
 ::::
 
 ```{toctree}
@@ -37,5 +43,6 @@ Symptom-based guide for common issues.
 architecture
 concepts
 safety
+gotchas
 troubleshooting
 ```
