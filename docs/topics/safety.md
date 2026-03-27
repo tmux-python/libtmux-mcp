@@ -14,7 +14,7 @@ libtmux-mcp uses a three-tier safety system to control which tools are available
 
 ## Configuration
 
-Set the safety tier via the {ref}`LIBTMUX_SAFETY` environment variable:
+Set the safety tier via the {envvar}`LIBTMUX_SAFETY` environment variable:
 
 ```json
 {
