@@ -421,15 +421,38 @@ def _extract_enum_values(type_str: str) -> list[str]:
     return values
 
 
-def _safety_badge(safety: str) -> nodes.inline:
-    """Create a colored safety badge node."""
+class _safety_badge_node(nodes.General, nodes.Inline, nodes.Element):
+    """Custom node for safety badges with ARIA attributes in HTML output."""
+
+
+def _visit_safety_badge_html(self: t.Any, node: _safety_badge_node) -> None:
+    """Emit opening ``<span>`` with classes, role, and aria-label."""
+    classes = " ".join(node.get("classes", []))
+    safety = node.get("safety", "")
+    self.body.append(
+        f'<span class="{classes}" role="note" aria-label="Safety tier: {safety}">'
+    )
+
+
+def _depart_safety_badge_html(self: t.Any, node: _safety_badge_node) -> None:
+    """Close the ``<span>``."""
+    self.body.append("</span>")
+
+
+def _safety_badge(safety: str) -> _safety_badge_node:
+    """Create a colored safety badge node with ARIA attributes."""
     _base = ["sd-sphinx-override", "sd-badge"]
     classes = {
         "readonly": [*_base, "sd-bg-success", "sd-bg-text-success"],
         "mutating": [*_base, "sd-bg-warning", "sd-bg-text-warning"],
         "destructive": [*_base, "sd-bg-danger", "sd-bg-text-danger"],
     }
-    badge = nodes.inline("", safety, classes=classes.get(safety, []))
+    badge = _safety_badge_node(
+        "",
+        nodes.Text(safety),
+        classes=classes.get(safety, []),
+        safety=safety,
+    )
     return badge
 
 
@@ -926,6 +949,10 @@ def _badge_role(
 
 def setup(app: Sphinx) -> ExtensionMetadata:
     """Register the fastmcp_autodoc extension."""
+    app.add_node(
+        _safety_badge_node,
+        html=(_visit_safety_badge_html, _depart_safety_badge_html),
+    )
     app.connect("builder-inited", _collect_tools)
     app.connect("doctree-read", _register_tool_labels)
     app.connect("doctree-resolved", _add_section_badges)

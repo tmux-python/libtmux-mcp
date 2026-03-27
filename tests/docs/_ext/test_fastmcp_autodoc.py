@@ -432,7 +432,7 @@ def test_make_type_cell_single_type() -> None:
 
 
 def test_safety_badge_classes() -> None:
-    """_safety_badge creates inline nodes with correct CSS classes."""
+    """_safety_badge creates badge nodes with correct CSS classes."""
     badge = fastmcp_autodoc._safety_badge("readonly")
     assert "sd-bg-success" in badge["classes"]
 
@@ -441,6 +441,16 @@ def test_safety_badge_classes() -> None:
 
     badge = fastmcp_autodoc._safety_badge("destructive")
     assert "sd-bg-danger" in badge["classes"]
+
+
+def test_safety_badge_aria_attributes() -> None:
+    """_safety_badge stores safety tier for ARIA output."""
+    badge = fastmcp_autodoc._safety_badge("readonly")
+    assert badge["safety"] == "readonly"
+    assert badge.astext() == "readonly"
+
+    badge = fastmcp_autodoc._safety_badge("destructive")
+    assert badge["safety"] == "destructive"
 
 
 # ---------------------------------------------------------------------------
@@ -531,15 +541,13 @@ def _make_doc_with_section(
 
 def test_add_section_badges_appends_badge_on_tools_index() -> None:
     """_add_section_badges appends badge when fromdocname is tools/index."""
-    from docutils import nodes
-
     doc, _section, title = _make_doc_with_section("inspect", "Inspect")
 
     fastmcp_autodoc._add_section_badges(None, doc, "tools/index")
 
     assert len(title.children) == 3
     badge = title.children[2]
-    assert isinstance(badge, nodes.inline)
+    assert isinstance(badge, fastmcp_autodoc._safety_badge_node)
     assert "sd-bg-success" in badge["classes"]
     assert badge.astext() == "readonly"
 
@@ -585,7 +593,7 @@ def test_add_section_badges_parenthesized_on_index() -> None:
     assert len(title.children) == 2
     assert title.children[0].astext() == "Inspect "
     badge = title.children[1]
-    assert isinstance(badge, nodes.inline)
+    assert isinstance(badge, fastmcp_autodoc._safety_badge_node)
     assert "sd-bg-success" in badge["classes"]
     assert badge.astext() == "readonly"
 
@@ -598,7 +606,7 @@ def test_add_section_badges_works_on_homepage() -> None:
 
     assert len(title.children) == 3
     badge = title.children[2]
-    assert isinstance(badge, nodes.inline)
+    assert isinstance(badge, fastmcp_autodoc._safety_badge_node)
     assert "sd-bg-warning" in badge["classes"]
 
 

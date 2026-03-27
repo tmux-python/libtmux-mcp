@@ -245,6 +245,8 @@ img[src*="codecov.io"] {
 .sd-badge {
   font-size: 0.75rem;
   vertical-align: middle;
+  user-select: none;        /* Don't include badge text when copying */
+  -webkit-user-select: none; /* Safari */
 }
 
 .sd-badge.sd-bg-warning {
