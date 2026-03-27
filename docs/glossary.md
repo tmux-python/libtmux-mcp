@@ -29,7 +29,7 @@ Pane
     A tmux pane within a window. A pseudoterminal that runs a single process. Has an ID (e.g. `%1`) that is globally unique within a server.
 
 Safety tier
-    A level controlling which MCP tools are available: `readonly`, `mutating`, or `destructive`. Set via the `LIBTMUX_SAFETY` env var.
+    A level controlling which MCP tools are available: `readonly`, `mutating`, or `destructive`. Set via the {ref}`LIBTMUX_SAFETY` env var.
 
 Socket
     The Unix socket used to communicate with a tmux server. Can be specified by name (`-L`) or path (`-S`).
