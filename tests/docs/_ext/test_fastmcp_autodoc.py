@@ -444,6 +444,62 @@ def test_safety_badge_classes() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _make_type_xref
+# ---------------------------------------------------------------------------
+
+
+def test_make_type_xref_model_class() -> None:
+    """_make_type_xref creates pending_xref for known model classes."""
+    from sphinx import addnodes
+
+    para = fastmcp_autodoc._make_type_xref("PaneInfo")
+    assert len(para.children) == 1
+    xref = para.children[0]
+    assert isinstance(xref, addnodes.pending_xref)
+    assert xref["refdomain"] == "py"
+    assert xref["reftype"] == "class"
+    assert xref["reftarget"] == "libtmux_mcp.models.PaneInfo"
+    assert xref.children[0].astext() == "PaneInfo"
+
+
+def test_make_type_xref_list_of_model() -> None:
+    """_make_type_xref handles list[SessionInfo] with xrefs for both."""
+    from sphinx import addnodes
+
+    para = fastmcp_autodoc._make_type_xref("list[SessionInfo]")
+    # list xref, "[", SessionInfo xref, "]"
+    assert len(para.children) == 4
+    list_xref = para.children[0]
+    assert isinstance(list_xref, addnodes.pending_xref)
+    assert list_xref["reftarget"] == "list"
+
+    inner_xref = para.children[2]
+    assert isinstance(inner_xref, addnodes.pending_xref)
+    assert inner_xref["reftarget"] == "libtmux_mcp.models.SessionInfo"
+
+
+def test_make_type_xref_builtin() -> None:
+    """_make_type_xref creates pending_xref for builtins like str."""
+    from sphinx import addnodes
+
+    para = fastmcp_autodoc._make_type_xref("str")
+    xref = para.children[0]
+    assert isinstance(xref, addnodes.pending_xref)
+    assert xref["reftarget"] == "str"
+    assert xref["refdomain"] == "py"
+
+
+def test_make_type_xref_unknown() -> None:
+    """_make_type_xref still creates pending_xref for unknown types."""
+    from sphinx import addnodes
+
+    para = fastmcp_autodoc._make_type_xref("SomeUnknown")
+    xref = para.children[0]
+    assert isinstance(xref, addnodes.pending_xref)
+    assert xref["reftarget"] == "SomeUnknown"
+
+
+# ---------------------------------------------------------------------------
 # SECTION_BADGE_MAP + _add_section_badges
 # ---------------------------------------------------------------------------
 

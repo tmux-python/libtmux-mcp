@@ -30,6 +30,7 @@ import typing as t
 from dataclasses import dataclass
 
 from docutils import nodes
+from sphinx import addnodes
 from sphinx.application import Sphinx
 from sphinx.util.docutils import SphinxDirective
 
@@ -59,6 +60,20 @@ SECTION_BADGE_MAP: dict[str, str] = {
 TAG_READONLY = "readonly"
 TAG_MUTATING = "mutating"
 TAG_DESTRUCTIVE = "destructive"
+
+_MODEL_MODULE = "libtmux_mcp.models"
+_MODEL_CLASSES: set[str] = {
+    "SessionInfo",
+    "WindowInfo",
+    "PaneInfo",
+    "PaneContentMatch",
+    "ServerInfo",
+    "OptionResult",
+    "OptionSetResult",
+    "EnvironmentResult",
+    "EnvironmentSetResult",
+    "WaitForTextResult",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +291,42 @@ def _make_table(
 def _make_literal(text: str) -> nodes.literal:
     """Create an inline code literal node."""
     return nodes.literal("", text)
+
+
+def _single_type_xref(name: str) -> addnodes.pending_xref:
+    """Create a ``pending_xref`` for a single type name.
+
+    Known model classes are qualified to ``libtmux_mcp.models.X``.
+    Builtins (``str``, ``list``, ``int``, etc.) target the Python domain.
+    """
+    target = f"{_MODEL_MODULE}.{name}" if name in _MODEL_CLASSES else name
+    return addnodes.pending_xref(
+        "",
+        nodes.literal("", name),
+        refdomain="py",
+        reftype="class",
+        reftarget=target,
+    )
+
+
+def _make_type_xref(type_str: str) -> nodes.paragraph:
+    """Render a return type annotation with cross-reference links.
+
+    Handles ``list[X]`` generics and bare type names.
+    Each type component becomes a ``pending_xref`` that Sphinx resolves
+    into a hyperlink (internal or intersphinx).
+    """
+    para = nodes.paragraph("")
+    m = re.match(r"^(list|set|tuple)\[(.+)\]$", type_str)
+    if m:
+        container, inner = m.group(1), m.group(2)
+        para += _single_type_xref(container)
+        para += nodes.Text("[")
+        para += _single_type_xref(inner)
+        para += nodes.Text("]")
+    else:
+        para += _single_type_xref(type_str)
+    return para
 
 
 def _make_para(*children: nodes.Node | str) -> nodes.paragraph:
@@ -533,10 +584,12 @@ class FastMCPToolDirective(SphinxDirective):
 
         # Returns (promoted — high-signal for tool selection)
         if tool.return_annotation:
-            section += _make_para(
-                nodes.strong("", "Returns: "),
-                _make_literal(tool.return_annotation),
-            )
+            returns_para = nodes.paragraph("")
+            returns_para += nodes.strong("", "Returns: ")
+            type_para = _make_type_xref(tool.return_annotation)
+            for child in type_para.children:
+                returns_para += child.deepcopy()
+            section += returns_para
 
         return [section]
 
