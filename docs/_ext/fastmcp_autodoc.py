@@ -911,6 +911,19 @@ def _tool_role(
     return [node], []
 
 
+def _badge_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:badge:`readonly``` → colored safety badge span."""
+    return [_safety_badge(text.strip())], []
+
+
 def setup(app: Sphinx) -> ExtensionMetadata:
     """Register the fastmcp_autodoc extension."""
     app.connect("builder-inited", _collect_tools)
@@ -918,6 +931,7 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     app.connect("doctree-resolved", _add_section_badges)
     app.connect("doctree-resolved", _resolve_tool_refs)
     app.add_role("tool", _tool_role)
+    app.add_role("badge", _badge_role)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)
     app.add_directive("fastmcp-toolsummary", FastMCPToolSummaryDirective)

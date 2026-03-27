@@ -6,11 +6,11 @@ libtmux-mcp uses a three-tier safety system to control which tools are available
 
 ## Overview
 
-| Tier | Access | Use case |
-|------|--------|----------|
-| `readonly` | List, capture, search, info | Monitoring, browsing |
-| `mutating` (default) | + create, send_keys, rename, resize | Normal agent workflow |
-| `destructive` | + kill_server, kill_session, kill_window, kill_pane | Full control |
+| Tier | Label | Access | Use case |
+|------|-------|--------|----------|
+| `readonly` | {badge}`readonly` | List, capture, search, info | Monitoring, browsing |
+| `mutating` (default) | {badge}`mutating` | + create, send_keys, rename, resize | Normal agent workflow |
+| `destructive` | {badge}`destructive` | + kill_server, kill_session, kill_window, kill_pane | Full control |
 
 ## Configuration
 
@@ -42,9 +42,9 @@ Set the safety tier via the `LIBTMUX_SAFETY` environment variable:
 
 Every tool is tagged with exactly one safety tier:
 
-- `readonly` — Read-only operations that don't modify tmux state
-- `mutating` — Operations that create, modify, or send input to tmux objects
-- `destructive` — Operations that destroy tmux objects (kill commands)
+- {badge}`readonly` `readonly` — Read-only operations that don't modify tmux state
+- {badge}`mutating` `mutating` — Operations that create, modify, or send input to tmux objects
+- {badge}`destructive` `destructive` — Operations that destroy tmux objects (kill commands)
 
 ### Fail-closed design
 
@@ -65,32 +65,32 @@ These protections use the `TMUX_PANE` environment variable to detect the caller'
 
 Each tool carries MCP tool annotations that hint at its behavior:
 
-| Tool | Tier | readOnly | destructive | idempotent |
-|------|------|----------|-------------|------------|
-| `list_sessions` | readonly | true | false | true |
-| `get_server_info` | readonly | true | false | true |
-| `list_windows` | readonly | true | false | true |
-| `list_panes` | readonly | true | false | true |
-| `capture_pane` | readonly | true | false | true |
-| `get_pane_info` | readonly | true | false | true |
-| `search_panes` | readonly | true | false | true |
-| `wait_for_text` | readonly | true | false | true |
-| `show_option` | readonly | true | false | true |
-| `show_environment` | readonly | true | false | true |
-| `create_session` | mutating | false | false | false |
-| `create_window` | mutating | false | false | false |
-| `split_window` | mutating | false | false | false |
-| `send_keys` | mutating | false | false | false |
-| `rename_session` | mutating | false | false | true |
-| `rename_window` | mutating | false | false | true |
-| `resize_pane` | mutating | false | false | true |
-| `resize_window` | mutating | false | false | true |
-| `set_pane_title` | mutating | false | false | true |
-| `clear_pane` | mutating | false | false | true |
-| `select_layout` | mutating | false | false | true |
-| `set_option` | mutating | false | false | true |
-| `set_environment` | mutating | false | false | true |
-| `kill_server` | destructive | false | true | false |
-| `kill_session` | destructive | false | true | false |
-| `kill_window` | destructive | false | true | false |
-| `kill_pane` | destructive | false | true | false |
+| Tool | Tier | Label | readOnly | destructive | idempotent |
+|------|------|-------|----------|-------------|------------|
+| `list_sessions` | readonly | {badge}`readonly` | true | false | true |
+| `get_server_info` | readonly | {badge}`readonly` | true | false | true |
+| `list_windows` | readonly | {badge}`readonly` | true | false | true |
+| `list_panes` | readonly | {badge}`readonly` | true | false | true |
+| `capture_pane` | readonly | {badge}`readonly` | true | false | true |
+| `get_pane_info` | readonly | {badge}`readonly` | true | false | true |
+| `search_panes` | readonly | {badge}`readonly` | true | false | true |
+| `wait_for_text` | readonly | {badge}`readonly` | true | false | true |
+| `show_option` | readonly | {badge}`readonly` | true | false | true |
+| `show_environment` | readonly | {badge}`readonly` | true | false | true |
+| `create_session` | mutating | {badge}`mutating` | false | false | false |
+| `create_window` | mutating | {badge}`mutating` | false | false | false |
+| `split_window` | mutating | {badge}`mutating` | false | false | false |
+| `send_keys` | mutating | {badge}`mutating` | false | false | false |
+| `rename_session` | mutating | {badge}`mutating` | false | false | true |
+| `rename_window` | mutating | {badge}`mutating` | false | false | true |
+| `resize_pane` | mutating | {badge}`mutating` | false | false | true |
+| `resize_window` | mutating | {badge}`mutating` | false | false | true |
+| `set_pane_title` | mutating | {badge}`mutating` | false | false | true |
+| `clear_pane` | mutating | {badge}`mutating` | false | false | true |
+| `select_layout` | mutating | {badge}`mutating` | false | false | true |
+| `set_option` | mutating | {badge}`mutating` | false | false | true |
+| `set_environment` | mutating | {badge}`mutating` | false | false | true |
+| `kill_server` | destructive | {badge}`destructive` | false | true | false |
+| `kill_session` | destructive | {badge}`destructive` | false | true | false |
+| `kill_window` | destructive | {badge}`destructive` | false | true | false |
+| `kill_pane` | destructive | {badge}`destructive` | false | true | false |
