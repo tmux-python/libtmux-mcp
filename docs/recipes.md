@@ -2,155 +2,325 @@
 
 # Recipes
 
-Composable workflow patterns showing how to combine tools. Each recipe shows the tool sequence, why each step matters, and a common mistake to avoid.
+Each recipe starts from a real workspace situation and traces the agent's
+reasoning through discovery, decision, and action. The goal is not to show
+tool-call sequences -- it is to show *how an agent decides* what to do with
+existing tmux state so you can write better prompts and system instructions.
 
-## Run a command and capture output
+Every recipe uses the same structure:
 
-The fundamental workflow. Most agent interactions follow this pattern.
+- **Situation** -- the developer's world before the agent acts
+- **Discover** -- what the agent inspects and why
+- **Decide** -- the judgment call that changes the plan
+- **Act** -- the minimum safe action sequence
+- **The non-obvious part** -- the lesson you would miss from reading tool docs
+  alone
+- **Prompt** -- a natural-language sentence that triggers this recipe
 
-```json
-{"tool": "send_keys", "arguments": {"keys": "make test", "pane_id": "%0"}}
+---
+
+## 1. Find a running dev server and test against it
+
+**Situation.** A developer manages a CV project with tmuxp. One pane is
+already running `pnpm start` with Vite somewhere in the `react` window.
+They want to run Playwright e2e tests. The agent does not know which pane
+has the server, or what port it chose.
+
+### Discover
+
+> {toolref}`list-panes` will not help here -- it shows metadata like current
+> command and working directory, not terminal content. The dev server printed
+> its URL to the terminal minutes ago, so I need to search terminal content.
+
+The agent calls {tool}`search-panes` with `pattern: "Local:"` and
+`session_name: "cv"`. The response comes back with pane `%5` in the `react`
+window, matched line: `Local: http://localhost:5173/`.
+
+### Decide
+
+> The server is alive and its URL is known. I do not need to start anything.
+> I just need an idle pane for running tests.
+
+The agent calls {tool}`list-panes` on the `cv` session. Several panes show
+`pane_current_command: zsh` -- idle shells. It picks `%4` in the same window.
+
+### Act
+
+The agent calls {tool}`send-keys` in pane `%4`:
+`PLAYWRIGHT_BASE_URL=http://localhost:5173 pnpm exec playwright test`
+
+Then it calls {tool}`wait-for-text` on pane `%4` with `pattern: "passed|failed|timed out"`, `regex: true`, and `timeout: 120`. Once the
+wait resolves, it calls {tool}`capture-pane` on `%4` with `start: -80` to
+read the test results.
+
+```{tip}
+The agent's first instinct might be to *start* a Vite server. But
+{tool}`search-panes` reveals one is already running. This avoids a port
+conflict, a wasted pane, and the most common agent mistake: treating tmux
+like a blank shell.
 ```
 
-```json
-{"tool": "wait_for_text", "arguments": {"pattern": "\\$\\s*$", "pane_id": "%0", "regex": true}}
-```
+### The non-obvious part
 
-```json
-{"tool": "capture_pane", "arguments": {"pane_id": "%0", "start": -50}}
-```
+{toolref}`search-panes` searches terminal *content* -- what you would see on
+screen. {toolref}`list-panes` searches *metadata* like current command and
+working directory. If the agent had used {toolref}`list-panes` to find a pane
+running `node`, it would know a process exists but not whether it is ready or
+what URL it chose.
 
-**Why each step matters:**
-- `send_keys` sends the command but returns immediately — it does not wait for completion
-- `wait_for_text` blocks until the shell prompt returns (the `$` regex), confirming the command finished
-- `capture_pane` reads the result after the command has completed
+**Prompt:** "Run the Playwright tests against my dev server in the cv
+session."
+
+---
+
+## 2. Start a service and wait for it before running dependent work
+
+**Situation.** The developer is starting fresh in their `backend` session --
+no server running yet. They want to run integration tests, but the test
+suite needs a live API server.
+
+### Discover
+
+> First I need to know what exists in the `backend` session. If a server is
+> already running, I should reuse it instead of starting a duplicate.
+
+The agent calls {tool}`list-panes` for the `backend` session. No pane is
+running a server process. A {tool}`search-panes` call for `"listening"`
+returns no matches.
+
+### Decide
+
+> Nothing to reuse. I need a dedicated pane for the server so its output
+> stays separate from the test output.
+
+### Act
+
+The agent calls {tool}`split-window` with `session_name: "backend"` to
+create a new pane, then calls {tool}`send-keys` in that pane:
+`npm run serve`.
+
+The agent calls {tool}`wait-for-text` on the server pane with
+`pattern: "Listening on"` and `timeout: 30`. Once the wait resolves, the
+agent calls {tool}`send-keys` in the original pane:
+`npm test -- --integration`, then {tool}`wait-for-text` with
+`pattern: "passed|failed|error"` and `regex: true`, then
+{tool}`capture-pane` to read the test results.
 
 ```{warning}
-Do not call `capture_pane` immediately after `send_keys`. There is a race condition — you may capture the terminal *before* the command produces output. Always use `wait_for_text` between them.
+Calling {toolref}`capture-pane` immediately after {toolref}`send-keys` is a
+race condition. {toolref}`send-keys` returns the moment tmux accepts the
+keystrokes, not when the command finishes. Always use {toolref}`wait-for-text`
+between them.
 ```
 
-## Start a service and wait for readiness
+### The non-obvious part
 
-Use when you need a background service running before proceeding — web servers, databases, build watchers.
+{toolref}`wait-for-text` replaces `sleep`. The server might start in 2
+seconds or 20 -- the agent adapts. The anti-pattern is polling with repeated
+{toolref}`capture-pane` calls or hardcoding a sleep duration. The MCP server
+handles the polling internally with configurable `timeout` (default 8s) and
+`interval` (default 50ms).
 
-```json
-{"tool": "split_window", "arguments": {"session_name": "dev", "direction": "right"}}
+**Prompt:** "Start the API server in my backend session and run the
+integration tests once it's ready."
+
+---
+
+## 3. Find the failing pane without opening random terminals
+
+**Situation.** The developer kicked off multiple jobs across panes in a `ci`
+session -- linting, unit tests, integration tests, type checking. One of
+them failed, but they stepped away and do not remember which pane.
+
+### Discover
+
+> I should not capture every pane and read them all -- that is expensive and
+> slow. Instead I will search for common failure indicators across all panes
+> at once.
+
+The agent calls {tool}`search-panes` with
+`pattern: "FAIL|ERROR|error:|Traceback"`, `regex: true`, scoped to
+`session_name: "ci"`.
+
+### Decide
+
+> Two panes matched: `%3` has `FAIL: test_upload` and `%6` has
+> `error: Type 'string' is not assignable`. I will capture context from each.
+
+### Act
+
+The agent calls {tool}`capture-pane` on `%3` with `start: -60`, then on
+`%6` with `start: -60`.
+
+```{tip}
+If the error scrolled off the visible screen, use `content_start: -200` (or
+deeper) when calling {tool}`search-panes`. The `content_start` parameter
+makes search reach into scrollback history, not just the visible screen.
 ```
 
-The new pane's `pane_id` is in the response. Use it for the remaining steps:
+### The non-obvious part
 
-```json
-{"tool": "send_keys", "arguments": {"keys": "npm run dev", "pane_id": "%1"}}
+{toolref}`search-panes` checks all panes in a single call -- searching 20
+panes costs roughly the same as searching 2. An agent that instead calls
+{toolref}`list-panes` then {toolref}`capture-pane` on each one individually
+makes 20+ round trips for the same information. The `regex: true` parameter
+is required here because the `|` in the pattern is a regex alternation, not
+literal text.
+
+**Prompt:** "Check my ci session -- which jobs failed?"
+
+---
+
+## 4. Interrupt a stuck process and recover the pane
+
+**Situation.** A long-running build is hanging. The developer wants to
+interrupt it, verify the pane is responsive, and re-run the command.
+
+### Discover
+
+> I need to send Ctrl-C. This is a tmux key name, not text -- so I must use
+> `enter: false` or tmux will send Ctrl-C followed by Enter, which could
+> confirm a prompt I did not intend to answer.
+
+The agent calls {tool}`send-keys` with `keys: "C-c"` and `enter: false` on
+the target pane.
+
+### Decide
+
+> Did the interrupt work? Some processes ignore SIGINT. I will wait briefly
+> for a shell prompt to reappear. Developers use custom prompts, so I cannot
+> just look for `$`.
+
+The agent calls {tool}`wait-for-text` with `pattern: "[$#>%] *$"`,
+`regex: true`, and `timeout: 5`.
+
+> If the wait resolves, the shell is back. If it times out, the process
+> ignored Ctrl-C. I will escalate: try SIGQUIT (`C-\` with `enter: false`),
+> then destroy and replace the pane only as a last resort.
+
+### Act
+
+If the wait times out, the agent sends `C-\` (also with `enter: false`). If
+that also fails, it calls {tool}`kill-pane` on the stuck pane, then
+{tool}`split-window` to create a replacement, then {tool}`send-keys` to
+re-run.
+
+```{warning}
+The `enter: false` parameter is critical. Without it, {toolref}`send-keys`
+sends Ctrl-C *then* Enter, which could confirm a "really quit?" prompt,
+submit a partially typed command, or enter a newline into a REPL.
 ```
 
-```json
-{"tool": "wait_for_text", "arguments": {"pattern": "Local:.*http://localhost", "pane_id": "%1", "regex": true, "timeout": 30}}
+### The non-obvious part
+
+Recovery is a two-step decision. Try the gentle approach first (Ctrl-C),
+verify it worked with {toolref}`wait-for-text`, escalate only if needed. The
+escalation ladder is: interrupt, verify, escalate signal, destroy. Skipping
+straight to {toolref}`kill-pane` loses the pane's scrollback history and any
+partially written output that might explain *why* it hung.
+
+**Prompt:** "The build in pane %2 is stuck. Kill it and restart."
+
+---
+
+## 5. Re-run a command without mixing old and new output
+
+**Situation.** The developer wants `pytest` re-run in tmux, but the
+candidate pane already has old test output in scrollback. They want only
+fresh results.
+
+### Discover
+
+The agent calls {tool}`list-panes` to find the pane by title, cwd, or
+current command. If more than one pane is plausible, it uses
+{tool}`capture-pane` with a small range to confirm the target.
+
+### Decide
+
+> The pane is a shell. I should clear it before running so the capture
+> afterwards contains only fresh output. If it were running a watcher or
+> long-lived process, I would not hijack it -- I would use a different pane.
+
+### Act
+
+The agent calls {tool}`clear-pane`, then {tool}`send-keys` with
+`keys: "pytest"`, then {tool}`wait-for-text` with
+`pattern: "passed|failed|error"` and `regex: true`, then
+{tool}`capture-pane` to read the fresh output.
+
+### The non-obvious part
+
+{toolref}`clear-pane` runs two tmux commands internally (`send-keys -R` then
+`clear-history`) with a brief gap between them. Calling
+{toolref}`capture-pane` immediately after {toolref}`clear-pane` may catch
+partial state. The {toolref}`wait-for-text` call after {toolref}`send-keys`
+naturally provides the needed delay, so the sequence clear-send-wait-capture
+is safe.
+
+**Prompt:** "Run `pytest` in the test pane and show me only the fresh
+output."
+
+---
+
+## 6. Build a workspace the agent can revisit later
+
+**Situation.** The developer wants a durable project workspace -- not just a
+quick split, but a layout that later prompts can refer to by role ("the
+server pane", "the test pane").
+
+### Discover
+
+> Before creating anything, I need to check whether a session with this name
+> already exists. Creating a duplicate will fail.
+
+The agent calls {tool}`list-sessions`. No session named `myproject` exists.
+
+### Decide
+
+> Safe to create. I need three panes: editor, server, tests. I will create
+> the session, split twice, then apply a layout so tmux handles the geometry
+> instead of me calculating sizes.
+
+### Act
+
+The agent calls {tool}`create-session` with `session_name: "myproject"` and
+`start_directory: "/home/dev/myproject"`. Then {tool}`split-window` twice
+(with `direction: "right"` and `direction: "below"`), followed by
+{tool}`select-layout` with `layout: "main-vertical"`.
+
+The agent calls {tool}`set-pane-title` on each pane: `editor`, `server`,
+`tests`.
+
+The agent calls {tool}`send-keys` in the server pane: `npm run dev`, then
+{tool}`wait-for-text` for `pattern: "ready|listening|Local:"` with
+`regex: true` and `timeout: 30`.
+
+```{tip}
+If the session *does* already exist, the right move is to reuse and extend
+it, not recreate it. The {toolref}`list-sessions` check at the top is what
+makes that decision possible.
 ```
 
-Now the server is ready — run tests in the original pane:
+### The non-obvious part
 
-```json
-{"tool": "send_keys", "arguments": {"keys": "npx playwright test", "pane_id": "%0"}}
-```
+Titles and naming are not cosmetic. They reduce future discovery cost. When
+the agent comes back in a later conversation and the user says "restart the
+server," the agent calls {toolref}`list-panes`, finds the pane titled
+`server`, and acts -- no searching, no guessing, no capturing every pane to
+figure out which one is which. But note: pane IDs are ephemeral across tmux
+server restarts, so the agent should always re-discover by metadata (session
+name, pane title, cwd) rather than trusting remembered `%N` values.
 
-**Common mistake:** Using a fixed `sleep` instead of `wait_for_text`. Server startup times vary — `wait_for_text` adapts automatically.
+**Prompt:** "Set up a tmux workspace for myproject with editor, server, and
+test panes."
 
-## Search for errors across all panes
+---
 
-Find which pane has an error without knowing where to look.
+## What to read next
 
-```json
-{"tool": "search_panes", "arguments": {"pattern": "error", "session_name": "dev"}}
-```
+For the principles that recur across these recipes -- discover before acting,
+wait instead of polling, content vs. metadata, prefer IDs, escalate
+gracefully -- see the {ref}`prompting guide <prompting>`. For specific
+pitfalls like `enter: false` and the `send_keys`/`capture_pane` race
+condition, see {ref}`gotchas <gotchas>`.
 
-The response lists every pane with matching lines. Then capture the full context from each match:
-
-```json
-{"tool": "capture_pane", "arguments": {"pane_id": "%2", "start": -100}}
-```
-
-**Why two steps:** `search_panes` is fast — it uses tmux's built-in filter for plain text patterns and never captures full pane content. Once you know *which* pane has the error, `capture_pane` gets the full context.
-
-**Common mistake:** Using `list_panes` to find errors. `list_panes` only searches metadata (names, IDs, current command) — not terminal content.
-
-## Set up a multi-pane workspace
-
-Create a structured development layout with labeled panes.
-
-```json
-{"tool": "create_session", "arguments": {"session_name": "workspace"}}
-```
-
-```json
-{"tool": "split_window", "arguments": {"session_name": "workspace", "direction": "right"}}
-```
-
-```json
-{"tool": "split_window", "arguments": {"session_name": "workspace", "direction": "below"}}
-```
-
-```json
-{"tool": "select_layout", "arguments": {"session_name": "workspace", "layout": "main-vertical"}}
-```
-
-Label each pane for later identification:
-
-```json
-{"tool": "set_pane_title", "arguments": {"pane_id": "%0", "title": "editor"}}
-```
-
-```json
-{"tool": "set_pane_title", "arguments": {"pane_id": "%1", "title": "server"}}
-```
-
-```json
-{"tool": "set_pane_title", "arguments": {"pane_id": "%2", "title": "tests"}}
-```
-
-Then start processes in each:
-
-```json
-{"tool": "send_keys", "arguments": {"keys": "vim .", "pane_id": "%0"}}
-```
-
-```json
-{"tool": "send_keys", "arguments": {"keys": "npm run dev", "pane_id": "%1"}}
-```
-
-## Interrupt a hung command
-
-Recover when a command is stuck or waiting for input.
-
-```json
-{"tool": "send_keys", "arguments": {"keys": "C-c", "pane_id": "%0", "enter": false}}
-```
-
-```json
-{"tool": "wait_for_text", "arguments": {"pattern": "\\$\\s*$", "pane_id": "%0", "regex": true, "timeout": 5}}
-```
-
-**Why `enter: false`:** Ctrl-C is a tmux key name, not text to type. Setting `enter: false` prevents sending an extra Enter keystroke after the interrupt signal.
-
-**If the interrupt fails** (process ignores Ctrl-C), use `kill_pane` to destroy the pane and `split_window` to get a fresh one.
-
-## Clean capture (no prior output)
-
-Get a clean capture without output from previous commands.
-
-```json
-{"tool": "clear_pane", "arguments": {"pane_id": "%0"}}
-```
-
-```json
-{"tool": "send_keys", "arguments": {"keys": "pytest -x", "pane_id": "%0"}}
-```
-
-```json
-{"tool": "wait_for_text", "arguments": {"pattern": "passed|failed|error", "pane_id": "%0", "regex": true, "timeout": 60}}
-```
-
-```json
-{"tool": "capture_pane", "arguments": {"pane_id": "%0"}}
-```
-
-**Why clear first:** Without clearing, `capture_pane` returns the visible viewport which may include output from prior commands. Clearing ensures you only capture output from the command you just ran.
