@@ -54,10 +54,10 @@ Tools without a recognized tier tag are **denied by default**. This prevents acc
 
 Destructive tools include safeguards against self-harm:
 
-- `kill_server` refuses to run if the MCP server is inside the target server
-- `kill_session` refuses to kill the session containing the MCP pane
-- `kill_window` refuses to kill the window containing the MCP pane
-- `kill_pane` refuses to kill the pane running the MCP server
+- {tool}`kill-server` refuses to run if the MCP server is inside the target server
+- {tool}`kill-session` refuses to kill the session containing the MCP pane
+- {tool}`kill-window` refuses to kill the window containing the MCP pane
+- {tool}`kill-pane` refuses to kill the pane running the MCP server
 
 These protections use the `TMUX_PANE` environment variable to detect the caller's own pane.
 
@@ -65,32 +65,32 @@ These protections use the `TMUX_PANE` environment variable to detect the caller'
 
 Each tool carries MCP tool annotations that hint at its behavior:
 
-| Tool | Tier | Label | readOnly | destructive | idempotent |
-|------|------|-------|----------|-------------|------------|
-| `list_sessions` | readonly | {badge}`readonly` | true | false | true |
-| `get_server_info` | readonly | {badge}`readonly` | true | false | true |
-| `list_windows` | readonly | {badge}`readonly` | true | false | true |
-| `list_panes` | readonly | {badge}`readonly` | true | false | true |
-| `capture_pane` | readonly | {badge}`readonly` | true | false | true |
-| `get_pane_info` | readonly | {badge}`readonly` | true | false | true |
-| `search_panes` | readonly | {badge}`readonly` | true | false | true |
-| `wait_for_text` | readonly | {badge}`readonly` | true | false | true |
-| `show_option` | readonly | {badge}`readonly` | true | false | true |
-| `show_environment` | readonly | {badge}`readonly` | true | false | true |
-| `create_session` | mutating | {badge}`mutating` | false | false | false |
-| `create_window` | mutating | {badge}`mutating` | false | false | false |
-| `split_window` | mutating | {badge}`mutating` | false | false | false |
-| `send_keys` | mutating | {badge}`mutating` | false | false | false |
-| `rename_session` | mutating | {badge}`mutating` | false | false | true |
-| `rename_window` | mutating | {badge}`mutating` | false | false | true |
-| `resize_pane` | mutating | {badge}`mutating` | false | false | true |
-| `resize_window` | mutating | {badge}`mutating` | false | false | true |
-| `set_pane_title` | mutating | {badge}`mutating` | false | false | true |
-| `clear_pane` | mutating | {badge}`mutating` | false | false | true |
-| `select_layout` | mutating | {badge}`mutating` | false | false | true |
-| `set_option` | mutating | {badge}`mutating` | false | false | true |
-| `set_environment` | mutating | {badge}`mutating` | false | false | true |
-| `kill_server` | destructive | {badge}`destructive` | false | true | false |
-| `kill_session` | destructive | {badge}`destructive` | false | true | false |
-| `kill_window` | destructive | {badge}`destructive` | false | true | false |
-| `kill_pane` | destructive | {badge}`destructive` | false | true | false |
+| Tool | Tier | readOnly | destructive | idempotent |
+|------|------|----------|-------------|------------|
+| {ref}`list-sessions` | {badge}`readonly` | true | false | true |
+| {ref}`get-server-info` | {badge}`readonly` | true | false | true |
+| {ref}`list-windows` | {badge}`readonly` | true | false | true |
+| {ref}`list-panes` | {badge}`readonly` | true | false | true |
+| {ref}`capture-pane` | {badge}`readonly` | true | false | true |
+| {ref}`get-pane-info` | {badge}`readonly` | true | false | true |
+| {ref}`search-panes` | {badge}`readonly` | true | false | true |
+| {ref}`wait-for-text` | {badge}`readonly` | true | false | true |
+| {ref}`show-option` | {badge}`readonly` | true | false | true |
+| {ref}`show-environment` | {badge}`readonly` | true | false | true |
+| {ref}`create-session` | {badge}`mutating` | false | false | false |
+| {ref}`create-window` | {badge}`mutating` | false | false | false |
+| {ref}`split-window` | {badge}`mutating` | false | false | false |
+| {ref}`send-keys` | {badge}`mutating` | false | false | false |
+| {ref}`rename-session` | {badge}`mutating` | false | false | true |
+| {ref}`rename-window` | {badge}`mutating` | false | false | true |
+| {ref}`resize-pane` | {badge}`mutating` | false | false | true |
+| {ref}`resize-window` | {badge}`mutating` | false | false | true |
+| {ref}`set-pane-title` | {badge}`mutating` | false | false | true |
+| {ref}`clear-pane` | {badge}`mutating` | false | false | true |
+| {ref}`select-layout` | {badge}`mutating` | false | false | true |
+| {ref}`set-option` | {badge}`mutating` | false | false | true |
+| {ref}`set-environment` | {badge}`mutating` | false | false | true |
+| {ref}`kill-server` | {badge}`destructive` | false | true | false |
+| {ref}`kill-session` | {badge}`destructive` | false | true | false |
+| {ref}`kill-window` | {badge}`destructive` | false | true | false |
+| {ref}`kill-pane` | {badge}`destructive` | false | true | false |
