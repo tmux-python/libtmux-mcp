@@ -188,7 +188,7 @@ the target pane.
 
 ### Decide
 
-> Did the interrupt work? Some processes ignore SIGINT. I will wait briefly
+> Did the interrupt work? Some processes ignore {term}`SIGINT`. I will wait briefly
 > for a shell prompt to reappear. Developers use custom prompts, so I cannot
 > just look for `$`.
 
@@ -196,7 +196,7 @@ The agent calls {tool}`wait-for-text` with `pattern: "[$#>%] *$"`,
 `regex: true`, and `timeout: 5`.
 
 > If the wait resolves, the shell is back. If it times out, the process
-> ignored Ctrl-C. I will escalate: try SIGQUIT (`C-\` with `enter: false`),
+> ignored Ctrl-C. I will escalate: try {term}`SIGQUIT` (`C-\` with `enter: false`),
 > then destroy and replace the pane only as a last resort.
 
 ### Act
@@ -214,9 +214,10 @@ submit a partially typed command, or enter a newline into a REPL.
 
 ### The non-obvious part
 
-Recovery is a two-step decision. Try the gentle approach first (Ctrl-C),
-verify it worked with {toolref}`wait-for-text`, escalate only if needed. The
-escalation ladder is: interrupt, verify, escalate signal, destroy. Skipping
+Recovery is a two-step decision. Try {term}`SIGINT` first (Ctrl-C),
+verify it worked with {toolref}`wait-for-text`, escalate to {term}`SIGQUIT`
+only if needed. The escalation ladder is: interrupt, verify, escalate signal,
+destroy. Skipping
 straight to {toolref}`kill-pane` loses the pane's scrollback history and any
 partially written output that might explain *why* it hung.
 
