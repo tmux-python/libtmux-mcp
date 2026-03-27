@@ -2,7 +2,27 @@
 
 # Tools
 
-All tools accept an optional `socket_name` parameter for multi-server support. It defaults to the `LIBTMUX_SOCKET` env var. See {ref}`configuration`.
+All tools accept an optional `socket_name` parameter for multi-server support. It defaults to the {envvar}`LIBTMUX_SOCKET` env var. See {ref}`configuration`.
+
+## Which tool do I want?
+
+**Reading terminal content?**
+- Know which pane? → {tool}`capture-pane`
+- Don't know which pane? → {tool}`search-panes`
+- Need to wait for output? → {tool}`wait-for-text`
+- Only need metadata (PID, path, size)? → {tool}`get-pane-info`
+
+**Running a command?**
+- {tool}`send-keys` — then {tool}`wait-for-text` + {tool}`capture-pane`
+
+**Creating workspace structure?**
+- New session → {tool}`create-session`
+- New window → {tool}`create-window`
+- New pane → {tool}`split-window`
+
+**Changing settings?**
+- tmux options → {tool}`show-option` / {tool}`set-option`
+- Environment vars → {ref}`show-environment` / {ref}`set-environment`
 
 ## Inspect
 
