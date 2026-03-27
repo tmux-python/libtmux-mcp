@@ -30,6 +30,16 @@ Here are a few things to try:
 
 > Search all my panes for the word "error".
 
+## How it works
+
+When you say "run `make test` and show me the output", the agent executes a three-step pattern:
+
+1. {ref}`send-keys` — send the command to a tmux pane
+2. {ref}`wait-for-text` — wait for the shell prompt to return (command finished)
+3. {ref}`capture-pane` — read the terminal output
+
+This **send → wait → capture** sequence is the fundamental workflow. Most agent interactions with tmux follow this pattern or a variation of it.
+
 ## Next steps
 
 - {ref}`concepts` — Understand the tmux hierarchy and how tools target panes
