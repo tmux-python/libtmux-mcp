@@ -95,7 +95,7 @@ html_theme_options: dict[str, str | list[dict[str, str]]] = {
         },
     ],
     "source_repository": f"{about['__repository__']}/",
-    "source_branch": "master",
+    "source_branch": "main",
     "source_directory": "docs/",
     "announcement": "<em>Pre-alpha.</em> APIs may change. <a href='https://github.com/tmux-python/libtmux-mcp/issues'>Feedback welcome</a>.",
 }
@@ -140,7 +140,7 @@ copybutton_line_continuation_character = "\\"
 
 # sphinxext-rediraffe
 rediraffe_redirects = "redirects.txt"
-rediraffe_branch = "master~1"
+rediraffe_branch = "main~1"
 
 # sphinxext.opengraph
 ogp_site_url = about["__url__"]
@@ -259,7 +259,7 @@ def linkcode_resolve(domain: str, info: dict[str, str]) -> None | str:
     fn = relpath(fn, start=pathlib.Path(libtmux_mcp.__file__).parent)
 
     if "dev" in about["__version__"]:
-        return "{}/blob/master/{}/{}/{}{}".format(
+        return "{}/blob/main/{}/{}/{}{}".format(
             about["__repository__"],
             "src",
             about["__package_name__"],
