@@ -21,10 +21,11 @@ Every recipe uses the same structure:
 
 ## Find a running dev server and test against it
 
-**Situation.** A developer manages a CV project with tmuxp. One pane is
-already running `pnpm start` with Vite somewhere in the `react` window.
-They want to run Playwright e2e tests. The agent does not know which pane
-has the server, or what port it chose.
+**Situation.** A developer manages a React project with
+[tmuxp](https://tmuxp.git-pull.com). One pane is already running
+`pnpm start` with Vite somewhere in the `react` window. They want to run
+Playwright e2e tests. The agent does not know which pane has the server,
+or what port it chose.
 
 ### Discover
 
@@ -33,7 +34,7 @@ has the server, or what port it chose.
 > its URL to the terminal minutes ago, so I need to search terminal content.
 
 The agent calls {tool}`search-panes` with `pattern: "Local:"` and
-`session_name: "cv"`. The response comes back with pane `%5` in the `react`
+`session_name: "myapp"`. The response comes back with pane `%5` in the `react`
 window, matched line: `Local: http://localhost:5173/`.
 
 ### Decide
@@ -41,7 +42,7 @@ window, matched line: `Local: http://localhost:5173/`.
 > The server is alive and its URL is known. I do not need to start anything.
 > I just need an idle pane for running tests.
 
-The agent calls {tool}`list-panes` on the `cv` session. Several panes show
+The agent calls {tool}`list-panes` on the `myapp` session. Several panes show
 `pane_current_command: zsh` -- idle shells. It picks `%4` in the same window.
 
 ### Act
@@ -68,7 +69,7 @@ working directory. If the agent had used {toolref}`list-panes` to find a pane
 running `node`, it would know a process exists but not whether it is ready or
 what URL it chose.
 
-**Prompt:** "Run the Playwright tests against my dev server in the cv
+**Prompt:** "Run the Playwright tests against my dev server in the myapp
 session."
 
 ---
