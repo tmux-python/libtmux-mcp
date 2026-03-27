@@ -6,7 +6,7 @@ Things that will bite you if you don't know about them in advance. For symptom-b
 
 ## Metadata vs. content
 
-{ref}`list-panes` and {ref}`list-windows` search **metadata** — names, IDs, current command. They do not search what is displayed in the terminal.
+{tool}`list-panes` and {tool}`list-windows` search **metadata** — names, IDs, current command. They do not search what is displayed in the terminal.
 
 To find text that is visible in terminals, use {tool}`search-panes`. To read what a specific pane shows, use {tool}`capture-pane`.
 

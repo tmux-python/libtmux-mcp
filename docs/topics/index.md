@@ -35,6 +35,12 @@ Symptom-based guide for common issues.
 Things that will bite you if you don't know about them.
 :::
 
+:::{grid-item-card} Agent Prompting
+:link: prompting
+:link-type: doc
+Write effective instructions for AI agents using tmux tools.
+:::
+
 ::::
 
 ```{toctree}
@@ -44,5 +50,6 @@ architecture
 concepts
 safety
 gotchas
+prompting
 troubleshooting
 ```
