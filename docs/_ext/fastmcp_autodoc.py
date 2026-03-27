@@ -421,7 +421,7 @@ def _extract_enum_values(type_str: str) -> list[str]:
     return values
 
 
-class _safety_badge_node(nodes.General, nodes.Inline, nodes.Element):
+class _safety_badge_node(nodes.General, nodes.Inline, nodes.Element):  # type: ignore[misc]
     """Custom node for safety badges with ARIA attributes in HTML output."""
 
 
@@ -868,7 +868,7 @@ def _add_section_badges(
                 title_node += _safety_badge(tier)
 
 
-class _tool_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):
+class _tool_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):  # type: ignore[misc]
     """Placeholder node for ``{tool}`` and ``{toolref}`` roles.
 
     Resolved at ``doctree-resolved`` by ``_resolve_tool_refs``.
