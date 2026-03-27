@@ -234,26 +234,102 @@ img[src*="codecov.io"] {
 }
 
 /* ── MCP Tool safety badges ──────────────────────────────
- * Badges appear inline in both h2/h3 headings and body text.
- * Pin size to body-text scale so they don't inflate in headings.
- * Vertical-align keeps them centered with adjacent text.
+ * Small semantic tags — secondary to the tool name, quietly
+ * color-coded. Target: GitHub-label density, not app-store pills.
  *
- * Links containing badges: underline only the code text, not
- * the gap or badge itself. Achieved by moving text-decoration
- * from the <a> to its <code> child.
+ * Dot icon via ::before circle. No emoji.
+ * Sidebar/TOC compresses badges to colored dots only.
  * ────────────────────────────────────────────────────────── */
+
+/* ── Heading flex alignment ──────────────────────────────
+ * Makes headings containing badges into flex rows so the
+ * badge vertically centers against the heading cap-height
+ * instead of fighting baseline math.
+ * ────────────────────────────────────────────────────────── */
+h2:has(> .sd-badge),
+h3:has(> .sd-badge),
+h4:has(> .sd-badge) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* ── Base badge ─────────────────────────────────────────── */
 .sd-badge {
-  font-size: 0.75rem;
-  vertical-align: middle;
-  user-select: none;        /* Don't include badge text when copying */
-  -webkit-user-select: none; /* Safari */
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 0.67rem;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  padding: 0.16rem 0.38rem;
+  border-radius: 0.22rem;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Matte color palette ────────────────────────────────── */
+.sd-badge.sd-bg-success {
+  background-color: #1f7a3f !important;
+  color: #f3fff7 !important;
+  border: 1px solid #2a8d4d;
 }
 
 .sd-badge.sd-bg-warning {
-  background-color: #e67e22 !important;
-  color: #fff !important;
+  background-color: #b96a1a !important;
+  color: #fff8ef !important;
+  border: 1px solid #cf7a23;
 }
 
+.sd-badge.sd-bg-danger {
+  background-color: #b4232c !important;
+  color: #fff5f5 !important;
+  border: 1px solid #cb3640;
+}
+
+/* ── Monochrome icons via VS15 (text presentation) ──────
+ * \FE0E (VS15) tells the OS to render the text/outline
+ * variant instead of the color bitmap. The glyph inherits
+ * currentColor — no opacity hack, no grayscale filter.
+ *
+ * Picks: geometrically simple glyphs with strong text-style
+ * variants. ⚡ replaces 💥 (too much detail at small sizes).
+ * ────────────────────────────────────────────────────────── */
+.sd-badge::before {
+  font-style: normal;
+  font-weight: normal;
+  font-size: 1em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sd-badge.sd-bg-success::before { content: "🔍"; }   /* readonly    */
+.sd-badge.sd-bg-warning::before { content: "✏️"; }    /* mutating    */
+.sd-badge.sd-bg-danger::before  { content: "💣"; }   /* destructive */
+
+/* ── Context-aware badge sizing ─────────────────────────── */
+h2 .sd-badge,
+h3 .sd-badge {
+  font-size: 0.68rem;
+  padding: 0.17rem 0.4rem;
+}
+
+p .sd-badge,
+li .sd-badge,
+td .sd-badge,
+a .sd-badge {
+  font-size: 0.62rem;
+  padding: 0.12rem 0.32rem;
+}
+
+/* ── Consistent code → badge spacing ────────────────────── */
+code.docutils + .sd-badge,
+.sd-badge + code.docutils {
+  margin-left: 0.4em;
+}
+
+/* ── Link behavior: underline code only, on hover ───────── */
 a.reference .sd-badge {
   text-decoration: none;
 }
@@ -268,4 +344,27 @@ a.reference:has(.sd-badge) code {
 
 a.reference:has(.sd-badge):hover code {
   text-decoration: underline;
+}
+
+/* ── Sidebar TOC: compress badges to colored dots ───────── */
+.toc-tree .sd-badge {
+  color: transparent !important;
+  padding: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  overflow: hidden;
+  font-size: 0;
+  gap: 0;
+  border: none;
+}
+
+.toc-tree .sd-badge::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 1;
+  font-size: 0;
 }
