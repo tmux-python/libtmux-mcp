@@ -19,7 +19,7 @@ Every recipe uses the same structure:
 
 ---
 
-## 1. Find a running dev server and test against it
+## Find a running dev server and test against it
 
 **Situation.** A developer manages a CV project with tmuxp. One pane is
 already running `pnpm start` with Vite somewhere in the `react` window.
@@ -73,7 +73,7 @@ session."
 
 ---
 
-## 2. Start a service and wait for it before running dependent work
+## Start a service and wait for it before running dependent work
 
 **Situation.** The developer is starting fresh in their `backend` session --
 no server running yet. They want to run integration tests, but the test
@@ -126,7 +126,7 @@ integration tests once it's ready."
 
 ---
 
-## 3. Find the failing pane without opening random terminals
+## Find the failing pane without opening random terminals
 
 **Situation.** The developer kicked off multiple jobs across panes in a `ci`
 session -- linting, unit tests, integration tests, type checking. One of
@@ -171,7 +171,7 @@ literal text.
 
 ---
 
-## 4. Interrupt a stuck process and recover the pane
+## Interrupt a stuck process and recover the pane
 
 **Situation.** A long-running build is hanging. The developer wants to
 interrupt it, verify the pane is responsive, and re-run the command.
@@ -223,7 +223,7 @@ partially written output that might explain *why* it hung.
 
 ---
 
-## 5. Re-run a command without mixing old and new output
+## Re-run a command without mixing old and new output
 
 **Situation.** The developer wants `pytest` re-run in tmux, but the
 candidate pane already has old test output in scrollback. They want only
@@ -262,7 +262,7 @@ output."
 
 ---
 
-## 6. Build a workspace the agent can revisit later
+## Build a workspace the agent can revisit later
 
 **Situation.** The developer wants a durable project workspace -- not just a
 quick split, but a layout that later prompts can refer to by role ("the
