@@ -869,7 +869,11 @@ def _add_section_badges(
 
 
 class _tool_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):
-    """Placeholder node for ``{tool}`` role, resolved at doctree-resolved."""
+    """Placeholder node for ``{tool}`` and ``{toolref}`` roles.
+
+    Resolved at ``doctree-resolved`` by ``_resolve_tool_refs``.
+    The ``show_badge`` attribute controls whether the safety badge is appended.
+    """
 
 
 def _resolve_tool_refs(
@@ -877,7 +881,10 @@ def _resolve_tool_refs(
     doctree: nodes.document,
     fromdocname: str,
 ) -> None:
-    """Resolve ``{tool}`` placeholders into links with safety badges.
+    """Resolve ``{tool}`` and ``{toolref}`` placeholders into links.
+
+    ``{tool}`` renders as ``code`` + safety badge.
+    ``{toolref}`` renders as ``code`` only (no badge).
 
     Runs at ``doctree-resolved`` — after all labels are registered and
     standard ``{ref}`` resolution is done.
@@ -888,6 +895,7 @@ def _resolve_tool_refs(
 
     for node in list(doctree.findall(_tool_ref_placeholder)):
         target = node.get("reftarget", "")
+        show_badge = node.get("show_badge", True)
         label_info = domain.labels.get(target)
         if label_info is None:
             node.replace_self(nodes.literal("", target.replace("-", "_")))
@@ -908,10 +916,11 @@ def _resolve_tool_refs(
 
         newnode += nodes.literal("", tool_name)
 
-        tool_info = tool_data.get(tool_name)
-        if tool_info:
-            newnode += nodes.Text(" ")
-            newnode += _safety_badge(tool_info.safety)
+        if show_badge:
+            tool_info = tool_data.get(tool_name)
+            if tool_info:
+                newnode += nodes.Text(" ")
+                newnode += _safety_badge(tool_info.safety)
 
         node.replace_self(newnode)
 
@@ -930,7 +939,26 @@ def _tool_role(
     Creates a placeholder node resolved later by ``_resolve_tool_refs``.
     """
     target = text.strip().replace("_", "-")
-    node = _tool_ref_placeholder(rawtext, reftarget=target)
+    node = _tool_ref_placeholder(rawtext, reftarget=target, show_badge=True)
+    return [node], []
+
+
+def _toolref_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:toolref:`capture-pane``` → code-linked tool name, no badge.
+
+    Like ``{tool}`` but without the safety badge. Use in dense contexts
+    (tables, inline prose) where badges would be too heavy.
+    """
+    target = text.strip().replace("_", "-")
+    node = _tool_ref_placeholder(rawtext, reftarget=target, show_badge=False)
     return [node], []
 
 
@@ -958,6 +986,7 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     app.connect("doctree-resolved", _add_section_badges)
     app.connect("doctree-resolved", _resolve_tool_refs)
     app.add_role("tool", _tool_role)
+    app.add_role("toolref", _toolref_role)
     app.add_role("badge", _badge_role)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)

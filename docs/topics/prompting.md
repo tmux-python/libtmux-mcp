@@ -34,12 +34,12 @@ These natural-language prompts reliably trigger the right tool sequences:
 
 | Prompt | Agent interprets as |
 |--------|-------------------|
-| "Run `pytest` in my build pane and show results" | {tool}`send-keys` → {tool}`wait-for-text` → {tool}`capture-pane` |
-| "Start the dev server and wait until it's ready" | {tool}`send-keys` → {tool}`wait-for-text` (for "listening on") |
-| "Check if any pane has errors" | {tool}`search-panes` with pattern "error" |
-| "Set up a workspace with editor, server, and tests" | {tool}`create-session` → {tool}`split-window` (x2) → {tool}`set-pane-title` (x3) |
-| "What's running in my tmux sessions?" | {tool}`list-sessions` → {tool}`list-panes` → {tool}`capture-pane` |
-| "Kill the old workspace session" | {tool}`kill-session` (after confirming target) |
+| "Run `pytest` in my build pane and show results" | {toolref}`send-keys` → {toolref}`wait-for-text` → {toolref}`capture-pane` |
+| "Start the dev server and wait until it's ready" | {toolref}`send-keys` → {toolref}`wait-for-text` (for "listening on") |
+| "Check if any pane has errors" | {toolref}`search-panes` with pattern "error" |
+| "Set up a workspace with editor, server, and tests" | {toolref}`create-session` → {toolref}`split-window` (x2) → {toolref}`set-pane-title` (x3) |
+| "What's running in my tmux sessions?" | {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`capture-pane` |
+| "Kill the old workspace session" | {toolref}`kill-session` (after confirming target) |
 
 ## Anti-patterns to avoid
 
@@ -85,8 +85,8 @@ that depend on it.
 
 When an agent is unsure which tool to use, these rules help:
 
-1. **Discovery first**: Call {tool}`list-sessions` or {tool}`list-panes` before acting on specific targets
+1. **Discovery first**: Call {toolref}`list-sessions` or {toolref}`list-panes` before acting on specific targets
 2. **Prefer IDs**: Once you have a `pane_id`, use it for all subsequent calls — it never changes during the pane's lifetime
-3. **Wait, don't poll**: Use {tool}`wait-for-text` instead of repeatedly calling {tool}`capture-pane` in a loop
-4. **Content vs. metadata**: If looking for text *in* a terminal, use {tool}`search-panes`. If looking for pane *properties* (name, PID, path), use {tool}`list-panes` or {tool}`get-pane-info`
+3. **Wait, don't poll**: Use {toolref}`wait-for-text` instead of repeatedly calling {toolref}`capture-pane` in a loop
+4. **Content vs. metadata**: If looking for text *in* a terminal, use {toolref}`search-panes`. If looking for pane *properties* (name, PID, path), use {toolref}`list-panes` or {toolref}`get-pane-info`
 5. **Destructive tools are opt-in**: Never kill sessions, windows, or panes unless the user explicitly asks
