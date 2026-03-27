@@ -73,6 +73,9 @@ def show_option(
 ) -> OptionResult:
     """Show a tmux option value.
 
+    Use to check tmux configuration values such as history-limit,
+    mouse support, or status bar settings.
+
     Parameters
     ----------
     option : str
@@ -108,6 +111,9 @@ def set_option(
     socket_name: str | None = None,
 ) -> OptionSetResult:
     """Set a tmux option value.
+
+    Use to change tmux behavior at runtime. Common uses: adjusting
+    history-limit, enabling mouse support, changing status bar format.
 
     Parameters
     ----------

@@ -40,6 +40,10 @@ def send_keys(
 ) -> str:
     """Send keys (commands or text) to a tmux pane.
 
+    After sending, use wait_for_text to block until the command completes,
+    or capture_pane to read the result. Do not capture_pane immediately —
+    there is a race condition.
+
     Parameters
     ----------
     keys : str
@@ -147,6 +151,8 @@ def resize_pane(
 ) -> PaneInfo:
     """Resize a tmux pane.
 
+    Use when adjusting layout for better readability or to fit content.
+
     Parameters
     ----------
     pane_id : str, optional
@@ -205,6 +211,9 @@ def kill_pane(
 ) -> str:
     """Kill (close) a tmux pane. Requires exact pane_id (e.g. '%5').
 
+    Use to clean up panes no longer needed. To remove an entire window
+    and all its panes, use kill_window instead.
+
     Parameters
     ----------
     pane_id : str
@@ -244,6 +253,8 @@ def set_pane_title(
     socket_name: str | None = None,
 ) -> PaneInfo:
     """Set the title of a tmux pane.
+
+    Use titles to label panes for later identification via list_panes or get_pane_info.
 
     Parameters
     ----------
@@ -287,6 +298,9 @@ def get_pane_info(
 ) -> PaneInfo:
     """Get detailed information about a tmux pane.
 
+    Use this for metadata (PID, path, dimensions) without reading terminal content.
+    To read what is displayed in the pane, use capture_pane instead.
+
     Parameters
     ----------
     pane_id : str, optional
@@ -325,6 +339,9 @@ def clear_pane(
     socket_name: str | None = None,
 ) -> str:
     """Clear the contents of a tmux pane.
+
+    Use before send_keys + capture_pane to get a clean capture without prior output.
+    Note: this is two tmux commands with a brief gap — not fully atomic.
 
     Parameters
     ----------
