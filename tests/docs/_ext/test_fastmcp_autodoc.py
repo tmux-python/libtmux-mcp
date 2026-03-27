@@ -573,6 +573,35 @@ def test_add_section_badges_ignores_non_matching() -> None:
     assert title.astext() == "Overview"
 
 
+def test_add_section_badges_parenthesized_on_index() -> None:
+    """_add_section_badges replaces 'Inspect (readonly)' with badge on index."""
+    doc, _section, title = _make_doc_with_section(
+        "inspect-readonly", "Inspect (readonly)"
+    )
+
+    fastmcp_autodoc._add_section_badges(None, doc, "index")
+
+    # Title should be: Text("Inspect "), inline(badge)
+    assert len(title.children) == 2
+    assert title.children[0].astext() == "Inspect "
+    badge = title.children[1]
+    assert isinstance(badge, nodes.inline)
+    assert "sd-bg-success" in badge["classes"]
+    assert badge.astext() == "readonly"
+
+
+def test_add_section_badges_works_on_homepage() -> None:
+    """_add_section_badges runs on the homepage (fromdocname='index')."""
+    doc, _section, title = _make_doc_with_section("act", "Act")
+
+    fastmcp_autodoc._add_section_badges(None, doc, "index")
+
+    assert len(title.children) == 3
+    badge = title.children[2]
+    assert isinstance(badge, nodes.inline)
+    assert "sd-bg-warning" in badge["classes"]
+
+
 # ---------------------------------------------------------------------------
 # Integration: collect real tools
 # ---------------------------------------------------------------------------

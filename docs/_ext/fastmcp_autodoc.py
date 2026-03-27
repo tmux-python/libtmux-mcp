@@ -798,29 +798,51 @@ def _register_tool_labels(app: Sphinx, doctree: nodes.document) -> None:
             domain.labels[section_id] = (docname, section_id, tool_name)
 
 
+_SECTION_BADGE_PAGES: set[str] = {"tools/index", "index"}
+
+
 def _add_section_badges(
     app: Sphinx,
     doctree: nodes.document,
     fromdocname: str,
 ) -> None:
-    """Append safety badges to Inspect/Act/Destroy section headings.
+    """Replace parenthesized tier names with colored badges in headings.
 
-    Only applied to the tools index page — individual tool pages already
-    have per-tool badges, making section-level badges redundant.
+    Matches both bare headings (``Inspect``) and parenthesized variants
+    (``Inspect (readonly)``).  The parenthesized text is stripped and
+    replaced with a badge node.
+
+    Only applied to pages in ``_SECTION_BADGE_PAGES`` — individual tool
+    pages already have per-tool badges, making section-level badges
+    redundant.
 
     Runs at ``doctree-resolved`` — section IDs are already frozen, so
-    appending nodes to the title doesn't affect anchors or cross-refs.
+    modifying the title doesn't affect anchors or cross-refs.
     """
-    if fromdocname != "tools/index":
+    if fromdocname not in _SECTION_BADGE_PAGES:
         return
     for section in doctree.findall(nodes.section):
         if not section.children or not isinstance(section[0], nodes.title):
             continue
         title_text = section[0].astext().strip()
+
+        # Try exact match first ("Inspect")
         safety = SECTION_BADGE_MAP.get(title_text)
         if safety is not None:
             section[0] += nodes.Text(" ")
             section[0] += _safety_badge(safety)
+            continue
+
+        # Try parenthesized match ("Inspect (readonly)")
+        m = re.match(r"^(\w+)\s*\((\w+)\)$", title_text)
+        if m:
+            heading, tier = m.group(1), m.group(2)
+            if heading in SECTION_BADGE_MAP and tier == SECTION_BADGE_MAP[heading]:
+                # Replace title children: strip parenthesized text, add badge
+                title_node = section[0]
+                title_node.clear()
+                title_node += nodes.Text(heading + " ")
+                title_node += _safety_badge(tier)
 
 
 class _tool_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):
