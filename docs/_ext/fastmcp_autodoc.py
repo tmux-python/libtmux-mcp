@@ -922,6 +922,11 @@ def _resolve_tool_refs(
             if labelid:
                 newnode["refuri"] += "#" + labelid
         except Exception:
+            logger.warning(
+                "fastmcp_autodoc: failed to resolve URI for %s -> %s",
+                fromdocname,
+                todocname,
+            )
             newnode["refuri"] = "#" + labelid
         newnode["classes"].append("reference")
         newnode["classes"].append("internal")
