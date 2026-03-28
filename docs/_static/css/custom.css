@@ -258,6 +258,7 @@ h4:has(> .sd-badge) {
 .sd-badge {
   display: inline-flex !important;
   align-items: center;
+  vertical-align: middle;
   gap: 0.28rem;
   font-size: 0.67rem;
   font-weight: 650;
