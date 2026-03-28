@@ -53,19 +53,19 @@ Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 
 Read tmux state without changing anything.
 
-[`list_sessions`](#list-sessions) · [`capture_pane`](#capture-pane) · [`get_pane_info`](#get-pane-info) · [`search_panes`](#search-panes) · [`wait_for_text`](#wait-for-text)
+{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`get-pane-info` · {toolref}`search-panes` · {toolref}`wait-for-text`
 
 ### Act (mutating)
 
 Create or modify tmux objects.
 
-[`create_session`](#create-session) · [`send_keys`](#send-keys) · [`create_window`](#create-window) · [`split_window`](#split-window) · [`resize_pane`](#resize-pane) · [`set_option`](#set-option)
+{toolref}`create-session` · {toolref}`send-keys` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`resize-pane` · {toolref}`set-option`
 
 ### Destroy (destructive)
 
 Tear down tmux objects. Not reversible.
 
-[`kill_session`](#kill-session) · [`kill_window`](#kill-window) · [`kill_pane`](#kill-pane) · [`kill_server`](#kill-server)
+{toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server`
 
 [Browse all tools →](tools/index)
 
