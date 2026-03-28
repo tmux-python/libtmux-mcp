@@ -228,6 +228,23 @@ div.admonition.prompt > p {
   color: var(--color-foreground-primary);
 }
 
+div.admonition.prompt > p:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Copy button — inserted afterend of p:last-child, so it
+ * lands inside the prompt div. position:relative on the
+ * prompt div provides the positioning context. */
+div.admonition.prompt > button.copybtn {
+  background: transparent !important;
+  border: none !important;
+}
+
+div.admonition.prompt:hover > button.copybtn,
+div.admonition.prompt > button.copybtn.success {
+  opacity: 1;
+}
+
 div.admonition.prompt > p:last-child {
   margin-bottom: 0;
 }

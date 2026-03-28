@@ -138,6 +138,8 @@ copybutton_prompt_text = (
 copybutton_prompt_is_regexp = True
 copybutton_remove_prompts = True
 copybutton_line_continuation_character = "\\"
+copybutton_selector = "div.highlight pre, div.admonition.prompt > p:last-child"
+copybutton_exclude = ".linenos, .admonition-title"
 
 # sphinxext-rediraffe
 rediraffe_redirects = "redirects.txt"
