@@ -8,7 +8,9 @@ How to write effective instructions for AI agents using libtmux-mcp.
 
 Every MCP client receives these instructions when connecting to the libtmux-mcp server. You do not need to repeat this information — the agent already knows it.
 
-```text
+```{code-block} text
+:class: server-prompt
+
 libtmux MCP server for programmatic tmux control. tmux hierarchy:
 Server > Session > Window > Pane. Use pane_id (e.g. '%1') as the
 preferred targeting method - it is globally unique within a tmux server.

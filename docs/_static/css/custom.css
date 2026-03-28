@@ -246,17 +246,20 @@ div.admonition.agent-thought > p:last-child {
   margin-bottom: 0;
 }
 
-/* ── System prompt fragments ─────────────────────────────
- * Copyable instruction prose for AGENTS.md / CLAUDE.md.
- * Internal label row, softer dark panel, prose wrapping.
+/* ── Labeled code panels ─────────────────────────────────
+ * Copyable prose in labeled dark panels. Two variants:
+ * .system-prompt — user-authored fragments for AGENTS.md
+ * .server-prompt — libtmux-mcp's built-in instructions
  * Keeps sphinx-copybutton via .highlight > pre selector.
  * ────────────────────────────────────────────────────────── */
-div.system-prompt {
+div.system-prompt,
+div.server-prompt {
   margin: 1.25rem 0;
   position: relative;
 }
 
-div.system-prompt > div.highlight {
+div.system-prompt > div.highlight,
+div.server-prompt > div.highlight {
   background: #1f2329 !important;
   border: 1px solid color-mix(in srgb, var(--color-link) 20%, transparent);
   border-left: 3px solid var(--color-link);
@@ -265,7 +268,8 @@ div.system-prompt > div.highlight {
   padding-top: 1.3rem;
 }
 
-div.system-prompt > div.highlight > pre {
+div.system-prompt > div.highlight > pre,
+div.server-prompt > div.highlight > pre {
   background: transparent;
   font-size: 13px;
   line-height: 1.6;
@@ -273,9 +277,9 @@ div.system-prompt > div.highlight > pre {
   word-break: break-word;
 }
 
-/* Internal label — sits inside the block, not floating above */
-div.system-prompt > div.highlight::before {
-  content: "System prompt";
+/* Internal label — quiet uppercase whisper */
+div.system-prompt > div.highlight::before,
+div.server-prompt > div.highlight::before {
   position: absolute;
   top: 0.45rem;
   left: 0.85rem;
@@ -291,8 +295,17 @@ div.system-prompt > div.highlight::before {
   opacity: 0.8;
 }
 
+div.system-prompt > div.highlight::before {
+  content: "System prompt";
+}
+
+div.server-prompt > div.highlight::before {
+  content: "Built-in server prompt";
+}
+
 /* Fix copy button background to match panel */
-div.system-prompt .copybtn {
+div.system-prompt .copybtn,
+div.server-prompt .copybtn {
   background: #1f2329 !important;
 }
 
