@@ -237,6 +237,7 @@ div.admonition.prompt > p:last-of-type {
  * prompt div provides the positioning context. */
 div.admonition.prompt > button.copybtn {
   background: transparent !important;
+  cursor: pointer;
   border: none !important;
 }
 
