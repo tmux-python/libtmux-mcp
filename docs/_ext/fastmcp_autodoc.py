@@ -881,11 +881,14 @@ def _resolve_tool_refs(
     doctree: nodes.document,
     fromdocname: str,
 ) -> None:
-    """Resolve ``{tool}``, ``{toolref}``, and ``{toolicon}`` placeholders.
+    """Resolve ``{tool}``, ``{toolref}``, and ``{toolicon*}`` placeholders.
 
     ``{tool}`` renders as ``code`` + safety badge (text + icon).
     ``{toolref}`` renders as ``code`` only (no badge).
-    ``{toolicon}`` renders as ``code`` + icon-only badge (square, no text).
+    ``{toolicon}``/``{tooliconl}`` — icon-only badge left of code.
+    ``{tooliconr}`` — icon-only badge right of code.
+    ``{tooliconil}`` — icon-only badge inside code, left of text.
+    ``{tooliconir}`` — icon-only badge inside code, right of text.
 
     Runs at ``doctree-resolved`` — after all labels are registered and
     standard ``{ref}`` resolution is done.
@@ -897,7 +900,7 @@ def _resolve_tool_refs(
     for node in list(doctree.findall(_tool_ref_placeholder)):
         target = node.get("reftarget", "")
         show_badge = node.get("show_badge", True)
-        icon_only = node.get("icon_only", False)
+        icon_pos = node.get("icon_pos", "")
         label_info = domain.labels.get(target)
         if label_info is None:
             node.replace_self(nodes.literal("", target.replace("-", "_")))
@@ -916,24 +919,44 @@ def _resolve_tool_refs(
         newnode["classes"].append("reference")
         newnode["classes"].append("internal")
 
-        if icon_only:
-            # Icon badge goes BEFORE the <code> element, outside it
+        if icon_pos:
             tool_info = tool_data.get(tool_name)
+            badge = None
             if tool_info:
                 badge = _safety_badge(tool_info.safety)
                 badge["classes"].append("icon-only")
+                if icon_pos.startswith("inline"):
+                    badge["classes"].append("icon-only-inline")
                 badge.children.clear()
                 badge += nodes.Text("")
-                newnode += badge
-            newnode += nodes.literal("", tool_name)
+
+            if icon_pos == "left":
+                if badge:
+                    newnode += badge
+                newnode += nodes.literal("", tool_name)
+            elif icon_pos == "right":
+                newnode += nodes.literal("", tool_name)
+                if badge:
+                    newnode += badge
+            elif icon_pos == "inline-left":
+                code_node = nodes.literal("", "")
+                if badge:
+                    code_node += badge
+                code_node += nodes.Text(tool_name)
+                newnode += code_node
+            elif icon_pos == "inline-right":
+                code_node = nodes.literal("", "")
+                code_node += nodes.Text(tool_name)
+                if badge:
+                    code_node += badge
+                newnode += code_node
         else:
             newnode += nodes.literal("", tool_name)
-
-        if not icon_only and show_badge:
-            tool_info = tool_data.get(tool_name)
-            if tool_info:
-                newnode += nodes.Text(" ")
-                newnode += _safety_badge(tool_info.safety)
+            if show_badge:
+                tool_info = tool_data.get(tool_name)
+                if tool_info:
+                    newnode += nodes.Text(" ")
+                    newnode += _safety_badge(tool_info.safety)
 
         node.replace_self(newnode)
 
@@ -975,25 +998,34 @@ def _toolref_role(
     return [node], []
 
 
-def _toolicon_role(
-    name: str,
-    rawtext: str,
-    text: str,
-    lineno: int,
-    inliner: object,
-    options: dict[str, object] | None = None,
-    content: list[str] | None = None,
-) -> tuple[list[nodes.Node], list[nodes.system_message]]:
-    """Inline role ``:toolicon:`capture-pane``` → code + square icon badge.
+def _make_toolicon_role(
+    icon_pos: str,
+) -> t.Callable[..., tuple[list[nodes.Node], list[nodes.system_message]]]:
+    """Create an icon-only tool reference role for a given position."""
 
-    Like ``{tool}`` but the badge is icon-only (no text label), square,
-    and compact — designed for inline prose where the full badge is too wide.
-    """
-    target = text.strip().replace("_", "-")
-    node = _tool_ref_placeholder(
-        rawtext, reftarget=target, show_badge=False, icon_only=True,
-    )
-    return [node], []
+    def role_fn(
+        name: str,
+        rawtext: str,
+        text: str,
+        lineno: int,
+        inliner: object,
+        options: dict[str, object] | None = None,
+        content: list[str] | None = None,
+    ) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+        target = text.strip().replace("_", "-")
+        node = _tool_ref_placeholder(
+            rawtext, reftarget=target, show_badge=False, icon_pos=icon_pos,
+        )
+        return [node], []
+
+    return role_fn
+
+
+_toolicon_role = _make_toolicon_role("left")
+_tooliconl_role = _make_toolicon_role("left")
+_tooliconr_role = _make_toolicon_role("right")
+_tooliconil_role = _make_toolicon_role("inline-left")
+_tooliconir_role = _make_toolicon_role("inline-right")
 
 
 def _badge_role(
@@ -1022,6 +1054,10 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     app.add_role("tool", _tool_role)
     app.add_role("toolref", _toolref_role)
     app.add_role("toolicon", _toolicon_role)
+    app.add_role("tooliconl", _tooliconl_role)
+    app.add_role("tooliconr", _tooliconr_role)
+    app.add_role("tooliconil", _tooliconil_role)
+    app.add_role("tooliconir", _tooliconir_role)
     app.add_role("badge", _badge_role)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)

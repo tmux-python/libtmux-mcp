@@ -331,10 +331,29 @@ h4:has(> .sd-badge) {
   margin-left: 0;
 }
 
+/* Right-of-code variant: flip margins */
+code.docutils + .sd-badge.icon-only {
+  margin-left: 0.3em;
+  margin-right: 0;
+}
+
 .sd-badge.icon-only::before {
   font-size: 10px;
   line-height: 1;
   margin: 0;
+}
+
+/* Inline variants (inside <code>): tighter, inherit vertical alignment */
+.sd-badge.icon-only-inline {
+  vertical-align: baseline;
+  margin-right: 0.2em;
+  margin-left: 0;
+}
+
+/* Inline-right: flip margins */
+code.docutils .sd-badge.icon-only-inline:last-child {
+  margin-left: 0.2em;
+  margin-right: 0;
 }
 
 /* ── Context-aware badge sizing ─────────────────────────── */
