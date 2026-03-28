@@ -16,7 +16,11 @@ Using a different client? See {ref}`installation` and {ref}`clients`.
 
 Ask your LLM:
 
-> List all my tmux sessions and show me what's running in each pane.
+```{admonition} Prompt
+:class: prompt
+
+List all my tmux sessions and show me what's running in each pane.
+```
 
 The agent will call `list_sessions`, then `list_panes` and `capture_pane` to inspect your workspace. You should see your tmux sessions, windows, and pane contents in the response.
 
@@ -24,11 +28,23 @@ The agent will call `list_sessions`, then `list_panes` and `capture_pane` to ins
 
 Here are a few things to try:
 
-> Create a new tmux session called "workspace" with a window named "build".
+```{admonition} Prompt
+:class: prompt
 
-> Send `make test` to the pane in my build window, then wait for it to finish and capture the output.
+Create a new tmux session called "workspace" with a window named "build".
+```
 
-> Search all my panes for the word "error".
+```{admonition} Prompt
+:class: prompt
+
+Send `make test` to the pane in my build window, then wait for it to finish and capture the output.
+```
+
+```{admonition} Prompt
+:class: prompt
+
+Search all my panes for the word "error".
+```
 
 ## How it works
 

@@ -29,9 +29,13 @@ or what port it chose.
 
 ### Discover
 
-> {toolref}`list-panes` will not help here -- it shows metadata like current
-> command and working directory, not terminal content. The dev server printed
-> its URL to the terminal minutes ago, so I need to search terminal content.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+{toolref}`list-panes` will not help here -- it shows metadata like current
+command and working directory, not terminal content. The dev server printed
+its URL to the terminal minutes ago, so I need to search terminal content.
+```
 
 The agent calls {tooliconl}`search-panes` with `pattern: "Local:"` and
 `session_name: "myapp"`. The response comes back with pane `%5` in the `react`
@@ -39,8 +43,12 @@ window, matched line: `Local: http://localhost:5173/`.
 
 ### Decide
 
-> The server is alive and its URL is known. I do not need to start anything.
-> I just need an idle pane for running tests.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+The server is alive and its URL is known. I do not need to start anything.
+I just need an idle pane for running tests.
+```
 
 The agent calls {tooliconl}`list-panes` on the `myapp` session. Several panes show
 `pane_current_command: zsh` -- idle shells. It picks `%4` in the same window.
@@ -82,8 +90,12 @@ suite needs a live API server.
 
 ### Discover
 
-> First I need to know what exists in the `backend` session. If a server is
-> already running, I should reuse it instead of starting a duplicate.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+First I need to know what exists in the `backend` session. If a server is
+already running, I should reuse it instead of starting a duplicate.
+```
 
 The agent calls {tooliconl}`list-panes` for the `backend` session. No pane is
 running a server process. A {tooliconl}`search-panes` call for `"listening"`
@@ -91,8 +103,12 @@ returns no matches.
 
 ### Decide
 
-> Nothing to reuse. I need a dedicated pane for the server so its output
-> stays separate from the test output.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+Nothing to reuse. I need a dedicated pane for the server so its output
+stays separate from the test output.
+```
 
 ### Act
 
@@ -135,9 +151,13 @@ them failed, but they stepped away and do not remember which pane.
 
 ### Discover
 
-> I should not capture every pane and read them all -- that is expensive and
-> slow. Instead I will search for common failure indicators across all panes
-> at once.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+I should not capture every pane and read them all -- that is expensive and
+slow. Instead I will search for common failure indicators across all panes
+at once.
+```
 
 The agent calls {tooliconl}`search-panes` with
 `pattern: "FAIL|ERROR|error:|Traceback"`, `regex: true`, scoped to
@@ -145,8 +165,12 @@ The agent calls {tooliconl}`search-panes` with
 
 ### Decide
 
-> Two panes matched: `%3` has `FAIL: test_upload` and `%6` has
-> `error: Type 'string' is not assignable`. I will capture context from each.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+Two panes matched: `%3` has `FAIL: test_upload` and `%6` has
+`error: Type 'string' is not assignable`. I will capture context from each.
+```
 
 ### Act
 
@@ -179,25 +203,37 @@ interrupt it, verify the pane is responsive, and re-run the command.
 
 ### Discover
 
-> I need to send Ctrl-C. This is a tmux key name, not text -- so I must use
-> `enter: false` or tmux will send Ctrl-C followed by Enter, which could
-> confirm a prompt I did not intend to answer.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+I need to send Ctrl-C. This is a tmux key name, not text -- so I must use
+`enter: false` or tmux will send Ctrl-C followed by Enter, which could
+confirm a prompt I did not intend to answer.
+```
 
 The agent calls {tooliconl}`send-keys` with `keys: "C-c"` and `enter: false` on
 the target pane.
 
 ### Decide
 
-> Did the interrupt work? Some processes ignore {term}`SIGINT`. I will wait briefly
-> for a shell prompt to reappear. Developers use custom prompts, so I cannot
-> just look for `$`.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+Did the interrupt work? Some processes ignore {term}`SIGINT`. I will wait briefly
+for a shell prompt to reappear. Developers use custom prompts, so I cannot
+just look for `$`.
+```
 
 The agent calls {tooliconl}`wait-for-text` with `pattern: "[$#>%] *$"`,
 `regex: true`, and `timeout: 5`.
 
-> If the wait resolves, the shell is back. If it times out, the process
-> ignored Ctrl-C. I will escalate: try {term}`SIGQUIT` (`C-\` with `enter: false`),
-> then destroy and replace the pane only as a last resort.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+If the wait resolves, the shell is back. If it times out, the process
+ignored Ctrl-C. I will escalate: try {term}`SIGQUIT` (`C-\` with `enter: false`),
+then destroy and replace the pane only as a last resort.
+```
 
 ### Act
 
@@ -239,9 +275,13 @@ current command. If more than one pane is plausible, it uses
 
 ### Decide
 
-> The pane is a shell. I should clear it before running so the capture
-> afterwards contains only fresh output. If it were running a watcher or
-> long-lived process, I would not hijack it -- I would use a different pane.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+The pane is a shell. I should clear it before running so the capture
+afterwards contains only fresh output. If it were running a watcher or
+long-lived process, I would not hijack it -- I would use a different pane.
+```
 
 ### Act
 
@@ -272,16 +312,24 @@ server pane", "the test pane").
 
 ### Discover
 
-> Before creating anything, I need to check whether a session with this name
-> already exists. Creating a duplicate will fail.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+Before creating anything, I need to check whether a session with this name
+already exists. Creating a duplicate will fail.
+```
 
 The agent calls {tooliconl}`list-sessions`. No session named `myproject` exists.
 
 ### Decide
 
-> Safe to create. I need three panes: editor, server, tests. I will create
-> the session, split twice, then apply a layout so tmux handles the geometry
-> instead of me calculating sizes.
+```{admonition} Agent reasoning
+:class: agent-thought
+
+Safe to create. I need three panes: editor, server, tests. I will create
+the session, split twice, then apply a layout so tmux handles the geometry
+instead of me calculating sizes.
+```
 
 ### Act
 

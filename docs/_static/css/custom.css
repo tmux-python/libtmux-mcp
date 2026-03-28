@@ -192,6 +192,60 @@ article {
   line-height: 1.6;
 }
 
+/* ── Prompt blocks (user → LLM) ───────────────────────────
+ * Styled admonition for copy-paste prompts. Purple-tinted
+ * left bar ties to the interactive/link color. Visually says
+ * "type this into your LLM client."
+ * ────────────────────────────────────────────────────────── */
+div.admonition.prompt {
+  border: none;
+  border-left: 3px solid var(--color-link);
+  background: color-mix(in srgb, var(--color-link) 6%, var(--color-background-primary));
+  padding: 0.6rem 1rem;
+  margin: 1rem 0;
+  box-shadow: none;
+}
+
+div.admonition.prompt > .admonition-title {
+  display: none;
+}
+
+div.admonition.prompt > p {
+  font-size: 0.95rem;
+}
+
+div.admonition.prompt > p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Agent reasoning blocks ──────────────────────────────
+ * Styled admonition for agent chain-of-thought. Neutral
+ * gray bar + italic + muted opacity = "internal narration,
+ * not something you do."
+ * ────────────────────────────────────────────────────────── */
+div.admonition.agent-thought {
+  border: none;
+  border-left: 3px solid var(--color-foreground-border);
+  background: transparent;
+  padding: 0.6rem 1rem;
+  margin: 1rem 0;
+  box-shadow: none;
+}
+
+div.admonition.agent-thought > .admonition-title {
+  display: none;
+}
+
+div.admonition.agent-thought > p {
+  font-style: italic;
+  color: var(--color-foreground-secondary);
+  font-size: 0.9rem;
+}
+
+div.admonition.agent-thought > p:last-child {
+  margin-bottom: 0;
+}
+
 /* ── Image layout shift prevention ────────────────────────
  * Reserve space for images before they load. Furo already
  * sets max-width: 100%; height: auto on img. We add
