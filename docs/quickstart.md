@@ -61,4 +61,4 @@ This **send → wait → capture** sequence is the fundamental workflow. Most ag
 - {ref}`concepts` — Understand the tmux hierarchy and how tools target panes
 - {ref}`configuration` — Environment variables and socket isolation
 - {ref}`safety` — Control which tools are available
-- {ref}`tools <tools-overview>` — Browse all available tools
+- {ref}`Tools <tools-overview>` — Browse all available tools
