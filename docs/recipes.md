@@ -10,12 +10,12 @@ existing tmux state so you can write better prompts and system instructions.
 Every recipe uses the same structure:
 
 - **Situation** -- the developer's world before the agent acts
+- **Prompt** -- the natural-language sentence that triggers the recipe
 - **Discover** -- what the agent inspects and why
 - **Decide** -- the judgment call that changes the plan
 - **Act** -- the minimum safe action sequence
 - **The non-obvious part** -- the lesson you would miss from reading tool docs
   alone
-- **Prompt** -- a natural-language sentence that triggers this recipe
 
 ---
 
@@ -26,6 +26,12 @@ Every recipe uses the same structure:
 `pnpm start` with Vite somewhere in the `react` window. They want to run
 Playwright e2e tests. The agent does not know which pane has the server,
 or what port it chose.
+
+```{admonition} Prompt
+:class: prompt
+
+Run the Playwright tests against my dev server in the myapp session.
+```
 
 ### Discover
 
@@ -77,9 +83,6 @@ working directory. If the agent had used {toolref}`list-panes` to find a pane
 running `node`, it would know a process exists but not whether it is ready or
 what URL it chose.
 
-**Prompt:** "Run the Playwright tests against my dev server in the myapp
-session."
-
 ---
 
 ## Start a service and wait for it before running dependent work
@@ -87,6 +90,12 @@ session."
 **Situation.** The developer is starting fresh in their `backend` session --
 no server running yet. They want to run integration tests, but the test
 suite needs a live API server.
+
+```{admonition} Prompt
+:class: prompt
+
+Start the API server in my backend session and run the integration tests once it's ready.
+```
 
 ### Discover
 
@@ -138,9 +147,6 @@ seconds or 20 -- the agent adapts. The anti-pattern is polling with repeated
 handles the polling internally with configurable `timeout` (default 8s) and
 `interval` (default 50ms).
 
-**Prompt:** "Start the API server in my backend session and run the
-integration tests once it's ready."
-
 ---
 
 ## Find the failing pane without opening random terminals
@@ -148,6 +154,12 @@ integration tests once it's ready."
 **Situation.** The developer kicked off multiple jobs across panes in a `ci`
 session -- linting, unit tests, integration tests, type checking. One of
 them failed, but they stepped away and do not remember which pane.
+
+```{admonition} Prompt
+:class: prompt
+
+Check my ci session -- which jobs failed?
+```
 
 ### Discover
 
@@ -192,14 +204,34 @@ makes 20+ round trips for the same information. The `regex: true` parameter
 is required here because the `|` in the pattern is a regex alternation, not
 literal text.
 
-**Prompt:** "Check my ci session -- which jobs failed?"
-
 ---
 
 ## Interrupt a stuck process and recover the pane
 
 **Situation.** A long-running build is hanging. The developer wants to
 interrupt it, verify the pane is responsive, and re-run the command.
+
+```{admonition} Prompt
+:class: prompt
+
+The build in pane %2 is stuck. Kill it and restart.
+```
+
+Or with less specificity — the agent will discover the target:
+
+```{admonition} Prompt
+:class: prompt
+
+The build in one of my panes is stuck. Kill it and restart.
+```
+
+Or if you've built muscle memory in your chats:
+
+```{admonition} Prompt
+:class: prompt
+
+The build is stuck. Kill it and restart.
+```
 
 ### Discover
 
@@ -257,8 +289,6 @@ destroy. Skipping
 straight to {toolref}`kill-pane` loses the pane's scrollback history and any
 partially written output that might explain *why* it hung.
 
-**Prompt:** "The build in pane %2 is stuck. Kill it and restart."
-
 ---
 
 ## Re-run a command without mixing old and new output
@@ -266,6 +296,12 @@ partially written output that might explain *why* it hung.
 **Situation.** The developer wants `pytest` re-run in tmux, but the
 candidate pane already has old test output in scrollback. They want only
 fresh results.
+
+```{admonition} Prompt
+:class: prompt
+
+Run `pytest` in the test pane and show me only the fresh output.
+```
 
 ### Discover
 
@@ -299,9 +335,6 @@ partial state. The {toolref}`wait-for-text` call after {toolref}`send-keys`
 naturally provides the needed delay, so the sequence clear-send-wait-capture
 is safe.
 
-**Prompt:** "Run `pytest` in the test pane and show me only the fresh
-output."
-
 ---
 
 ## Build a workspace the agent can revisit later
@@ -309,6 +342,12 @@ output."
 **Situation.** The developer wants a durable project workspace -- not just a
 quick split, but a layout that later prompts can refer to by role ("the
 server pane", "the test pane").
+
+```{admonition} Prompt
+:class: prompt
+
+Set up a tmux workspace for myproject with editor, server, and test panes.
+```
 
 ### Discover
 
@@ -360,9 +399,6 @@ server," the agent calls {toolref}`list-panes`, finds the pane titled
 figure out which one is which. But note: pane IDs are ephemeral across tmux
 server restarts, so the agent should always re-discover by metadata (session
 name, pane title, cwd) rather than trusting remembered `%N` values.
-
-**Prompt:** "Set up a tmux workspace for myproject with editor, server, and
-test panes."
 
 ---
 
