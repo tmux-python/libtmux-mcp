@@ -1014,7 +1014,10 @@ def _make_toolicon_role(
     ) -> tuple[list[nodes.Node], list[nodes.system_message]]:
         target = text.strip().replace("_", "-")
         node = _tool_ref_placeholder(
-            rawtext, reftarget=target, show_badge=False, icon_pos=icon_pos,
+            rawtext,
+            reftarget=target,
+            show_badge=False,
+            icon_pos=icon_pos,
         )
         return [node], []
 
