@@ -22,7 +22,7 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 
 **Changing settings?**
 - tmux options → {tool}`show-option` / {tool}`set-option`
-- Environment vars → {ref}`show-environment` / {ref}`set-environment`
+- Environment vars → {tool}`show-environment` / {tool}`set-environment`
 
 ## Inspect
 
