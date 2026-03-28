@@ -339,6 +339,13 @@ EOF
 
 ## Documentation Standards
 
+### Sphinx Cross-Reference Roles for MCP Tools
+
+- `{tool}` — code chip + full safety badge (text + icon). Use in **headers, bulleted lists, and tables** where the badge provides scannable context.
+- `{tooliconl}` — code chip + small colored square icon (left). Use in **inline paragraph text** where the full badge is too visually heavy.
+- `{toolref}` — code chip only, no badge. Use for **dense inline sequences** or explanatory text where the safety tier is already established.
+- `{tooliconil}` / `{tooliconir}` — bare emoji inside code chip. Use for **compact lists and scan-heavy surfaces**.
+
 ### Code Blocks in Documentation
 
 When writing documentation (README, CHANGES, docs/), follow these rules for code blocks:
