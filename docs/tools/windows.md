@@ -343,8 +343,7 @@ Response:
 {
   "tool": "kill_window",
   "arguments": {
-    "session_name": "dev",
-    "window_name": "old-logs"
+    "window_id": "@1"
   }
 }
 ```
@@ -352,7 +351,7 @@ Response:
 Response (string):
 
 ```text
-Window killed: old-logs
+Window killed: @1
 ```
 
 ```{fastmcp-tool-input} window_tools.kill_window

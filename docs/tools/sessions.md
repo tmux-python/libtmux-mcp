@@ -86,7 +86,7 @@ container — create one before creating windows or panes.
 **Avoid when** a session with the target name already exists — check with
 {tooliconl}`list-sessions` first, or the command will fail.
 
-**Side effects:** Creates a new tmux session. Attaches if `attach` is true.
+**Side effects:** Creates a new tmux session with one window and one pane.
 
 **Example:**
 
@@ -206,7 +206,7 @@ session, window, and pane.
 Response (string):
 
 ```text
-Server killed
+Server killed successfully
 ```
 
 ```{fastmcp-tool-input} server_tools.kill_server
