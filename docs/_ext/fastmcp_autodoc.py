@@ -1036,6 +1036,7 @@ def _make_toolicon_role(
     return role_fn
 
 
+# {toolicon} is a convenience alias for {tooliconl} (both render icon-left)
 _toolicon_role = _make_toolicon_role("left")
 _tooliconl_role = _make_toolicon_role("left")
 _tooliconr_role = _make_toolicon_role("right")
