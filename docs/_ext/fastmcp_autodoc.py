@@ -881,10 +881,11 @@ def _resolve_tool_refs(
     doctree: nodes.document,
     fromdocname: str,
 ) -> None:
-    """Resolve ``{tool}`` and ``{toolref}`` placeholders into links.
+    """Resolve ``{tool}``, ``{toolref}``, and ``{toolicon}`` placeholders.
 
-    ``{tool}`` renders as ``code`` + safety badge.
+    ``{tool}`` renders as ``code`` + safety badge (text + icon).
     ``{toolref}`` renders as ``code`` only (no badge).
+    ``{toolicon}`` renders as ``code`` + icon-only badge (square, no text).
 
     Runs at ``doctree-resolved`` — after all labels are registered and
     standard ``{ref}`` resolution is done.
@@ -896,6 +897,7 @@ def _resolve_tool_refs(
     for node in list(doctree.findall(_tool_ref_placeholder)):
         target = node.get("reftarget", "")
         show_badge = node.get("show_badge", True)
+        icon_only = node.get("icon_only", False)
         label_info = domain.labels.get(target)
         if label_info is None:
             node.replace_self(nodes.literal("", target.replace("-", "_")))
@@ -914,9 +916,20 @@ def _resolve_tool_refs(
         newnode["classes"].append("reference")
         newnode["classes"].append("internal")
 
-        newnode += nodes.literal("", tool_name)
+        if icon_only:
+            # Icon badge goes BEFORE the <code> element, outside it
+            tool_info = tool_data.get(tool_name)
+            if tool_info:
+                badge = _safety_badge(tool_info.safety)
+                badge["classes"].append("icon-only")
+                badge.children.clear()
+                badge += nodes.Text("")
+                newnode += badge
+            newnode += nodes.literal("", tool_name)
+        else:
+            newnode += nodes.literal("", tool_name)
 
-        if show_badge:
+        if not icon_only and show_badge:
             tool_info = tool_data.get(tool_name)
             if tool_info:
                 newnode += nodes.Text(" ")
@@ -962,6 +975,27 @@ def _toolref_role(
     return [node], []
 
 
+def _toolicon_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:toolicon:`capture-pane``` → code + square icon badge.
+
+    Like ``{tool}`` but the badge is icon-only (no text label), square,
+    and compact — designed for inline prose where the full badge is too wide.
+    """
+    target = text.strip().replace("_", "-")
+    node = _tool_ref_placeholder(
+        rawtext, reftarget=target, show_badge=False, icon_only=True,
+    )
+    return [node], []
+
+
 def _badge_role(
     name: str,
     rawtext: str,
@@ -987,6 +1021,7 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     app.connect("doctree-resolved", _resolve_tool_refs)
     app.add_role("tool", _tool_role)
     app.add_role("toolref", _toolref_role)
+    app.add_role("toolicon", _toolicon_role)
     app.add_role("badge", _badge_role)
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)

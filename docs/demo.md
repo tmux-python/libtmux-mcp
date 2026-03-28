@@ -24,6 +24,10 @@ Standalone badges via `{badge}`:
 
 {toolref}`capture-pane` · {toolref}`send-keys` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`kill-pane` · {toolref}`create-session` · {toolref}`split-window`
 
+### `{toolicon}` — code-linked with icon-only square badge
+
+{toolicon}`capture-pane` · {toolicon}`send-keys` · {toolicon}`search-panes` · {toolicon}`wait-for-text` · {toolicon}`kill-pane` · {toolicon}`create-session` · {toolicon}`split-window`
+
 ### `{ref}` — plain text link
 
 {ref}`capture-pane` · {ref}`send-keys` · {ref}`search-panes` · {ref}`wait-for-text` · {ref}`kill-pane` · {ref}`create-session` · {ref}`split-window`

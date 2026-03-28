@@ -309,6 +309,34 @@ h4:has(> .sd-badge) {
 .sd-badge.sd-bg-warning::before { content: "✏️"; }    /* mutating    */
 .sd-badge.sd-bg-danger::before  { content: "💣"; }   /* destructive */
 
+/* ── Icon-only badge ({toolicon} role) ───────────────────
+ * Square, no text, just the emoji from ::before.
+ * Designed for inline prose where the full badge is too wide.
+ * ────────────────────────────────────────────────────────── */
+.sd-badge.icon-only {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  border-radius: 3px;
+  gap: 0;
+  font-size: 0;
+  line-height: 1;
+  width: 14px;
+  height: 14px;
+  min-width: 0;
+  min-height: 0;
+  vertical-align: -0.1em;
+  margin-right: 0.3em;
+  margin-left: 0;
+}
+
+.sd-badge.icon-only::before {
+  font-size: 10px;
+  line-height: 1;
+  margin: 0;
+}
+
 /* ── Context-aware badge sizing ─────────────────────────── */
 h2 .sd-badge,
 h3 .sd-badge {
