@@ -246,6 +246,56 @@ div.admonition.agent-thought > p:last-child {
   margin-bottom: 0;
 }
 
+/* ── System prompt fragments ─────────────────────────────
+ * Copyable instruction prose for AGENTS.md / CLAUDE.md.
+ * Internal label row, softer dark panel, prose wrapping.
+ * Keeps sphinx-copybutton via .highlight > pre selector.
+ * ────────────────────────────────────────────────────────── */
+div.system-prompt {
+  margin: 1.25rem 0;
+  position: relative;
+}
+
+div.system-prompt > div.highlight {
+  background: #1f2329 !important;
+  border: 1px solid color-mix(in srgb, var(--color-link) 20%, transparent);
+  border-left: 3px solid var(--color-link);
+  border-radius: 6px;
+  position: relative;
+  padding-top: 1.3rem;
+}
+
+div.system-prompt > div.highlight > pre {
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Internal label — sits inside the block, not floating above */
+div.system-prompt > div.highlight::before {
+  content: "System prompt";
+  position: absolute;
+  top: 0.45rem;
+  left: 0.85rem;
+  font-family: var(--font-stack);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9590b8;
+  background: transparent;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+/* Fix copy button background to match panel */
+div.system-prompt .copybtn {
+  background: #1f2329 !important;
+}
+
 /* ── Image layout shift prevention ────────────────────────
  * Reserve space for images before they load. Furo already
  * sets max-width: 100%; height: auto on img. We add

@@ -56,7 +56,9 @@ Copy these into your agent's system instructions (`AGENTS.md`, `CLAUDE.md`, `.cu
 
 ### For general tmux workflows
 
-```text
+```{code-block} text
+:class: system-prompt
+
 When executing long-running commands (servers, builds, test suites),
 use tmux via the libtmux MCP server rather than running them directly.
 This keeps output accessible for later inspection. Use the pattern:
@@ -65,7 +67,9 @@ send_keys → wait_for_text (for completion signal) → capture_pane.
 
 ### For safe agent behavior
 
-```text
+```{code-block} text
+:class: system-prompt
+
 Before creating tmux sessions, check list_sessions to avoid duplicates.
 Always use pane_id for targeting — it is globally unique. Never run
 destructive operations (kill_session, kill_server) without confirming
@@ -74,7 +78,9 @@ the target with the user first.
 
 ### For development workflows
 
-```text
+```{code-block} text
+:class: system-prompt
+
 When the user asks you to run tests or start servers, use dedicated
 tmux panes. Split windows to run related processes side-by-side.
 Use wait_for_text to know when a server is ready before running tests
