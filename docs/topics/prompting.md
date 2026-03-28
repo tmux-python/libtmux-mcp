@@ -52,7 +52,7 @@ These natural-language prompts reliably trigger the right tool sequences:
 
 ## System prompt fragments
 
-Copy these into your agent's system instructions (`CLAUDE.md`, `.cursorrules`, or MCP client config) to improve behavior:
+Copy these into your agent's system instructions (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`, or MCP client config) to improve behavior:
 
 ### For general tmux workflows
 
