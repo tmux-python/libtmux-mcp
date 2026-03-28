@@ -193,17 +193,29 @@ article {
 }
 
 /* ── Prompt blocks (user → LLM) ───────────────────────────
- * Styled admonition for copy-paste prompts. Purple-tinted
- * left bar ties to the interactive/link color. Visually says
- * "type this into your LLM client."
+ * Styled admonition for copy-paste prompts. Chat-bubble
+ * aesthetic with speech icon. Says "type this into your LLM."
  * ────────────────────────────────────────────────────────── */
 div.admonition.prompt {
-  border: none;
+  border: 1px solid color-mix(in srgb, var(--color-link) 25%, transparent);
   border-left: 3px solid var(--color-link);
-  background: color-mix(in srgb, var(--color-link) 6%, var(--color-background-primary));
-  padding: 0.6rem 1rem;
-  margin: 1rem 0;
+  background: color-mix(in srgb, var(--color-link) 4%, var(--color-background-primary));
+  border-radius: 6px;
+  padding: 0.75rem 1rem 0.75rem 2.2rem;
+  margin: 1.25rem 0;
   box-shadow: none;
+  position: relative;
+}
+
+/* Speech bubble icon */
+div.admonition.prompt::before {
+  content: "\1F4AC";
+  position: absolute;
+  left: 0.65rem;
+  top: 0.7rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.45;
 }
 
 div.admonition.prompt > .admonition-title {
@@ -212,6 +224,8 @@ div.admonition.prompt > .admonition-title {
 
 div.admonition.prompt > p {
   font-size: 0.95rem;
+  font-style: italic;
+  color: var(--color-foreground-primary);
 }
 
 div.admonition.prompt > p:last-child {
