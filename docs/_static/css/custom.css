@@ -376,10 +376,10 @@ img {
 /* Docutils emits :width:/:height: as inline CSS (style="width: Xpx;
  * height: Ypx;") rather than HTML attributes.  When Furo's
  * max-width: 100% constrains width below the declared value,
- * the fixed height causes distortion.  height: auto + aspect-ratio
- * lets the browser compute the correct height from the intrinsic
- * ratio once loaded; before load, aspect-ratio reserves space
- * at the intended proportion — preventing both CLS and distortion. */
+ * the fixed height causes distortion.  height: auto lets the
+ * browser recompute height proportionally once the image loads.
+ * Note: this does not reserve space before load — images without
+ * explicit HTML width/height attributes will cause layout shift. */
 article img[loading="lazy"] {
   height: auto !important;
 }
