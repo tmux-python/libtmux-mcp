@@ -9,8 +9,8 @@
 after running a command, checking output, or verifying state.
 
 **Avoid when** you need to search across multiple panes at once — use
-{tool}`search-panes`. If you only need pane metadata (not content), use
-{tool}`get-pane-info`.
+{tooliconl}`search-panes`. If you only need pane metadata (not content), use
+{tooliconl}`get-pane-info`.
 
 **Side effects:** None. Readonly.
 
@@ -51,7 +51,7 @@ $
 **Use when** you need pane dimensions, PID, current working directory, or
 other metadata without reading the terminal content.
 
-**Avoid when** you need the actual text — use {tool}`capture-pane`.
+**Avoid when** you need the actual text — use {tooliconl}`capture-pane`.
 
 **Side effects:** None. Readonly.
 
@@ -97,7 +97,7 @@ Response:
 which pane has an error, finding a running process, or checking output
 without knowing which pane to look in.
 
-**Avoid when** you already know the target pane — use {tool}`capture-pane`
+**Avoid when** you already know the target pane — use {tooliconl}`capture-pane`
 directly.
 
 **Side effects:** None. Readonly.
@@ -146,7 +146,7 @@ Response:
 **Use when** you need to block until specific output appears — waiting for a
 server to start, a build to complete, or a prompt to return.
 
-**Avoid when** you can poll with {tool}`capture-pane` instead, or if the
+**Avoid when** you can poll with {tooliconl}`capture-pane` instead, or if the
 expected text may never appear (set a timeout).
 
 **Side effects:** None. Readonly. Blocks until text appears or timeout.
@@ -190,7 +190,7 @@ Response:
 terminal. This is the primary way to execute commands in tmux panes.
 
 **Avoid when** you need to run something and immediately capture the result —
-send keys first, then use {tool}`capture-pane` or {tool}`wait-for-text`.
+send keys first, then use {tooliconl}`capture-pane` or {tooliconl}`wait-for-text`.
 
 **Side effects:** Sends keystrokes to the pane. If `enter` is true (default),
 the command executes.
@@ -339,7 +339,7 @@ Response:
 **Use when** you're done with a specific terminal and want to remove it
 without affecting sibling panes.
 
-**Avoid when** you want to remove the entire window — use {tool}`kill-window`.
+**Avoid when** you want to remove the entire window — use {tooliconl}`kill-window`.
 
 **Side effects:** Destroys the pane. Not reversible.
 

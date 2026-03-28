@@ -8,8 +8,8 @@
 **Use when** you need session names, IDs, or attached status before deciding
 which session to target.
 
-**Avoid when** you need window or pane details — use {tool}`list-windows` or
-{tool}`list-panes` instead.
+**Avoid when** you need window or pane details — use {tooliconl}`list-windows` or
+{tooliconl}`list-panes` instead.
 
 **Side effects:** None. Readonly.
 
@@ -47,7 +47,7 @@ Response:
 **Use when** you need to verify the tmux server is running, check its PID,
 or inspect server-level state before creating sessions.
 
-**Avoid when** you only need session names — use {tool}`list-sessions`.
+**Avoid when** you only need session names — use {tooliconl}`list-sessions`.
 
 **Side effects:** None. Readonly.
 
@@ -84,7 +84,7 @@ Response:
 container — create one before creating windows or panes.
 
 **Avoid when** a session with the target name already exists — check with
-{tool}`list-sessions` first, or the command will fail.
+{tooliconl}`list-sessions` first, or the command will fail.
 
 **Side effects:** Creates a new tmux session. Attaches if `attach` is true.
 
@@ -158,7 +158,7 @@ Response:
 **Use when** you're done with a workspace and want to clean up. Kills all
 windows and panes in the session.
 
-**Avoid when** you only want to close one window — use {tool}`kill-window`.
+**Avoid when** you only want to close one window — use {tooliconl}`kill-window`.
 
 **Side effects:** Destroys the session and all its contents. Not reversible.
 
@@ -190,7 +190,7 @@ Session killed: old-workspace
 **Use when** you need to tear down the entire tmux server. This kills every
 session, window, and pane.
 
-**Avoid when** you only need to remove one session — use {tool}`kill-session`.
+**Avoid when** you only need to remove one session — use {tooliconl}`kill-session`.
 
 **Side effects:** Destroys everything. Not reversible.
 

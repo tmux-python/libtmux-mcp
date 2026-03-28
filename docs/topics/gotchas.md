@@ -6,9 +6,9 @@ Things that will bite you if you don't know about them in advance. For symptom-b
 
 ## Metadata vs. content
 
-{tool}`list-panes` and {tool}`list-windows` search **metadata** — names, IDs, current command. They do not search what is displayed in the terminal.
+{tooliconl}`list-panes` and {tooliconl}`list-windows` search **metadata** — names, IDs, current command. They do not search what is displayed in the terminal.
 
-To find text that is visible in terminals, use {tool}`search-panes`. To read what a specific pane shows, use {tool}`capture-pane`.
+To find text that is visible in terminals, use {tooliconl}`search-panes`. To read what a specific pane shows, use {tooliconl}`capture-pane`.
 
 This is the most common source of agent confusion. The server instructions already warn about this, but it bears repeating: if a user asks "which pane mentions error", the answer is `search_panes`, not `list_panes`.
 
@@ -31,7 +31,7 @@ The `enter` parameter defaults to `true`, which is correct for commands (`make t
 {"tool": "capture_pane", "arguments": {"pane_id": "%0"}}
 ```
 
-The capture above may return the terminal state **before** pytest runs. Use {tool}`wait-for-text` between them:
+The capture above may return the terminal state **before** pytest runs. Use {tooliconl}`wait-for-text` between them:
 
 ```json
 {"tool": "send_keys", "arguments": {"keys": "pytest", "pane_id": "%0"}}

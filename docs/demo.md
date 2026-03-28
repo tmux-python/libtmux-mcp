@@ -66,7 +66,7 @@ These are the actual tool headings as they render on tool pages:
 
 ### In prose
 
-Use {tool}`search-panes` to find text across all panes. If you know which pane, use {tool}`capture-pane` instead. After running a command with {tool}`send-keys`, always {tool}`wait-for-text` before capturing.
+Use {tooliconl}`search-panes` to find text across all panes. If you know which pane, use {tooliconl}`capture-pane` instead. After running a command with {tooliconl}`send-keys`, always {tooliconl}`wait-for-text` before capturing.
 
 ### Dense inline (toolref, no badges)
 
@@ -83,7 +83,7 @@ The fundamental pattern: {toolref}`send-keys` → {toolref}`wait-for-text` → {
 ## Admonitions
 
 ```{tip}
-Use {tool}`search-panes` before {tool}`capture-pane` when you don't know which pane has the output you need.
+Use {tooliconl}`search-panes` before {tooliconl}`capture-pane` when you don't know which pane has the output you need.
 ```
 
 ```{warning}

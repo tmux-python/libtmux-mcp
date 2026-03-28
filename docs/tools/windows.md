@@ -8,7 +8,7 @@
 **Use when** you need window names, indices, or layout metadata within a
 session before selecting a window to work with.
 
-**Avoid when** you need pane-level detail — use {tool}`list-panes`.
+**Avoid when** you need pane-level detail — use {tooliconl}`list-panes`.
 
 **Side effects:** None. Readonly.
 
@@ -333,7 +333,7 @@ Response:
 
 **Use when** you're done with a window and all its panes.
 
-**Avoid when** you only want to remove one pane — use {tool}`kill-pane`.
+**Avoid when** you only want to remove one pane — use {tooliconl}`kill-pane`.
 
 **Side effects:** Destroys the window and all its panes. Not reversible.
 
