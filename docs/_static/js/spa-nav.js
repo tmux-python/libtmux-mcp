@@ -26,27 +26,58 @@
   }
 
   // --- Copy button injection ---
+  //
+  // Matches sphinx-copybutton's button HTML and selector so buttons work
+  // identically after SPA navigation.  Uses an inline template instead of
+  // cloning an existing button — the initial page may have no code blocks
+  // (e.g. index.html), leaving nothing to clone.
 
-  var copyBtnTemplate = null;
+  var iconCopy =
+    '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-copy" ' +
+    'width="44" height="44" viewBox="0 0 24 24" stroke-width="1.5" stroke="#000000" ' +
+    'fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+    "<title>Copy to clipboard</title>" +
+    '<path stroke="none" d="M0 0h24v24H0z" fill="none"/>' +
+    '<rect x="8" y="8" width="12" height="12" rx="2" />' +
+    '<path d="M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2" />' +
+    "</svg>";
 
-  function captureCopyIcon() {
-    var btn = document.querySelector(".copybtn");
-    if (btn) copyBtnTemplate = btn.cloneNode(true);
+  function makeCopyButton(targetId) {
+    return (
+      '<button class="copybtn o-tooltip--left" data-tooltip="Copy" ' +
+      'data-clipboard-target="#' +
+      targetId +
+      '">' +
+      iconCopy +
+      "</button>"
+    );
   }
 
   function addCopyButtons() {
-    if (!copyBtnTemplate) captureCopyIcon();
-    if (!copyBtnTemplate) return;
+    // Code blocks
     var cells = document.querySelectorAll("div.highlight pre");
     cells.forEach(function (cell, i) {
-      cell.id = "codecell" + i;
+      var id = "codecell" + i;
+      cell.id = id;
       var next = cell.nextElementSibling;
       if (next && next.classList.contains("copybtn")) {
-        next.setAttribute("data-clipboard-target", "#codecell" + i);
+        next.setAttribute("data-clipboard-target", "#" + id);
       } else {
-        var btn = copyBtnTemplate.cloneNode(true);
-        btn.setAttribute("data-clipboard-target", "#codecell" + i);
-        cell.insertAdjacentElement("afterend", btn);
+        cell.insertAdjacentHTML("afterend", makeCopyButton(id));
+      }
+    });
+    // Prompt blocks — match sphinx-copybutton's copybutton_selector
+    var prompts = document.querySelectorAll(
+      "div.admonition.prompt > p:last-child"
+    );
+    prompts.forEach(function (p, i) {
+      var id = "promptcell" + i;
+      p.id = id;
+      var next = p.nextElementSibling;
+      if (next && next.classList.contains("copybtn")) {
+        next.setAttribute("data-clipboard-target", "#" + id);
+      } else {
+        p.insertAdjacentHTML("afterend", makeCopyButton(id));
       }
     });
   }
@@ -247,8 +278,6 @@
 
   // --- Init ---
 
-  // Copy buttons are injected by copybutton.js on DOMContentLoaded.
-  // This defer script runs before DOMContentLoaded, so our handler
-  // fires after copybutton's handler (registration order preserved).
-  document.addEventListener("DOMContentLoaded", captureCopyIcon);
+  // No DOMContentLoaded setup needed for copy buttons — addCopyButtons()
+  // creates buttons from an inline template, independent of the initial page.
 })();
