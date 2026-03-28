@@ -397,10 +397,13 @@ img[src*="codecov.io"] {
 /* ── View Transitions (SPA navigation) ────────────────────
  * Crossfade between pages during SPA navigation.
  * Browsers without View Transitions API get instant swap.
+ * Respects prefers-reduced-motion for accessibility.
  * ────────────────────────────────────────────────────────── */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 150ms;
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 150ms;
+  }
 }
 
 /* ── MCP Tool safety badges ──────────────────────────────
