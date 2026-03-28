@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import re
 import typing as t
 from dataclasses import dataclass
@@ -37,6 +38,8 @@ from sphinx.util.docutils import SphinxDirective
 if t.TYPE_CHECKING:
     from sphinx.domains.std import StandardDomain
     from sphinx.util.typing import ExtensionMetadata
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -529,7 +532,11 @@ def _collect_tools(app: Sphinx) -> None:
             if hasattr(mod, "register"):
                 mod.register(collector)
         except Exception:
-            pass  # Module not importable during docs build
+            logger.warning(
+                "fastmcp_autodoc: failed to load tool module %s",
+                mod_name,
+                exc_info=True,
+            )
 
     app.env.fastmcp_tools = {tool.name: tool for tool in collector.tools}  # type: ignore[attr-defined]
 
