@@ -110,6 +110,7 @@ topics/index
 
 reference/api/index
 reference/compatibility
+glossary
 ```
 
 ```{toctree}
