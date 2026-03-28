@@ -315,6 +315,17 @@ h4:has(> .sd-badge) {
  * into the code chip as a seamless annotation.
  * ────────────────────────────────────────────────────────── */
 
+/* Outside icon links: flexbox collapses whitespace nodes */
+a.reference:has(> .sd-badge.icon-only) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+a.reference:has(> .sd-badge.icon-only) > code {
+  margin: 0;
+}
+
 /* Outside variants: colored square box */
 .sd-badge.icon-only {
   display: inline-flex !important;
@@ -330,10 +341,7 @@ h4:has(> .sd-badge) {
   line-height: 1;
   min-width: 0;
   min-height: 0;
-  vertical-align: middle;
-  transform: translateY(-1px);
-  margin-right: 3px;
-  margin-left: 0;
+  margin: 0;
 }
 
 .sd-badge.icon-only::before {
@@ -344,12 +352,6 @@ h4:has(> .sd-badge) {
   margin: 0;
   display: block;
   opacity: 0.9;
-}
-
-/* Right-of-code variant: slightly tighter than left */
-code.docutils + .sd-badge.icon-only {
-  margin-left: 4px;
-  margin-right: 0;
 }
 
 /* Inline variants (inside <code>): bare emoji, no box */
