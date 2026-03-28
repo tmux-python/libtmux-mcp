@@ -32,62 +32,62 @@ Read tmux state without changing anything.
 :gutter: 2 2 3 3
 
 :::{grid-item-card} list_sessions
-:link: sessions
-:link-type: doc
+:link: list-sessions
+:link-type: ref
 List all active sessions.
 :::
 
 :::{grid-item-card} list_windows
-:link: windows
-:link-type: doc
+:link: list-windows
+:link-type: ref
 List windows in a session.
 :::
 
 :::{grid-item-card} list_panes
-:link: windows
-:link-type: doc
+:link: list-panes
+:link-type: ref
 List panes in a window.
 :::
 
 :::{grid-item-card} capture_pane
-:link: panes
-:link-type: doc
+:link: capture-pane
+:link-type: ref
 Read visible content of a pane.
 :::
 
 :::{grid-item-card} get_pane_info
-:link: panes
-:link-type: doc
+:link: get-pane-info
+:link-type: ref
 Get detailed pane metadata.
 :::
 
 :::{grid-item-card} search_panes
-:link: panes
-:link-type: doc
+:link: search-panes
+:link-type: ref
 Search text across panes.
 :::
 
 :::{grid-item-card} wait_for_text
-:link: panes
-:link-type: doc
+:link: wait-for-text
+:link-type: ref
 Wait for text to appear in a pane.
 :::
 
 :::{grid-item-card} get_server_info
-:link: sessions
-:link-type: doc
+:link: get-server-info
+:link-type: ref
 Get tmux server info.
 :::
 
 :::{grid-item-card} show_option
-:link: options
-:link-type: doc
+:link: show-option
+:link-type: ref
 Query a tmux option value.
 :::
 
 :::{grid-item-card} show_environment
-:link: options
-:link-type: doc
+:link: show-environment
+:link-type: ref
 Show tmux environment variables.
 :::
 
@@ -101,80 +101,80 @@ Create or modify tmux objects.
 :gutter: 2 2 3 3
 
 :::{grid-item-card} create_session
-:link: sessions
-:link-type: doc
+:link: create-session
+:link-type: ref
 Start a new tmux session.
 :::
 
 :::{grid-item-card} create_window
-:link: windows
-:link-type: doc
+:link: create-window
+:link-type: ref
 Add a window to a session.
 :::
 
 :::{grid-item-card} split_window
-:link: windows
-:link-type: doc
+:link: split-window
+:link-type: ref
 Split a window into panes.
 :::
 
 :::{grid-item-card} send_keys
-:link: panes
-:link-type: doc
+:link: send-keys
+:link-type: ref
 Send commands or keystrokes to a pane.
 :::
 
 :::{grid-item-card} rename_session
-:link: sessions
-:link-type: doc
+:link: rename-session
+:link-type: ref
 Rename a session.
 :::
 
 :::{grid-item-card} rename_window
-:link: windows
-:link-type: doc
+:link: rename-window
+:link-type: ref
 Rename a window.
 :::
 
 :::{grid-item-card} resize_pane
-:link: panes
-:link-type: doc
+:link: resize-pane
+:link-type: ref
 Adjust pane dimensions.
 :::
 
 :::{grid-item-card} resize_window
-:link: windows
-:link-type: doc
+:link: resize-window
+:link-type: ref
 Adjust window dimensions.
 :::
 
 :::{grid-item-card} select_layout
-:link: windows
-:link-type: doc
+:link: select-layout
+:link-type: ref
 Set window layout.
 :::
 
 :::{grid-item-card} set_pane_title
-:link: panes
-:link-type: doc
+:link: set-pane-title
+:link-type: ref
 Set pane title.
 :::
 
 :::{grid-item-card} clear_pane
-:link: panes
-:link-type: doc
+:link: clear-pane
+:link-type: ref
 Clear pane content.
 :::
 
 :::{grid-item-card} set_option
-:link: options
-:link-type: doc
+:link: set-option
+:link-type: ref
 Set a tmux option.
 :::
 
 :::{grid-item-card} set_environment
-:link: options
-:link-type: doc
+:link: set-environment
+:link-type: ref
 Set a tmux environment variable.
 :::
 
@@ -188,26 +188,26 @@ Tear down tmux objects. Not reversible.
 :gutter: 2 2 3 3
 
 :::{grid-item-card} kill_session
-:link: sessions
-:link-type: doc
+:link: kill-session
+:link-type: ref
 Destroy a session and all its windows.
 :::
 
 :::{grid-item-card} kill_window
-:link: windows
-:link-type: doc
+:link: kill-window
+:link-type: ref
 Destroy a window and all its panes.
 :::
 
 :::{grid-item-card} kill_pane
-:link: panes
-:link-type: doc
+:link: kill-pane
+:link-type: ref
 Destroy a pane.
 :::
 
 :::{grid-item-card} kill_server
-:link: sessions
-:link-type: doc
+:link: kill-server
+:link-type: ref
 Kill the entire tmux server.
 :::
 
