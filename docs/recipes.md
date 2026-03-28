@@ -33,7 +33,7 @@ or what port it chose.
 > command and working directory, not terminal content. The dev server printed
 > its URL to the terminal minutes ago, so I need to search terminal content.
 
-The agent calls {tool}`search-panes` with `pattern: "Local:"` and
+The agent calls {tooliconl}`search-panes` with `pattern: "Local:"` and
 `session_name: "myapp"`. The response comes back with pane `%5` in the `react`
 window, matched line: `Local: http://localhost:5173/`.
 
@@ -42,21 +42,21 @@ window, matched line: `Local: http://localhost:5173/`.
 > The server is alive and its URL is known. I do not need to start anything.
 > I just need an idle pane for running tests.
 
-The agent calls {tool}`list-panes` on the `myapp` session. Several panes show
+The agent calls {tooliconl}`list-panes` on the `myapp` session. Several panes show
 `pane_current_command: zsh` -- idle shells. It picks `%4` in the same window.
 
 ### Act
 
-The agent calls {tool}`send-keys` in pane `%4`:
+The agent calls {tooliconl}`send-keys` in pane `%4`:
 `PLAYWRIGHT_BASE_URL=http://localhost:5173 pnpm exec playwright test`
 
-Then it calls {tool}`wait-for-text` on pane `%4` with `pattern: "passed|failed|timed out"`, `regex: true`, and `timeout: 120`. Once the
-wait resolves, it calls {tool}`capture-pane` on `%4` with `start: -80` to
+Then it calls {tooliconl}`wait-for-text` on pane `%4` with `pattern: "passed|failed|timed out"`, `regex: true`, and `timeout: 120`. Once the
+wait resolves, it calls {tooliconl}`capture-pane` on `%4` with `start: -80` to
 read the test results.
 
 ```{tip}
 The agent's first instinct might be to *start* a Vite server. But
-{tool}`search-panes` reveals one is already running. This avoids a port
+{tooliconl}`search-panes` reveals one is already running. This avoids a port
 conflict, a wasted pane, and the most common agent mistake: treating tmux
 like a blank shell.
 ```
@@ -85,8 +85,8 @@ suite needs a live API server.
 > First I need to know what exists in the `backend` session. If a server is
 > already running, I should reuse it instead of starting a duplicate.
 
-The agent calls {tool}`list-panes` for the `backend` session. No pane is
-running a server process. A {tool}`search-panes` call for `"listening"`
+The agent calls {tooliconl}`list-panes` for the `backend` session. No pane is
+running a server process. A {tooliconl}`search-panes` call for `"listening"`
 returns no matches.
 
 ### Decide
@@ -96,16 +96,16 @@ returns no matches.
 
 ### Act
 
-The agent calls {tool}`split-window` with `session_name: "backend"` to
-create a new pane, then calls {tool}`send-keys` in that pane:
+The agent calls {tooliconl}`split-window` with `session_name: "backend"` to
+create a new pane, then calls {tooliconl}`send-keys` in that pane:
 `npm run serve`.
 
-The agent calls {tool}`wait-for-text` on the server pane with
+The agent calls {tooliconl}`wait-for-text` on the server pane with
 `pattern: "Listening on"` and `timeout: 30`. Once the wait resolves, the
-agent calls {tool}`send-keys` in the original pane:
-`npm test -- --integration`, then {tool}`wait-for-text` with
+agent calls {tooliconl}`send-keys` in the original pane:
+`npm test -- --integration`, then {tooliconl}`wait-for-text` with
 `pattern: "passed|failed|error"` and `regex: true`, then
-{tool}`capture-pane` to read the test results.
+{tooliconl}`capture-pane` to read the test results.
 
 ```{warning}
 Calling {toolref}`capture-pane` immediately after {toolref}`send-keys` is a
@@ -139,7 +139,7 @@ them failed, but they stepped away and do not remember which pane.
 > slow. Instead I will search for common failure indicators across all panes
 > at once.
 
-The agent calls {tool}`search-panes` with
+The agent calls {tooliconl}`search-panes` with
 `pattern: "FAIL|ERROR|error:|Traceback"`, `regex: true`, scoped to
 `session_name: "ci"`.
 
@@ -150,12 +150,12 @@ The agent calls {tool}`search-panes` with
 
 ### Act
 
-The agent calls {tool}`capture-pane` on `%3` with `start: -60`, then on
+The agent calls {tooliconl}`capture-pane` on `%3` with `start: -60`, then on
 `%6` with `start: -60`.
 
 ```{tip}
 If the error scrolled off the visible screen, use `content_start: -200` (or
-deeper) when calling {tool}`search-panes`. The `content_start` parameter
+deeper) when calling {tooliconl}`search-panes`. The `content_start` parameter
 makes search reach into scrollback history, not just the visible screen.
 ```
 
@@ -183,7 +183,7 @@ interrupt it, verify the pane is responsive, and re-run the command.
 > `enter: false` or tmux will send Ctrl-C followed by Enter, which could
 > confirm a prompt I did not intend to answer.
 
-The agent calls {tool}`send-keys` with `keys: "C-c"` and `enter: false` on
+The agent calls {tooliconl}`send-keys` with `keys: "C-c"` and `enter: false` on
 the target pane.
 
 ### Decide
@@ -192,7 +192,7 @@ the target pane.
 > for a shell prompt to reappear. Developers use custom prompts, so I cannot
 > just look for `$`.
 
-The agent calls {tool}`wait-for-text` with `pattern: "[$#>%] *$"`,
+The agent calls {tooliconl}`wait-for-text` with `pattern: "[$#>%] *$"`,
 `regex: true`, and `timeout: 5`.
 
 > If the wait resolves, the shell is back. If it times out, the process
@@ -202,8 +202,8 @@ The agent calls {tool}`wait-for-text` with `pattern: "[$#>%] *$"`,
 ### Act
 
 If the wait times out, the agent sends `C-\` (also with `enter: false`). If
-that also fails, it calls {tool}`kill-pane` on the stuck pane, then
-{tool}`split-window` to create a replacement, then {tool}`send-keys` to
+that also fails, it calls {tooliconl}`kill-pane` on the stuck pane, then
+{tooliconl}`split-window` to create a replacement, then {tooliconl}`send-keys` to
 re-run.
 
 ```{warning}
@@ -233,9 +233,9 @@ fresh results.
 
 ### Discover
 
-The agent calls {tool}`list-panes` to find the pane by title, cwd, or
+The agent calls {tooliconl}`list-panes` to find the pane by title, cwd, or
 current command. If more than one pane is plausible, it uses
-{tool}`capture-pane` with a small range to confirm the target.
+{tooliconl}`capture-pane` with a small range to confirm the target.
 
 ### Decide
 
@@ -245,10 +245,10 @@ current command. If more than one pane is plausible, it uses
 
 ### Act
 
-The agent calls {tool}`clear-pane`, then {tool}`send-keys` with
-`keys: "pytest"`, then {tool}`wait-for-text` with
+The agent calls {tooliconl}`clear-pane`, then {tooliconl}`send-keys` with
+`keys: "pytest"`, then {tooliconl}`wait-for-text` with
 `pattern: "passed|failed|error"` and `regex: true`, then
-{tool}`capture-pane` to read the fresh output.
+{tooliconl}`capture-pane` to read the fresh output.
 
 ### The non-obvious part
 
@@ -275,7 +275,7 @@ server pane", "the test pane").
 > Before creating anything, I need to check whether a session with this name
 > already exists. Creating a duplicate will fail.
 
-The agent calls {tool}`list-sessions`. No session named `myproject` exists.
+The agent calls {tooliconl}`list-sessions`. No session named `myproject` exists.
 
 ### Decide
 
@@ -285,16 +285,16 @@ The agent calls {tool}`list-sessions`. No session named `myproject` exists.
 
 ### Act
 
-The agent calls {tool}`create-session` with `session_name: "myproject"` and
-`start_directory: "/home/dev/myproject"`. Then {tool}`split-window` twice
+The agent calls {tooliconl}`create-session` with `session_name: "myproject"` and
+`start_directory: "/home/dev/myproject"`. Then {tooliconl}`split-window` twice
 (with `direction: "right"` and `direction: "below"`), followed by
-{tool}`select-layout` with `layout: "main-vertical"`.
+{tooliconl}`select-layout` with `layout: "main-vertical"`.
 
-The agent calls {tool}`set-pane-title` on each pane: `editor`, `server`,
+The agent calls {tooliconl}`set-pane-title` on each pane: `editor`, `server`,
 `tests`.
 
-The agent calls {tool}`send-keys` in the server pane: `npm run dev`, then
-{tool}`wait-for-text` for `pattern: "ready|listening|Local:"` with
+The agent calls {tooliconl}`send-keys` in the server pane: `npm run dev`, then
+{tooliconl}`wait-for-text` for `pattern: "ready|listening|Local:"` with
 `regex: true` and `timeout: 30`.
 
 ```{tip}
