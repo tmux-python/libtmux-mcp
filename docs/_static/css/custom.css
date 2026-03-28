@@ -310,57 +310,56 @@ h4:has(> .sd-badge) {
 .sd-badge.sd-bg-danger::before  { content: "💣"; }   /* destructive */
 
 /* ── Icon-only badge ({toolicon*} roles) ─────────────────
- * Bare emoji glyph — no box, no border, no background.
- * Outside variants are smaller and quieter than inside ones.
- * Prefix/suffix spacing is asymmetric (suffix tighter).
+ * Outside variants (l/r): colored square box with emoji.
+ * Inside variants (il/ir): bare emoji, no box — blends
+ * into the code chip as a seamless annotation.
  * ────────────────────────────────────────────────────────── */
 
-/* Outside variants: smaller, lighter */
+/* Outside variants: colored square box */
 .sd-badge.icon-only {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
+  width: 16px;
+  height: 16px;
   padding: 0;
-  border: none !important;
-  background: transparent !important;
-  border-radius: 0;
+  box-sizing: border-box;
+  border-radius: 3px;
   gap: 0;
   font-size: 0;
   line-height: 1;
-  width: auto;
-  height: auto;
   min-width: 0;
   min-height: 0;
-  vertical-align: -0.06em;
-  margin-right: 0.18em;
+  vertical-align: middle;
+  transform: translateY(-1px);
+  margin-right: 5px;
   margin-left: 0;
 }
 
 .sd-badge.icon-only::before {
-  font-size: 0.72rem;
+  font-size: 10px;
   line-height: 1;
+  font-style: normal;
+  font-weight: normal;
   margin: 0;
-  opacity: 0.85;
   display: block;
+  opacity: 0.9;
 }
 
-/* Right-of-code variant: tighter gap than left */
+/* Right-of-code variant: slightly tighter than left */
 code.docutils + .sd-badge.icon-only {
-  margin-left: 0.14em;
+  margin-left: 4px;
   margin-right: 0;
 }
 
-/* Bomb emoji has more visual mass — slightly smaller */
-.sd-badge.sd-bg-danger.icon-only::before {
-  font-size: 0.68rem;
-  opacity: 0.8;
-}
-
-/* Inline variants (inside <code>): tighter, baseline-aligned */
+/* Inline variants (inside <code>): bare emoji, no box */
 .sd-badge.icon-only-inline {
   background: transparent !important;
   border: none !important;
   padding: 0;
+  width: auto;
+  height: auto;
+  border-radius: 0;
   vertical-align: -0.01em;
   margin-right: 0.12em;
   margin-left: 0;
@@ -368,12 +367,7 @@ code.docutils + .sd-badge.icon-only {
 
 .sd-badge.icon-only-inline::before {
   font-size: 0.78rem;
-}
-
-/* Inline bomb: slightly smaller */
-.sd-badge.sd-bg-danger.icon-only-inline::before {
-  font-size: 0.72rem;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 /* Inline-right: tighter than inline-left */
