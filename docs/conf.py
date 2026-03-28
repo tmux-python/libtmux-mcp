@@ -66,7 +66,7 @@ master_doc = "index"
 project = about["__title__"]
 project_copyright = about["__copyright__"]
 
-version = "{}".format(".".join(about["__version__"].split("."))[:2])
+version = "{}".format(".".join(about["__version__"].split(".")[:2]))
 release = "{}".format(about["__version__"])
 
 exclude_patterns = ["_build"]
