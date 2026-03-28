@@ -54,6 +54,7 @@ myst_enable_extensions = [
     "replacements",
     "strikethrough",
     "linkify",
+    "attrs_inline",
 ]
 
 templates_path = ["_templates"]

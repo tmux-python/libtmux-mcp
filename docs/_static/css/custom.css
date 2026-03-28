@@ -246,6 +246,27 @@ div.admonition.agent-thought > p:last-child {
   margin-bottom: 0;
 }
 
+/* ── Inline prompt dialog ────────────────────────────────
+ * Inline styled span for user-to-LLM prompts. Supports
+ * full nested markup via MyST attrs_inline extension:
+ *   [Run `pytest` in my build pane]{.prompt}
+ * No line-height or word-wrap disruption. WCAG AA contrast.
+ * ────────────────────────────────────────────────────────── */
+span.prompt {
+  font-style: italic;
+  color: var(--color-foreground-primary);
+}
+
+span.prompt::before {
+  content: "\201C";
+  color: var(--color-foreground-muted);
+}
+
+span.prompt::after {
+  content: "\201D";
+  color: var(--color-foreground-muted);
+}
+
 /* ── Labeled code panels ─────────────────────────────────
  * Copyable prose in labeled dark panels. Two variants:
  * .system-prompt — user-authored fragments for AGENTS.md
