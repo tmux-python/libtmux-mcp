@@ -24,6 +24,22 @@ Standalone badges via `{badge}`:
 
 {toolref}`capture-pane` · {toolref}`send-keys` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`kill-pane` · {toolref}`create-session` · {toolref}`split-window`
 
+### `{tooliconl}` — icon left, outside code
+
+{tooliconl}`capture-pane` · {tooliconl}`send-keys` · {tooliconl}`search-panes` · {tooliconl}`wait-for-text` · {tooliconl}`kill-pane` · {tooliconl}`create-session` · {tooliconl}`split-window`
+
+### `{tooliconr}` — icon right, outside code
+
+{tooliconr}`capture-pane` · {tooliconr}`send-keys` · {tooliconr}`search-panes` · {tooliconr}`wait-for-text` · {tooliconr}`kill-pane` · {tooliconr}`create-session` · {tooliconr}`split-window`
+
+### `{tooliconil}` — icon inline-left, inside code
+
+{tooliconil}`capture-pane` · {tooliconil}`send-keys` · {tooliconil}`search-panes` · {tooliconil}`wait-for-text` · {tooliconil}`kill-pane` · {tooliconil}`create-session` · {tooliconil}`split-window`
+
+### `{tooliconir}` — icon inline-right, inside code
+
+{tooliconir}`capture-pane` · {tooliconir}`send-keys` · {tooliconir}`search-panes` · {tooliconir}`wait-for-text` · {tooliconir}`kill-pane` · {tooliconir}`create-session` · {tooliconir}`split-window`
+
 ### `{ref}` — plain text link
 
 {ref}`capture-pane` · {ref}`send-keys` · {ref}`search-panes` · {ref}`wait-for-text` · {ref}`kill-pane` · {ref}`create-session` · {ref}`split-window`
