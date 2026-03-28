@@ -146,8 +146,10 @@ Response:
 **Use when** you need to block until specific output appears — waiting for a
 server to start, a build to complete, or a prompt to return.
 
-**Avoid when** you can poll with {tooliconl}`capture-pane` instead, or if the
-expected text may never appear (set a timeout).
+**Avoid when** the expected text may never appear — always set a reasonable
+`timeout`. For known output, {tooliconl}`capture-pane` after a known delay
+may suffice, but `wait_for_text` is preferred because it adapts to variable
+timing.
 
 **Side effects:** None. Readonly. Blocks until text appears or timeout.
 
