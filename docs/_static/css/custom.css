@@ -311,15 +311,17 @@ h4:has(> .sd-badge) {
 
 /* ── Icon-only badge ({toolicon*} roles) ─────────────────
  * Bare emoji glyph — no box, no border, no background.
- * The emoji color signals the tier. Lightweight semantic
- * mark that attaches to the tool name, not competes with it.
+ * Outside variants are smaller and quieter than inside ones.
+ * Prefix/suffix spacing is asymmetric (suffix tighter).
  * ────────────────────────────────────────────────────────── */
+
+/* Outside variants: smaller, lighter */
 .sd-badge.icon-only {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: none;
+  border: none !important;
   background: transparent !important;
   border-radius: 0;
   gap: 0;
@@ -329,41 +331,54 @@ h4:has(> .sd-badge) {
   height: auto;
   min-width: 0;
   min-height: 0;
-  vertical-align: -0.15em;
-  margin-right: 0.2em;
+  vertical-align: -0.06em;
+  margin-right: 0.18em;
   margin-left: 0;
 }
 
 .sd-badge.icon-only::before {
-  font-size: 0.85rem;
+  font-size: 0.72rem;
   line-height: 1;
   margin: 0;
-  opacity: 0.88;
+  opacity: 0.85;
+  display: block;
 }
 
-/* Right-of-code variant: flip margins */
+/* Right-of-code variant: tighter gap than left */
 code.docutils + .sd-badge.icon-only {
-  margin-left: 0.2em;
+  margin-left: 0.14em;
   margin-right: 0;
 }
 
-/* Inline variants (inside <code>): no background, sit on baseline */
+/* Bomb emoji has more visual mass — slightly smaller */
+.sd-badge.sd-bg-danger.icon-only::before {
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
+/* Inline variants (inside <code>): tighter, baseline-aligned */
 .sd-badge.icon-only-inline {
   background: transparent !important;
-  border: none;
+  border: none !important;
   padding: 0;
-  vertical-align: middle;
-  margin-right: 0.15em;
+  vertical-align: -0.01em;
+  margin-right: 0.12em;
   margin-left: 0;
 }
 
 .sd-badge.icon-only-inline::before {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
 }
 
-/* Inline-right: flip margins */
+/* Inline bomb: slightly smaller */
+.sd-badge.sd-bg-danger.icon-only-inline::before {
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+/* Inline-right: tighter than inline-left */
 code.docutils .sd-badge.icon-only-inline:last-child {
-  margin-left: 0.15em;
+  margin-left: 0.1em;
   margin-right: 0;
 }
 
