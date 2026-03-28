@@ -81,6 +81,8 @@ def create_window(
 ) -> WindowInfo:
     """Create a new window in a tmux session.
 
+    Creates a window with one pane. Use split_window to add more panes afterward.
+
     Parameters
     ----------
     session_name : str, optional
@@ -137,6 +139,9 @@ def rename_session(
 ) -> SessionInfo:
     """Rename a tmux session.
 
+    Use when a session's purpose has changed. Existing pane_id references
+    remain valid after renaming.
+
     Parameters
     ----------
     new_name : str
@@ -166,6 +171,10 @@ def kill_session(
     socket_name: str | None = None,
 ) -> str:
     """Kill a tmux session.
+
+    Destroys the session and all its windows and panes. Use kill_window
+    to remove a single window instead. Self-kill protection prevents
+    killing the session containing this MCP process.
 
     Parameters
     ----------

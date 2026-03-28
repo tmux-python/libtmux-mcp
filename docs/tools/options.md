@@ -42,6 +42,29 @@ Response:
 
 **Side effects:** None. Readonly.
 
+**Example:**
+
+```json
+{
+  "tool": "show_environment",
+  "arguments": {}
+}
+```
+
+Response:
+
+```json
+{
+  "variables": {
+    "SHELL": "/bin/zsh",
+    "TERM": "xterm-256color",
+    "HOME": "/home/user",
+    "USER": "user",
+    "LANG": "C.UTF-8"
+  }
+}
+```
+
 ```{fastmcp-tool-input} env_tools.show_environment
 ```
 
@@ -88,6 +111,28 @@ Response:
 **Use when** you need to set a tmux environment variable.
 
 **Side effects:** Sets the variable in the tmux server.
+
+**Example:**
+
+```json
+{
+  "tool": "set_environment",
+  "arguments": {
+    "name": "MY_VAR",
+    "value": "hello"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "name": "MY_VAR",
+  "value": "hello",
+  "status": "set"
+}
+```
 
 ```{fastmcp-tool-input} env_tools.set_environment
 ```

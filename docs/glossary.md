@@ -33,4 +33,10 @@ Safety tier
 
 Socket
     The Unix socket used to communicate with a tmux server. Can be specified by name (`-L`) or path (`-S`).
+
+SIGINT
+    Interrupt signal (Ctrl-C). Sent via {toolref}`send-keys` with `keys: "C-c"` and `enter: false`. Most processes terminate gracefully on SIGINT.
+
+SIGQUIT
+    Quit signal (Ctrl-\\). Sent via {toolref}`send-keys` with `keys: "C-\\"` and `enter: false`. Stronger than {term}`SIGINT` — may produce a core dump on Unix. Use as an escalation when SIGINT is ignored.
 ```

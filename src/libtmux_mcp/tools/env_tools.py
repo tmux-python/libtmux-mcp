@@ -27,6 +27,8 @@ def show_environment(
 ) -> EnvironmentResult:
     """Show tmux environment variables.
 
+    Use to inspect tmux environment variables that affect child processes.
+
     Parameters
     ----------
     session_name : str, optional
@@ -65,6 +67,9 @@ def set_environment(
     socket_name: str | None = None,
 ) -> EnvironmentSetResult:
     """Set a tmux environment variable.
+
+    Use to set variables that will be inherited by new panes and windows.
+    Changes do not affect already-running processes.
 
     Parameters
     ----------

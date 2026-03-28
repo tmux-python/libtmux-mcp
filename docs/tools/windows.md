@@ -67,6 +67,52 @@ sending keys or capturing output.
 
 **Side effects:** None. Readonly.
 
+**Example:**
+
+```json
+{
+  "tool": "list_panes",
+  "arguments": {
+    "session_name": "dev"
+  }
+}
+```
+
+Response:
+
+```json
+[
+  {
+    "pane_id": "%0",
+    "pane_index": "0",
+    "pane_width": "80",
+    "pane_height": "15",
+    "pane_current_command": "zsh",
+    "pane_current_path": "/home/user/myproject",
+    "pane_pid": "12345",
+    "pane_title": "build",
+    "pane_active": "1",
+    "window_id": "@0",
+    "session_id": "$0",
+    "is_caller": null
+  },
+  {
+    "pane_id": "%1",
+    "pane_index": "1",
+    "pane_width": "80",
+    "pane_height": "8",
+    "pane_current_command": "zsh",
+    "pane_current_path": "/home/user/myproject",
+    "pane_pid": "12400",
+    "pane_title": "",
+    "pane_active": "0",
+    "window_id": "@0",
+    "session_id": "$0",
+    "is_caller": null
+  }
+]
+```
+
 ```{fastmcp-tool-input} window_tools.list_panes
 ```
 
@@ -164,6 +210,35 @@ Response:
 
 **Side effects:** Renames the window.
 
+**Example:**
+
+```json
+{
+  "tool": "rename_window",
+  "arguments": {
+    "session_name": "dev",
+    "new_name": "build"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "window_id": "@0",
+  "window_name": "build",
+  "window_index": "1",
+  "session_id": "$0",
+  "session_name": "dev",
+  "pane_count": 2,
+  "window_layout": "7f9f,80x24,0,0[80x15,0,0,0,80x8,0,16,1]",
+  "window_active": "1",
+  "window_width": "80",
+  "window_height": "24"
+}
+```
+
 ```{fastmcp-tool-input} window_tools.rename_window
 ```
 
@@ -177,6 +252,35 @@ Response:
 
 **Side effects:** Rearranges all panes in the window.
 
+**Example:**
+
+```json
+{
+  "tool": "select_layout",
+  "arguments": {
+    "session_name": "dev",
+    "layout": "even-vertical"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "window_id": "@0",
+  "window_name": "editor",
+  "window_index": "1",
+  "session_id": "$0",
+  "session_name": "dev",
+  "pane_count": 2,
+  "window_layout": "even-vertical,80x24,0,0[80x12,0,0,0,80x11,0,13,1]",
+  "window_active": "1",
+  "window_width": "80",
+  "window_height": "24"
+}
+```
+
 ```{fastmcp-tool-input} window_tools.select_layout
 ```
 
@@ -188,6 +292,36 @@ Response:
 **Use when** you need to adjust the window dimensions.
 
 **Side effects:** Changes window size.
+
+**Example:**
+
+```json
+{
+  "tool": "resize_window",
+  "arguments": {
+    "session_name": "dev",
+    "width": 120,
+    "height": 40
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "window_id": "@0",
+  "window_name": "editor",
+  "window_index": "1",
+  "session_id": "$0",
+  "session_name": "dev",
+  "pane_count": 2,
+  "window_layout": "baaa,120x40,0,0[120x20,0,0,0,120x19,0,21,1]",
+  "window_active": "1",
+  "window_width": "120",
+  "window_height": "40"
+}
+```
 
 ```{fastmcp-tool-input} window_tools.resize_window
 ```
@@ -202,6 +336,24 @@ Response:
 **Avoid when** you only want to remove one pane — use {tool}`kill-pane`.
 
 **Side effects:** Destroys the window and all its panes. Not reversible.
+
+**Example:**
+
+```json
+{
+  "tool": "kill_window",
+  "arguments": {
+    "session_name": "dev",
+    "window_name": "old-logs"
+  }
+}
+```
+
+Response (string):
+
+```text
+Window killed: old-logs
+```
 
 ```{fastmcp-tool-input} window_tools.kill_window
 ```

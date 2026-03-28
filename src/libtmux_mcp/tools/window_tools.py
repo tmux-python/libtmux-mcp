@@ -111,6 +111,9 @@ def split_window(
 ) -> PaneInfo:
     """Split a tmux window to create a new pane.
 
+    Creates a new pane by splitting an existing one. Use direction to choose
+    above/below/left/right. Returns the new pane's info including its pane_id.
+
     Parameters
     ----------
     pane_id : str, optional
@@ -188,6 +191,9 @@ def rename_window(
 ) -> WindowInfo:
     """Rename a tmux window.
 
+    Use when a window's purpose has changed. Existing window_id references
+    remain valid after renaming.
+
     Parameters
     ----------
     new_name : str
@@ -226,6 +232,10 @@ def kill_window(
     socket_name: str | None = None,
 ) -> str:
     """Kill (close) a tmux window. Requires exact window_id (e.g. '@3').
+
+    Destroys the window and all its panes. Use kill_pane to remove a single
+    pane instead. Self-kill protection prevents killing the window containing
+    this MCP process.
 
     Parameters
     ----------
@@ -271,6 +281,9 @@ def select_layout(
     socket_name: str | None = None,
 ) -> WindowInfo:
     """Set the layout of a tmux window.
+
+    Choose from: even-horizontal, even-vertical, main-horizontal,
+    main-vertical, or tiled. Rearranges all panes in the window.
 
     Parameters
     ----------
@@ -318,6 +331,8 @@ def resize_window(
     socket_name: str | None = None,
 ) -> WindowInfo:
     """Resize a tmux window.
+
+    Use to adjust the window dimensions. This affects all panes within the window.
 
     Parameters
     ----------

@@ -258,6 +258,7 @@ h4:has(> .sd-badge) {
 .sd-badge {
   display: inline-flex !important;
   align-items: center;
+  vertical-align: middle;
   gap: 0.28rem;
   font-size: 0.67rem;
   font-weight: 650;
@@ -332,6 +333,11 @@ code.docutils + .sd-badge,
 /* ── Link behavior: underline code only, on hover ───────── */
 a.reference .sd-badge {
   text-decoration: none;
+  vertical-align: middle;
+}
+
+a.reference:has(.sd-badge) code {
+  vertical-align: middle;
 }
 
 a.reference:has(.sd-badge) {

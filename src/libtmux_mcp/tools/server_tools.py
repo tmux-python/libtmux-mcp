@@ -31,6 +31,9 @@ def list_sessions(
 ) -> list[SessionInfo]:
     """List all tmux sessions.
 
+    Use as the starting point for discovery — call this before targeting
+    specific sessions, windows, or panes.
+
     Parameters
     ----------
     socket_name : str, optional
@@ -60,6 +63,9 @@ def create_session(
     socket_name: str | None = None,
 ) -> SessionInfo:
     """Create a new tmux session.
+
+    Check list_sessions first to avoid name conflicts. A new session
+    starts with one window and one pane.
 
     Parameters
     ----------
@@ -105,6 +111,10 @@ def create_session(
 def kill_server(socket_name: str | None = None) -> str:
     """Kill the tmux server and all its sessions.
 
+    Destroys ALL sessions, windows, and panes on this server. Use kill_session
+    to remove a single session instead. Self-kill protection prevents killing
+    the server running this MCP process.
+
     Parameters
     ----------
     socket_name : str, optional
@@ -133,6 +143,9 @@ def kill_server(socket_name: str | None = None) -> str:
 @handle_tool_errors
 def get_server_info(socket_name: str | None = None) -> ServerInfo:
     """Get information about the tmux server.
+
+    Use to verify the tmux server is running before other operations.
+    For session-level details, use list_sessions instead.
 
     Parameters
     ----------

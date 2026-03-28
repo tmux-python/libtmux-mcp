@@ -63,7 +63,9 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
         "Available tiers: 'readonly' (read operations only), "
         "'mutating' (default, read + write + send_keys), "
         "'destructive' (all operations including kill commands). "
-        "Set via LIBTMUX_SAFETY env var."
+        "Set via LIBTMUX_SAFETY env var. "
+        "Tools outside the active tier are hidden and will not appear in "
+        "tool listings."
     )
 
     # Agent tmux context

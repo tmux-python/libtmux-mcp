@@ -51,6 +51,27 @@ or inspect server-level state before creating sessions.
 
 **Side effects:** None. Readonly.
 
+**Example:**
+
+```json
+{
+  "tool": "get_server_info",
+  "arguments": {}
+}
+```
+
+Response:
+
+```json
+{
+  "is_alive": true,
+  "socket_name": null,
+  "socket_path": null,
+  "session_count": 2,
+  "version": "3.6a"
+}
+```
+
 ```{fastmcp-tool-input} server_tools.get_server_info
 ```
 
@@ -141,6 +162,23 @@ windows and panes in the session.
 
 **Side effects:** Destroys the session and all its contents. Not reversible.
 
+**Example:**
+
+```json
+{
+  "tool": "kill_session",
+  "arguments": {
+    "session_name": "old-workspace"
+  }
+}
+```
+
+Response (string):
+
+```text
+Session killed: old-workspace
+```
+
 ```{fastmcp-tool-input} session_tools.kill_session
 ```
 
@@ -155,6 +193,21 @@ session, window, and pane.
 **Avoid when** you only need to remove one session — use {tool}`kill-session`.
 
 **Side effects:** Destroys everything. Not reversible.
+
+**Example:**
+
+```json
+{
+  "tool": "kill_server",
+  "arguments": {}
+}
+```
+
+Response (string):
+
+```text
+Server killed
+```
 
 ```{fastmcp-tool-input} server_tools.kill_server
 ```

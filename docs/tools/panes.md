@@ -55,6 +55,36 @@ other metadata without reading the terminal content.
 
 **Side effects:** None. Readonly.
 
+**Example:**
+
+```json
+{
+  "tool": "get_pane_info",
+  "arguments": {
+    "pane_id": "%0"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "pane_id": "%0",
+  "pane_index": "0",
+  "pane_width": "80",
+  "pane_height": "24",
+  "pane_current_command": "zsh",
+  "pane_current_path": "/home/user/myproject",
+  "pane_pid": "12345",
+  "pane_title": "",
+  "pane_active": "1",
+  "window_id": "@0",
+  "session_id": "$0",
+  "is_caller": null
+}
+```
+
 ```{fastmcp-tool-input} pane_tools.get_pane_info
 ```
 
@@ -195,6 +225,37 @@ Keys sent to pane %2
 
 **Side effects:** Changes the pane title.
 
+**Example:**
+
+```json
+{
+  "tool": "set_pane_title",
+  "arguments": {
+    "pane_id": "%0",
+    "title": "build"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "pane_id": "%0",
+  "pane_index": "0",
+  "pane_width": "80",
+  "pane_height": "24",
+  "pane_current_command": "zsh",
+  "pane_current_path": "/home/user/myproject",
+  "pane_pid": "12345",
+  "pane_title": "build",
+  "pane_active": "1",
+  "window_id": "@0",
+  "session_id": "$0",
+  "is_caller": null
+}
+```
+
 ```{fastmcp-tool-input} pane_tools.set_pane_title
 ```
 
@@ -207,6 +268,23 @@ Keys sent to pane %2
 
 **Side effects:** Clears the pane's visible content.
 
+**Example:**
+
+```json
+{
+  "tool": "clear_pane",
+  "arguments": {
+    "pane_id": "%0"
+  }
+}
+```
+
+Response (string):
+
+```text
+Pane cleared: %0
+```
+
 ```{fastmcp-tool-input} pane_tools.clear_pane
 ```
 
@@ -218,6 +296,37 @@ Keys sent to pane %2
 **Use when** you need to adjust pane dimensions.
 
 **Side effects:** Changes pane size. May affect adjacent panes.
+
+**Example:**
+
+```json
+{
+  "tool": "resize_pane",
+  "arguments": {
+    "pane_id": "%0",
+    "height": 15
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "pane_id": "%0",
+  "pane_index": "0",
+  "pane_width": "80",
+  "pane_height": "15",
+  "pane_current_command": "zsh",
+  "pane_current_path": "/home/user/myproject",
+  "pane_pid": "12345",
+  "pane_title": "",
+  "pane_active": "1",
+  "window_id": "@0",
+  "session_id": "$0",
+  "is_caller": null
+}
+```
 
 ```{fastmcp-tool-input} pane_tools.resize_pane
 ```
@@ -233,6 +342,23 @@ without affecting sibling panes.
 **Avoid when** you want to remove the entire window — use {tool}`kill-window`.
 
 **Side effects:** Destroys the pane. Not reversible.
+
+**Example:**
+
+```json
+{
+  "tool": "kill_pane",
+  "arguments": {
+    "pane_id": "%1"
+  }
+}
+```
+
+Response (string):
+
+```text
+Pane killed: %1
+```
 
 ```{fastmcp-tool-input} pane_tools.kill_pane
 ```
