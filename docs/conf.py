@@ -158,7 +158,7 @@ sphinx_fonts = [
         "version": "5.2.8",
         "weights": [400, 500, 600, 700],
         "styles": ["normal", "italic"],
-        "subset": "latin",
+        "subsets": ["latin", "latin-ext"],
     },
     {
         "family": "IBM Plex Mono",
@@ -166,7 +166,7 @@ sphinx_fonts = [
         "version": "5.2.7",
         "weights": [400, 500, 600, 700],
         "styles": ["normal", "italic"],
-        "subset": "latin",
+        "subsets": ["latin", "latin-ext"],
     },
 ]
 
