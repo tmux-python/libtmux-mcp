@@ -113,10 +113,6 @@ files = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sphinx_fonts"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = ["fastmcp_autodoc", "docutils", "docutils.*"]
 ignore_missing_imports = true
 
