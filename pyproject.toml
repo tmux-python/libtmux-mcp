@@ -56,18 +56,9 @@ libtmux-mcp = "libtmux_mcp:main"
 [dependency-groups]
 dev = [
   # Docs
-  "sphinx<9",
-  "furo",
+  "gp-sphinx==0.0.1a1",
   "gp-libs",
   "sphinx-autobuild",
-  "sphinx-autodoc-typehints",
-  "sphinx-inline-tabs",
-  "sphinx-design",
-  "sphinxext-opengraph",
-  "sphinx-copybutton",
-  "sphinxext-rediraffe",
-  "myst-parser",
-  "linkify-it-py",
   # Testing
   "typing-extensions; python_version < '3.11'",
   "gp-libs",
@@ -86,18 +77,9 @@ dev = [
 ]
 
 docs = [
-  "sphinx<9",
-  "furo",
+  "gp-sphinx==0.0.1a1",
   "gp-libs",
   "sphinx-autobuild",
-  "sphinx-autodoc-typehints",
-  "sphinx-inline-tabs",
-  "sphinx-design",
-  "sphinxext-opengraph",
-  "sphinx-copybutton",
-  "sphinxext-rediraffe",
-  "myst-parser",
-  "linkify-it-py",
 ]
 testing = [
   "typing-extensions; python_version < '3.11'",
@@ -129,10 +111,6 @@ files = [
   "src",
   "tests",
 ]
-
-[[tool.mypy.overrides]]
-module = ["sphinx_fonts"]
-ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["fastmcp_autodoc", "docutils", "docutils.*"]
