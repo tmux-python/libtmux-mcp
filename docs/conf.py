@@ -19,7 +19,6 @@ project_root = cwd.parent
 project_src = project_root / "src"
 
 sys.path.insert(0, str(project_src))
-sys.path.insert(0, str(cwd / "_ext"))
 
 # package data
 about: dict[str, str] = {}
@@ -38,7 +37,7 @@ conf = merge_sphinx_config(
     extra_extensions=[
         "sphinx_autodoc_api_style",
         "sphinx.ext.todo",
-        "fastmcp_autodoc",
+        "sphinx_autodoc_fastmcp",
     ],
     intersphinx_mapping={
         "python": ("https://docs.python.org/", None),
@@ -65,6 +64,42 @@ conf = merge_sphinx_config(
 )
 
 conf["myst_enable_extensions"] = [*conf["myst_enable_extensions"], "attrs_inline"]
+
+conf["fastmcp_tool_modules"] = [
+    "libtmux_mcp.tools.server_tools",
+    "libtmux_mcp.tools.session_tools",
+    "libtmux_mcp.tools.window_tools",
+    "libtmux_mcp.tools.pane_tools",
+    "libtmux_mcp.tools.option_tools",
+    "libtmux_mcp.tools.env_tools",
+]
+conf["fastmcp_area_map"] = {
+    "server_tools": "sessions",
+    "session_tools": "sessions",
+    "window_tools": "windows",
+    "pane_tools": "panes",
+    "option_tools": "options",
+    "env_tools": "options",
+}
+conf["fastmcp_model_module"] = "libtmux_mcp.models"
+conf["fastmcp_model_classes"] = (
+    "SessionInfo",
+    "WindowInfo",
+    "PaneInfo",
+    "PaneContentMatch",
+    "ServerInfo",
+    "OptionResult",
+    "OptionSetResult",
+    "EnvironmentResult",
+    "EnvironmentSetResult",
+    "WaitForTextResult",
+)
+conf["fastmcp_section_badge_map"] = {
+    "Inspect": "readonly",
+    "Act": "mutating",
+    "Destroy": "destructive",
+}
+conf["fastmcp_section_badge_pages"] = ("tools/index", "index")
 
 _gp_setup = conf.pop("setup")
 
