@@ -53,11 +53,18 @@ Changes = "https://github.com/tmux-python/libtmux-mcp/blob/master/CHANGES"
 [project.scripts]
 libtmux-mcp = "libtmux_mcp:main"
 
+# Sibling clone: ../gp-sphinx (git-pull/gp-sphinx). Override PyPI pins for local dev.
+[tool.uv.sources]
+gp-sphinx = { path = "../gp-sphinx/packages/gp-sphinx", editable = true }
+sphinx-autodoc-api-style = { path = "../gp-sphinx/packages/sphinx-autodoc-api-style", editable = true }
+sphinx-autodoc-fastmcp = { path = "../gp-sphinx/packages/sphinx-autodoc-fastmcp", editable = true }
+
 [dependency-groups]
 dev = [
   # Docs
   "gp-sphinx==0.0.1a5",
   "sphinx-autodoc-api-style==0.0.1a5",
+  "sphinx-autodoc-fastmcp==0.0.1a5",
   "gp-libs",
   "sphinx-autobuild",
   # Testing
@@ -80,6 +87,7 @@ dev = [
 docs = [
   "gp-sphinx==0.0.1a5",
   "sphinx-autodoc-api-style==0.0.1a5",
+  "sphinx-autodoc-fastmcp==0.0.1a5",
   "gp-libs",
   "sphinx-autobuild",
 ]
@@ -115,7 +123,7 @@ files = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["fastmcp_autodoc", "docutils", "docutils.*"]
+module = ["sphinx_autodoc_fastmcp", "sphinx_autodoc_fastmcp.*", "docutils", "docutils.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
