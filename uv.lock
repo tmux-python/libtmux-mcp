@@ -2310,6 +2310,22 @@ source = { editable = "../gp-sphinx/packages/sphinx-autodoc-api-style" }
 dependencies = [
     { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "sphinx", version = "8.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "sphinx-autodoc-badges" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "sphinx" },
+    { name = "sphinx-autodoc-badges", editable = "../gp-sphinx/packages/sphinx-autodoc-badges" },
+]
+
+[[package]]
+name = "sphinx-autodoc-badges"
+version = "0.0.1a5"
+source = { editable = "../gp-sphinx/packages/sphinx-autodoc-badges" }
+dependencies = [
+    { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "sphinx", version = "8.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
@@ -2322,10 +2338,14 @@ source = { editable = "../gp-sphinx/packages/sphinx-autodoc-fastmcp" }
 dependencies = [
     { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "sphinx", version = "8.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "sphinx-autodoc-badges" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "sphinx" }]
+requires-dist = [
+    { name = "sphinx" },
+    { name = "sphinx-autodoc-badges", editable = "../gp-sphinx/packages/sphinx-autodoc-badges" },
+]
 
 [[package]]
 name = "sphinx-autodoc-typehints"
