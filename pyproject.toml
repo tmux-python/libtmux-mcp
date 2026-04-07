@@ -123,7 +123,7 @@ files = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sphinx_autodoc_fastmcp", "sphinx_autodoc_fastmcp.*", "docutils", "docutils.*"]
+module = ["fastmcp_autodoc", "sphinx_autodoc_fastmcp", "sphinx_autodoc_fastmcp.*", "docutils", "docutils.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

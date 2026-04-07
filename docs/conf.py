@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import typing as t
 
@@ -103,10 +104,30 @@ conf["fastmcp_section_badge_pages"] = ("tools/index", "index")
 
 _gp_setup = conf.pop("setup")
 
+# Matches Pydantic-style markdown cross-refs in RST docstrings:
+#   [DisplayText][qualified.Name]       →  :any:`DisplayText <qualified.Name>`
+#   [`DisplayText`][qualified.Name]     →  :any:`DisplayText <qualified.Name>`
+# Display text may be wrapped in backticks — strip them before forming the role.
+_MD_XREF = re.compile(r"\[`?([^`\]]+)`?\]\[([a-zA-Z_][a-zA-Z0-9_.]*)\]")
+
+
+def _convert_md_xrefs(
+    app: Sphinx,
+    what: str,
+    name: str,
+    obj: object,
+    options: object,
+    lines: list[str],
+) -> None:
+    """Rewrite Pydantic markdown cross-refs to RST :any: roles."""
+    for i, line in enumerate(lines):
+        lines[i] = _MD_XREF.sub(r":any:`\1 <\2>`", line)
+
 
 def setup(app: Sphinx) -> None:
     """Configure Sphinx app hooks and register project-specific JS."""
     _gp_setup(app)
+    app.connect("autodoc-process-docstring", _convert_md_xrefs)
     app.add_js_file("js/prompt-copy.js", loading_method="defer")
 
 
