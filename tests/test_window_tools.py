@@ -10,6 +10,7 @@ from fastmcp.exceptions import ToolError
 from libtmux_mcp.tools.window_tools import (
     kill_window,
     list_panes,
+    move_window,
     rename_window,
     resize_window,
     select_layout,
@@ -200,6 +201,42 @@ def test_list_panes_with_filters(
         result = list_panes(**kwargs)
         assert isinstance(result, list)
         assert len(result) >= expected_min_count
+
+
+# ---------------------------------------------------------------------------
+# move_window tests
+# ---------------------------------------------------------------------------
+
+
+def test_move_window_reorder(mcp_server: Server, mcp_session: Session) -> None:
+    """move_window changes a window's index."""
+    win = mcp_session.new_window(window_name="move_me")
+    result = move_window(
+        window_id=win.window_id,
+        destination_index="99",
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == win.window_id
+    assert result.window_index == "99"
+
+
+def test_move_window_to_another_session(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """move_window moves a window to a different session."""
+    target_session = mcp_server.new_session(session_name="move_target")
+    win = mcp_session.new_window(window_name="move_cross")
+    window_id = win.window_id
+
+    result = move_window(
+        window_id=window_id,
+        destination_session=target_session.session_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == window_id
+
+    # Cleanup
+    target_session.kill()
 
 
 def test_kill_window_requires_window_id(mcp_server: Server) -> None:
