@@ -1031,9 +1031,9 @@ class FastMCPToolSummaryDirective(SphinxDirective):
             rows: list[list[str | nodes.Node]] = []
             for tool in sorted(tier_tools, key=lambda t: t.name):
                 first_line = _first_paragraph(tool.docstring)
-                # Link to the tool's section on its area page
+                section_id = tool.name.replace("_", "-")
                 ref = nodes.reference("", "", internal=True)
-                ref["refuri"] = f"{tool.area}/#{tool.name.replace('_', '-')}"
+                ref["refuri"] = f"#{section_id}"
                 ref += nodes.literal("", tool.name)
                 rows.append(
                     [

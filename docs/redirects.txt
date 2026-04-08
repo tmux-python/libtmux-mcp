@@ -12,3 +12,7 @@
 "concepts" "topics/concepts"
 "safety" "topics/safety"
 "guides/troubleshooting" "topics/troubleshooting"
+"tools/sessions" "tools/index"
+"tools/windows" "tools/index"
+"tools/panes" "tools/index"
+"tools/options" "tools/index"
