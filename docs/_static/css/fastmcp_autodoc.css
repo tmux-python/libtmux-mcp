@@ -18,6 +18,18 @@ span.sd-badge[aria-label*="model"] {
     font-family: var(--sd-fontfamily-monospace, monospace);
 }
 
+/* Badge in section headings — medium size, not full h1 scale */
+h1 .sd-badge,
+h2 .sd-badge {
+    font-size: 0.5em;
+    vertical-align: middle;
+}
+
+/* Sidebar: strip background from inline code (tool/resource/model names) */
+.sidebar-tree code.literal {
+    background: none;
+}
+
 /* Field/param table polish — tighter padding */
 .fastmcp-autodoc-table td,
 .fastmcp-autodoc-table th {

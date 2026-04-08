@@ -1997,6 +1997,19 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     # CSS
     app.add_css_file("css/fastmcp_autodoc.css")
 
+    # Strip badge nodes from toctree/sidebar title extraction.
+    # SphinxContentsFilter walks title nodes to build toctree text.
+    # Without this, badges inside titles propagate to the sidebar.
+    # This is the same pattern Sphinx uses for visit_image (SkipNode).
+    from sphinx.transforms import SphinxContentsFilter
+
+    def _skip_badge(self: t.Any, node: nodes.Node) -> None:
+        raise nodes.SkipNode
+
+    SphinxContentsFilter.visit__safety_badge_node = _skip_badge  # type: ignore[attr-defined]
+    SphinxContentsFilter.visit__resource_badge_node = _skip_badge  # type: ignore[attr-defined]
+    SphinxContentsFilter.visit__model_badge_node = _skip_badge  # type: ignore[attr-defined]
+
     return {
         "version": "0.1.0",
         "parallel_read_safe": True,
