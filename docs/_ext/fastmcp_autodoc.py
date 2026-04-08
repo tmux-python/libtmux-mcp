@@ -65,18 +65,35 @@ TAG_MUTATING = "mutating"
 TAG_DESTRUCTIVE = "destructive"
 
 _MODEL_MODULE = "libtmux_mcp.models"
-_MODEL_CLASSES: set[str] = {
-    "SessionInfo",
-    "WindowInfo",
-    "PaneInfo",
-    "PaneContentMatch",
-    "ServerInfo",
-    "OptionResult",
-    "OptionSetResult",
-    "EnvironmentResult",
-    "EnvironmentSetResult",
-    "WaitForTextResult",
-}
+_model_classes_cache: set[str] | None = None
+
+
+def _discover_model_classes() -> set[str]:
+    """Discover all BaseModel subclasses in libtmux_mcp.models.
+
+    Results are cached after first call. Only discovers classes whose
+    ``__module__`` matches ``_MODEL_MODULE`` to prevent third-party leakage.
+    """
+    global _model_classes_cache
+    if _model_classes_cache is not None:
+        return _model_classes_cache
+    import inspect as _inspect
+
+    from pydantic import BaseModel
+
+    try:
+        mod = importlib.import_module(_MODEL_MODULE)
+    except ImportError:
+        logger.warning("fastmcp_autodoc: could not import %s", _MODEL_MODULE)
+        _model_classes_cache = set()
+        return _model_classes_cache
+    _model_classes_cache = {
+        name
+        for name, obj in _inspect.getmembers(mod, _inspect.isclass)
+        if issubclass(obj, BaseModel)
+        and getattr(obj, "__module__", "") == _MODEL_MODULE
+    }
+    return _model_classes_cache
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +126,40 @@ class ToolInfo:
     docstring: str
     params: list[ParamInfo]
     return_annotation: str
+
+
+@dataclass
+class ResourceInfo:
+    """Collected metadata for a single MCP resource."""
+
+    name: str
+    qualified_name: str
+    title: str
+    uri_template: str
+    docstring: str
+    params: list[ParamInfo]
+    return_annotation: str
+
+
+@dataclass
+class ModelFieldInfo:
+    """Extracted field information for a Pydantic model."""
+
+    name: str
+    type_str: str
+    required: bool
+    default: str
+    description: str
+
+
+@dataclass
+class ModelInfo:
+    """Collected metadata for a single Pydantic model."""
+
+    name: str
+    qualified_name: str
+    docstring: str
+    fields: list[ModelFieldInfo]
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +353,7 @@ def _single_type_xref(name: str) -> addnodes.pending_xref:
     Known model classes are qualified to ``libtmux_mcp.models.X``.
     Builtins (``str``, ``list``, ``int``, etc.) target the Python domain.
     """
-    target = f"{_MODEL_MODULE}.{name}" if name in _MODEL_CLASSES else name
+    target = f"{_MODEL_MODULE}.{name}" if name in _discover_model_classes() else name
     return addnodes.pending_xref(
         "",
         nodes.literal("", name),
@@ -459,6 +510,76 @@ def _safety_badge(safety: str) -> _safety_badge_node:
     return badge
 
 
+class _resource_badge_node(nodes.General, nodes.Inline, nodes.Element):  # type: ignore[misc]
+    """Custom node for resource badges with ARIA attributes in HTML output."""
+
+
+def _visit_resource_badge_html(self: t.Any, node: _resource_badge_node) -> None:
+    """Emit opening ``<span>`` with classes, role, and aria-label."""
+    classes = " ".join(node.get("classes", []))
+    self.body.append(
+        f'<span class="{classes}" role="note" aria-label="Type: resource">'
+    )
+
+
+def _depart_resource_badge_html(self: t.Any, node: _resource_badge_node) -> None:
+    """Close the ``<span>``."""
+    self.body.append("</span>")
+
+
+def _resource_badge() -> _resource_badge_node:
+    """Create a blue resource badge node with ARIA attributes."""
+    _base = ["sd-sphinx-override", "sd-badge"]
+    badge = _resource_badge_node(
+        "",
+        nodes.Text("resource"),
+        classes=[*_base, "sd-bg-info", "sd-bg-text-info"],
+    )
+    return badge
+
+
+class _model_badge_node(nodes.General, nodes.Inline, nodes.Element):  # type: ignore[misc]
+    """Custom node for model badges with ARIA attributes in HTML output."""
+
+
+def _visit_model_badge_html(self: t.Any, node: _model_badge_node) -> None:
+    """Emit opening ``<span>`` with classes, role, and aria-label."""
+    classes = " ".join(node.get("classes", []))
+    self.body.append(f'<span class="{classes}" role="note" aria-label="Type: model">')
+
+
+def _depart_model_badge_html(self: t.Any, node: _model_badge_node) -> None:
+    """Close the ``<span>``."""
+    self.body.append("</span>")
+
+
+def _model_badge() -> _model_badge_node:
+    """Create a purple model badge node with ARIA attributes."""
+    _base = ["sd-sphinx-override", "sd-badge"]
+    badge = _model_badge_node(
+        "",
+        nodes.Text("model"),
+        classes=[*_base, "sd-bg-primary", "sd-bg-text-primary"],
+    )
+    return badge
+
+
+class _resource_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):  # type: ignore[misc]
+    """Placeholder node for ``{resource}`` and ``{resourceref}`` roles.
+
+    Resolved at ``doctree-resolved`` by ``_resolve_resource_refs``.
+    The ``show_badge`` attribute controls whether the resource badge is appended.
+    """
+
+
+class _model_ref_placeholder(nodes.General, nodes.Inline, nodes.Element):  # type: ignore[misc]
+    """Placeholder node for ``{model}`` and ``{modelref}`` roles.
+
+    Resolved at ``doctree-resolved`` by ``_resolve_model_refs``.
+    The ``show_badge`` attribute controls whether the model badge is appended.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Tool collection (runs at builder-inited)
 # ---------------------------------------------------------------------------
@@ -512,6 +633,38 @@ class _ToolCollector:
         return decorator
 
 
+class _ResourceCollector:
+    """Mock FastMCP that captures resource registrations."""
+
+    def __init__(self) -> None:
+        self.resources: list[ResourceInfo] = []
+        self._current_module: str = ""
+
+    def resource(
+        self,
+        uri_template: str,
+        title: str = "",
+        **kwargs: t.Any,
+    ) -> t.Callable[[t.Callable[..., t.Any]], t.Callable[..., t.Any]]:
+        def decorator(func: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
+            self.resources.append(
+                ResourceInfo(
+                    name=func.__name__,
+                    qualified_name=f"{self._current_module}.{func.__name__}",
+                    title=title or func.__name__.replace("_", " ").title(),
+                    uri_template=uri_template,
+                    docstring=func.__doc__ or "",
+                    params=_extract_params(func),
+                    return_annotation=_format_annotation(
+                        inspect.signature(func).return_annotation,
+                    ),
+                )
+            )
+            return func
+
+        return decorator
+
+
 def _collect_tools(app: Sphinx) -> None:
     """Collect tool metadata from libtmux_mcp source at build time."""
     collector = _ToolCollector()
@@ -539,6 +692,111 @@ def _collect_tools(app: Sphinx) -> None:
             )
 
     app.env.fastmcp_tools = {tool.name: tool for tool in collector.tools}  # type: ignore[attr-defined]
+
+
+def _collect_resources(app: Sphinx) -> None:
+    """Collect resource metadata from libtmux_mcp source at build time."""
+    collector = _ResourceCollector()
+
+    resource_modules = ["hierarchy"]
+
+    for mod_name in resource_modules:
+        collector._current_module = mod_name
+        try:
+            mod = importlib.import_module(f"libtmux_mcp.resources.{mod_name}")
+            if hasattr(mod, "register"):
+                mod.register(collector)
+        except Exception:
+            logger.warning(
+                "fastmcp_autodoc: failed to load resource module %s",
+                mod_name,
+                exc_info=True,
+            )
+
+    app.env.fastmcp_resources = {r.name: r for r in collector.resources}  # type: ignore[attr-defined]
+
+
+def _collect_models(app: Sphinx) -> None:
+    """Collect Pydantic model metadata from libtmux_mcp.models at build time."""
+    from pydantic import BaseModel
+
+    try:
+        mod = importlib.import_module(_MODEL_MODULE)
+    except ImportError:
+        logger.warning("fastmcp_autodoc: could not import %s", _MODEL_MODULE)
+        app.env.fastmcp_models = {}  # type: ignore[attr-defined]
+        return
+
+    models: dict[str, ModelInfo] = {}
+    for name, obj in inspect.getmembers(mod, inspect.isclass):
+        if not issubclass(obj, BaseModel):
+            continue
+        if getattr(obj, "__module__", "") != _MODEL_MODULE:
+            continue
+
+        fields: list[ModelFieldInfo] = []
+        for field_name, field_info in obj.model_fields.items():
+            # Determine type string
+            ann = obj.__annotations__.get(field_name, "")
+            type_str = _format_annotation(ann)
+
+            # Determine required / default
+            has_default_factory = (
+                hasattr(field_info, "default_factory")
+                and field_info.default_factory is not None
+            )
+            has_default = not field_info.is_required() and not has_default_factory
+
+            if has_default_factory:
+                required = False
+                factory = field_info.default_factory
+                # Show factory name for common factories
+                default_str = f"{factory.__name__}()" if factory else ""
+            elif has_default:
+                required = False
+                default_val = field_info.default
+                if default_val is None:
+                    default_str = "None"
+                elif isinstance(default_val, bool):
+                    default_str = str(default_val)
+                elif isinstance(default_val, str):
+                    default_str = repr(default_val)
+                else:
+                    default_str = str(default_val)
+            else:
+                required = True
+                default_str = ""
+
+            # Extract description from Field(description=...)
+            description = ""
+            if hasattr(field_info, "description") and field_info.description:
+                description = field_info.description
+
+            fields.append(
+                ModelFieldInfo(
+                    name=field_name,
+                    type_str=type_str,
+                    required=required,
+                    default=default_str,
+                    description=description,
+                )
+            )
+
+        models[name] = ModelInfo(
+            name=name,
+            qualified_name=f"{_MODEL_MODULE}.{name}",
+            docstring=obj.__doc__ or "",
+            fields=fields,
+        )
+
+    app.env.fastmcp_models = models  # type: ignore[attr-defined]
+
+
+def _collect_all(app: Sphinx) -> None:
+    """Collect tools, resources, and models at build time."""
+    _collect_tools(app)
+    _collect_resources(app)
+    _collect_models(app)
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +1046,410 @@ class FastMCPToolSummaryDirective(SphinxDirective):
             result_nodes.append(section)
 
         return result_nodes
+
+
+class FastMCPResourceDirective(SphinxDirective):
+    """Autodocument a single MCP resource as a proper section.
+
+    Creates a section node (visible in ToC) containing:
+    - Resource badge + one-line description
+    - URI template literal block
+    - Optional parameter table
+    - Return type
+
+    Usage::
+
+        ```{fastmcp-resource} hierarchy.get_sessions
+        ```
+    """
+
+    required_arguments = 1
+    optional_arguments = 0
+    has_content = True
+    final_argument_whitespace = False
+
+    def run(self) -> list[nodes.Node]:
+        """Build resource section nodes."""
+        arg = self.arguments[0]
+        func_name = arg.split(".")[-1] if "." in arg else arg
+
+        resources: dict[str, ResourceInfo] = getattr(self.env, "fastmcp_resources", {})
+        resource = resources.get(func_name)
+
+        if resource is None:
+            return [
+                self.state.document.reporter.warning(
+                    f"fastmcp-resource: resource '{func_name}' not found. "
+                    f"Available: {', '.join(sorted(resources.keys()))}",
+                    line=self.lineno,
+                )
+            ]
+
+        return self._build_resource_section(resource)
+
+    def _build_resource_section(self, resource: ResourceInfo) -> list[nodes.Node]:
+        """Build section: title, badge, description, URI template, params."""
+        document = self.state.document
+
+        # Section with anchor ID
+        section_id = f"resource-{resource.name.replace('_', '-')}"
+        section = nodes.section()
+        section["ids"].append(section_id)
+        document.note_explicit_target(section)
+
+        # Title: resource name + resource badge
+        title_node = nodes.title("", "")
+        title_node += nodes.literal("", resource.name)
+        title_node += nodes.Text(" ")
+        title_node += _resource_badge()
+        section += title_node
+
+        # Description paragraph
+        first_para = _first_paragraph(resource.docstring)
+        if first_para:
+            desc_para = _parse_rst_inline(first_para, self.state, self.lineno)
+            section += desc_para
+
+        # URI template as literal block
+        uri_block = nodes.literal_block("", resource.uri_template)
+        uri_block["language"] = "none"
+        uri_block["classes"].append("fastmcp-uri-template")
+        section += uri_block
+
+        # Returns
+        if resource.return_annotation:
+            returns_para = nodes.paragraph("")
+            returns_para += nodes.strong("", "Returns: ")
+            type_para = _make_type_xref(resource.return_annotation)
+            for child in type_para.children:
+                returns_para += child.deepcopy()
+            section += returns_para
+
+        # Parameter table
+        if resource.params:
+            section += _make_para(nodes.strong("", "Parameters"))
+            headers = ["Parameter", "Type", "Required", "Default", "Description"]
+            rows: list[list[str | nodes.Node]] = []
+            for p in resource.params:
+                desc_node = (
+                    _parse_rst_inline(p.description, self.state, self.lineno)
+                    if p.description
+                    else nodes.paragraph("", "\u2014")
+                )
+
+                type_cell, _is_enum = _make_type_cell_smart(p.type_str)
+
+                default_cell: str | nodes.Node = "\u2014"
+                if p.default and p.default != "None":
+                    default_cell = _make_para(_make_literal(p.default))
+
+                rows.append(
+                    [
+                        _make_para(_make_literal(p.name)),
+                        type_cell,
+                        "yes" if p.required else "no",
+                        default_cell,
+                        desc_node,
+                    ]
+                )
+            section += _make_table(headers, rows, col_widths=[15, 15, 8, 10, 52])
+
+        return [section]
+
+
+class FastMCPResourceSummaryDirective(SphinxDirective):
+    """Generate a summary table of all resources.
+
+    Produces a single table with URI Template, Title, and Description columns.
+
+    Usage::
+
+        ```{fastmcp-resourcesummary}
+        ```
+    """
+
+    required_arguments = 0
+    optional_arguments = 0
+    has_content = False
+
+    def run(self) -> list[nodes.Node]:
+        """Build resource summary table."""
+        resources: dict[str, ResourceInfo] = getattr(self.env, "fastmcp_resources", {})
+
+        if not resources:
+            return [
+                self.state.document.reporter.warning(
+                    "fastmcp-resourcesummary: no resources found.",
+                    line=self.lineno,
+                )
+            ]
+
+        headers = ["URI Template", "Title", "Description"]
+        rows: list[list[str | nodes.Node]] = []
+        for resource in sorted(resources.values(), key=lambda r: r.uri_template):
+            first_line = _first_paragraph(resource.docstring)
+            ref = nodes.reference("", "", internal=True)
+            section_id = f"resource-{resource.name.replace('_', '-')}"
+            ref["refuri"] = f"#{section_id}"
+            ref += nodes.literal("", resource.uri_template)
+            rows.append(
+                [
+                    _make_para(ref),
+                    resource.title,
+                    _parse_rst_inline(first_line, self.state, self.lineno),
+                ]
+            )
+
+        return [_make_table(headers, rows, col_widths=[35, 15, 50])]
+
+
+class FastMCPModelDirective(SphinxDirective):
+    """Autodocument a single Pydantic model as a proper section.
+
+    Creates a section node (visible in ToC) containing:
+    - Model badge + docstring
+    - Field table (Field, Type, Required, Default, Description)
+
+    Options:
+    - ``:fields:`` — comma-separated allowlist of fields to include
+    - ``:exclude:`` — comma-separated denylist of fields to exclude
+
+    Usage::
+
+        ```{fastmcp-model} SessionInfo
+        ```
+    """
+
+    required_arguments = 1
+    optional_arguments = 0
+    has_content = True
+    final_argument_whitespace = False
+    option_spec: t.ClassVar[dict[str, t.Any]] = {
+        "fields": lambda x: x,
+        "exclude": lambda x: x,
+    }
+
+    def run(self) -> list[nodes.Node]:
+        """Build model section nodes."""
+        model_name = self.arguments[0].strip()
+
+        models: dict[str, ModelInfo] = getattr(self.env, "fastmcp_models", {})
+        model = models.get(model_name)
+
+        if model is None:
+            return [
+                self.state.document.reporter.warning(
+                    f"fastmcp-model: model '{model_name}' not found. "
+                    f"Available: {', '.join(sorted(models.keys()))}",
+                    line=self.lineno,
+                )
+            ]
+
+        return self._build_model_section(model)
+
+    def _build_model_section(self, model: ModelInfo) -> list[nodes.Node]:
+        """Build section: title, badge, docstring, field table."""
+        document = self.state.document
+
+        # Section with anchor ID
+        section_id = f"model-{model.name}"
+        section = nodes.section()
+        section["ids"].append(section_id)
+        document.note_explicit_target(section)
+
+        # Title: model name + model badge
+        title_node = nodes.title("", "")
+        title_node += nodes.literal("", model.name)
+        title_node += nodes.Text(" ")
+        title_node += _model_badge()
+        section += title_node
+
+        # Docstring
+        first_para = _first_paragraph(model.docstring)
+        if first_para:
+            desc_para = _parse_rst_inline(first_para, self.state, self.lineno)
+            section += desc_para
+
+        # Field table
+        fields = self._filter_fields(model.fields)
+        if fields:
+            section += self._build_field_table(fields)
+
+        return [section]
+
+    def _filter_fields(self, fields: list[ModelFieldInfo]) -> list[ModelFieldInfo]:
+        """Apply :fields: and :exclude: options."""
+        result = list(fields)
+        fields_opt = self.options.get("fields")
+        if fields_opt:
+            allow = {f.strip() for f in fields_opt.split(",")}
+            result = [f for f in result if f.name in allow]
+        exclude_opt = self.options.get("exclude")
+        if exclude_opt:
+            deny = {f.strip() for f in exclude_opt.split(",")}
+            result = [f for f in result if f.name not in deny]
+        return result
+
+    def _build_field_table(self, fields: list[ModelFieldInfo]) -> nodes.table:
+        """Build a field table."""
+        headers = ["Field", "Type", "Required", "Default", "Description"]
+        rows: list[list[str | nodes.Node]] = []
+        for f in fields:
+            type_cell, _is_enum = _make_type_cell_smart(f.type_str)
+
+            default_cell: str | nodes.Node = "\u2014"
+            if f.default and f.default != "None":
+                default_cell = _make_para(_make_literal(f.default))
+
+            desc = f.description or "\u2014"
+
+            rows.append(
+                [
+                    _make_para(_make_literal(f.name)),
+                    type_cell,
+                    "yes" if f.required else "no",
+                    default_cell,
+                    desc,
+                ]
+            )
+        return _make_table(headers, rows, col_widths=[15, 15, 8, 10, 52])
+
+
+class FastMCPModelFieldsDirective(SphinxDirective):
+    """Emit the field table for a model without a section wrapper.
+
+    Useful for embedding model fields inline in other content.
+
+    Options:
+    - ``:fields:`` — comma-separated allowlist of fields to include
+    - ``:exclude:`` — comma-separated denylist of fields to exclude
+    - ``:link-header:`` — if set, adds a header linking to the model section
+
+    Usage::
+
+        ```{fastmcp-model-fields} SessionInfo
+        ```
+    """
+
+    required_arguments = 1
+    optional_arguments = 0
+    has_content = False
+    option_spec: t.ClassVar[dict[str, t.Any]] = {
+        "fields": lambda x: x,
+        "exclude": lambda x: x,
+        "link-header": lambda x: x,
+    }
+
+    def run(self) -> list[nodes.Node]:
+        """Build field table nodes."""
+        model_name = self.arguments[0].strip()
+
+        models: dict[str, ModelInfo] = getattr(self.env, "fastmcp_models", {})
+        model = models.get(model_name)
+
+        if model is None:
+            return [
+                self.state.document.reporter.warning(
+                    f"fastmcp-model-fields: model '{model_name}' not found.",
+                    line=self.lineno,
+                )
+            ]
+
+        result: list[nodes.Node] = []
+
+        # Optional link header
+        link_header = self.options.get("link-header")
+        if link_header is not None:
+            ref = nodes.reference("", "", internal=True)
+            section_id = f"model-{model.name}"
+            ref["refuri"] = f"#{section_id}"
+            ref += nodes.literal("", model.name)
+            result.append(_make_para(ref))
+
+        # Filter and build table
+        fields = self._filter_fields(model.fields)
+        if fields:
+            headers = ["Field", "Type", "Required", "Default", "Description"]
+            rows: list[list[str | nodes.Node]] = []
+            for f in fields:
+                type_cell, _is_enum = _make_type_cell_smart(f.type_str)
+
+                default_cell: str | nodes.Node = "\u2014"
+                if f.default and f.default != "None":
+                    default_cell = _make_para(_make_literal(f.default))
+
+                desc = f.description or "\u2014"
+
+                rows.append(
+                    [
+                        _make_para(_make_literal(f.name)),
+                        type_cell,
+                        "yes" if f.required else "no",
+                        default_cell,
+                        desc,
+                    ]
+                )
+            result.append(_make_table(headers, rows, col_widths=[15, 15, 8, 10, 52]))
+
+        return result
+
+    def _filter_fields(self, fields: list[ModelFieldInfo]) -> list[ModelFieldInfo]:
+        """Apply :fields: and :exclude: options."""
+        result = list(fields)
+        fields_opt = self.options.get("fields")
+        if fields_opt:
+            allow = {f.strip() for f in fields_opt.split(",")}
+            result = [f for f in result if f.name in allow]
+        exclude_opt = self.options.get("exclude")
+        if exclude_opt:
+            deny = {f.strip() for f in exclude_opt.split(",")}
+            result = [f for f in result if f.name not in deny]
+        return result
+
+
+class FastMCPModelSummaryDirective(SphinxDirective):
+    """Generate a summary table of all models.
+
+    Produces a single table with Model and Description columns.
+
+    Usage::
+
+        ```{fastmcp-modelsummary}
+        ```
+    """
+
+    required_arguments = 0
+    optional_arguments = 0
+    has_content = False
+
+    def run(self) -> list[nodes.Node]:
+        """Build model summary table."""
+        models: dict[str, ModelInfo] = getattr(self.env, "fastmcp_models", {})
+
+        if not models:
+            return [
+                self.state.document.reporter.warning(
+                    "fastmcp-modelsummary: no models found.",
+                    line=self.lineno,
+                )
+            ]
+
+        headers = ["Model", "Description"]
+        rows: list[list[str | nodes.Node]] = []
+        for model in sorted(models.values(), key=lambda m: m.name):
+            first_line = _first_paragraph(model.docstring)
+            ref = nodes.reference("", "", internal=True)
+            section_id = f"model-{model.name}"
+            ref["refuri"] = f"#{section_id}"
+            ref += nodes.literal("", model.name)
+            rows.append(
+                [
+                    _make_para(ref),
+                    _parse_rst_inline(first_line, self.state, self.lineno),
+                ]
+            )
+
+        return [_make_table(headers, rows, col_widths=[30, 70])]
 
 
 # ---------------------------------------------------------------------------
@@ -1059,16 +1721,248 @@ def _badge_role(
     return [_safety_badge(text.strip())], []
 
 
+def _resource_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:resource:`get-sessions``` → linked name + resource badge."""
+    target = text.strip().replace("_", "-")
+    node = _resource_ref_placeholder(rawtext, reftarget=target, show_badge=True)
+    return [node], []
+
+
+def _resourceref_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:resourceref:`get-sessions``` → code-linked, no badge."""
+    target = text.strip().replace("_", "-")
+    node = _resource_ref_placeholder(rawtext, reftarget=target, show_badge=False)
+    return [node], []
+
+
+def _model_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:model:`SessionInfo``` → linked name + model badge."""
+    target = text.strip()
+    node = _model_ref_placeholder(rawtext, reftarget=target, show_badge=True)
+    return [node], []
+
+
+def _modelref_role(
+    name: str,
+    rawtext: str,
+    text: str,
+    lineno: int,
+    inliner: object,
+    options: dict[str, object] | None = None,
+    content: list[str] | None = None,
+) -> tuple[list[nodes.Node], list[nodes.system_message]]:
+    """Inline role ``:modelref:`SessionInfo``` → code-linked, no badge."""
+    target = text.strip()
+    node = _model_ref_placeholder(rawtext, reftarget=target, show_badge=False)
+    return [node], []
+
+
+def _register_resource_labels(app: Sphinx, doctree: nodes.document) -> None:
+    """Register resource sections with StandardDomain for site-wide {ref} links.
+
+    Same pattern as ``_register_tool_labels`` but for sections with
+    ``resource-`` prefixed IDs.
+    """
+    domain = t.cast("StandardDomain", app.env.get_domain("std"))
+    docname = app.env.docname
+    for section in doctree.findall(nodes.section):
+        if not section["ids"]:
+            continue
+        section_id = section["ids"][0]
+        if not section_id.startswith("resource-"):
+            continue
+        if section.children and isinstance(section[0], nodes.title):
+            title_node = section[0]
+            resource_name = ""
+            for child in title_node.children:
+                if isinstance(child, nodes.literal):
+                    resource_name = child.astext()
+                    break
+            if not resource_name:
+                continue
+            domain.anonlabels[section_id] = (docname, section_id)
+            domain.labels[section_id] = (docname, section_id, resource_name)
+
+
+def _register_model_labels(app: Sphinx, doctree: nodes.document) -> None:
+    """Register model sections with StandardDomain for site-wide {ref} links.
+
+    Same pattern as ``_register_tool_labels`` but for sections with
+    ``model-`` prefixed IDs.
+    """
+    domain = t.cast("StandardDomain", app.env.get_domain("std"))
+    docname = app.env.docname
+    for section in doctree.findall(nodes.section):
+        if not section["ids"]:
+            continue
+        section_id = section["ids"][0]
+        if not section_id.startswith("model-"):
+            continue
+        if section.children and isinstance(section[0], nodes.title):
+            title_node = section[0]
+            model_name = ""
+            for child in title_node.children:
+                if isinstance(child, nodes.literal):
+                    model_name = child.astext()
+                    break
+            if not model_name:
+                continue
+            domain.anonlabels[section_id] = (docname, section_id)
+            domain.labels[section_id] = (docname, section_id, model_name)
+
+
+def _resolve_resource_refs(
+    app: Sphinx,
+    doctree: nodes.document,
+    fromdocname: str,
+) -> None:
+    """Resolve ``{resource}`` and ``{resourceref}`` placeholders.
+
+    ``{resource}`` renders as ``code`` + resource badge.
+    ``{resourceref}`` renders as ``code`` only (no badge).
+    """
+    domain = t.cast("StandardDomain", app.env.get_domain("std"))
+    builder = app.builder
+
+    for node in list(doctree.findall(_resource_ref_placeholder)):
+        target = node.get("reftarget", "")
+        show_badge = node.get("show_badge", True)
+        # Try resource-prefixed label
+        label_key = f"resource-{target}"
+        label_info = domain.labels.get(label_key)
+        if label_info is None:
+            node.replace_self(nodes.literal("", target.replace("-", "_")))
+            continue
+
+        todocname, labelid, _title = label_info
+        resource_name = target.replace("-", "_")
+
+        newnode = nodes.reference("", "", internal=True)
+        try:
+            newnode["refuri"] = builder.get_relative_uri(fromdocname, todocname)
+            if labelid:
+                newnode["refuri"] += "#" + labelid
+        except Exception:
+            logger.warning(
+                "fastmcp_autodoc: failed to resolve URI for %s -> %s",
+                fromdocname,
+                todocname,
+            )
+            newnode["refuri"] = "#" + labelid
+        newnode["classes"].append("reference")
+        newnode["classes"].append("internal")
+
+        newnode += nodes.literal("", resource_name)
+        if show_badge:
+            newnode += nodes.Text(" ")
+            newnode += _resource_badge()
+
+        node.replace_self(newnode)
+
+
+def _resolve_model_refs(
+    app: Sphinx,
+    doctree: nodes.document,
+    fromdocname: str,
+) -> None:
+    """Resolve ``{model}`` and ``{modelref}`` placeholders.
+
+    ``{model}`` renders as ``code`` + model badge.
+    ``{modelref}`` renders as ``code`` only (no badge).
+    """
+    domain = t.cast("StandardDomain", app.env.get_domain("std"))
+    builder = app.builder
+
+    for node in list(doctree.findall(_model_ref_placeholder)):
+        target = node.get("reftarget", "")
+        show_badge = node.get("show_badge", True)
+        # Try model-prefixed label
+        label_key = f"model-{target}"
+        label_info = domain.labels.get(label_key)
+        if label_info is None:
+            node.replace_self(nodes.literal("", target))
+            continue
+
+        todocname, labelid, _title = label_info
+
+        newnode = nodes.reference("", "", internal=True)
+        try:
+            newnode["refuri"] = builder.get_relative_uri(fromdocname, todocname)
+            if labelid:
+                newnode["refuri"] += "#" + labelid
+        except Exception:
+            logger.warning(
+                "fastmcp_autodoc: failed to resolve URI for %s -> %s",
+                fromdocname,
+                todocname,
+            )
+            newnode["refuri"] = "#" + labelid
+        newnode["classes"].append("reference")
+        newnode["classes"].append("internal")
+
+        newnode += nodes.literal("", target)
+        if show_badge:
+            newnode += nodes.Text(" ")
+            newnode += _model_badge()
+
+        node.replace_self(newnode)
+
+
 def setup(app: Sphinx) -> ExtensionMetadata:
     """Register the fastmcp_autodoc extension."""
+    # Nodes
     app.add_node(
         _safety_badge_node,
         html=(_visit_safety_badge_html, _depart_safety_badge_html),
     )
-    app.connect("builder-inited", _collect_tools)
+    app.add_node(
+        _resource_badge_node,
+        html=(_visit_resource_badge_html, _depart_resource_badge_html),
+    )
+    app.add_node(
+        _model_badge_node,
+        html=(_visit_model_badge_html, _depart_model_badge_html),
+    )
+
+    # Collection
+    app.connect("builder-inited", _collect_all)
+
+    # Label registration
     app.connect("doctree-read", _register_tool_labels)
+    app.connect("doctree-read", _register_resource_labels)
+    app.connect("doctree-read", _register_model_labels)
+
+    # Ref resolution
     app.connect("doctree-resolved", _add_section_badges)
     app.connect("doctree-resolved", _resolve_tool_refs)
+    app.connect("doctree-resolved", _resolve_resource_refs)
+    app.connect("doctree-resolved", _resolve_model_refs)
+
+    # Tool roles
     app.add_role("tool", _tool_role)
     app.add_role("toolref", _toolref_role)
     app.add_role("toolicon", _toolicon_role)
@@ -1077,9 +1971,31 @@ def setup(app: Sphinx) -> ExtensionMetadata:
     app.add_role("tooliconil", _tooliconil_role)
     app.add_role("tooliconir", _tooliconir_role)
     app.add_role("badge", _badge_role)
+
+    # Resource roles
+    app.add_role("resource", _resource_role)
+    app.add_role("resourceref", _resourceref_role)
+
+    # Model roles
+    app.add_role("model", _model_role)
+    app.add_role("modelref", _modelref_role)
+
+    # Tool directives
     app.add_directive("fastmcp-tool", FastMCPToolDirective)
     app.add_directive("fastmcp-tool-input", FastMCPToolInputDirective)
     app.add_directive("fastmcp-toolsummary", FastMCPToolSummaryDirective)
+
+    # Resource directives
+    app.add_directive("fastmcp-resource", FastMCPResourceDirective)
+    app.add_directive("fastmcp-resourcesummary", FastMCPResourceSummaryDirective)
+
+    # Model directives
+    app.add_directive("fastmcp-model", FastMCPModelDirective)
+    app.add_directive("fastmcp-model-fields", FastMCPModelFieldsDirective)
+    app.add_directive("fastmcp-modelsummary", FastMCPModelSummaryDirective)
+
+    # CSS
+    app.add_css_file("css/fastmcp_autodoc.css")
 
     return {
         "version": "0.1.0",
