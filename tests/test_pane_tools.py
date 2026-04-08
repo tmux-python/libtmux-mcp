@@ -8,16 +8,30 @@ import pytest
 from fastmcp.exceptions import ToolError
 from libtmux.test.retry import retry_until
 
-from libtmux_mcp.models import PaneContentMatch, WaitForTextResult
+from libtmux_mcp.models import (
+    ContentChangeResult,
+    PaneContentMatch,
+    PaneSnapshot,
+    WaitForTextResult,
+)
 from libtmux_mcp.tools.pane_tools import (
     capture_pane,
     clear_pane,
+    display_message,
+    enter_copy_mode,
+    exit_copy_mode,
     get_pane_info,
     kill_pane,
+    paste_text,
+    pipe_pane,
     resize_pane,
     search_panes,
+    select_pane,
     send_keys,
     set_pane_title,
+    snapshot_pane,
+    swap_pane,
+    wait_for_content_change,
     wait_for_text,
 )
 
@@ -507,3 +521,292 @@ def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None
             pane_id=mcp_pane.pane_id,
             socket_name=mcp_server.socket_name,
         )
+
+
+# ---------------------------------------------------------------------------
+# snapshot_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_pane(mcp_server: Server, mcp_pane: Pane) -> None:
+    """snapshot_pane returns rich metadata alongside content."""
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert isinstance(result, PaneSnapshot)
+    assert result.pane_id == mcp_pane.pane_id
+    assert isinstance(result.content, str)
+    assert result.cursor_x >= 0
+    assert result.cursor_y >= 0
+    assert result.pane_width > 0
+    assert result.pane_height > 0
+    assert result.pane_in_mode is False
+    assert result.pane_mode is None
+    assert result.history_size >= 0
+
+
+def test_snapshot_pane_cursor_moves(mcp_server: Server, mcp_pane: Pane) -> None:
+    """snapshot_pane reflects cursor position changes."""
+    mcp_pane.send_keys("echo hello_snapshot", enter=True)
+    retry_until(
+        lambda: "hello_snapshot" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "hello_snapshot" in result.content
+    assert result.pane_current_command is not None
+
+
+# ---------------------------------------------------------------------------
+# wait_for_content_change tests
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_content_change_detects_change(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """wait_for_content_change detects screen changes."""
+    import threading
+
+    # Send a command after a brief delay to trigger a change
+    def _send_later() -> None:
+        import time
+
+        time.sleep(0.2)
+        mcp_pane.send_keys("echo CHANGE_DETECTED_xyz", enter=True)
+
+    thread = threading.Thread(target=_send_later)
+    thread.start()
+
+    result = wait_for_content_change(
+        pane_id=mcp_pane.pane_id,
+        timeout=3.0,
+        socket_name=mcp_server.socket_name,
+    )
+    thread.join()
+    assert isinstance(result, ContentChangeResult)
+    assert result.changed is True
+    assert result.timed_out is False
+    assert result.elapsed_seconds > 0
+
+
+def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
+    """wait_for_content_change times out when no change occurs."""
+    # Wait for the shell prompt to settle before testing for "no change"
+    import time
+
+    time.sleep(0.5)
+
+    result = wait_for_content_change(
+        pane_id=mcp_pane.pane_id,
+        timeout=0.5,
+        socket_name=mcp_server.socket_name,
+    )
+    assert isinstance(result, ContentChangeResult)
+    assert result.changed is False
+    assert result.timed_out is True
+
+
+# ---------------------------------------------------------------------------
+# select_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_select_pane_by_id(mcp_server: Server, mcp_session: Session) -> None:
+    """select_pane focuses a specific pane by ID."""
+    window = mcp_session.active_window
+    pane1 = window.active_pane
+    assert pane1 is not None
+    window.split()
+
+    # Select the first pane
+    result = select_pane(
+        pane_id=pane1.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == pane1.pane_id
+
+
+def test_select_pane_directional(mcp_server: Server, mcp_session: Session) -> None:
+    """select_pane navigates using direction."""
+    window = mcp_session.active_window
+    pane1 = window.active_pane
+    assert pane1 is not None
+    pane2 = window.split()  # creates pane below; pane1 stays active
+
+    # pane1 is active, select "down" should go to pane2
+    result = select_pane(
+        direction="down",
+        window_id=window.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == pane2.pane_id
+
+
+def test_select_pane_requires_target(mcp_server: Server) -> None:
+    """select_pane raises ToolError when neither pane_id nor direction given."""
+    with pytest.raises(ToolError, match="Provide either"):
+        select_pane(socket_name=mcp_server.socket_name)
+
+
+# ---------------------------------------------------------------------------
+# swap_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_swap_pane(mcp_server: Server, mcp_session: Session) -> None:
+    """swap_pane exchanges two pane positions."""
+    window = mcp_session.active_window
+    pane1 = window.active_pane
+    assert pane1 is not None
+    pane2 = window.split()
+
+    assert pane1.pane_id is not None
+    assert pane2.pane_id is not None
+
+    result = swap_pane(
+        source_pane_id=pane1.pane_id,
+        target_pane_id=pane2.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == pane1.pane_id
+
+
+# ---------------------------------------------------------------------------
+# pipe_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_pipe_pane_start_stop(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any
+) -> None:
+    """pipe_pane starts and stops piping output to a file."""
+    log_file = str(tmp_path / "pane_output.log")
+
+    # Start piping
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=log_file,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "piping" in result.lower()
+
+    # Stop piping
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=None,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "stopped" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# display_message tests
+# ---------------------------------------------------------------------------
+
+
+def test_display_message(mcp_server: Server, mcp_pane: Pane) -> None:
+    """display_message expands tmux format strings."""
+    result = display_message(
+        format_string="#{pane_width}x#{pane_height}",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "x" in result
+    parts = result.split("x")
+    assert len(parts) == 2
+    assert parts[0].isdigit()
+    assert parts[1].isdigit()
+
+
+def test_display_message_zoomed_flag(mcp_server: Server, mcp_session: Session) -> None:
+    """display_message queries arbitrary tmux variables."""
+    window = mcp_session.active_window
+    pane = window.active_pane
+    assert pane is not None
+    result = display_message(
+        format_string="#{window_zoomed_flag}",
+        pane_id=pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result in ("0", "1")
+
+
+# ---------------------------------------------------------------------------
+# enter_copy_mode / exit_copy_mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_enter_and_exit_copy_mode(mcp_server: Server, mcp_pane: Pane) -> None:
+    """enter_copy_mode enters copy mode, exit_copy_mode leaves it."""
+    enter_result = enter_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert enter_result.pane_id == mcp_pane.pane_id
+
+    # Verify pane is in copy mode via snapshot
+    snap = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert snap.pane_in_mode is True
+
+    exit_result = exit_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert exit_result.pane_id == mcp_pane.pane_id
+
+
+def test_enter_copy_mode_with_scroll(mcp_server: Server, mcp_pane: Pane) -> None:
+    """enter_copy_mode can scroll up immediately."""
+    # Generate some scrollback history
+    for i in range(20):
+        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
+    retry_until(
+        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    enter_result = enter_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        scroll_up=5,
+        socket_name=mcp_server.socket_name,
+    )
+    assert enter_result.pane_id == mcp_pane.pane_id
+
+    # Clean up: exit copy mode
+    exit_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# paste_text tests
+# ---------------------------------------------------------------------------
+
+
+def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
+    """paste_text pastes text into a pane via tmux buffer."""
+    result = paste_text(
+        text="echo PASTE_TEST_marker_xyz",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "pasted" in result.lower()
+
+    # Verify the text appeared in the pane
+    retry_until(
+        lambda: "PASTE_TEST_marker_xyz" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )

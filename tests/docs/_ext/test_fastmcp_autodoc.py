@@ -666,7 +666,7 @@ def test_collect_real_tools() -> None:
 
 
 def test_collect_real_tools_total_count() -> None:
-    """All 27 tools should be collected."""
+    """All 38 tools should be collected."""
     collector = fastmcp_autodoc._ToolCollector()
 
     import importlib
@@ -683,4 +683,4 @@ def test_collect_real_tools_total_count() -> None:
         mod = importlib.import_module(f"libtmux_mcp.tools.{mod_name}")
         mod.register(collector)
 
-    assert len(collector.tools) == 27
+    assert len(collector.tools) == 38
