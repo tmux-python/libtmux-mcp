@@ -300,8 +300,8 @@ Kill the entire tmux server.
 ```{toctree}
 :hidden:
 
-sessions
-windows
-panes
-options
+server/index
+session/index
+window/index
+pane/index
 ```

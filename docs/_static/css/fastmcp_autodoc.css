@@ -1,0 +1,37 @@
+/* fastmcp_autodoc.css — resource badge, model badge, URI template, table polish */
+
+/* Resource badge (blue) — additional ARIA styling */
+span.sd-badge[aria-label*="resource"] {
+    user-select: none;
+}
+
+/* Model badge (purple) — additional ARIA styling */
+span.sd-badge[aria-label*="model"] {
+    user-select: none;
+}
+
+/* URI template block — left-border accent, monospace */
+.fastmcp-uri-template {
+    border-left: 3px solid var(--sd-color-info, #0dcaf0);
+    padding: 0.5em 1em;
+    background: var(--sd-color-info-bg, #f0f9ff);
+    font-family: var(--sd-fontfamily-monospace, monospace);
+}
+
+/* Badge in section headings — medium size, not full h1 scale */
+h1 .sd-badge,
+h2 .sd-badge {
+    font-size: 0.5em;
+    vertical-align: middle;
+}
+
+/* Sidebar: strip background from inline code (tool/resource/model names) */
+.sidebar-tree code.literal {
+    background: none;
+}
+
+/* Field/param table polish — tighter padding */
+.fastmcp-autodoc-table td,
+.fastmcp-autodoc-table th {
+    padding: 0.35em 0.6em;
+}

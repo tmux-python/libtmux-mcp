@@ -665,6 +665,29 @@ def test_collect_real_tools() -> None:
     assert socket_param.required is False
 
 
+# ---------------------------------------------------------------------------
+# _discover_model_classes
+# ---------------------------------------------------------------------------
+
+
+def test_discover_model_classes_finds_all_12() -> None:
+    """_discover_model_classes finds all 12 Pydantic models."""
+    classes = fastmcp_autodoc._discover_model_classes()
+    assert len(classes) == 12
+
+
+def test_discover_model_classes_includes_pane_snapshot() -> None:
+    """_discover_model_classes includes PaneSnapshot (previously missing)."""
+    classes = fastmcp_autodoc._discover_model_classes()
+    assert "PaneSnapshot" in classes
+
+
+def test_discover_model_classes_includes_content_change_result() -> None:
+    """_discover_model_classes includes ContentChangeResult (previously missing)."""
+    classes = fastmcp_autodoc._discover_model_classes()
+    assert "ContentChangeResult" in classes
+
+
 def test_collect_real_tools_total_count() -> None:
     """All 38 tools should be collected."""
     collector = fastmcp_autodoc._ToolCollector()

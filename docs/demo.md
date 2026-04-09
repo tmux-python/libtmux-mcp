@@ -72,6 +72,26 @@ Use {tooliconl}`search-panes` to find text across all panes. If you know which p
 
 The fundamental pattern: {toolref}`send-keys` → {toolref}`wait-for-text` → {toolref}`capture-pane`. For discovery: {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`get-pane-info`.
 
+## Resource references
+
+### `{resource}` — code-linked with badge
+
+{resource}`get-sessions` · {resource}`get-session` · {resource}`get-session-windows` · {resource}`get-window` · {resource}`get-pane` · {resource}`get-pane-content`
+
+### `{resourceref}` — code-linked, no badge
+
+{resourceref}`get-sessions` · {resourceref}`get-session` · {resourceref}`get-session-windows` · {resourceref}`get-window` · {resourceref}`get-pane` · {resourceref}`get-pane-content`
+
+## Model references
+
+### `{model}` — code-linked with badge
+
+{model}`SessionInfo` · {model}`WindowInfo` · {model}`PaneInfo` · {model}`PaneSnapshot` · {model}`ServerInfo` · {model}`WaitForTextResult`
+
+### `{modelref}` — code-linked, no badge
+
+{modelref}`SessionInfo` · {modelref}`WindowInfo` · {modelref}`PaneInfo` · {modelref}`PaneSnapshot` · {modelref}`ServerInfo` · {modelref}`WaitForTextResult`
+
 ## Environment variable references
 
 {envvar}`LIBTMUX_SOCKET` · {envvar}`LIBTMUX_SAFETY` · {envvar}`LIBTMUX_SOCKET_PATH` · {envvar}`LIBTMUX_TMUX_BIN`
