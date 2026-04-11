@@ -56,7 +56,9 @@ libtmux-mcp = "libtmux_mcp:main"
 [dependency-groups]
 dev = [
   # Docs
-  "gp-sphinx==0.0.1a1",
+  "gp-sphinx==0.0.1a7",
+  "sphinx-autodoc-api-style==0.0.1a7",
+  "sphinx-autodoc-fastmcp==0.0.1a7",
   "gp-libs",
   "sphinx-autobuild",
   # Testing
@@ -77,7 +79,9 @@ dev = [
 ]
 
 docs = [
-  "gp-sphinx==0.0.1a1",
+  "gp-sphinx==0.0.1a7",
+  "sphinx-autodoc-api-style==0.0.1a7",
+  "sphinx-autodoc-fastmcp==0.0.1a7",
   "gp-libs",
   "sphinx-autobuild",
 ]
@@ -113,12 +117,8 @@ files = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["fastmcp_autodoc", "docutils", "docutils.*"]
+module = ["sphinx_autodoc_fastmcp", "sphinx_autodoc_fastmcp.*", "docutils", "docutils.*"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["tests.docs.*"]
-disable_error_code = ["untyped-decorator"]
 
 [tool.coverage.run]
 branch = true
