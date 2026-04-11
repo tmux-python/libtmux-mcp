@@ -1,5 +1,15 @@
 # Changelog
 
+## libtmux-mcp 0.1.x (unreleased)
+
+<!-- KEEP THIS PLACEHOLDER - DO NOT REMOVE OR MODIFY THIS LINE -->
+_Notes on upcoming releases will be added here_
+<!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
+
+### Documentation
+
+- Visual improvements to API docs from [gp-sphinx](https://gp-sphinx.git-pull.com)-based Sphinx packages (#10)
+
 ## libtmux-mcp 0.1.0a0 (2026-03-22)
 
 ### New features
