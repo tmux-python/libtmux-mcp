@@ -1285,7 +1285,7 @@ def register(mcp: FastMCP) -> None:
     )
     mcp.tool(
         title="Enter Copy Mode",
-        annotations=ANNOTATIONS_MUTATING,
+        annotations=ANNOTATIONS_CREATE,
         tags={TAG_MUTATING},
     )(enter_copy_mode)
     mcp.tool(
