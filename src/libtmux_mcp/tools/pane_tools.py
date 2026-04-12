@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 import typing as t
 
@@ -1190,9 +1191,7 @@ def paste_text(
         paste_args.extend(["-t", pane.pane_id or ""])
         pane.cmd("paste-buffer", *paste_args)
     finally:
-        from pathlib import Path
-
-        Path(tmppath).unlink()
+        pathlib.Path(tmppath).unlink()
 
     return f"Text pasted to pane {pane.pane_id}"
 
