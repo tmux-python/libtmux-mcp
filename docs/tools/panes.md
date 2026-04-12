@@ -223,7 +223,7 @@ Response:
   "pane_mode": null,
   "scroll_position": null,
   "history_size": 142,
-  "title": "",
+  "title": null,
   "pane_current_command": "zsh",
   "pane_current_path": "/home/user/myproject",
   "is_caller": null
@@ -576,10 +576,28 @@ with `start`/`end` to read scrollback.
 }
 ```
 
-Response (string):
+Response (start):
 
 ```text
 Piping pane %0 to /tmp/build.log
+```
+
+**Stopping the pipe:**
+
+```json
+{
+  "tool": "pipe_pane",
+  "arguments": {
+    "pane_id": "%0",
+    "output_path": null
+  }
+}
+```
+
+Response (stop):
+
+```text
+Piping stopped for pane %0
 ```
 
 ```{fastmcp-tool-input} pane_tools.pipe_pane
