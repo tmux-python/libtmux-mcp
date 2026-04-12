@@ -965,6 +965,12 @@ def pipe_pane(
         pane.cmd("pipe-pane")
         return f"Piping stopped for pane {pane.pane_id}"
 
+    if not output_path.strip():
+        from fastmcp.exceptions import ToolError
+
+        msg = "output_path must be a non-empty path, or None to stop piping."
+        raise ToolError(msg)
+
     redirect = ">>" if append else ">"
     pane.cmd("pipe-pane", f"cat {redirect} {shlex.quote(output_path)}")
     return f"Piping pane {pane.pane_id} to {output_path}"

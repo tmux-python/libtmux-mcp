@@ -757,6 +757,17 @@ def test_pipe_pane_quotes_path_with_spaces(
         )
 
 
+def test_pipe_pane_rejects_empty_path(mcp_server: Server, mcp_pane: Pane) -> None:
+    """pipe_pane raises ToolError when output_path is empty or whitespace."""
+    for bad in ("", "   ", "\t"):
+        with pytest.raises(ToolError, match="non-empty"):
+            pipe_pane(
+                pane_id=mcp_pane.pane_id,
+                output_path=bad,
+                socket_name=mcp_server.socket_name,
+            )
+
+
 # ---------------------------------------------------------------------------
 # display_message tests
 # ---------------------------------------------------------------------------
