@@ -234,8 +234,40 @@ def test_move_window_to_another_session(
         socket_name=mcp_server.socket_name,
     )
     assert result.window_id == window_id
+    # Proof the move actually happened: the returned session_id matches
+    # the destination, and the window no longer lives in the source.
+    assert result.session_id == target_session.session_id
+    source_window_ids = {w.window_id for w in mcp_session.windows}
+    assert window_id not in source_window_ids
 
     # Cleanup
+    target_session.kill()
+
+
+def test_move_window_to_another_session_with_index(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Cross-session move with an explicit destination_index refreshes metadata.
+
+    libtmux's Window.move_window skips its own refresh when BOTH a
+    non-empty destination index and a target session are provided. The
+    tool must refresh explicitly, otherwise the returned session_id
+    would be the pre-move (source) value.
+    """
+    target_session = mcp_server.new_session(session_name="move_target_indexed")
+    win = mcp_session.new_window(window_name="move_cross_idx")
+    window_id = win.window_id
+
+    result = move_window(
+        window_id=window_id,
+        destination_index="7",
+        destination_session=target_session.session_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == window_id
+    assert result.window_index == "7"
+    assert result.session_id == target_session.session_id
+
     target_session.kill()
 
 

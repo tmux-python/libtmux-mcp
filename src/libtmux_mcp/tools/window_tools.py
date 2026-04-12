@@ -416,6 +416,11 @@ def move_window(
         destination=destination_index,
         session=destination_session,
     )
+    # libtmux's Window.move_window skips its own refresh when BOTH a
+    # non-empty destination index and a target session are passed — in
+    # that branch session_id stays stale. Refresh unconditionally so
+    # _serialize_window always reads fresh metadata.
+    window.refresh()
     return _serialize_window(window)
 
 
