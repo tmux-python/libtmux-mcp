@@ -274,15 +274,22 @@ def select_window(
         window.select()
         return _serialize_window(window)
 
-    # Directional navigation
+    # Directional navigation: use the dedicated tmux subcommands so that
+    # libtmux's Session.cmd injects `-t $session_id` and the navigation
+    # stays scoped to this session (a bare `-t +` resolves against the
+    # attached client, not the target session).
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
-    _DIR_MAP = {"next": "+", "previous": "-", "last": "!"}
+    _CMD_MAP = {
+        "next": "next-window",
+        "previous": "previous-window",
+        "last": "last-window",
+    }
     assert direction is not None
-    flag = _DIR_MAP.get(direction)
-    if flag is None:
+    subcommand = _CMD_MAP.get(direction)
+    if subcommand is None:
         msg = f"Invalid direction: {direction!r}. Valid: next, previous, last"
         raise ToolError(msg)
-    session.cmd("select-window", "-t", flag)
+    session.cmd(subcommand)
 
     active_window = session.active_window
     return _serialize_window(active_window)
