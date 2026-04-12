@@ -564,6 +564,46 @@ def test_snapshot_pane_cursor_moves(mcp_server: Server, mcp_pane: Pane) -> None:
     assert result.pane_current_command is not None
 
 
+def test_snapshot_pane_pads_short_display_message_output(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """snapshot_pane survives a truncated display-message result.
+
+    Older tmux versions may drop unknown format variables (e.g.
+    `#{pane_mode}`), producing fewer delimited fields than expected.
+    Defensive padding must guarantee 11 fields so index access in the
+    parser never raises IndexError.
+    """
+    # Capture the real cmd so non-display-message calls still work.
+    real_cmd = mcp_pane.__class__.cmd
+
+    def fake_cmd(self, cmd_name, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = real_cmd(self, cmd_name, *args, **kwargs)
+        if cmd_name == "display-message":
+            # Return only the first 2 fields (cursor_x, cursor_y) —
+            # simulate an old tmux that dropped several unknown format
+            # variables. Without defensive padding, parts[2..10] would
+            # IndexError.
+            parts = result.stdout[0].split("\x1f") if result.stdout else [""]
+            result.stdout = ["\x1f".join(parts[:2])]
+        return result
+
+    monkeypatch.setattr(mcp_pane.__class__, "cmd", fake_cmd)
+
+    # Must not raise IndexError; missing fields default to zero/None.
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert isinstance(result, PaneSnapshot)
+    assert result.pane_width == 0
+    assert result.pane_height == 0
+    assert result.history_size == 0
+    assert result.title is None
+    assert result.pane_current_command is None
+    assert result.pane_current_path is None
+
+
 # ---------------------------------------------------------------------------
 # wait_for_content_change tests
 # ---------------------------------------------------------------------------

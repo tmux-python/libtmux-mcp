@@ -668,8 +668,12 @@ def snapshot_pane(
         window_id=window_id,
     )
 
-    # Fetch all metadata in a single display-message call using tab separators
-    fmt = "\t".join(
+    # Fetch all metadata in a single display-message call. Use the ASCII
+    # Unit Separator (0x1f) as the field delimiter — it cannot appear in
+    # normal terminal titles or paths, so tabs/newlines embedded in
+    # pane_title or pane_current_path can't shift field indices.
+    _SEP = "\x1f"
+    fmt = _SEP.join(
         [
             "#{cursor_x}",
             "#{cursor_y}",
@@ -685,7 +689,10 @@ def snapshot_pane(
         ]
     )
     result = pane.cmd("display-message", "-p", "-t", pane.pane_id, fmt)
-    parts = result.stdout[0].split("\t") if result.stdout else [""] * 11
+    raw = result.stdout[0] if result.stdout else ""
+    # Pad defensively to guarantee 11 fields even if tmux drops an
+    # unknown format variable on older versions.
+    parts = (raw.split(_SEP) + [""] * 11)[:11]
 
     content = "\n".join(pane.capture_pane())
 
