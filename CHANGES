@@ -9,6 +9,7 @@ _Notes on upcoming releases will be added here_
 ### Documentation
 
 - Visual improvements to API docs from [gp-sphinx](https://gp-sphinx.git-pull.com)-based Sphinx packages (#10)
+- Bump gp-sphinx docs stack to v0.0.1a8 (#14)
 
 ## libtmux-mcp 0.1.0a0 (2026-03-22)
 
