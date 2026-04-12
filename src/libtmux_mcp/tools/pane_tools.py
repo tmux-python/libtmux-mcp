@@ -1241,7 +1241,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Swap Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING})(
         swap_pane
     )
-    mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING})(
+    mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
         pipe_pane
     )
     mcp.tool(title="Display Message", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
