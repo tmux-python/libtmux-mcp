@@ -6,6 +6,7 @@ import typing as t
 
 import pytest
 from fastmcp.exceptions import ToolError
+from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
 from libtmux_mcp.models import (
@@ -686,24 +687,40 @@ def test_swap_pane(mcp_server: Server, mcp_session: Session) -> None:
 def test_pipe_pane_start_stop(
     mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any
 ) -> None:
-    """pipe_pane starts and stops piping output to a file."""
-    log_file = str(tmp_path / "pane_output.log")
+    """pipe_pane starts writes after start and halts writes after stop."""
+    log_file = tmp_path / "pane_output.log"
 
-    # Start piping
     result = pipe_pane(
         pane_id=mcp_pane.pane_id,
-        output_path=log_file,
+        output_path=str(log_file),
         socket_name=mcp_server.socket_name,
     )
     assert "piping" in result.lower()
 
-    # Stop piping
+    mcp_pane.send_keys("echo START_MARKER_42", enter=True)
+    retry_until(
+        lambda: log_file.exists() and "START_MARKER_42" in log_file.read_text(),
+        2,
+        raises=True,
+    )
+
     result = pipe_pane(
         pane_id=mcp_pane.pane_id,
         output_path=None,
         socket_name=mcp_server.socket_name,
     )
     assert "stopped" in result.lower()
+
+    size_after_stop = log_file.stat().st_size
+    mcp_pane.send_keys("echo POST_STOP_MARKER_99", enter=True)
+    # Poll briefly — if stop worked the file must not grow.
+    with pytest.raises(libtmux_exc.WaitTimeout):
+        retry_until(
+            lambda: log_file.stat().st_size > size_after_stop,
+            1,
+            raises=True,
+        )
+    assert "POST_STOP_MARKER_99" not in log_file.read_text()
 
 
 def test_pipe_pane_quotes_path_with_spaces(
