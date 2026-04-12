@@ -912,3 +912,35 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
         2,
         raises=True,
     )
+
+
+def test_paste_text_does_not_clobber_unnamed_buffer(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """paste_text must not overwrite the user's unnamed tmux paste buffer.
+
+    Regression guard for the pre-fix behavior: load-buffer without -b
+    writes into tmux's default unnamed buffer, clobbering whatever the
+    user had there. The fix uses a unique named buffer per call.
+    """
+    sentinel = "USER_UNNAMED_BUFFER_SENTINEL_777"
+    mcp_server.cmd("set-buffer", sentinel)
+
+    paste_text(
+        text="echo BUFFER_ISOLATION_test",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    # The user's unnamed buffer should still contain the sentinel.
+    result = mcp_server.cmd("show-buffer")
+    assert result.stdout and sentinel in "\n".join(result.stdout), (
+        "paste_text clobbered the user's unnamed paste buffer"
+    )
+
+    # And no mcp_paste_* named buffer should linger on the server.
+    listing = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}")
+    buffer_names = "\n".join(listing.stdout or [])
+    assert "mcp_paste_" not in buffer_names, (
+        f"paste_text leaked a named buffer: {buffer_names!r}"
+    )

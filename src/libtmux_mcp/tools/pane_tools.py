@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import re
 import shlex
 import typing as t
+import uuid
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
@@ -1172,6 +1174,8 @@ def paste_text(
     import subprocess
     import tempfile
 
+    from fastmcp.exceptions import ToolError
+
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,
@@ -1181,31 +1185,49 @@ def paste_text(
         window_id=window_id,
     )
 
-    # Write text to a temp file and load into tmux buffer
-    # (libtmux's cmd() doesn't support stdin)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(text)
-        tmppath = f.name
-
+    # Use a unique named tmux buffer so we don't clobber the user's
+    # unnamed paste buffer, and so we can reliably clean up on error
+    # paths (paste-buffer -b NAME -d deletes the named buffer).
+    buffer_name = f"mcp_paste_{uuid.uuid4().hex}"
+    tmppath: str | None = None
     try:
-        # Build tmux command args for loading buffer
+        # Write text to a temp file and load into tmux buffer
+        # (libtmux's cmd() doesn't support stdin).
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            tmppath = f.name  # bind first so cleanup works even if write fails
+            f.write(text)
+
+        # Build tmux command args for loading the named buffer
         tmux_bin: str = getattr(server, "tmux_bin", None) or "tmux"
         load_args: list[str] = [tmux_bin]
         if server.socket_name:
             load_args.extend(["-L", server.socket_name])
         if server.socket_path:
             load_args.extend(["-S", str(server.socket_path)])
-        load_args.extend(["load-buffer", tmppath])
-        subprocess.run(load_args, check=True, capture_output=True)
+        load_args.extend(["load-buffer", "-b", buffer_name, tmppath])
 
-        # Paste from buffer into pane
-        paste_args = ["-d"]  # delete buffer after paste
+        try:
+            subprocess.run(load_args, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+            msg = f"load-buffer failed: {stderr or e}"
+            raise ToolError(msg) from e
+
+        # Paste from the named buffer. -d deletes only that named buffer,
+        # leaving any unnamed user buffer intact.
+        paste_args = ["-b", buffer_name, "-d"]
         if bracket:
             paste_args.append("-p")  # bracketed paste mode
         paste_args.extend(["-t", pane.pane_id or ""])
         pane.cmd("paste-buffer", *paste_args)
     finally:
-        pathlib.Path(tmppath).unlink()
+        if tmppath is not None:
+            pathlib.Path(tmppath).unlink(missing_ok=True)
+        # Defensive: the buffer should already be gone (paste-buffer -d
+        # deletes it), but if paste-buffer failed before -d took effect
+        # we leak an entry in the tmux server. Best-effort delete.
+        with contextlib.suppress(Exception):
+            server.cmd("delete-buffer", "-b", buffer_name)
 
     return f"Text pasted to pane {pane.pane_id}"
 
