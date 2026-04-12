@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shlex
 import typing as t
 
 from libtmux_mcp._utils import (
@@ -965,7 +966,7 @@ def pipe_pane(
         return f"Piping stopped for pane {pane.pane_id}"
 
     redirect = ">>" if append else ">"
-    pane.cmd("pipe-pane", f"cat {redirect} {output_path}")
+    pane.cmd("pipe-pane", f"cat {redirect} {shlex.quote(output_path)}")
     return f"Piping pane {pane.pane_id} to {output_path}"
 
 

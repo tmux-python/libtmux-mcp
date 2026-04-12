@@ -706,6 +706,40 @@ def test_pipe_pane_start_stop(
     assert "stopped" in result.lower()
 
 
+def test_pipe_pane_quotes_path_with_spaces(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any
+) -> None:
+    """pipe_pane survives an output_path containing spaces.
+
+    Without shell-quoting the path, tmux runs `cat >> /tmp/has space.log`
+    which the shell splits into two arguments — the redirect silently
+    lands on `/tmp/has` and `space.log` becomes a literal cat argument.
+    """
+    log_file = tmp_path / "has space.log"
+    marker = "PIPE_PANE_MARKER_42"
+
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=str(log_file),
+        socket_name=mcp_server.socket_name,
+    )
+    assert "piping" in result.lower()
+
+    try:
+        mcp_pane.send_keys(f"echo {marker}", enter=True)
+        retry_until(
+            lambda: log_file.exists() and marker in log_file.read_text(),
+            2,
+            raises=True,
+        )
+    finally:
+        pipe_pane(
+            pane_id=mcp_pane.pane_id,
+            output_path=None,
+            socket_name=mcp_server.socket_name,
+        )
+
+
 # ---------------------------------------------------------------------------
 # display_message tests
 # ---------------------------------------------------------------------------
