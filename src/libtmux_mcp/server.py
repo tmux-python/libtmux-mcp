@@ -17,7 +17,7 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
 )
-from libtmux_mcp.middleware import SafetyMiddleware
+from libtmux_mcp.middleware import AuditMiddleware, SafetyMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ mcp = FastMCP(
     name="libtmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),
-    middleware=[SafetyMiddleware(max_tier=_safety_level)],
+    middleware=[SafetyMiddleware(max_tier=_safety_level), AuditMiddleware()],
     on_duplicate="error",
 )
 
