@@ -94,7 +94,7 @@ Response:
     "pane_active": "1",
     "window_id": "@0",
     "session_id": "$0",
-    "is_caller": null
+    "is_caller": false
   },
   {
     "pane_id": "%1",
@@ -108,7 +108,7 @@ Response:
     "pane_active": "0",
     "window_id": "@0",
     "session_id": "$0",
-    "is_caller": null
+    "is_caller": false
   }
 ]
 ```
@@ -194,7 +194,7 @@ Response:
   "pane_active": "0",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 

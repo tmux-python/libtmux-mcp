@@ -81,7 +81,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -130,7 +130,7 @@ Response:
       "FAIL: test_upload (AssertionError)",
       "3 tests: 2 passed, 1 failed"
     ],
-    "is_caller": null
+    "is_caller": false
   }
 ]
 ```
@@ -226,7 +226,7 @@ Response:
   "title": null,
   "pane_current_command": "zsh",
   "pane_current_path": "/home/user/myproject",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -381,7 +381,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -453,7 +453,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -498,7 +498,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -542,7 +542,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -643,7 +643,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
@@ -686,7 +686,7 @@ Response:
   "pane_active": "1",
   "window_id": "@0",
   "session_id": "$0",
-  "is_caller": null
+  "is_caller": false
 }
 ```
 
