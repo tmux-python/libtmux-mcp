@@ -696,6 +696,65 @@ def test_select_pane_requires_target(mcp_server: Server) -> None:
         select_pane(socket_name=mcp_server.socket_name)
 
 
+def test_select_pane_next_previous_respects_target_window(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """select_pane direction=next/previous must anchor to window_id.
+
+    Regression guard: bare `-t +1` / `-t -1` pane targets resolve
+    against the attached client's current window (tmux cmd-find.c),
+    not against any earlier -t on the command line. Targeting a
+    non-active window must use a window-scoped syntax like
+    `@window_id.+` to actually affect that window. Without the fix,
+    calling select_pane(direction='next', window_id=w2) when w1 is
+    the client's active window shifts focus in w1 and leaves w2
+    untouched.
+    """
+    w1 = mcp_session.active_window
+    assert w1.active_pane is not None
+    w1.split()
+    w1.split()
+    w2 = mcp_session.new_window()
+    w2.split()
+    w2.split()
+
+    # Make w1 the active window again, so w2 is the NON-active target.
+    w1.select()
+    w1.refresh()
+    w2.refresh()
+
+    w1_before = w1.active_pane.pane_id
+    assert w2.active_pane is not None
+    w2_before = w2.active_pane.pane_id
+
+    result = select_pane(
+        direction="next",
+        window_id=w2.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    w1.refresh()
+    w2.refresh()
+    assert w2.active_pane is not None
+    w2_after = w2.active_pane.pane_id
+    assert w1.active_pane is not None
+    w1_after = w1.active_pane.pane_id
+
+    # Result must describe a pane in w2 (the target), not w1.
+    w2_pane_ids = {p.pane_id for p in w2.panes}
+    assert result.pane_id in w2_pane_ids, (
+        f"select_pane returned {result.pane_id} which is not in target "
+        f"window {w2.window_id}'s panes {w2_pane_ids}"
+    )
+    # w2's active pane must have actually changed.
+    assert w2_after != w2_before, "target window w2's active pane did not change"
+    # w1's active pane must NOT have changed — the wrong-window bug.
+    assert w1_after == w1_before, (
+        f"select_pane targeting w2 shifted focus in w1 "
+        f"({w1_before} -> {w1_after}) — anchor missing"
+    )
+
+
 # ---------------------------------------------------------------------------
 # swap_pane tests
 # ---------------------------------------------------------------------------

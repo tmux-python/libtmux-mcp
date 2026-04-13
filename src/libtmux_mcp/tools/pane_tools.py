@@ -870,9 +870,14 @@ def select_pane(
     if direction in _DIRECTION_FLAGS:
         window.select_pane(_DIRECTION_FLAGS[direction])
     elif direction == "next":
-        window.cmd("select-pane", "-t", "+1")
+        # Anchor the relative target to the requested window. A bare
+        # `-t +` resolves against the attached client's current window
+        # (tmux cmd-find.c), NOT the window we're targeting.
+        # `@window_id.+` forces tmux to resolve the `+` offset against
+        # the explicit window's active pane.
+        server.cmd("select-pane", target=f"{window.window_id}.+")
     elif direction == "previous":
-        window.cmd("select-pane", "-t", "-1")
+        server.cmd("select-pane", target=f"{window.window_id}.-")
 
     # Query the active pane ID directly from tmux to avoid stale cache
     target = window.window_id or ""
