@@ -8,17 +8,35 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 
 **Reading terminal content?**
 - Know which pane? → {tool}`capture-pane`
+- Need text + cursor + mode in one call? → {tool}`snapshot-pane`
 - Don't know which pane? → {tool}`search-panes`
-- Need to wait for output? → {tool}`wait-for-text`
+- Need to wait for specific output? → {tool}`wait-for-text`
+- Need to wait for *any* change? → {tool}`wait-for-content-change`
 - Only need metadata (PID, path, size)? → {tool}`get-pane-info`
+- Need an arbitrary tmux variable? → {tool}`display-message`
 
 **Running a command?**
 - {tool}`send-keys` — then {tool}`wait-for-text` + {tool}`capture-pane`
+- Pasting multi-line text? → {tool}`paste-text`
 
 **Creating workspace structure?**
 - New session → {tool}`create-session`
 - New window → {tool}`create-window`
 - New pane → {tool}`split-window`
+
+**Navigating?**
+- Switch pane → {tool}`select-pane` (by ID or direction)
+- Switch window → {tool}`select-window` (by ID, index, or direction)
+
+**Rearranging layout?**
+- Swap two panes → {tool}`swap-pane`
+- Move window → {tool}`move-window`
+- Change layout → {tool}`select-layout`
+
+**Scrollback / copy mode?**
+- Enter copy mode → {tool}`enter-copy-mode`
+- Exit copy mode → {tool}`exit-copy-mode`
+- Log output to file → {tool}`pipe-pane`
 
 **Changing settings?**
 - tmux options → {tool}`show-option` / {tool}`set-option`
@@ -89,6 +107,24 @@ Query a tmux option value.
 :link: show-environment
 :link-type: ref
 Show tmux environment variables.
+:::
+
+:::{grid-item-card} snapshot_pane
+:link: snapshot-pane
+:link-type: ref
+Rich capture: content + cursor + mode + scroll.
+:::
+
+:::{grid-item-card} wait_for_content_change
+:link: wait-for-content-change
+:link-type: ref
+Wait for any screen change.
+:::
+
+:::{grid-item-card} display_message
+:link: display-message
+:link-type: ref
+Query arbitrary tmux format strings.
 :::
 
 ::::
@@ -176,6 +212,54 @@ Set a tmux option.
 :link: set-environment
 :link-type: ref
 Set a tmux environment variable.
+:::
+
+:::{grid-item-card} select_pane
+:link: select-pane
+:link-type: ref
+Focus a pane by ID or direction.
+:::
+
+:::{grid-item-card} select_window
+:link: select-window
+:link-type: ref
+Focus a window by ID, index, or direction.
+:::
+
+:::{grid-item-card} swap_pane
+:link: swap-pane
+:link-type: ref
+Exchange positions of two panes.
+:::
+
+:::{grid-item-card} move_window
+:link: move-window
+:link-type: ref
+Move window to another index or session.
+:::
+
+:::{grid-item-card} pipe_pane
+:link: pipe-pane
+:link-type: ref
+Stream pane output to a file.
+:::
+
+:::{grid-item-card} enter_copy_mode
+:link: enter-copy-mode
+:link-type: ref
+Enter copy mode for scrollback.
+:::
+
+:::{grid-item-card} exit_copy_mode
+:link: exit-copy-mode
+:link-type: ref
+Exit copy mode.
+:::
+
+:::{grid-item-card} paste_text
+:link: paste-text
+:link-type: ref
+Paste multi-line text via tmux buffer.
 :::
 
 ::::

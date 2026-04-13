@@ -12,6 +12,7 @@ from libtmux_mcp.tools.session_tools import (
     kill_session,
     list_windows,
     rename_session,
+    select_window,
 )
 
 if t.TYPE_CHECKING:
@@ -190,6 +191,78 @@ def test_list_windows_with_filters(
     # Cleanup
     cross_win.kill()
     second_session.kill()
+
+
+# ---------------------------------------------------------------------------
+# select_window tests
+# ---------------------------------------------------------------------------
+
+
+def test_select_window_by_id(mcp_server: Server, mcp_session: Session) -> None:
+    """select_window focuses a window by ID."""
+    win1 = mcp_session.active_window
+    mcp_session.new_window(window_name="select_target")
+
+    result = select_window(
+        window_id=win1.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == win1.window_id
+
+
+def test_select_window_by_index(mcp_server: Server, mcp_session: Session) -> None:
+    """select_window focuses a window by index."""
+    win1 = mcp_session.active_window
+    mcp_session.new_window(window_name="select_idx")
+
+    result = select_window(
+        window_index=win1.window_index,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == win1.window_id
+
+
+def test_select_window_direction_next(mcp_server: Server, mcp_session: Session) -> None:
+    """select_window navigates to next window."""
+    win1 = mcp_session.active_window
+    win2 = mcp_session.new_window(window_name="next_win")
+
+    # Make win1 active
+    win1.select()
+    result = select_window(
+        direction="next",
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == win2.window_id
+
+
+def test_select_window_requires_target(mcp_server: Server) -> None:
+    """select_window raises ToolError without target or direction."""
+    with pytest.raises(ToolError, match="Provide"):
+        select_window(socket_name=mcp_server.socket_name)
+
+
+def test_select_window_last_on_single_window_session_raises(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """select_window last with no prior window must surface the tmux error.
+
+    Regression guard: session.cmd("last-window") on a session that has
+    never had a previously-active window emits "no last window" on
+    stderr, but the tool previously discarded the return value and
+    returned the unchanged active window as if the navigation had
+    worked.
+    """
+    # The fixture session is freshly created: there is no previously-
+    # active window for last-window to jump back to.
+    with pytest.raises(ToolError, match="last-window"):
+        select_window(
+            direction="last",
+            session_name=mcp_session.session_name,
+            socket_name=mcp_server.socket_name,
+        )
 
 
 def test_kill_session_requires_target(mcp_server: Server) -> None:

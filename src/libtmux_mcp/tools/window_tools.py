@@ -368,6 +368,62 @@ def resize_window(
     return _serialize_window(window)
 
 
+@handle_tool_errors
+def move_window(
+    window_id: str | None = None,
+    window_index: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    destination_index: str = "",
+    destination_session: str | None = None,
+    socket_name: str | None = None,
+) -> WindowInfo:
+    """Move a window to a different index or session.
+
+    Reorder windows within a session or move a window to another session.
+
+    Parameters
+    ----------
+    window_id : str, optional
+        Window ID (e.g. '@1').
+    window_index : str, optional
+        Window index within the session.
+    session_name : str, optional
+        Source session name.
+    session_id : str, optional
+        Source session ID.
+    destination_index : str
+        Target window index. Default empty string (next available).
+    destination_session : str, optional
+        Target session name or ID. Default is current session.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    WindowInfo
+        Serialized window after move.
+    """
+    server = _get_server(socket_name=socket_name)
+    window = _resolve_window(
+        server,
+        window_id=window_id,
+        window_index=window_index,
+        session_name=session_name,
+        session_id=session_id,
+    )
+    window.move_window(
+        destination=destination_index,
+        session=destination_session,
+    )
+    # libtmux's Window.move_window skips its own refresh when BOTH a
+    # non-empty destination index and a target session are passed — in
+    # that branch session_id stays stale. Refresh unconditionally so
+    # _serialize_window always reads fresh metadata.
+    window.refresh()
+    return _serialize_window(window)
+
+
 def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(title="List Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
@@ -390,3 +446,6 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(
         title="Resize Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(resize_window)
+    mcp.tool(
+        title="Move Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+    )(move_window)

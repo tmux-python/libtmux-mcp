@@ -219,6 +219,86 @@ def kill_session(
     return f"Session killed: {name}"
 
 
+@handle_tool_errors
+def select_window(
+    window_id: str | None = None,
+    window_index: str | None = None,
+    direction: t.Literal["next", "previous", "last"] | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    socket_name: str | None = None,
+) -> WindowInfo:
+    """Select (focus) a tmux window by ID, index, or direction.
+
+    Use to navigate between windows. Provide window_id or window_index
+    for direct selection, or direction for relative navigation.
+
+    Parameters
+    ----------
+    window_id : str, optional
+        Window ID (e.g. '@1') for direct selection.
+    window_index : str, optional
+        Window index for direct selection.
+    direction : str, optional
+        Relative direction: 'next', 'previous', or 'last'.
+    session_name : str, optional
+        Session name for resolution.
+    session_id : str, optional
+        Session ID for resolution.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    WindowInfo
+        The now-active window.
+    """
+    from fastmcp.exceptions import ToolError
+
+    if window_id is None and window_index is None and direction is None:
+        msg = "Provide window_id, window_index, or direction."
+        raise ToolError(msg)
+
+    server = _get_server(socket_name=socket_name)
+
+    if window_id is not None or window_index is not None:
+        from libtmux_mcp._utils import _resolve_window
+
+        window = _resolve_window(
+            server,
+            window_id=window_id,
+            window_index=window_index,
+            session_name=session_name,
+            session_id=session_id,
+        )
+        window.select()
+        return _serialize_window(window)
+
+    # Directional navigation: use the dedicated tmux subcommands so that
+    # libtmux's Session.cmd injects `-t $session_id` and the navigation
+    # stays scoped to this session (a bare `-t +` resolves against the
+    # attached client, not the target session).
+    session = _resolve_session(server, session_name=session_name, session_id=session_id)
+    _CMD_MAP = {
+        "next": "next-window",
+        "previous": "previous-window",
+        "last": "last-window",
+    }
+    assert direction is not None
+    subcommand = _CMD_MAP.get(direction)
+    if subcommand is None:
+        msg = f"Invalid direction: {direction!r}. Valid: next, previous, last"
+        raise ToolError(msg)
+    proc = session.cmd(subcommand)
+    if proc.stderr:
+        stderr = " ".join(proc.stderr).strip()
+        msg = f"tmux {subcommand} failed: {stderr}"
+        raise ToolError(msg)
+
+    active_window = session.active_window
+    return _serialize_window(active_window)
+
+
 def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
     mcp.tool(title="List Windows", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
@@ -235,3 +315,6 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_DESTRUCTIVE},
     )(kill_session)
+    mcp.tool(
+        title="Select Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+    )(select_window)

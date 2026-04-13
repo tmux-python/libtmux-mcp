@@ -6,6 +6,13 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+- New pane tools: `snapshot_pane`, `wait_for_content_change`, `select_pane`, `swap_pane`, `pipe_pane`, `display_message`, `enter_copy_mode`, `exit_copy_mode`, and `paste_text` (#11)
+- New session tool: `select_window` — navigate by ID, index, or direction (#11)
+- New window tool: `move_window` — reorder within a session or move across sessions (#11)
+- New models: `PaneSnapshot` and `ContentChangeResult` (#11)
+
 ### Documentation
 
 - Visual improvements to API docs from [gp-sphinx](https://gp-sphinx.git-pull.com)-based Sphinx packages (#10)

@@ -53,13 +53,13 @@ Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 
 Read tmux state without changing anything.
 
-{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`get-pane-info` · {toolref}`search-panes` · {toolref}`wait-for-text`
+{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`wait-for-content-change` · {toolref}`display-message`
 
 ### Act (mutating)
 
 Create or modify tmux objects.
 
-{toolref}`create-session` · {toolref}`send-keys` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`resize-pane` · {toolref}`set-option`
+{toolref}`create-session` · {toolref}`send-keys` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option`
 
 ### Destroy (destructive)
 

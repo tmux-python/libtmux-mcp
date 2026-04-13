@@ -6,18 +6,33 @@ import typing as t
 
 import pytest
 from fastmcp.exceptions import ToolError
+from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
-from libtmux_mcp.models import PaneContentMatch, WaitForTextResult
+from libtmux_mcp.models import (
+    ContentChangeResult,
+    PaneContentMatch,
+    PaneSnapshot,
+    WaitForTextResult,
+)
 from libtmux_mcp.tools.pane_tools import (
     capture_pane,
     clear_pane,
+    display_message,
+    enter_copy_mode,
+    exit_copy_mode,
     get_pane_info,
     kill_pane,
+    paste_text,
+    pipe_pane,
     resize_pane,
     search_panes,
+    select_pane,
     send_keys,
     set_pane_title,
+    snapshot_pane,
+    swap_pane,
+    wait_for_content_change,
     wait_for_text,
 )
 
@@ -507,3 +522,496 @@ def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None
             pane_id=mcp_pane.pane_id,
             socket_name=mcp_server.socket_name,
         )
+
+
+# ---------------------------------------------------------------------------
+# snapshot_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_pane(mcp_server: Server, mcp_pane: Pane) -> None:
+    """snapshot_pane returns rich metadata alongside content."""
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert isinstance(result, PaneSnapshot)
+    assert result.pane_id == mcp_pane.pane_id
+    assert isinstance(result.content, str)
+    assert result.cursor_x >= 0
+    assert result.cursor_y >= 0
+    assert result.pane_width > 0
+    assert result.pane_height > 0
+    assert result.pane_in_mode is False
+    assert result.pane_mode is None
+    assert result.history_size >= 0
+
+
+def test_snapshot_pane_cursor_moves(mcp_server: Server, mcp_pane: Pane) -> None:
+    """snapshot_pane reflects cursor position changes."""
+    mcp_pane.send_keys("echo hello_snapshot", enter=True)
+    retry_until(
+        lambda: "hello_snapshot" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "hello_snapshot" in result.content
+    assert result.pane_current_command is not None
+
+
+def test_snapshot_pane_pads_short_display_message_output(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """snapshot_pane survives a truncated display-message result.
+
+    Older tmux versions may drop unknown format variables (e.g.
+    `#{pane_mode}`), producing fewer delimited fields than expected.
+    Defensive padding must guarantee 11 fields so index access in the
+    parser never raises IndexError.
+    """
+    # Capture the real cmd so non-display-message calls still work.
+    real_cmd = mcp_pane.__class__.cmd
+
+    def fake_cmd(self, cmd_name, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = real_cmd(self, cmd_name, *args, **kwargs)
+        if cmd_name == "display-message":
+            # Return only the first 2 fields (cursor_x, cursor_y) —
+            # simulate an old tmux that dropped several unknown format
+            # variables. Without defensive padding, parts[2..10] would
+            # IndexError.
+            parts = result.stdout[0].split("␞") if result.stdout else [""]
+            result.stdout = ["␞".join(parts[:2])]
+        return result
+
+    monkeypatch.setattr(mcp_pane.__class__, "cmd", fake_cmd)
+
+    # Must not raise IndexError; missing fields default to zero/None.
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert isinstance(result, PaneSnapshot)
+    assert result.pane_width == 0
+    assert result.pane_height == 0
+    assert result.history_size == 0
+    assert result.title is None
+    assert result.pane_current_command is None
+    assert result.pane_current_path is None
+
+
+# ---------------------------------------------------------------------------
+# wait_for_content_change tests
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_content_change_detects_change(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """wait_for_content_change detects screen changes."""
+    import threading
+
+    # Send a command after a brief delay to trigger a change
+    def _send_later() -> None:
+        import time
+
+        time.sleep(0.2)
+        mcp_pane.send_keys("echo CHANGE_DETECTED_xyz", enter=True)
+
+    thread = threading.Thread(target=_send_later)
+    thread.start()
+
+    result = wait_for_content_change(
+        pane_id=mcp_pane.pane_id,
+        timeout=3.0,
+        socket_name=mcp_server.socket_name,
+    )
+    thread.join()
+    assert isinstance(result, ContentChangeResult)
+    assert result.changed is True
+    assert result.timed_out is False
+    assert result.elapsed_seconds > 0
+
+
+def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
+    """wait_for_content_change times out when no change occurs."""
+    # Wait for the shell prompt to settle before testing for "no change"
+    import time
+
+    time.sleep(0.5)
+
+    result = wait_for_content_change(
+        pane_id=mcp_pane.pane_id,
+        timeout=0.5,
+        socket_name=mcp_server.socket_name,
+    )
+    assert isinstance(result, ContentChangeResult)
+    assert result.changed is False
+    assert result.timed_out is True
+
+
+# ---------------------------------------------------------------------------
+# select_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_select_pane_by_id(mcp_server: Server, mcp_session: Session) -> None:
+    """select_pane focuses a specific pane by ID."""
+    window = mcp_session.active_window
+    pane1 = window.active_pane
+    assert pane1 is not None
+    window.split()
+
+    # Select the first pane
+    result = select_pane(
+        pane_id=pane1.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == pane1.pane_id
+
+
+def test_select_pane_directional(mcp_server: Server, mcp_session: Session) -> None:
+    """select_pane navigates using direction."""
+    window = mcp_session.active_window
+    pane1 = window.active_pane
+    assert pane1 is not None
+    pane2 = window.split()  # creates pane below; pane1 stays active
+
+    # pane1 is active, select "down" should go to pane2
+    result = select_pane(
+        direction="down",
+        window_id=window.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == pane2.pane_id
+
+
+def test_select_pane_requires_target(mcp_server: Server) -> None:
+    """select_pane raises ToolError when neither pane_id nor direction given."""
+    with pytest.raises(ToolError, match="Provide either"):
+        select_pane(socket_name=mcp_server.socket_name)
+
+
+def test_select_pane_next_previous_respects_target_window(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """select_pane direction=next/previous must anchor to window_id.
+
+    Regression guard: bare `-t +1` / `-t -1` pane targets resolve
+    against the attached client's current window (tmux cmd-find.c),
+    not against any earlier -t on the command line. Targeting a
+    non-active window must use a window-scoped syntax like
+    `@window_id.+` to actually affect that window. Without the fix,
+    calling select_pane(direction='next', window_id=w2) when w1 is
+    the client's active window shifts focus in w1 and leaves w2
+    untouched.
+    """
+    w1 = mcp_session.active_window
+    assert w1.active_pane is not None
+    w1.split()
+    w1.split()
+    w2 = mcp_session.new_window()
+    w2.split()
+    w2.split()
+
+    # Make w1 the active window again, so w2 is the NON-active target.
+    w1.select()
+    w1.refresh()
+    w2.refresh()
+
+    w1_before = w1.active_pane.pane_id
+    assert w2.active_pane is not None
+    w2_before = w2.active_pane.pane_id
+
+    result = select_pane(
+        direction="next",
+        window_id=w2.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    w1.refresh()
+    w2.refresh()
+    assert w2.active_pane is not None
+    w2_after = w2.active_pane.pane_id
+    assert w1.active_pane is not None
+    w1_after = w1.active_pane.pane_id
+
+    # Result must describe a pane in w2 (the target), not w1.
+    w2_pane_ids = {p.pane_id for p in w2.panes}
+    assert result.pane_id in w2_pane_ids, (
+        f"select_pane returned {result.pane_id} which is not in target "
+        f"window {w2.window_id}'s panes {w2_pane_ids}"
+    )
+    # w2's active pane must have actually changed.
+    assert w2_after != w2_before, "target window w2's active pane did not change"
+    # w1's active pane must NOT have changed — the wrong-window bug.
+    assert w1_after == w1_before, (
+        f"select_pane targeting w2 shifted focus in w1 "
+        f"({w1_before} -> {w1_after}) — anchor missing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# swap_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_swap_pane(mcp_server: Server, mcp_session: Session) -> None:
+    """swap_pane exchanges two pane positions."""
+    window = mcp_session.active_window
+    pane1 = window.active_pane
+    assert pane1 is not None
+    pane2 = window.split()
+
+    assert pane1.pane_id is not None
+    assert pane2.pane_id is not None
+
+    result = swap_pane(
+        source_pane_id=pane1.pane_id,
+        target_pane_id=pane2.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == pane1.pane_id
+
+
+# ---------------------------------------------------------------------------
+# pipe_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_pipe_pane_start_stop(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any
+) -> None:
+    """pipe_pane starts writes after start and halts writes after stop."""
+    log_file = tmp_path / "pane_output.log"
+
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=str(log_file),
+        socket_name=mcp_server.socket_name,
+    )
+    assert "piping" in result.lower()
+
+    mcp_pane.send_keys("echo START_MARKER_42", enter=True)
+    retry_until(
+        lambda: log_file.exists() and "START_MARKER_42" in log_file.read_text(),
+        2,
+        raises=True,
+    )
+
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=None,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "stopped" in result.lower()
+
+    size_after_stop = log_file.stat().st_size
+    mcp_pane.send_keys("echo POST_STOP_MARKER_99", enter=True)
+    # Poll briefly — if stop worked the file must not grow.
+    with pytest.raises(libtmux_exc.WaitTimeout):
+        retry_until(
+            lambda: log_file.stat().st_size > size_after_stop,
+            1,
+            raises=True,
+        )
+    assert "POST_STOP_MARKER_99" not in log_file.read_text()
+
+
+def test_pipe_pane_quotes_path_with_spaces(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any
+) -> None:
+    """pipe_pane survives an output_path containing spaces.
+
+    Without shell-quoting the path, tmux runs `cat >> /tmp/has space.log`
+    which the shell splits into two arguments — the redirect silently
+    lands on `/tmp/has` and `space.log` becomes a literal cat argument.
+    """
+    log_file = tmp_path / "has space.log"
+    marker = "PIPE_PANE_MARKER_42"
+
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=str(log_file),
+        socket_name=mcp_server.socket_name,
+    )
+    assert "piping" in result.lower()
+
+    try:
+        mcp_pane.send_keys(f"echo {marker}", enter=True)
+        retry_until(
+            lambda: log_file.exists() and marker in log_file.read_text(),
+            2,
+            raises=True,
+        )
+    finally:
+        pipe_pane(
+            pane_id=mcp_pane.pane_id,
+            output_path=None,
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_pipe_pane_rejects_empty_path(mcp_server: Server, mcp_pane: Pane) -> None:
+    """pipe_pane raises ToolError when output_path is empty or whitespace."""
+    for bad in ("", "   ", "\t"):
+        with pytest.raises(ToolError, match="non-empty"):
+            pipe_pane(
+                pane_id=mcp_pane.pane_id,
+                output_path=bad,
+                socket_name=mcp_server.socket_name,
+            )
+
+
+# ---------------------------------------------------------------------------
+# display_message tests
+# ---------------------------------------------------------------------------
+
+
+def test_display_message(mcp_server: Server, mcp_pane: Pane) -> None:
+    """display_message expands tmux format strings."""
+    result = display_message(
+        format_string="#{pane_width}x#{pane_height}",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "x" in result
+    parts = result.split("x")
+    assert len(parts) == 2
+    assert parts[0].isdigit()
+    assert parts[1].isdigit()
+
+
+def test_display_message_zoomed_flag(mcp_server: Server, mcp_session: Session) -> None:
+    """display_message queries arbitrary tmux variables."""
+    window = mcp_session.active_window
+    pane = window.active_pane
+    assert pane is not None
+    result = display_message(
+        format_string="#{window_zoomed_flag}",
+        pane_id=pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result in ("0", "1")
+
+
+# ---------------------------------------------------------------------------
+# enter_copy_mode / exit_copy_mode tests
+# ---------------------------------------------------------------------------
+
+
+def test_enter_and_exit_copy_mode(mcp_server: Server, mcp_pane: Pane) -> None:
+    """enter_copy_mode enters copy mode, exit_copy_mode leaves it."""
+    enter_result = enter_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert enter_result.pane_id == mcp_pane.pane_id
+
+    # Verify pane is in copy mode via snapshot
+    snap = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert snap.pane_in_mode is True
+
+    exit_result = exit_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert exit_result.pane_id == mcp_pane.pane_id
+
+
+def test_enter_copy_mode_with_scroll(mcp_server: Server, mcp_pane: Pane) -> None:
+    """enter_copy_mode can scroll up immediately."""
+    # Generate some scrollback history
+    for i in range(20):
+        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
+    retry_until(
+        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    enter_result = enter_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        scroll_up=5,
+        socket_name=mcp_server.socket_name,
+    )
+    assert enter_result.pane_id == mcp_pane.pane_id
+
+    # Clean up: exit copy mode
+    exit_copy_mode(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# paste_text tests
+# ---------------------------------------------------------------------------
+
+
+def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
+    """paste_text pastes text into a pane via tmux buffer.
+
+    Uses bracket=False and a trailing newline so the shell actually
+    executes the echo command. Previous versions of this test
+    relied on the default bracket=True, which is fragile on CI:
+    bash readline needs a prompt cycle to latch bracketed-paste
+    mode, and if the paste arrives before that the escape sequences
+    get consumed as unrecognized input and the marker never reaches
+    the visible pane buffer. bracket=False sends raw bytes and the
+    trailing newline forces execution, exercising the full
+    paste->execute->output round-trip.
+    """
+    result = paste_text(
+        text="echo PASTE_TEST_marker_xyz\n",
+        pane_id=mcp_pane.pane_id,
+        bracket=False,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "pasted" in result.lower()
+
+    # Verify the echoed marker reaches the pane. 10 seconds is
+    # generous on local machines (<1s) but tolerates slow CI
+    # runners where bash cold-start can exceed the default budget.
+    retry_until(
+        lambda: "PASTE_TEST_marker_xyz" in "\n".join(mcp_pane.capture_pane()),
+        10,
+        raises=True,
+    )
+
+
+def test_paste_text_does_not_leak_named_buffer(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """paste_text must not leave its mcp_paste_* buffer behind.
+
+    Regression guard for the pre-fix behavior: the earlier
+    implementation used tmux's default unnamed buffer AND relied on
+    `paste-buffer -d` to clean up. If paste-buffer failed mid-flight
+    the buffer leaked. The fix generates a unique `mcp_paste_<uuid>`
+    named buffer per call and adds a best-effort `delete-buffer -b`
+    in `finally` so the server is left in a clean state on both
+    success and failure paths.
+
+    The check is portable across every tmux version the CI matrix
+    tests (3.2a through master): list-buffers with a format string
+    returns buffer names without any version-specific behavior.
+    """
+    paste_text(
+        text="echo BUFFER_ISOLATION_test",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    listing = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}")
+    buffer_names = "\n".join(listing.stdout or [])
+    assert "mcp_paste_" not in buffer_names, (
+        f"paste_text leaked a named buffer: {buffer_names!r}"
+    )

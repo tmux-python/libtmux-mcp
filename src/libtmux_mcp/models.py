@@ -139,3 +139,43 @@ class WaitForTextResult(BaseModel):
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
     timed_out: bool = Field(description="Whether the timeout was reached")
+
+
+class PaneSnapshot(BaseModel):
+    """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
+
+    pane_id: str = Field(description="Pane ID (e.g. '%1')")
+    content: str = Field(description="Visible pane text")
+    cursor_x: int = Field(description="Cursor column (0-based)")
+    cursor_y: int = Field(description="Cursor row (0-based)")
+    pane_width: int = Field(description="Pane width in columns")
+    pane_height: int = Field(description="Pane height in rows")
+    pane_in_mode: bool = Field(description="True if pane is in copy-mode or view-mode")
+    pane_mode: str | None = Field(
+        default=None, description="Mode name (e.g. 'copy-mode') or None if normal"
+    )
+    scroll_position: int | None = Field(
+        default=None,
+        description="Lines scrolled back in copy mode (None if not in copy mode)",
+    )
+    history_size: int = Field(description="Total scrollback lines available")
+    title: str | None = Field(default=None, description="Pane title")
+    pane_current_command: str | None = Field(
+        default=None, description="Running command"
+    )
+    pane_current_path: str | None = Field(
+        default=None, description="Current working directory"
+    )
+    is_caller: bool | None = Field(
+        default=None,
+        description="True if this is the MCP caller's own pane",
+    )
+
+
+class ContentChangeResult(BaseModel):
+    """Result of waiting for any screen content change."""
+
+    changed: bool = Field(description="Whether the content changed before timeout")
+    pane_id: str = Field(description="Pane ID that was polled")
+    elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+    timed_out: bool = Field(description="Whether the timeout was reached")
