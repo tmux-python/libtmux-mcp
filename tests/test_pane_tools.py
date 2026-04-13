@@ -957,20 +957,29 @@ def test_enter_copy_mode_with_scroll(mcp_server: Server, mcp_pane: Pane) -> None
 
 
 def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
-    """paste_text pastes text into a pane via tmux buffer."""
+    """paste_text pastes text into a pane via tmux buffer.
+
+    Uses bracket=False and a trailing newline so the shell actually
+    executes the echo command. Previous versions of this test
+    relied on the default bracket=True, which is fragile on CI:
+    bash readline needs a prompt cycle to latch bracketed-paste
+    mode, and if the paste arrives before that the escape sequences
+    get consumed as unrecognized input and the marker never reaches
+    the visible pane buffer. bracket=False sends raw bytes and the
+    trailing newline forces execution, exercising the full
+    paste->execute->output round-trip.
+    """
     result = paste_text(
-        text="echo PASTE_TEST_marker_xyz",
+        text="echo PASTE_TEST_marker_xyz\n",
         pane_id=mcp_pane.pane_id,
+        bracket=False,
         socket_name=mcp_server.socket_name,
     )
     assert "pasted" in result.lower()
 
-    # Verify the text appeared in the pane. Use a generous retry
-    # window: CI runners cold-start the pane's shell and the echo
-    # output can take several seconds to render on the first run.
-    # The 5-second budget tripped on tmux 3.3a CI; 10 seconds is
-    # still fast enough to keep the test useful locally but reliable
-    # on the slowest matrix cells.
+    # Verify the echoed marker reaches the pane. 10 seconds is
+    # generous on local machines (<1s) but tolerates slow CI
+    # runners where bash cold-start can exceed the default budget.
     retry_until(
         lambda: "PASTE_TEST_marker_xyz" in "\n".join(mcp_pane.capture_pane()),
         10,
