@@ -17,6 +17,8 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    _caller_is_on_server,
+    _get_caller_identity,
     _get_caller_pane_id,
     _get_server,
     _resolve_pane,
@@ -239,15 +241,19 @@ def kill_pane(
     """
     from fastmcp.exceptions import ToolError
 
-    caller = _get_caller_pane_id()
-    if caller is not None and pane_id == caller:
+    server = _get_server(socket_name=socket_name)
+    caller = _get_caller_identity()
+    if (
+        caller is not None
+        and caller.pane_id == pane_id
+        and _caller_is_on_server(server, caller)
+    ):
         msg = (
             "Refusing to kill the pane running this MCP server. "
             "Use a manual tmux command if intended."
         )
         raise ToolError(msg)
 
-    server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(server, pane_id=pane_id)
     pid = pane.pane_id
     pane.kill()
