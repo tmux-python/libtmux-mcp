@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import typing as t
 
 import pytest
@@ -978,14 +979,21 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
 def test_paste_text_does_not_clobber_unnamed_buffer(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
-    """paste_text must not overwrite the user's unnamed tmux paste buffer.
+    """paste_text must not disturb a user-owned tmux paste buffer.
 
     Regression guard for the pre-fix behavior: load-buffer without -b
     writes into tmux's default unnamed buffer, clobbering whatever the
-    user had there. The fix uses a unique named buffer per call.
+    user had there. The fix uses a unique named buffer per call so the
+    operation is isolated from any buffer the user has set up.
+
+    Uses an explicit named buffer as the sentinel because
+    `show-buffer` semantics for the default (unnamed) buffer vary
+    across tmux versions — targeting a named buffer is portable all
+    the way back to tmux 1.5.
     """
-    sentinel = "USER_UNNAMED_BUFFER_SENTINEL_777"
-    mcp_server.cmd("set-buffer", sentinel)
+    sentinel_name = "mcp_test_user_buffer"
+    sentinel_value = "USER_BUFFER_SENTINEL_777"
+    mcp_server.cmd("set-buffer", "-b", sentinel_name, sentinel_value)
 
     paste_text(
         text="echo BUFFER_ISOLATION_test",
@@ -993,11 +1001,16 @@ def test_paste_text_does_not_clobber_unnamed_buffer(
         socket_name=mcp_server.socket_name,
     )
 
-    # The user's unnamed buffer should still contain the sentinel.
-    result = mcp_server.cmd("show-buffer")
-    assert result.stdout and sentinel in "\n".join(result.stdout), (
-        "paste_text clobbered the user's unnamed paste buffer"
+    # The user's named buffer must still hold the sentinel unchanged.
+    result = mcp_server.cmd("show-buffer", "-b", sentinel_name)
+    assert result.stdout and sentinel_value in "\n".join(result.stdout), (
+        f"paste_text disturbed the user's named buffer {sentinel_name!r}; "
+        f"show-buffer returned {result.stdout!r}"
     )
+
+    # Clean up the sentinel.
+    with contextlib.suppress(Exception):
+        mcp_server.cmd("delete-buffer", "-b", sentinel_name)
 
     # And no mcp_paste_* named buffer should linger on the server.
     listing = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}")
