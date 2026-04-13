@@ -965,10 +965,12 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
     )
     assert "pasted" in result.lower()
 
-    # Verify the text appeared in the pane
+    # Verify the text appeared in the pane. Use a generous retry
+    # window: CI runners cold-start the pane's shell and the echo
+    # output can take several seconds to render on the first run.
     retry_until(
         lambda: "PASTE_TEST_marker_xyz" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        5,
         raises=True,
     )
 
