@@ -15,6 +15,7 @@ import pathlib
 import threading
 import typing as t
 
+from fastmcp.exceptions import ToolError
 from libtmux import exc
 from libtmux._internal.query_list import LOOKUP_NAME_MAP
 from libtmux.server import Server
@@ -473,8 +474,6 @@ def _apply_filters(
     if not filters:
         return [serializer(item) for item in items]
 
-    from fastmcp.exceptions import ToolError
-
     # Workaround: Cursor's composer-1/composer-1.5 models and some other
     # MCP clients serialize dict params as JSON strings instead of objects.
     # Claude and GPT models through Cursor work fine; the bug is model-specific.
@@ -605,7 +604,6 @@ def handle_tool_errors(
     Catches libtmux exceptions and re-raises as ``ToolError`` so that
     MCP responses have ``isError=True`` with a descriptive message.
     """
-    from fastmcp.exceptions import ToolError
 
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:

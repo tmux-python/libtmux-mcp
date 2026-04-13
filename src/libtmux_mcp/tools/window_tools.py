@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp.exceptions import ToolError
 from libtmux.constants import PaneDirection
 
 from libtmux_mcp._utils import (
@@ -150,8 +151,6 @@ def split_window(
     if direction is not None:
         pane_dir = _DIRECTION_MAP.get(direction)
         if pane_dir is None:
-            from fastmcp.exceptions import ToolError
-
             valid = ", ".join(sorted(_DIRECTION_MAP))
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ToolError(msg)
@@ -250,8 +249,6 @@ def kill_window(
     str
         Confirmation message.
     """
-    from fastmcp.exceptions import ToolError
-
     server = _get_server(socket_name=socket_name)
     window = _resolve_window(server, window_id=window_id)
 

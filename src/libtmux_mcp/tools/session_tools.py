@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp.exceptions import ToolError
 from libtmux.constants import WindowDirection
 
 from libtmux_mcp._utils import (
@@ -121,8 +122,6 @@ def create_window(
         }
         resolved = direction_map.get(direction)
         if resolved is None:
-            from fastmcp.exceptions import ToolError
-
             valid = ", ".join(sorted(direction_map))
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ToolError(msg)
@@ -191,8 +190,6 @@ def kill_session(
     str
         Confirmation message.
     """
-    from fastmcp.exceptions import ToolError
-
     if session_name is None and session_id is None:
         msg = (
             "Refusing to kill without an explicit target. "
@@ -252,8 +249,6 @@ def select_window(
     WindowInfo
         The now-active window.
     """
-    from fastmcp.exceptions import ToolError
-
     if window_id is None and window_index is None and direction is None:
         msg = "Provide window_id, window_index, or direction."
         raise ToolError(msg)
