@@ -6,9 +6,10 @@ import asyncio
 import hashlib
 import logging
 import typing as t
-from types import SimpleNamespace
 
 import pytest
+from fastmcp.server.middleware import MiddlewareContext
+from mcp.types import CallToolRequestParams
 
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.middleware import (
@@ -143,7 +144,7 @@ def test_redact_digest_shape() -> None:
 
 def test_summarize_args_redacts_sensitive_keys() -> None:
     """Sensitive arg names get replaced by a digest dict, not raw string."""
-    args = {
+    args: dict[str, t.Any] = {
         "keys": "rm -rf /",
         "text": "hello world",
         "value": "supersecret",
@@ -155,7 +156,9 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
         assert isinstance(summary[sensitive], dict)
         assert "len" in summary[sensitive]
         assert "sha256_prefix" in summary[sensitive]
-        assert args[sensitive] not in str(summary[sensitive])
+        raw_value = args[sensitive]
+        assert isinstance(raw_value, str)
+        assert raw_value not in str(summary[sensitive])
     # Non-sensitive args pass through unchanged.
     assert summary["pane_id"] == "%1"
     assert summary["bracket"] is True
@@ -187,14 +190,20 @@ class _RecordingCallNext:
 def _fake_context(
     name: str = "some_tool",
     arguments: dict[str, t.Any] | None = None,
-) -> SimpleNamespace:
-    """Build a MiddlewareContext-like stub for audit tests."""
-    message = SimpleNamespace(name=name, arguments=arguments or {})
-    fastmcp_context = SimpleNamespace(
-        client_id="test-client",
-        request_id="req-42",
+) -> MiddlewareContext[CallToolRequestParams]:
+    """Build a real MiddlewareContext for audit tests.
+
+    ``fastmcp_context`` is left as ``None`` — the real
+    :class:`fastmcp.Context` requires a live FastMCP server and MCP
+    request context to construct, which is out of scope for a unit
+    test. The audit middleware handles ``fastmcp_context=None``
+    cleanly; ``client_id`` and ``request_id`` just stay ``None`` in the
+    log record, which is exactly the production code path when no
+    upstream MCP context is attached.
+    """
+    return MiddlewareContext(
+        message=CallToolRequestParams(name=name, arguments=arguments or {}),
     )
-    return SimpleNamespace(message=message, fastmcp_context=fastmcp_context)
 
 
 def test_audit_middleware_logs_success(
@@ -213,7 +222,7 @@ def test_audit_middleware_logs_success(
     messages = [rec.getMessage() for rec in caplog.records]
     assert any("tool=list_sessions" in m and "outcome=ok" in m for m in messages)
     assert any("duration_ms=" in m for m in messages)
-    assert any("client_id=test-client" in m for m in messages)
+    assert any("client_id=None" in m for m in messages)
 
 
 def test_audit_middleware_logs_error_and_reraises(
