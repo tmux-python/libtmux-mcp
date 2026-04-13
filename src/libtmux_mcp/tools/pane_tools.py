@@ -670,11 +670,17 @@ def snapshot_pane(
         window_id=window_id,
     )
 
-    # Fetch all metadata in a single display-message call. Use the ASCII
-    # Unit Separator (0x1f) as the field delimiter — it cannot appear in
-    # normal terminal titles or paths, so tabs/newlines embedded in
-    # pane_title or pane_current_path can't shift field indices.
-    _SEP = "\x1f"
+    # Fetch all metadata in a single display-message call. Use a tab as
+    # the delimiter: tmux passes tabs through verbatim in
+    # display-message output, whereas other ASCII control characters
+    # (e.g. 0x1f / Unit Separator) get C-escaped to literal "\037"
+    # strings on tmux >=3.2 / <3.6-rc, which corrupts parsing. Tabs in
+    # pane_title are silently rejected by tmux's `select-pane -T`
+    # input sanitizer, so the `\t` delimiter is safe against that
+    # vector. Tabs in pane_current_path are legal on Linux but
+    # vanishingly rare; the defensive padding below limits the blast
+    # radius to a single truncated field rather than an IndexError.
+    _SEP = "\t"
     fmt = _SEP.join(
         [
             "#{cursor_x}",
