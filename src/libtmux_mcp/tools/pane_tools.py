@@ -670,17 +670,17 @@ def snapshot_pane(
         window_id=window_id,
     )
 
-    # Fetch all metadata in a single display-message call. Use a tab as
-    # the delimiter: tmux passes tabs through verbatim in
-    # display-message output, whereas other ASCII control characters
-    # (e.g. 0x1f / Unit Separator) get C-escaped to literal "\037"
-    # strings on tmux >=3.2 / <3.6-rc, which corrupts parsing. Tabs in
-    # pane_title are silently rejected by tmux's `select-pane -T`
-    # input sanitizer, so the `\t` delimiter is safe against that
-    # vector. Tabs in pane_current_path are legal on Linux but
-    # vanishingly rare; the defensive padding below limits the blast
-    # radius to a single truncated field rather than an IndexError.
-    _SEP = "\t"
+    # Fetch all metadata in a single display-message call. Use the
+    # printable Unicode glyph ␞ (U+241E, "SYMBOL FOR RECORD SEPARATOR")
+    # as the delimiter — the same choice libtmux itself uses for
+    # FORMAT_SEPARATOR. tmux's utf8_strvis (tmux/utf8.c) copies any
+    # valid UTF-8 multi-byte sequence verbatim, bypassing the vis()
+    # escape that turns ASCII control chars like 0x1f into literal
+    # "\037" in display-message output on some tmux builds. And ␞ is
+    # safe against the false-positive path that a tab delimiter has:
+    # tabs are legal (if rare) in Linux paths and could realistically
+    # appear in pane_current_path.
+    _SEP = "␞"
     fmt = _SEP.join(
         [
             "#{cursor_x}",

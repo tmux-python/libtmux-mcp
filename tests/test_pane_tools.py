@@ -584,8 +584,8 @@ def test_snapshot_pane_pads_short_display_message_output(
             # simulate an old tmux that dropped several unknown format
             # variables. Without defensive padding, parts[2..10] would
             # IndexError.
-            parts = result.stdout[0].split("\t") if result.stdout else [""]
-            result.stdout = ["\t".join(parts[:2])]
+            parts = result.stdout[0].split("␞") if result.stdout else [""]
+            result.stdout = ["␞".join(parts[:2])]
         return result
 
     monkeypatch.setattr(mcp_pane.__class__, "cmd", fake_cmd)
