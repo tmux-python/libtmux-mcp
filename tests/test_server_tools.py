@@ -204,9 +204,23 @@ def test_kill_server(
 def test_kill_server_self_kill_guard(
     mcp_server: Server, mcp_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """kill_server refuses when running inside tmux."""
+    """kill_server refuses when the caller shares the target's socket."""
     from fastmcp.exceptions import ToolError
 
+    from libtmux_mcp._utils import _effective_socket_path
+
+    socket_path = _effective_socket_path(mcp_server)
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$0")
     monkeypatch.setenv("TMUX_PANE", "%99")
     with pytest.raises(ToolError, match="Refusing to kill"):
         kill_server(socket_name=mcp_server.socket_name)
+
+
+def test_kill_server_allows_cross_socket(
+    mcp_server: Server, mcp_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """kill_server is allowed when the caller is on a different socket."""
+    monkeypatch.setenv("TMUX", "/tmp/tmux-99999/unrelated-socket,12345,$0")
+    monkeypatch.setenv("TMUX_PANE", "%99")
+    result = kill_server(socket_name=mcp_server.socket_name)
+    assert "killed" in result.lower()

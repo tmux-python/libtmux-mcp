@@ -321,6 +321,102 @@ def test_get_caller_pane_id_returns_none(monkeypatch: pytest.MonkeyPatch) -> Non
     assert _get_caller_pane_id() is None
 
 
+# ---------------------------------------------------------------------------
+# Caller identity parsing tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_caller_identity_parses_tmux_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_get_caller_identity parses TMUX as socket_path,pid,session_id."""
+    from libtmux_mcp._utils import _get_caller_identity
+
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,$7")
+    monkeypatch.setenv("TMUX_PANE", "%3")
+    caller = _get_caller_identity()
+    assert caller is not None
+    assert caller.socket_path == "/tmp/tmux-1000/default"
+    assert caller.server_pid == 12345
+    assert caller.session_id == "$7"
+    assert caller.pane_id == "%3"
+
+
+def test_get_caller_identity_returns_none_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_get_caller_identity returns None when neither TMUX nor TMUX_PANE set."""
+    from libtmux_mcp._utils import _get_caller_identity
+
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    assert _get_caller_identity() is None
+
+
+def test_get_caller_identity_tolerant_of_malformed_tmux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed TMUX doesn't raise — missing fields become None."""
+    from libtmux_mcp._utils import _get_caller_identity
+
+    monkeypatch.setenv("TMUX", "/tmp/sock")  # only socket, no pid/session
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    caller = _get_caller_identity()
+    assert caller is not None
+    assert caller.socket_path == "/tmp/sock"
+    assert caller.server_pid is None
+    assert caller.session_id is None
+
+
+def test_caller_is_on_server_matches_realpath(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same resolved socket path matches across symlink variants."""
+    from libtmux_mcp._utils import (
+        _caller_is_on_server,
+        _effective_socket_path,
+        _get_caller_identity,
+    )
+
+    effective = _effective_socket_path(mcp_server)
+    monkeypatch.setenv("TMUX", f"{effective},1,$0")
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    assert _caller_is_on_server(mcp_server, _get_caller_identity()) is True
+
+
+def test_caller_is_on_server_rejects_different_socket(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Different socket paths mean caller is on a different server."""
+    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+
+    monkeypatch.setenv("TMUX", "/tmp/tmux-99999/unrelated,1,$0")
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    assert _caller_is_on_server(mcp_server, _get_caller_identity()) is False
+
+
+def test_caller_is_on_server_conservative_when_socket_unknown(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TMUX_PANE without TMUX: err on the side of blocking (True)."""
+    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.setenv("TMUX_PANE", "%1")
+    assert _caller_is_on_server(mcp_server, _get_caller_identity()) is True
+
+
+def test_caller_is_on_server_none_when_not_in_tmux(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither TMUX nor TMUX_PANE set → no caller → no guard."""
+    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    assert _caller_is_on_server(mcp_server, _get_caller_identity()) is False
+
+
 class SerializePaneCallerFixture(t.NamedTuple):
     """Test fixture for _serialize_pane is_caller annotation."""
 

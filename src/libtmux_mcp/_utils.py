@@ -6,10 +6,12 @@ for all MCP tool functions.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import logging
 import os
+import pathlib
 import threading
 import typing as t
 
@@ -27,9 +29,112 @@ if t.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclasses.dataclass(frozen=True)
+class CallerIdentity:
+    """Identity of the tmux pane hosting this MCP server process.
+
+    Parsed from the ``TMUX`` and ``TMUX_PANE`` environment variables that
+    tmux injects into every child of a pane. ``TMUX`` has the format
+    ``socket_path,server_pid,session_id`` (see tmux ``environ.c:281``).
+
+    Used to scope self-protection checks to the caller's own tmux server —
+    a pane ID like ``%1`` is only unique within a single server, so
+    comparisons must also verify the socket path matches.
+    """
+
+    socket_path: str | None
+    server_pid: int | None
+    session_id: str | None
+    pane_id: str | None
+
+
+def _get_caller_identity() -> CallerIdentity | None:
+    """Return the caller's tmux identity, or None if not inside tmux.
+
+    Reads ``TMUX`` for socket_path/server_pid/session_id and ``TMUX_PANE``
+    for the pane id. Tolerant of missing/malformed ``TMUX`` values —
+    callers should check individual fields rather than relying on all
+    being populated.
+    """
+    pane_id = os.environ.get("TMUX_PANE")
+    tmux_env = os.environ.get("TMUX")
+
+    if not tmux_env and not pane_id:
+        return None
+
+    socket_path: str | None = None
+    server_pid: int | None = None
+    session_id: str | None = None
+
+    if tmux_env:
+        parts = tmux_env.split(",", 2)
+        if parts:
+            socket_path = parts[0] or None
+        if len(parts) >= 2 and parts[1]:
+            try:
+                server_pid = int(parts[1])
+            except ValueError:
+                server_pid = None
+        if len(parts) >= 3 and parts[2]:
+            session_id = parts[2]
+
+    return CallerIdentity(
+        socket_path=socket_path,
+        server_pid=server_pid,
+        session_id=session_id,
+        pane_id=pane_id,
+    )
+
+
 def _get_caller_pane_id() -> str | None:
-    """Return the TMUX_PANE of the calling process, or None if not in tmux."""
-    return os.environ.get("TMUX_PANE")
+    """Return the TMUX_PANE of the calling process, or None if not in tmux.
+
+    Thin wrapper around :func:`_get_caller_identity` kept for callers that
+    only need the pane id (notably :func:`_serialize_pane`).
+    """
+    caller = _get_caller_identity()
+    return caller.pane_id if caller else None
+
+
+def _effective_socket_path(server: Server) -> str | None:
+    """Return the filesystem socket path a Server will actually use.
+
+    libtmux leaves ``Server.socket_path`` as ``None`` when only
+    ``socket_name`` (or neither) was supplied, but tmux still resolves to
+    a real path under ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/<name>``. This
+    helper reproduces that resolution so :func:`_caller_is_on_server` can
+    compare against the caller's ``TMUX`` socket path.
+    """
+    if server.socket_path:
+        return str(server.socket_path)
+    tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
+    socket_name = server.socket_name or "default"
+    return str(pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}" / socket_name)
+
+
+def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
+    """Return True if ``caller`` looks like it is on the same tmux server.
+
+    Compares socket paths via :func:`os.path.realpath` so symlinked temp
+    dirs still match. Returns False only when the caller is definitively
+    somewhere else (sockets differ). In ambiguous cases — caller is None,
+    caller has no socket_path, or the target has no resolvable path — we
+    return True, since self-protection should err on the side of blocking
+    a destructive action rather than silently allowing a potential
+    self-kill. The error message already tells the user to run tmux
+    manually if the guard is a false positive.
+    """
+    if caller is None:
+        return False
+    if not caller.socket_path:
+        return caller.pane_id is not None
+    target = _effective_socket_path(server)
+    if not target:
+        return True
+    try:
+        return os.path.realpath(caller.socket_path) == os.path.realpath(target)
+    except OSError:
+        return caller.socket_path == target
 
 
 # ---------------------------------------------------------------------------

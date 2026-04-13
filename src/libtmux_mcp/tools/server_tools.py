@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import typing as t
 
 from libtmux_mcp._utils import (
@@ -13,6 +12,8 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     _apply_filters,
+    _caller_is_on_server,
+    _get_caller_identity,
     _get_server,
     _invalidate_server,
     _serialize_session,
@@ -125,7 +126,10 @@ def kill_server(socket_name: str | None = None) -> str:
     str
         Confirmation message.
     """
-    if os.environ.get("TMUX_PANE"):
+    server = _get_server(socket_name=socket_name)
+
+    caller = _get_caller_identity()
+    if _caller_is_on_server(server, caller):
         from fastmcp.exceptions import ToolError
 
         msg = (
@@ -134,7 +138,6 @@ def kill_server(socket_name: str | None = None) -> str:
         )
         raise ToolError(msg)
 
-    server = _get_server(socket_name=socket_name)
     server.kill()
     _invalidate_server(socket_name=socket_name)
     return "Server killed successfully"
