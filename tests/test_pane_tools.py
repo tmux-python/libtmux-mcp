@@ -968,9 +968,12 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
     # Verify the text appeared in the pane. Use a generous retry
     # window: CI runners cold-start the pane's shell and the echo
     # output can take several seconds to render on the first run.
+    # The 5-second budget tripped on tmux 3.3a CI; 10 seconds is
+    # still fast enough to keep the test useful locally but reliable
+    # on the slowest matrix cells.
     retry_until(
         lambda: "PASTE_TEST_marker_xyz" in "\n".join(mcp_pane.capture_pane()),
-        5,
+        10,
         raises=True,
     )
 
