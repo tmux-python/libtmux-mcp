@@ -6,6 +6,8 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a1 (2026-04-13)
+
 ### What's new
 
 - New pane tools: `snapshot_pane`, `wait_for_content_change`, `select_pane`, `swap_pane`, `pipe_pane`, `display_message`, `enter_copy_mode`, `exit_copy_mode`, and `paste_text` (#11)
