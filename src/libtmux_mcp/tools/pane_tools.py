@@ -875,15 +875,26 @@ def select_pane(
     assert direction is not None
     if direction in _DIRECTION_FLAGS:
         window.select_pane(_DIRECTION_FLAGS[direction])
-    elif direction == "next":
-        # Anchor the relative target to the requested window. A bare
-        # `-t +` resolves against the attached client's current window
-        # (tmux cmd-find.c), NOT the window we're targeting.
-        # `@window_id.+` forces tmux to resolve the `+` offset against
-        # the explicit window's active pane.
-        server.cmd("select-pane", target=f"{window.window_id}.+")
-    elif direction == "previous":
-        server.cmd("select-pane", target=f"{window.window_id}.-")
+    elif direction in ("next", "previous"):
+        # Compute the target pane by absolute pane_id rather than using
+        # tmux's relative pane-target syntax. Two portability issues
+        # motivate this approach:
+        # 1. A bare `-t +` / `-t -1` resolves against the attached
+        #    client's current window (tmux cmd-find.c), not the window
+        #    we're targeting.
+        # 2. The scoped form `@window_id.+` / `.-` works on tmux 3.6+
+        #    but the relative-offset parser's behavior for prefixed
+        #    window targets varies on older releases (tmux 3.2a still
+        #    falls back to client curw for `@id.+`). Enumerating
+        #    panes and selecting by absolute pane_id sidesteps
+        #    tmux-version variation entirely.
+        window.refresh()
+        panes = list(window.panes)
+        active = next((p for p in panes if p.pane_active == "1"), panes[0])
+        idx = panes.index(active)
+        step = 1 if direction == "next" else -1
+        target_pane = panes[(idx + step) % len(panes)]
+        server.cmd("select-pane", target=target_pane.pane_id)
 
     # Query the active pane ID directly from tmux to avoid stale cache
     target = window.window_id or ""
