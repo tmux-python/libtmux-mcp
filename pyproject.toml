@@ -213,8 +213,8 @@ addopts = [
   "--tb=short",
   "--no-header",
   "--showlocals",
+  "--doctest-modules",
   "--doctest-docutils-modules",
-  "-p no:doctest",
   "--reruns=2"
 ]
 doctest_optionflags = [

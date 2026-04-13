@@ -100,7 +100,19 @@ _MAX_LOGGED_STR_LEN: int = 200
 
 
 def _redact_digest(value: str) -> dict[str, t.Any]:
-    """Return a length + SHA-256 prefix summary of ``value``."""
+    """Return a length + SHA-256 prefix summary of ``value``.
+
+    The digest is stable and deterministic, which lets operators
+    correlate the same payload across log lines without ever recording
+    the payload itself.
+
+    Examples
+    --------
+    >>> _redact_digest("hello")
+    {'len': 5, 'sha256_prefix': '2cf24dba5fb0'}
+    >>> _redact_digest("")
+    {'len': 0, 'sha256_prefix': 'e3b0c44298fc'}
+    """
     return {
         "len": len(value),
         "sha256_prefix": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12],
@@ -112,6 +124,18 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
 
     Sensitive keys get replaced by a digest; over-long strings get
     truncated with a marker; everything else passes through as-is.
+
+    Examples
+    --------
+    Non-sensitive scalars pass through unchanged:
+
+    >>> _summarize_args({"pane_id": "%1", "bracket": True})
+    {'pane_id': '%1', 'bracket': True}
+
+    Sensitive payload names are replaced by a digest dict:
+
+    >>> _summarize_args({"keys": "rm -rf /"})["keys"]["len"]
+    8
     """
     summary: dict[str, t.Any] = {}
     for key, value in args.items():
