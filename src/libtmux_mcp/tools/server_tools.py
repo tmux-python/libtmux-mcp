@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp.exceptions import ToolError
+
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -130,8 +132,6 @@ def kill_server(socket_name: str | None = None) -> str:
 
     caller = _get_caller_identity()
     if _caller_is_on_server(server, caller):
-        from fastmcp.exceptions import ToolError
-
         msg = (
             "Refusing to kill the tmux server while this MCP server is running "
             "inside it. Use a manual tmux command if intended."

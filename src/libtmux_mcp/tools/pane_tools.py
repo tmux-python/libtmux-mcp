@@ -9,6 +9,8 @@ import shlex
 import typing as t
 import uuid
 
+from fastmcp.exceptions import ToolError
+
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -190,8 +192,6 @@ def resize_pane(
     PaneInfo
         Serialized pane object.
     """
-    from fastmcp.exceptions import ToolError
-
     if zoom is not None and (height is not None or width is not None):
         msg = "Cannot combine zoom with height/width"
         raise ToolError(msg)
@@ -239,8 +239,6 @@ def kill_pane(
     str
         Confirmation message.
     """
-    from fastmcp.exceptions import ToolError
-
     server = _get_server(socket_name=socket_name)
     caller = _get_caller_identity()
     if (
@@ -438,8 +436,6 @@ def search_panes(
     list[PaneContentMatch]
         Panes with matching content, including matched lines.
     """
-    from fastmcp.exceptions import ToolError
-
     search_pattern = pattern if regex else re.escape(pattern)
     flags = 0 if match_case else re.IGNORECASE
     try:
@@ -585,7 +581,6 @@ def wait_for_text(
     """
     import time
 
-    from fastmcp.exceptions import ToolError
     from libtmux.test.retry import retry_until
 
     search_pattern = pattern if regex else re.escape(pattern)
@@ -848,8 +843,6 @@ def select_pane(
     PaneInfo
         The now-active pane.
     """
-    from fastmcp.exceptions import ToolError
-
     if pane_id is None and direction is None:
         msg = "Provide either pane_id or direction."
         raise ToolError(msg)
@@ -1003,8 +996,6 @@ def pipe_pane(
         return f"Piping stopped for pane {pane.pane_id}"
 
     if not output_path.strip():
-        from fastmcp.exceptions import ToolError
-
         msg = "output_path must be a non-empty path, or None to stop piping."
         raise ToolError(msg)
 
@@ -1201,8 +1192,6 @@ def paste_text(
     """
     import subprocess
     import tempfile
-
-    from fastmcp.exceptions import ToolError
 
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
