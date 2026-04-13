@@ -289,7 +289,11 @@ def select_window(
     if subcommand is None:
         msg = f"Invalid direction: {direction!r}. Valid: next, previous, last"
         raise ToolError(msg)
-    session.cmd(subcommand)
+    proc = session.cmd(subcommand)
+    if proc.stderr:
+        stderr = " ".join(proc.stderr).strip()
+        msg = f"tmux {subcommand} failed: {stderr}"
+        raise ToolError(msg)
 
     active_window = session.active_window
     return _serialize_window(active_window)

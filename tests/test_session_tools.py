@@ -244,6 +244,27 @@ def test_select_window_requires_target(mcp_server: Server) -> None:
         select_window(socket_name=mcp_server.socket_name)
 
 
+def test_select_window_last_on_single_window_session_raises(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """select_window last with no prior window must surface the tmux error.
+
+    Regression guard: session.cmd("last-window") on a session that has
+    never had a previously-active window emits "no last window" on
+    stderr, but the tool previously discarded the return value and
+    returned the unchanged active window as if the navigation had
+    worked.
+    """
+    # The fixture session is freshly created: there is no previously-
+    # active window for last-window to jump back to.
+    with pytest.raises(ToolError, match="last-window"):
+        select_window(
+            direction="last",
+            session_name=mcp_session.session_name,
+            socket_name=mcp_server.socket_name,
+        )
+
+
 def test_kill_session_requires_target(mcp_server: Server) -> None:
     """kill_session refuses to kill without an explicit target."""
     with pytest.raises(ToolError, match="Refusing to kill"):
