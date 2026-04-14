@@ -9,6 +9,8 @@ import logging
 import os
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
+from fastmcp.server.middleware.timing import TimingMiddleware
 
 from libtmux_mcp.__about__ import __version__
 from libtmux_mcp._utils import (
@@ -127,11 +129,24 @@ mcp = FastMCP(
     name="libtmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),
+    # Middleware runs outermost-first. Order rationale:
+    #   1. TimingMiddleware — neutral observer; start clock as early
+    #      as possible so timing captures middleware cost too.
+    #   2. TailPreservingResponseLimitingMiddleware — bound the
+    #      response *before* ErrorHandlingMiddleware can transform
+    #      exceptions; keeps the size cap independent of error path.
+    #   3. ErrorHandlingMiddleware — transforms resource errors to
+    #      MCP code -32002; sits inside so it wraps the tool call
+    #      that Safety has already gated.
+    #   4. SafetyMiddleware — tier gate (fail-closed).
+    #   5. AuditMiddleware — innermost; logs the exact call/args.
     middleware=[
+        TimingMiddleware(),
         TailPreservingResponseLimitingMiddleware(
             max_size=DEFAULT_RESPONSE_LIMIT_BYTES,
             tools=_RESPONSE_LIMITED_TOOLS,
         ),
+        ErrorHandlingMiddleware(transform_errors=True),
         SafetyMiddleware(max_tier=_safety_level),
         AuditMiddleware(),
     ],
