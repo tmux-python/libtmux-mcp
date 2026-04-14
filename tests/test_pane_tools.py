@@ -1361,3 +1361,36 @@ def test_pane_tool_open_world_hint_registration(
         f"{tool_name} registration should carry annotations"
     )
     assert tool.annotations.openWorldHint is expected_open_world
+
+
+# ---------------------------------------------------------------------------
+# Typed-output regression guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected_type"),
+    [
+        # Read-heavy tools must keep returning Pydantic models so MCP
+        # clients get machine-readable ``outputSchema`` entries and
+        # agents don't have to re-parse strings. Regression guard:
+        # any future change that flattens one of these back to ``str``
+        # will break this test and force an explicit review.
+        ("get_pane_info", "PaneInfo"),
+        ("snapshot_pane", "PaneSnapshot"),
+    ],
+)
+def test_pane_read_tools_return_pydantic_models(
+    mcp_server: Server, mcp_pane: Pane, tool_name: str, expected_type: str
+) -> None:
+    """Read-heavy pane tools return their Pydantic model, not ``str``."""
+    tools: dict[str, t.Callable[..., t.Any]] = {
+        "get_pane_info": get_pane_info,
+        "snapshot_pane": snapshot_pane,
+    }
+    result = tools[tool_name](
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert type(result).__name__ == expected_type
+    assert hasattr(result, "model_dump"), "expected a Pydantic BaseModel instance"
