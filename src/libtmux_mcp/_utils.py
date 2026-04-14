@@ -617,13 +617,38 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
+def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
+    """Translate a libtmux / unexpected exception into a ``ToolError``.
+
+    Shared between the sync and async ``handle_tool_errors*`` decorators
+    so the two paths stay byte-for-byte identical in what agents see.
+    """
+    if isinstance(e, exc.TmuxCommandNotFound):
+        msg = "tmux binary not found. Ensure tmux is installed and in PATH."
+        return ToolError(msg)
+    if isinstance(e, exc.TmuxSessionExists):
+        return ToolError(str(e))
+    if isinstance(e, exc.BadSessionName):
+        return ToolError(str(e))
+    if isinstance(e, exc.TmuxObjectDoesNotExist):
+        return ToolError(f"Object not found: {e}")
+    if isinstance(e, exc.PaneNotFound):
+        return ToolError(f"Pane not found: {e}")
+    if isinstance(e, exc.LibTmuxException):
+        return ToolError(f"tmux error: {e}")
+    logger.exception("unexpected error in MCP tool %s", fn_name)
+    return ToolError(f"Unexpected error: {type(e).__name__}: {e}")
+
+
 def handle_tool_errors(
     fn: t.Callable[P, R],
 ) -> t.Callable[P, R]:
-    """Decorate MCP tool functions with standardized error handling.
+    """Decorate synchronous MCP tool functions with standardized error handling.
 
     Catches libtmux exceptions and re-raises as ``ToolError`` so that
     MCP responses have ``isError=True`` with a descriptive message.
+    Use :func:`handle_tool_errors_async` for ``async def`` tools — this
+    wrapper only supports plain sync callables.
     """
 
     @functools.wraps(fn)
@@ -632,25 +657,33 @@ def handle_tool_errors(
             return fn(*args, **kwargs)
         except ToolError:
             raise
-        except exc.TmuxCommandNotFound as e:
-            msg = "tmux binary not found. Ensure tmux is installed and in PATH."
-            raise ToolError(msg) from e
-        except exc.TmuxSessionExists as e:
-            raise ToolError(str(e)) from e
-        except exc.BadSessionName as e:
-            raise ToolError(str(e)) from e
-        except exc.TmuxObjectDoesNotExist as e:
-            msg = f"Object not found: {e}"
-            raise ToolError(msg) from e
-        except exc.PaneNotFound as e:
-            msg = f"Pane not found: {e}"
-            raise ToolError(msg) from e
-        except exc.LibTmuxException as e:
-            msg = f"tmux error: {e}"
-            raise ToolError(msg) from e
         except Exception as e:
-            logger.exception("unexpected error in MCP tool %s", fn.__name__)
-            msg = f"Unexpected error: {type(e).__name__}: {e}"
-            raise ToolError(msg) from e
+            raise _map_exception_to_tool_error(fn.__name__, e) from e
+
+    return wrapper
+
+
+def handle_tool_errors_async(
+    fn: t.Callable[P, t.Coroutine[t.Any, t.Any, R]],
+) -> t.Callable[P, t.Coroutine[t.Any, t.Any, R]]:
+    """Decorate asynchronous MCP tool functions with standardized error handling.
+
+    Async counterpart to :func:`handle_tool_errors`. Required for tools
+    that accept a :class:`fastmcp.Context` parameter because Context's
+    ``report_progress``/``elicit``/``read_resource`` methods are
+    coroutines that only run inside ``async def`` tools.
+
+    Maps the same libtmux exception set to the same ``ToolError``
+    messages as the sync decorator by delegating to a shared helper.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return await fn(*args, **kwargs)
+        except ToolError:
+            raise
+        except Exception as e:
+            raise _map_exception_to_tool_error(fn.__name__, e) from e
 
     return wrapper
