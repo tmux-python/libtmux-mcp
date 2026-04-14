@@ -123,12 +123,14 @@ mcp = FastMCP(
 
 
 def _register_all() -> None:
-    """Register all tools and resources with the MCP server."""
+    """Register all tools, resources, and prompts with the MCP server."""
+    from libtmux_mcp.prompts import register_prompts
     from libtmux_mcp.resources import register_resources
     from libtmux_mcp.tools import register_tools
 
     register_tools(mcp)
     register_resources(mcp)
+    register_prompts(mcp)
 
 
 def run_server() -> None:
