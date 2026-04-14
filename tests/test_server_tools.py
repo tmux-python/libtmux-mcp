@@ -224,3 +224,22 @@ def test_kill_server_allows_cross_socket(
     monkeypatch.setenv("TMUX_PANE", "%99")
     result = kill_server(socket_name=mcp_server.socket_name)
     assert "killed" in result.lower()
+
+
+def test_read_heavy_tools_return_pydantic_models(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``list_sessions`` and ``get_server_info`` return Pydantic models.
+
+    Regression guard: bare-string returns on read-heavy tools drop
+    machine-readable ``outputSchema`` from the MCP registration, which
+    forces agents to re-parse strings. Keep these typed.
+    """
+    from libtmux_mcp.models import ServerInfo, SessionInfo
+
+    sessions = list_sessions(socket_name=mcp_server.socket_name)
+    assert isinstance(sessions, list)
+    assert all(isinstance(s, SessionInfo) for s in sessions)
+
+    info = get_server_info(socket_name=mcp_server.socket_name)
+    assert isinstance(info, ServerInfo)
