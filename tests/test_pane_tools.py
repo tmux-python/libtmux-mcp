@@ -61,6 +61,73 @@ def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     assert isinstance(result, str)
 
 
+def test_capture_pane_untruncated_short_output(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Short output below ``max_lines`` passes through without a header."""
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=100,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "[... truncated" not in result
+
+
+def test_capture_pane_truncates_tail_preserving(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Long captures are truncated head-first; tail is preserved.
+
+    Prime the pane with >20 echo lines and confirm the last one is
+    visible, then capture the visible pane with a tight ``max_lines=5``
+    ceiling. The capture must (a) start with a single
+    ``[... truncated K lines ...]`` header, (b) have exactly 6 lines
+    total (the header + 5 kept lines), and (c) preserve the most
+    recent ``scrollback_line_19`` line at the tail.
+    """
+    for i in range(20):
+        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
+    retry_until(
+        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=5,
+        socket_name=mcp_server.socket_name,
+    )
+    lines = result.split("\n")
+    assert lines[0].startswith("[... truncated ")
+    assert lines[0].endswith(" lines ...]")
+    assert len(lines) == 6  # header + exactly 5 preserved tail lines
+    assert "scrollback_line_19" in lines[-1] or any(
+        "scrollback_line_19" in line for line in lines[1:]
+    )
+
+
+def test_capture_pane_max_lines_none_disables_truncation(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``max_lines=None`` opts out of truncation entirely."""
+    for i in range(20):
+        mcp_pane.send_keys(f"echo untrunc_line_{i}", enter=True)
+    retry_until(
+        lambda: "untrunc_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=None,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "[... truncated" not in result
+    assert "untrunc_line_19" in result
+
+
 def test_get_pane_info(mcp_server: Server, mcp_pane: Pane) -> None:
     """get_pane_info returns detailed pane info."""
     result = get_pane_info(

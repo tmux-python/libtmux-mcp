@@ -79,6 +79,52 @@ def send_keys(
     return f"Keys sent to pane {pane.pane_id}"
 
 
+#: Default line cap applied to :func:`capture_pane` and similar scrollback
+#: readers. Large enough to cover typical prompt + a few screens of output,
+#: small enough that a pathological pane (e.g. 50K lines of ``tail -f``)
+#: cannot blow the agent's context window on a single call. Callers who
+#: need a full capture can pass ``max_lines=None`` to opt out.
+CAPTURE_DEFAULT_MAX_LINES = 500
+
+
+def _truncate_lines_tail(
+    lines: list[str], max_lines: int | None
+) -> tuple[list[str], bool, int]:
+    """Return the tail of ``lines`` at most ``max_lines`` long.
+
+    Tail-preserving truncation is required for terminal output: the
+    most recent lines (active prompt, latest command output) live at
+    the bottom of the scrollback buffer. Dropping the head keeps what
+    the agent actually needs.
+
+    Parameters
+    ----------
+    lines : list of str
+        The captured lines, oldest first.
+    max_lines : int or None
+        Maximum number of lines to keep. ``None`` disables truncation.
+
+    Returns
+    -------
+    tuple
+        ``(kept, truncated, dropped)`` — the kept suffix, whether
+        truncation happened, and how many lines were dropped.
+
+    Examples
+    --------
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=2)
+    (['b', 'c'], True, 1)
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=5)
+    (['a', 'b', 'c'], False, 0)
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=None)
+    (['a', 'b', 'c'], False, 0)
+    """
+    if max_lines is None or len(lines) <= max_lines:
+        return lines, False, 0
+    dropped = len(lines) - max_lines
+    return lines[-max_lines:], True, dropped
+
+
 @handle_tool_errors
 def capture_pane(
     pane_id: str | None = None,
@@ -87,12 +133,20 @@ def capture_pane(
     window_id: str | None = None,
     start: int | None = None,
     end: int | None = None,
+    max_lines: int | None = CAPTURE_DEFAULT_MAX_LINES,
     socket_name: str | None = None,
 ) -> str:
     """Capture the visible contents of a tmux pane.
 
     This is the tool for reading what is displayed in a terminal. Use
     search_panes to search for text across multiple panes at once.
+
+    Output is tail-preserved: when the capture exceeds ``max_lines``
+    the oldest lines are dropped and the returned string is prefixed
+    with a single ``[... truncated K lines ...]`` header line so the
+    agent can tell truncation occurred and re-request with a narrower
+    ``start``/``end`` window or a larger ``max_lines`` if needed. Pass
+    ``max_lines=None`` to disable truncation entirely.
 
     Parameters
     ----------
@@ -109,13 +163,18 @@ def capture_pane(
         reach into scrollback history (e.g. -100 for last 100 lines).
     end : int, optional
         End line number.
+    max_lines : int or None
+        Maximum number of lines to return. Defaults to
+        :data:`CAPTURE_DEFAULT_MAX_LINES`. Pass ``None`` to return the
+        full capture with no truncation.
     socket_name : str, optional
         tmux socket name.
 
     Returns
     -------
     str
-        Captured pane content as text.
+        Captured pane content as text. When truncated, the first line
+        is a ``[... truncated K lines ...]`` marker.
     """
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -126,7 +185,10 @@ def capture_pane(
         window_id=window_id,
     )
     lines = pane.capture_pane(start=start, end=end)
-    return "\n".join(lines)
+    kept, truncated, dropped = _truncate_lines_tail(lines, max_lines)
+    if truncated:
+        return f"[... truncated {dropped} lines ...]\n" + "\n".join(kept)
+    return "\n".join(kept)
 
 
 @handle_tool_errors
