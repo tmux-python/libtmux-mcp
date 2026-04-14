@@ -117,13 +117,22 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
     """Return True if ``caller`` looks like it is on the same tmux server.
 
     Compares socket paths via :func:`os.path.realpath` so symlinked temp
-    dirs still match. Returns False only when the caller is definitively
-    somewhere else (sockets differ). In ambiguous cases — caller is None,
-    caller has no socket_path, or the target has no resolvable path — we
-    return True, since self-protection should err on the side of blocking
-    a destructive action rather than silently allowing a potential
-    self-kill. The error message already tells the user to run tmux
-    manually if the guard is a false positive.
+    dirs still match. Decision table:
+
+    * ``caller is None`` → ``False``. The process isn't inside tmux at
+      all, so there is no caller-side pane to protect and no self-kill
+      is possible.
+    * caller has a pane id but no socket path (e.g. ``TMUX_PANE`` set
+      without ``TMUX``) → ``True``. We can't rule out that the caller
+      is on the target server, so err on the side of blocking a
+      destructive action.
+    * target server has no resolvable socket path → ``True``. Same
+      conservative reasoning.
+    * Otherwise → ``True`` iff ``os.path.realpath`` of the caller's
+      socket path equals the target's effective socket path.
+
+    When a conservative block is a false positive, the caller's error
+    message directs the user to run tmux manually.
     """
     if caller is None:
         return False
