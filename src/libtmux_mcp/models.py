@@ -222,6 +222,36 @@ class SearchPanesResult(BaseModel):
     limit: int | None = Field(description="The ``limit`` that produced this page.")
 
 
+class BufferRef(BaseModel):
+    """Handle returned by :func:`load_buffer` for later buffer operations.
+
+    Agent-created tmux paste buffers are namespaced with a per-call UUID
+    to avoid collisions on the server-global buffer namespace when
+    concurrent agents (or parallel tool calls from a single agent) are
+    staging content. Callers must use the ``buffer_name`` this model
+    carries on subsequent ``paste_buffer`` / ``show_buffer`` /
+    ``delete_buffer`` calls.
+    """
+
+    buffer_name: str = Field(
+        description=(
+            "The actual tmux buffer name (with prefix and UUID nonce). "
+            "Pass this back to paste_buffer/show_buffer/delete_buffer."
+        ),
+    )
+    logical_name: str | None = Field(
+        default=None,
+        description="Optional logical name supplied by the caller, if any.",
+    )
+
+
+class BufferContent(BaseModel):
+    """Structured result of :func:`show_buffer`."""
+
+    buffer_name: str = Field(description="Agent-namespaced buffer name.")
+    content: str = Field(description="Buffer contents as text.")
+
+
 class ContentChangeResult(BaseModel):
     """Result of waiting for any screen content change."""
 
