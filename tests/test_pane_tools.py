@@ -1045,3 +1045,51 @@ def test_paste_text_does_not_leak_named_buffer(
     assert "mcp_paste_" not in buffer_names, (
         f"paste_text leaked a named buffer: {buffer_names!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Registration-time annotation verification
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected_open_world"),
+    [
+        # Shell-driving tools: the command the caller sends can reach
+        # arbitrary external state, so the interaction is open-world.
+        ("send_keys", True),
+        ("paste_text", True),
+        ("pipe_pane", True),
+        # Create-style tools: allocate tmux objects only. Not open-world
+        # even though they share the old ANNOTATIONS_CREATE preset.
+        ("swap_pane", False),
+        ("enter_copy_mode", False),
+    ],
+)
+def test_pane_tool_open_world_hint_registration(
+    tool_name: str, expected_open_world: bool
+) -> None:
+    """Pane tools advertise ``openWorldHint`` matching their real semantics.
+
+    Regression guard for the shared-preset trap: the old
+    ``ANNOTATIONS_CREATE`` preset was applied to both shell-driving and
+    non-shell-driving tools, so every caller saw ``openWorldHint=False``.
+    A new ``ANNOTATIONS_SHELL`` preset now carries ``openWorldHint=True``
+    for the three shell-driving tools only, leaving the other
+    ``ANNOTATIONS_CREATE`` users unchanged.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-pane-annotations")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool(tool_name))
+    assert tool is not None, f"{tool_name} should be registered"
+    assert tool.annotations is not None, (
+        f"{tool_name} registration should carry annotations"
+    )
+    assert tool.annotations.openWorldHint is expected_open_world

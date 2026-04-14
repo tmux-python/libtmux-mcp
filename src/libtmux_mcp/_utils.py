@@ -179,6 +179,18 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+#: Annotations for tools that drive a shell — ``send_keys``, ``paste_text``,
+#: ``pipe_pane``. Distinguished from :data:`ANNOTATIONS_CREATE` by
+#: ``openWorldHint=True``: shell-driving tools interact with an
+#: open-ended environment (file system, network, external processes) via
+#: whatever command the caller runs, which is the canonical open-world
+#: MCP interaction.
+ANNOTATIONS_SHELL: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
 ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
