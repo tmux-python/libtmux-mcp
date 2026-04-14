@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import pathlib
+import subprocess
+import tempfile
 import uuid
 
 from fastmcp.exceptions import ToolError
@@ -215,9 +217,6 @@ def paste_text(
     str
         Confirmation message.
     """
-    import subprocess
-    import tempfile
-
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,
