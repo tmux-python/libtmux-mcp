@@ -1,6 +1,6 @@
 """Middleware for libtmux MCP server.
 
-Provides two pieces of infrastructure:
+Provides three pieces of infrastructure:
 
 * :class:`SafetyMiddleware` gates tools by safety tier based on the
   ``LIBTMUX_SAFETY`` environment variable. Tools tagged above the
@@ -9,6 +9,12 @@ Provides two pieces of infrastructure:
   invocation (name, duration, outcome, client/request ids, and a
   summary of arguments with payload-bearing fields redacted to a
   length + SHA-256 prefix).
+* :class:`TailPreservingResponseLimitingMiddleware` is a backstop cap
+  for oversized tool output. Unlike FastMCP's stock
+  ``ResponseLimitingMiddleware`` it preserves the **tail** of the
+  response — terminal scrollback has its active prompt and the output
+  agents actually need at the bottom, so dropping the head is always
+  the correct direction.
 """
 
 from __future__ import annotations
@@ -20,6 +26,9 @@ import typing as t
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
+from fastmcp.tools.base import ToolResult
+from mcp.types import TextContent
 
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 
@@ -211,3 +220,85 @@ class AuditMiddleware(Middleware):
             args_summary,
         )
         return result
+
+
+# ---------------------------------------------------------------------------
+# Tail-preserving response limiter
+# ---------------------------------------------------------------------------
+
+#: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`.
+#: Chosen strictly above the per-tool ``max_lines`` caps (500 lines x
+#: ~100 bytes/line) so normal operation does not trip the middleware —
+#: it only fires when a tool forgot to declare its own cap or the user
+#: opted out via ``max_lines=None``.
+DEFAULT_RESPONSE_LIMIT_BYTES = 50_000
+
+#: Header prefixed to a truncated response. Intentionally matches the
+#: format used by the per-tool ``capture_pane`` truncation so clients
+#: see a consistent marker regardless of which layer fired.
+_TRUNCATION_HEADER_TEMPLATE = "[... truncated {dropped} bytes ...]\n"
+
+
+class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
+    """Response-limiter that keeps the tail of oversized output.
+
+    FastMCP's stock :class:`ResponseLimitingMiddleware` truncates the
+    tail of the response (keeps the start, appends a suffix). That's
+    exactly wrong for terminal scrollback, where the active shell
+    prompt and most recent command output live at the **bottom** of
+    the buffer. This subclass overrides ``_truncate_to_result`` to
+    drop the head instead, prefixing a single truncation-header line
+    so callers can detect the cap fired.
+
+    Used as a global backstop for :func:`libtmux_mcp.tools.pane_tools.io.capture_pane`,
+    :func:`libtmux_mcp.tools.pane_tools.meta.snapshot_pane`, and
+    :func:`libtmux_mcp.tools.pane_tools.search.search_panes`. Per-tool
+    caps at the tool layer fire first under normal operation; this
+    middleware catches pathological output from future tools that
+    forget to declare their own bounds.
+    """
+
+    def _truncate_to_result(
+        self,
+        text: str,
+        meta: dict[str, t.Any] | None = None,
+    ) -> ToolResult:
+        """Keep the last ``max_size`` bytes of ``text`` and prefix a header.
+
+        Overrides the base class implementation, which keeps the head.
+        """
+        encoded = text.encode("utf-8")
+        if len(encoded) <= self.max_size:
+            # Shouldn't normally happen — the caller already decided
+            # we were over limit — but be defensive.
+            return ToolResult(
+                content=[TextContent(type="text", text=text)],
+                meta=meta if meta is not None else {},
+            )
+
+        # Reserve space for the truncation header. The header length
+        # depends on the number of dropped bytes, which in turn
+        # depends on how much we keep — so compute conservatively
+        # (worst-case integer width) then re-trim.
+        header = _TRUNCATION_HEADER_TEMPLATE.format(dropped=len(encoded))
+        header_bytes = len(header.encode("utf-8"))
+        # JSON-wrapper overhead mirrors the base class accounting.
+        overhead = 50
+        target_size = self.max_size - header_bytes - overhead
+        if target_size <= 0:
+            return ToolResult(
+                content=[TextContent(type="text", text=header.rstrip("\n"))],
+                meta=meta if meta is not None else {},
+            )
+
+        # Take the LAST ``target_size`` bytes. Decode with errors=ignore
+        # so a split UTF-8 sequence at the boundary is dropped rather
+        # than corrupting the output.
+        tail = encoded[-target_size:].decode("utf-8", errors="ignore")
+        dropped = len(encoded) - len(tail.encode("utf-8"))
+        final_header = _TRUNCATION_HEADER_TEMPLATE.format(dropped=dropped)
+        truncated = final_header + tail
+        return ToolResult(
+            content=[TextContent(type="text", text=truncated)],
+            meta=meta if meta is not None else {},
+        )

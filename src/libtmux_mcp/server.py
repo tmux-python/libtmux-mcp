@@ -17,7 +17,12 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
 )
-from libtmux_mcp.middleware import AuditMiddleware, SafetyMiddleware
+from libtmux_mcp.middleware import (
+    DEFAULT_RESPONSE_LIMIT_BYTES,
+    AuditMiddleware,
+    SafetyMiddleware,
+    TailPreservingResponseLimitingMiddleware,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,11 +118,23 @@ if _safety_level not in VALID_SAFETY_LEVELS:
     )
     _safety_level = TAG_MUTATING
 
+#: Tools covered by the tail-preserving response limiter. Only tools
+#: whose output is terminal scrollback benefit from this backstop;
+#: structured responses from list/get tools stay under the cap naturally.
+_RESPONSE_LIMITED_TOOLS = ["capture_pane", "search_panes", "snapshot_pane"]
+
 mcp = FastMCP(
     name="libtmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),
-    middleware=[SafetyMiddleware(max_tier=_safety_level), AuditMiddleware()],
+    middleware=[
+        TailPreservingResponseLimitingMiddleware(
+            max_size=DEFAULT_RESPONSE_LIMIT_BYTES,
+            tools=_RESPONSE_LIMITED_TOOLS,
+        ),
+        SafetyMiddleware(max_tier=_safety_level),
+        AuditMiddleware(),
+    ],
     on_duplicate="error",
 )
 

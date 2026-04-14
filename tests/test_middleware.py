@@ -266,3 +266,44 @@ def test_audit_middleware_redacts_sensitive_args(
     assert payload not in rendered
     assert "sha256_prefix" in rendered
     assert "tool=send_keys" in rendered
+
+
+# ---------------------------------------------------------------------------
+# TailPreservingResponseLimitingMiddleware tests
+# ---------------------------------------------------------------------------
+
+
+def test_tail_preserving_truncation_keeps_tail() -> None:
+    """Over-sized text is truncated from the head, tail is preserved."""
+    from mcp.types import TextContent
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    mw = TailPreservingResponseLimitingMiddleware(max_size=200)
+    # Build a string much larger than the cap; mark the tail so we can
+    # assert the last chunk survived. ``HEAD_`` lines are old; ``TAIL_``
+    # line is the active prompt.
+    payload = ("HEAD_OLDER\n" * 200) + "TAIL_PROMPT $"
+    result = mw._truncate_to_result(payload)
+    assert isinstance(result.content[0], TextContent)
+    text = result.content[0].text
+    assert text.startswith("[... truncated ")
+    first_line, _, _ = text.partition("\n")
+    assert first_line.endswith(" bytes ...]")
+    # The most recent content must survive.
+    assert "TAIL_PROMPT $" in text
+    # The result is bounded.
+    assert len(text.encode("utf-8")) <= 200
+
+
+def test_tail_preserving_passthrough_when_under_cap() -> None:
+    """Text within the cap passes through unchanged."""
+    from mcp.types import TextContent
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    mw = TailPreservingResponseLimitingMiddleware(max_size=10_000)
+    payload = "short output\n$ "
+    result = mw._truncate_to_result(payload)
+    assert isinstance(result.content[0], TextContent)
+    assert result.content[0].text == payload
