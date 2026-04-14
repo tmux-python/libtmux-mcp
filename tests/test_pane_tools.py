@@ -13,6 +13,7 @@ from libtmux_mcp.models import (
     ContentChangeResult,
     PaneContentMatch,
     PaneSnapshot,
+    SearchPanesResult,
     WaitForTextResult,
 )
 from libtmux_mcp.tools.pane_tools import (
@@ -360,17 +361,17 @@ def test_search_panes(
         kwargs["session_name"] = mcp_session.session_name
 
     result = search_panes(**kwargs)
-    assert isinstance(result, list)
+    assert isinstance(result, SearchPanesResult)
 
     if expected_match:
-        assert len(result) >= 1
-        match = next((r for r in result if r.pane_id == mcp_pane.pane_id), None)
+        assert len(result.matches) >= 1
+        match = next((r for r in result.matches if r.pane_id == mcp_pane.pane_id), None)
         assert match is not None
         assert len(match.matched_lines) >= expected_min_lines
         assert match.session_id is not None
         assert match.window_id is not None
     else:
-        pane_matches = [r for r in result if r.pane_id == mcp_pane.pane_id]
+        pane_matches = [r for r in result.matches if r.pane_id == mcp_pane.pane_id]
         assert len(pane_matches) == 0
 
 
@@ -387,9 +388,9 @@ def test_search_panes_basic(mcp_server: Server, mcp_pane: Pane) -> None:
         pattern="SMOKE_TEST_MARKER_abc123",
         socket_name=mcp_server.socket_name,
     )
-    assert isinstance(result, list)
-    assert len(result) >= 1
-    assert any(r.pane_id == mcp_pane.pane_id for r in result)
+    assert isinstance(result, SearchPanesResult)
+    assert len(result.matches) >= 1
+    assert any(r.pane_id == mcp_pane.pane_id for r in result.matches)
 
 
 def test_search_panes_returns_pane_content_match_model(
@@ -407,8 +408,8 @@ def test_search_panes_returns_pane_content_match_model(
         pattern="MODEL_TYPE_CHECK_xyz",
         socket_name=mcp_server.socket_name,
     )
-    assert len(result) >= 1
-    for item in result:
+    assert len(result.matches) >= 1
+    for item in result.matches:
         assert isinstance(item, PaneContentMatch)
 
 
@@ -427,7 +428,7 @@ def test_search_panes_includes_window_and_session_names(
         pattern="CONTEXT_FIELDS_CHECK_789",
         socket_name=mcp_server.socket_name,
     )
-    match = next((r for r in result if r.pane_id == mcp_pane.pane_id), None)
+    match = next((r for r in result.matches if r.pane_id == mcp_pane.pane_id), None)
     assert match is not None
     assert match.window_name is not None
     assert match.session_name is not None
@@ -442,6 +443,94 @@ def test_search_panes_invalid_regex(mcp_server: Server, mcp_session: Session) ->
             regex=True,
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_search_panes_pagination_limit_and_offset(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """search_panes pages matching panes via ``limit`` and ``offset``.
+
+    Creates additional panes and seeds each with the same marker so
+    multiple panes match. Then asserts:
+    - ``limit=1`` returns one pane, ``truncated=True``, and the skipped
+      panes are listed in ``truncated_panes``.
+    - ``offset=1, limit=10`` returns the remaining panes with
+      ``truncated=False``.
+    - ``total_panes_matched`` is stable across pages.
+    """
+    marker = "PAGINATION_MARKER_qzz987"
+    # Split the window a few times so we have >=3 panes matching.
+    extra_panes = [
+        mcp_session.active_window.split(),
+        mcp_session.active_window.split(),
+    ]
+    all_panes = [mcp_pane, *extra_panes]
+    for pane in all_panes:
+        pane.send_keys(f"echo {marker}", enter=True)
+
+    def _waiter(target: Pane) -> t.Callable[[], bool]:
+        def _ready() -> bool:
+            return marker in "\n".join(target.capture_pane())
+
+        return _ready
+
+    for pane in all_panes:
+        retry_until(_waiter(pane), 2, raises=True)
+
+    first = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        limit=1,
+        socket_name=mcp_server.socket_name,
+    )
+    assert first.total_panes_matched >= 3
+    assert len(first.matches) == 1
+    assert first.truncated is True
+    assert len(first.truncated_panes) == first.total_panes_matched - 1
+    assert first.offset == 0
+    assert first.limit == 1
+
+    rest = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        offset=1,
+        limit=10,
+        socket_name=mcp_server.socket_name,
+    )
+    assert rest.total_panes_matched == first.total_panes_matched
+    assert len(rest.matches) == first.total_panes_matched - 1
+    assert rest.truncated is False
+    assert rest.truncated_panes == []
+    assert rest.offset == 1
+
+    # Union of paginated pane IDs equals the full matching set.
+    seen = {m.pane_id for m in first.matches} | {m.pane_id for m in rest.matches}
+    assert len(seen) == first.total_panes_matched
+
+
+def test_search_panes_per_pane_matched_lines_cap(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """``max_matched_lines_per_pane`` tail-truncates matched_lines per pane."""
+    marker = "PERLINE_MARKER_9gkv"
+    for _ in range(20):
+        mcp_pane.send_keys(f"echo {marker}", enter=True)
+    retry_until(
+        lambda: mcp_pane.capture_pane().count(f"echo {marker}") >= 3,
+        2,
+        raises=True,
+    )
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        max_matched_lines_per_pane=3,
+        socket_name=mcp_server.socket_name,
+    )
+    match = next((m for m in result.matches if m.pane_id == mcp_pane.pane_id), None)
+    assert match is not None
+    assert len(match.matched_lines) == 3
+    assert result.truncated is True
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +597,7 @@ def test_search_panes_is_caller(
         pattern=marker,
         socket_name=mcp_server.socket_name,
     )
-    match = next((r for r in result if r.pane_id == mcp_pane.pane_id), None)
+    match = next((r for r in result.matches if r.pane_id == mcp_pane.pane_id), None)
     assert match is not None
     assert match.is_caller is expected_is_caller
 

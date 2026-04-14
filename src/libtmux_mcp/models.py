@@ -183,6 +183,45 @@ class PaneSnapshot(BaseModel):
     )
 
 
+class SearchPanesResult(BaseModel):
+    """Paginated result of :func:`search_panes`.
+
+    Wrapping the match list lets us surface bounded-output information
+    that a bare ``list[PaneContentMatch]`` cannot: whether pagination
+    truncated the result set, which panes were skipped, and the
+    ``offset``/``limit`` that produced this page. Agents can re-request
+    with a higher ``offset`` to retrieve subsequent pages.
+    """
+
+    matches: list[PaneContentMatch] = Field(
+        default_factory=list,
+        description="PaneContentMatch entries for this page.",
+    )
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the result set was truncated by ``limit`` or "
+            "by ``max_matched_lines_per_pane`` on any pane."
+        ),
+    )
+    truncated_panes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Pane IDs that matched but were skipped because the global "
+            "``limit`` was already satisfied. Re-request with a larger "
+            "``offset`` to retrieve them."
+        ),
+    )
+    total_panes_matched: int = Field(
+        description=(
+            "Total number of panes that matched the pattern before "
+            "``offset`` / ``limit`` were applied."
+        ),
+    )
+    offset: int = Field(description="The ``offset`` that produced this page.")
+    limit: int | None = Field(description="The ``limit`` that produced this page.")
+
+
 class ContentChangeResult(BaseModel):
     """Result of waiting for any screen content change."""
 
