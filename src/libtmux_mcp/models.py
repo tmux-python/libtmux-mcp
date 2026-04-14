@@ -222,6 +222,36 @@ class SearchPanesResult(BaseModel):
     limit: int | None = Field(description="The ``limit`` that produced this page.")
 
 
+class HookEntry(BaseModel):
+    """One entry in a tmux hook array.
+
+    Hooks like ``session-renamed`` are arrays — they can have multiple
+    commands registered at sparse indices. :class:`HookEntry` flattens
+    one index+command pair into a serialisable row.
+    """
+
+    hook_name: str = Field(description="Hook name (e.g. 'pane-exited').")
+    index: int | None = Field(
+        default=None,
+        description=(
+            "Array index for array-style hooks (e.g. session-renamed[3]). "
+            "``None`` for scalar hooks."
+        ),
+    )
+    command: str = Field(description="tmux command string registered at that index.")
+
+
+class HookListResult(BaseModel):
+    """Structured result of :func:`show_hooks` / :func:`show_hook`.
+
+    Flat list of :class:`HookEntry` instances so MCP clients can iterate
+    without caring whether the underlying tmux hook is scalar or array-
+    shaped.
+    """
+
+    entries: list[HookEntry] = Field(default_factory=list)
+
+
 class BufferRef(BaseModel):
     """Handle returned by :func:`load_buffer` for later buffer operations.
 
