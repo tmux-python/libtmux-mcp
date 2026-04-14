@@ -161,3 +161,56 @@ def test_build_instructions_always_includes_safety() -> None:
     result = _build_instructions(safety_level=TAG_MUTATING)
     assert "Safety level:" in result
     assert "LIBTMUX_SAFETY" in result
+
+
+# ---------------------------------------------------------------------------
+# Lifespan tests
+# ---------------------------------------------------------------------------
+
+
+def test_lifespan_missing_tmux_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup raises a clear RuntimeError when tmux is not on PATH."""
+    import asyncio
+
+    from libtmux_mcp.server import _lifespan
+
+    def _missing_tmux(_name: str) -> None:
+        return None
+
+    monkeypatch.setattr("libtmux_mcp.server.shutil.which", _missing_tmux)
+
+    async def _enter() -> None:
+        async with _lifespan(_app=None):  # type: ignore[arg-type]
+            pytest.fail("lifespan should have raised before yielding")
+
+    with pytest.raises(RuntimeError, match="tmux binary not found"):
+        asyncio.run(_enter())
+
+
+def test_lifespan_clears_server_cache_on_exit() -> None:
+    """Clean lifespan exit empties the process-wide ``_server_cache``."""
+    import asyncio
+
+    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp.server import _lifespan
+
+    # Seed the cache with a sentinel entry — the actual value doesn't
+    # matter; we're checking that exit clears it.
+    _server_cache[("sentinel_socket", None, None)] = t.cast("t.Any", object())
+
+    async def _cycle() -> None:
+        async with _lifespan(_app=None):  # type: ignore[arg-type]
+            # While the lifespan is active the cache still holds state.
+            assert _server_cache
+
+    asyncio.run(_cycle())
+    assert _server_cache == {}
+
+
+def test_server_constructed_with_lifespan() -> None:
+    """The production FastMCP instance is wired with ``_lifespan``."""
+    from libtmux_mcp.server import _lifespan, mcp
+
+    assert mcp._lifespan is _lifespan

@@ -5,8 +5,11 @@ Creates and configures the MCP server with all tools and resources.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import shutil
+import typing as t
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
@@ -18,6 +21,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
+    _server_cache,
 )
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
@@ -125,10 +129,42 @@ if _safety_level not in VALID_SAFETY_LEVELS:
 #: structured responses from list/get tools stay under the cap naturally.
 _RESPONSE_LIMITED_TOOLS = ["capture_pane", "search_panes", "snapshot_pane"]
 
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
+    """FastMCP lifespan: fail-fast startup + deterministic cache cleanup.
+
+    Startup
+    -------
+    Verifies that a ``tmux`` binary is on ``PATH``. Without this
+    probe, tools fail at first call with a generic ``TmuxCommandNotFound``
+    deep inside libtmux. Failing at server start instead surfaces a
+    clear cold-start error before any tool traffic arrives.
+
+    Shutdown
+    --------
+    Clears the process-wide :data:`_server_cache` so repeated test runs
+    don't share stale Server references and HTTP-transport reload
+    cycles start clean. Note: FastMCP lifespan teardown runs on
+    SIGTERM / SIGINT only; ``kill -9`` and OOM bypass it, so this path
+    must not be relied on for any invariant that must survive a hard
+    crash (see the hook_tools module docstring for why write-hooks
+    are explicitly NOT gated on lifespan cleanup).
+    """
+    if shutil.which("tmux") is None:
+        msg = "tmux binary not found on PATH"
+        raise RuntimeError(msg)
+    try:
+        yield
+    finally:
+        _server_cache.clear()
+
+
 mcp = FastMCP(
     name="libtmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),
+    lifespan=_lifespan,
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early
     #      as possible so timing captures middleware cost too.
