@@ -638,11 +638,41 @@ def test_wait_for_content_change_detects_change(
 
 
 def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
-    """wait_for_content_change times out when no change occurs."""
-    # Wait for the shell prompt to settle before testing for "no change"
+    """wait_for_content_change times out when no change occurs.
+
+    Uses an active-polling settle loop instead of a fixed sleep: we wait
+    until two consecutive ``capture_pane`` reads return the same content
+    before starting the no-change assertion. On slow or loaded CI
+    machines the shell prompt can take well over 500 ms to fully render
+    (cursor blink, zsh right-prompt, git status async hooks) and would
+    otherwise be observed as pane-content change during the test window,
+    failing ``timed_out=True`` spuriously under ``--reruns=0``.
+    """
     import time
 
-    time.sleep(0.5)
+    #: Number of consecutive matching captures required to call the pane
+    #: "settled". One match is unreliable under zsh async hooks (vcs_info,
+    #: git prompt, right-prompt) that render after an initial quiet
+    #: window. Three requires ~300 ms of continuous quiescence which is
+    #: enough to outwait those hooks on loaded CI.
+    settle_streak_required = 3
+    settle_poll_interval = 0.1
+
+    previous = mcp_pane.capture_pane()
+    streak = 0
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        time.sleep(settle_poll_interval)
+        current = mcp_pane.capture_pane()
+        if current == previous:
+            streak += 1
+            if streak >= settle_streak_required:
+                break
+        else:
+            streak = 0
+            previous = current
+    else:
+        pytest.fail("pane content did not settle within 5s")
 
     result = wait_for_content_change(
         pane_id=mcp_pane.pane_id,
