@@ -307,3 +307,59 @@ def test_tail_preserving_passthrough_when_under_cap() -> None:
     result = mw._truncate_to_result(payload)
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == payload
+
+
+# ---------------------------------------------------------------------------
+# Middleware stack composition tests
+# ---------------------------------------------------------------------------
+
+
+def test_server_middleware_stack_order() -> None:
+    """The production middleware stack is wired in the intended order.
+
+    The ordering is load-bearing (see server.py comment): TimingMiddleware
+    must be outermost so it observes total wall time; AuditMiddleware
+    must be innermost so it logs the call/args directly adjacent to the
+    tool invocation. A refactor that accidentally reorders these would
+    degrade observability without an obvious failure mode, so pin the
+    sequence explicitly.
+    """
+    from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
+    from fastmcp.server.middleware.timing import TimingMiddleware
+
+    from libtmux_mcp.middleware import (
+        AuditMiddleware,
+        SafetyMiddleware,
+        TailPreservingResponseLimitingMiddleware,
+    )
+    from libtmux_mcp.server import mcp
+
+    types = [type(mw) for mw in mcp.middleware]
+    # FastMCP auto-appends an internal DereferenceRefsMiddleware at the
+    # end of the stack; we care about the ordering of the middleware
+    # *we* configured. Slice off the suffix before comparing.
+    assert types[:5] == [
+        TimingMiddleware,
+        TailPreservingResponseLimitingMiddleware,
+        ErrorHandlingMiddleware,
+        SafetyMiddleware,
+        AuditMiddleware,
+    ]
+
+
+def test_error_handling_middleware_transforms_errors() -> None:
+    """ErrorHandlingMiddleware is configured with transform_errors=True.
+
+    Regression guard: without ``transform_errors=True`` the middleware
+    would still log but not map resource errors to MCP error code
+    ``-32002``, which is the protocol-correctness point of adopting
+    this middleware in the first place.
+    """
+    from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
+
+    from libtmux_mcp.server import mcp
+
+    err_mw = next(
+        mw for mw in mcp.middleware if isinstance(mw, ErrorHandlingMiddleware)
+    )
+    assert err_mw.transform_errors is True
