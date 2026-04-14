@@ -16,6 +16,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    ANNOTATIONS_SHELL,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -73,7 +74,7 @@ __all__ = [
 
 def register(mcp: FastMCP) -> None:
     """Register pane-level tools with the MCP instance."""
-    mcp.tool(title="Send Keys", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
+    mcp.tool(title="Send Keys", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         send_keys
     )
     mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
@@ -116,7 +117,7 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Swap Pane", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
         swap_pane
     )
-    mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
+    mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         pipe_pane
     )
     mcp.tool(title="Display Message", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
@@ -132,6 +133,6 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_MUTATING,
         tags={TAG_MUTATING},
     )(exit_copy_mode)
-    mcp.tool(title="Paste Text", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
+    mcp.tool(title="Paste Text", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         paste_text
     )

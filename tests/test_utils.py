@@ -13,6 +13,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    ANNOTATIONS_SHELL,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -491,6 +492,7 @@ def test_annotation_presets_have_correct_keys() -> None:
         ANNOTATIONS_RO,
         ANNOTATIONS_MUTATING,
         ANNOTATIONS_CREATE,
+        ANNOTATIONS_SHELL,
         ANNOTATIONS_DESTRUCTIVE,
     ):
         assert set(preset.keys()) == _ANNOTATION_KEYS
@@ -506,6 +508,30 @@ def test_annotations_destructive_is_destructive() -> None:
     """ANNOTATIONS_DESTRUCTIVE marks tools as destructive."""
     assert ANNOTATIONS_DESTRUCTIVE["destructiveHint"] is True
     assert ANNOTATIONS_DESTRUCTIVE["readOnlyHint"] is False
+
+
+def test_annotations_shell_is_open_world() -> None:
+    """ANNOTATIONS_SHELL marks shell-driving tools as open-world.
+
+    Shell-driving tools (``send_keys``, ``paste_text``, ``pipe_pane``)
+    interact with arbitrary external state through whatever command the
+    caller runs — the canonical open-world MCP interaction.
+    """
+    assert ANNOTATIONS_SHELL["openWorldHint"] is True
+    assert ANNOTATIONS_SHELL["readOnlyHint"] is False
+    assert ANNOTATIONS_SHELL["destructiveHint"] is False
+    assert ANNOTATIONS_SHELL["idempotentHint"] is False
+
+
+def test_annotations_create_is_closed_world() -> None:
+    """ANNOTATIONS_CREATE does NOT set openWorldHint.
+
+    Create-style mutating tools (``create_session``, ``create_window``,
+    ``split_window``, ``swap_pane``, ``enter_copy_mode``) allocate tmux
+    objects but do not interact with an open-ended environment. The
+    shell-driving case is separately handled by ``ANNOTATIONS_SHELL``.
+    """
+    assert ANNOTATIONS_CREATE["openWorldHint"] is False
 
 
 def test_tag_constants() -> None:
