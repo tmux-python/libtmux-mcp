@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+import time
 
 from fastmcp.exceptions import ToolError
+from libtmux.test.retry import retry_until
 
 from libtmux_mcp._utils import (
     _get_server,
@@ -72,10 +74,6 @@ def wait_for_text(
     WaitForTextResult
         Result with found status, matched lines, and timing info.
     """
-    import time
-
-    from libtmux.test.retry import retry_until
-
     search_pattern = pattern if regex else re.escape(pattern)
     flags = 0 if match_case else re.IGNORECASE
     try:
@@ -161,10 +159,6 @@ def wait_for_content_change(
     ContentChangeResult
         Result with changed status and timing info.
     """
-    import time
-
-    from libtmux.test.retry import retry_until
-
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,
