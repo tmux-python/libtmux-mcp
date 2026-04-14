@@ -612,6 +612,60 @@ def test_snapshot_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     assert result.pane_in_mode is False
     assert result.pane_mode is None
     assert result.history_size >= 0
+    # Default max_lines leaves short captures untruncated.
+    assert result.content_truncated is False
+    assert result.content_truncated_lines == 0
+
+
+def test_snapshot_pane_truncates_content(mcp_server: Server, mcp_pane: Pane) -> None:
+    """snapshot_pane reports truncation via model fields, not in-band header.
+
+    Unlike capture_pane (which returns a bare string and therefore
+    signals truncation with a prefix line), snapshot_pane returns a
+    Pydantic model, so truncation is surfaced on typed fields:
+    ``content_truncated`` and ``content_truncated_lines``. ``content``
+    itself is the kept tail with no marker.
+    """
+    for i in range(20):
+        mcp_pane.send_keys(f"echo snap_line_{i}", enter=True)
+    retry_until(
+        lambda: "snap_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=5,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.content_truncated is True
+    assert result.content_truncated_lines > 0
+    assert result.content.count("\n") == 4  # 5 lines kept -> 4 separators
+    assert "[... truncated" not in result.content
+    assert "snap_line_19" in result.content
+
+
+def test_snapshot_pane_max_lines_none_keeps_full_content(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``max_lines=None`` returns the full content with no truncation flag."""
+    for i in range(20):
+        mcp_pane.send_keys(f"echo snapnone_{i}", enter=True)
+    retry_until(
+        lambda: "snapnone_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=None,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.content_truncated is False
+    assert result.content_truncated_lines == 0
+    assert "snapnone_19" in result.content
 
 
 def test_snapshot_pane_cursor_moves(mcp_server: Server, mcp_pane: Pane) -> None:

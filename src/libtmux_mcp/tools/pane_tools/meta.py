@@ -11,6 +11,10 @@ from libtmux_mcp._utils import (
 from libtmux_mcp.models import (
     PaneSnapshot,
 )
+from libtmux_mcp.tools.pane_tools.io import (
+    CAPTURE_DEFAULT_MAX_LINES,
+    _truncate_lines_tail,
+)
 
 
 @handle_tool_errors
@@ -66,6 +70,7 @@ def snapshot_pane(
     session_name: str | None = None,
     session_id: str | None = None,
     window_id: str | None = None,
+    max_lines: int | None = CAPTURE_DEFAULT_MAX_LINES,
     socket_name: str | None = None,
 ) -> PaneSnapshot:
     """Take a rich snapshot of a tmux pane: content + cursor + mode + scroll state.
@@ -74,6 +79,12 @@ def snapshot_pane(
     position, copy-mode state, and scroll position — in a single call.
     Use this instead of separate capture_pane + get_pane_info calls when
     you need to reason about cursor location or pane mode.
+
+    The ``content`` field is tail-preserved: when the captured pane
+    exceeds ``max_lines``, the oldest lines are dropped and the result
+    is reported via ``content_truncated`` / ``content_truncated_lines``
+    fields on the returned :class:`PaneSnapshot`. Pass ``max_lines=None``
+    to opt out of truncation entirely.
 
     Parameters
     ----------
@@ -85,6 +96,10 @@ def snapshot_pane(
         Session ID (e.g. '$1') for pane resolution.
     window_id : str, optional
         Window ID for pane resolution.
+    max_lines : int or None
+        Maximum number of content lines to return. Defaults to
+        :data:`libtmux_mcp.tools.pane_tools.io.CAPTURE_DEFAULT_MAX_LINES`.
+        Pass ``None`` to return the full capture untrimmed.
     socket_name : str, optional
         tmux socket name.
 
@@ -92,6 +107,9 @@ def snapshot_pane(
     -------
     PaneSnapshot
         Rich snapshot with content, cursor, mode, and scroll state.
+        When the capture is trimmed, ``content_truncated`` is True and
+        ``content_truncated_lines`` gives the number of dropped head
+        lines; ``content`` itself carries no marker header.
     """
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -134,7 +152,9 @@ def snapshot_pane(
     # unknown format variable on older versions.
     parts = (raw.split(_SEP) + [""] * 11)[:11]
 
-    content = "\n".join(pane.capture_pane())
+    raw_lines = pane.capture_pane()
+    kept_lines, truncated, dropped = _truncate_lines_tail(raw_lines, max_lines)
+    content = "\n".join(kept_lines)
 
     pane_in_mode = parts[4] == "1"
     pane_mode_raw = parts[5]
@@ -156,4 +176,6 @@ def snapshot_pane(
         pane_current_command=parts[9] if parts[9] else None,
         pane_current_path=parts[10] if parts[10] else None,
         is_caller=(pane.pane_id == caller_pane_id if caller_pane_id else None),
+        content_truncated=truncated,
+        content_truncated_lines=dropped,
     )
