@@ -170,6 +170,17 @@ class PaneSnapshot(BaseModel):
         default=None,
         description="True if this is the MCP caller's own pane",
     )
+    content_truncated: bool = Field(
+        default=False,
+        description=(
+            "True if ``content`` was tail-preserved to stay within "
+            "``max_lines``; oldest lines were dropped."
+        ),
+    )
+    content_truncated_lines: int = Field(
+        default=0,
+        description="Number of lines dropped from the head when truncating.",
+    )
 
 
 class ContentChangeResult(BaseModel):
