@@ -650,14 +650,18 @@ def test_wait_for_text(
     expected_found: bool,
 ) -> None:
     """wait_for_text polls pane content for a pattern."""
+    import asyncio
+
     if command is not None:
         mcp_pane.send_keys(command, enter=True)
 
-    result = wait_for_text(
-        pattern=pattern,
-        pane_id=mcp_pane.pane_id,
-        timeout=timeout,
-        socket_name=mcp_server.socket_name,
+    result = asyncio.run(
+        wait_for_text(
+            pattern=pattern,
+            pane_id=mcp_pane.pane_id,
+            timeout=timeout,
+            socket_name=mcp_server.socket_name,
+        )
     )
     assert isinstance(result, WaitForTextResult)
     assert result.found is expected_found
@@ -671,13 +675,59 @@ def test_wait_for_text(
 
 def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text raises ToolError on invalid regex when regex=True."""
+    import asyncio
+
     with pytest.raises(ToolError, match="Invalid regex pattern"):
-        wait_for_text(
-            pattern="[invalid",
-            regex=True,
-            pane_id=mcp_pane.pane_id,
-            socket_name=mcp_server.socket_name,
+        asyncio.run(
+            wait_for_text(
+                pattern="[invalid",
+                regex=True,
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
         )
+
+
+def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> None:
+    """wait_for_text calls ``ctx.report_progress`` at each poll tick.
+
+    Uses a minimal async stub Context so the test stays independent
+    from FastMCP's live server — ``report_progress`` is the only
+    coroutine the wait loop invokes and it only needs to be awaitable.
+    The assertion is that at least one progress report is emitted
+    during a short, guaranteed-to-timeout poll window.
+    """
+    import asyncio
+
+    progress_calls: list[tuple[float, float | None, str]] = []
+
+    class _StubContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            progress_calls.append((progress, total, message))
+
+    stub = _StubContext()
+    result = asyncio.run(
+        wait_for_text(
+            pattern="WILL_NEVER_MATCH_aBcDeF",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.2,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", stub),
+        )
+    )
+    assert result.found is False
+    assert result.timed_out is True
+    assert len(progress_calls) >= 2
+    first_progress, first_total, first_msg = progress_calls[0]
+    assert first_progress >= 0.0
+    assert first_total == 0.2
+    assert "Polling pane" in first_msg
 
 
 # ---------------------------------------------------------------------------
@@ -835,10 +885,14 @@ def test_wait_for_content_change_detects_change(
     thread = threading.Thread(target=_send_later)
     thread.start()
 
-    result = wait_for_content_change(
-        pane_id=mcp_pane.pane_id,
-        timeout=3.0,
-        socket_name=mcp_server.socket_name,
+    import asyncio
+
+    result = asyncio.run(
+        wait_for_content_change(
+            pane_id=mcp_pane.pane_id,
+            timeout=3.0,
+            socket_name=mcp_server.socket_name,
+        )
     )
     thread.join()
     assert isinstance(result, ContentChangeResult)
@@ -884,10 +938,14 @@ def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> 
     else:
         pytest.fail("pane content did not settle within 5s")
 
-    result = wait_for_content_change(
-        pane_id=mcp_pane.pane_id,
-        timeout=0.5,
-        socket_name=mcp_server.socket_name,
+    import asyncio
+
+    result = asyncio.run(
+        wait_for_content_change(
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            socket_name=mcp_server.socket_name,
+        )
     )
     assert isinstance(result, ContentChangeResult)
     assert result.changed is False
