@@ -132,6 +132,30 @@ def test_base_instructions_content() -> None:
     assert "metadata vs content" in _BASE_INSTRUCTIONS
 
 
+def test_base_instructions_surface_flagship_read_tools() -> None:
+    """_BASE_INSTRUCTIONS mentions the richer read tools by name.
+
+    ``display_message`` (tmux format queries) and ``snapshot_pane``
+    (content + metadata in one call) are strictly more expressive than
+    ``capture_pane`` for most contexts, but agents that never see them
+    named in the instructions default to ``capture_pane`` + a follow-up
+    ``get_pane_info``. Naming both explicitly changes that default.
+    """
+    assert "display_message" in _BASE_INSTRUCTIONS
+    assert "snapshot_pane" in _BASE_INSTRUCTIONS
+
+
+def test_base_instructions_prefer_wait_over_poll() -> None:
+    """_BASE_INSTRUCTIONS names wait_for_text and wait_for_content_change.
+
+    The wait tools block server-side, which is dramatically cheaper in
+    agent turns than ``capture_pane`` in a retry loop. Making them
+    discoverable from the instructions is a no-cost UX win.
+    """
+    assert "wait_for_text" in _BASE_INSTRUCTIONS
+    assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+
+
 def test_build_instructions_always_includes_safety() -> None:
     """_build_instructions always includes the safety level."""
     result = _build_instructions(safety_level=TAG_MUTATING)

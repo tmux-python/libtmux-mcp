@@ -34,7 +34,19 @@ _BASE_INSTRUCTIONS = (
     "To find text that is actually visible in terminals — when users ask "
     "what panes 'contain', 'mention', 'show', or 'have' — use "
     "search_panes to search across all pane contents, or list_panes + "
-    "capture_pane on each pane for manual inspection."
+    "capture_pane on each pane for manual inspection.\n\n"
+    "READ TOOLS TO PREFER: snapshot_pane returns pane content plus "
+    "cursor position, mode, and scroll state in one call — use it "
+    "instead of capture_pane + get_pane_info when you need context. "
+    "display_message evaluates any tmux format string (e.g. "
+    "'#{pane_current_command}', '#{session_name}') against a target, "
+    "which is often cheaper than parsing captured output.\n\n"
+    "WAIT, DON'T POLL: for 'run command, wait for output' workflows "
+    "use wait_for_text (matches text/regex on a pane) or "
+    "wait_for_content_change (waits for any change). These block "
+    "server-side until the condition is met or the timeout expires, "
+    "which is dramatically cheaper in agent turns than capture_pane "
+    "in a retry loop."
 )
 
 
