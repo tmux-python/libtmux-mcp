@@ -543,3 +543,110 @@ def test_tag_constants() -> None:
 def test_valid_safety_levels_matches_tags() -> None:
     """VALID_SAFETY_LEVELS contains all tag constants."""
     assert {TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE} == VALID_SAFETY_LEVELS
+
+
+# ---------------------------------------------------------------------------
+# Error-handler decorator tests
+# ---------------------------------------------------------------------------
+
+
+def test_handle_tool_errors_passes_value_through() -> None:
+    """A successful sync call returns the function's result untouched."""
+    from libtmux_mcp._utils import handle_tool_errors
+
+    @handle_tool_errors
+    def _ok(x: int) -> int:
+        return x * 2
+
+    assert _ok(3) == 6
+
+
+def test_handle_tool_errors_translates_libtmux_exception() -> None:
+    """Libtmux errors are remapped to ``ToolError``."""
+    from libtmux_mcp._utils import handle_tool_errors
+
+    err_msg = "session foo already exists"
+
+    @handle_tool_errors
+    def _raiser() -> None:
+        raise exc.TmuxSessionExists(err_msg)
+
+    with pytest.raises(ToolError, match=err_msg):
+        _raiser()
+
+
+def test_handle_tool_errors_preserves_existing_tool_error() -> None:
+    """An explicit ``ToolError`` is not rewrapped."""
+    from libtmux_mcp._utils import handle_tool_errors
+
+    sentinel = ToolError("explicit message")
+
+    @handle_tool_errors
+    def _raiser() -> None:
+        raise sentinel
+
+    with pytest.raises(ToolError) as excinfo:
+        _raiser()
+    assert excinfo.value is sentinel
+
+
+def test_handle_tool_errors_async_passes_value_through() -> None:
+    """Successful async tools return their result normally."""
+    import asyncio
+
+    from libtmux_mcp._utils import handle_tool_errors_async
+
+    @handle_tool_errors_async
+    async def _ok(x: int) -> int:
+        return x + 5
+
+    assert asyncio.run(_ok(10)) == 15
+
+
+def test_handle_tool_errors_async_translates_libtmux_exception() -> None:
+    """Async libtmux errors are remapped to ``ToolError`` consistently."""
+    import asyncio
+
+    from libtmux_mcp._utils import handle_tool_errors_async
+
+    msg = "%99"
+
+    @handle_tool_errors_async
+    async def _raiser() -> None:
+        raise exc.PaneNotFound(msg)
+
+    with pytest.raises(ToolError, match="Pane not found"):
+        asyncio.run(_raiser())
+
+
+def test_handle_tool_errors_async_preserves_tool_error() -> None:
+    """Async tools re-raise explicit ``ToolError`` without rewrapping."""
+    import asyncio
+
+    from libtmux_mcp._utils import handle_tool_errors_async
+
+    sentinel = ToolError("explicit async message")
+
+    @handle_tool_errors_async
+    async def _raiser() -> None:
+        raise sentinel
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(_raiser())
+    assert excinfo.value is sentinel
+
+
+def test_handle_tool_errors_async_wraps_unexpected_exception() -> None:
+    """Non-libtmux exceptions are wrapped with a typed prefix."""
+    import asyncio
+
+    from libtmux_mcp._utils import handle_tool_errors_async
+
+    msg = "boom"
+
+    @handle_tool_errors_async
+    async def _raiser() -> None:
+        raise RuntimeError(msg)
+
+    with pytest.raises(ToolError, match=r"Unexpected error: RuntimeError: boom"):
+        asyncio.run(_raiser())
