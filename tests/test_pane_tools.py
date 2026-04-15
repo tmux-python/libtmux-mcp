@@ -730,6 +730,58 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
     assert "Polling pane" in first_msg
 
 
+def test_wait_tools_do_not_block_event_loop(mcp_server: Server, mcp_pane: Pane) -> None:
+    """wait_for_text runs its blocking capture off the main event loop.
+
+    Regression guard for the critical bug that FastMCP async tools are
+    direct-awaited on the main event loop. ``pane.capture_pane()`` is a
+    sync ``subprocess.run`` call; without ``asyncio.to_thread`` it would
+    block every other coroutine on the same loop for the duration of
+    each poll tick.
+
+    The test runs ``wait_for_text`` against a never-matching pattern
+    inside an ``asyncio.gather`` alongside a ticker coroutine that
+    increments a counter every 10 ms. Because the test only asserts the
+    counter *advanced* during the wait (counter > 0), the shape is
+    low-flake under loaded CI while still proving the invariant: a
+    blocking capture would starve the ticker and leave the counter at
+    zero or one.
+    """
+    import asyncio
+
+    async def _drive() -> int:
+        ticks = 0
+        stop = asyncio.Event()
+
+        async def _ticker() -> None:
+            nonlocal ticks
+            while not stop.is_set():
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        async def _waiter() -> None:
+            try:
+                await wait_for_text(
+                    pattern="WILL_NEVER_MATCH_EVENT_LOOP_zqr9",
+                    pane_id=mcp_pane.pane_id,
+                    timeout=0.3,
+                    interval=0.05,
+                    socket_name=mcp_server.socket_name,
+                )
+            finally:
+                stop.set()
+
+        await asyncio.gather(_ticker(), _waiter())
+        return ticks
+
+    ticks = asyncio.run(_drive())
+    # A blocking capture loop would pin the event loop for the full
+    # 300 ms window, leaving the ticker unable to fire. With
+    # asyncio.to_thread the ticker fires ~30 times; assert a generous
+    # lower bound to stay robust on slow CI.
+    assert ticks >= 5, f"ticker advanced only {ticks} times — event loop is blocked"
+
+
 # ---------------------------------------------------------------------------
 # snapshot_pane tests
 # ---------------------------------------------------------------------------
