@@ -522,6 +522,59 @@ def _resolve_pane(
 M = t.TypeVar("M")
 
 
+def _coerce_dict_arg(
+    name: str,
+    value: dict[str, t.Any] | str | None,
+) -> dict[str, t.Any] | None:
+    """Coerce a tool parameter to a dict, accepting JSON-string form.
+
+    Workaround: Cursor's composer-1/composer-1.5 models and some other
+    MCP clients serialize dict params as JSON strings instead of
+    objects. Claude and GPT models through Cursor work fine; the bug
+    is model-specific. This helper is the canonical place to absorb
+    the string form so each tool can stay dict-typed on the Python
+    side. Callers pass ``name`` so the error messages identify the
+    offending parameter.
+
+    See:
+        https://forum.cursor.com/t/145807
+        https://github.com/anthropics/claude-code/issues/5504
+
+    Parameters
+    ----------
+    name : str
+        Parameter name, used in error messages.
+    value : dict, str, or None
+        Either an already-decoded dict, a JSON string of a dict, or
+        ``None``.
+
+    Returns
+    -------
+    dict or None
+        The decoded dict, or ``None`` if the input was ``None`` or an
+        empty string.
+
+    Raises
+    ------
+    ToolError
+        If ``value`` is a string that is not valid JSON, or decodes to
+        a JSON value that is not an object.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, ValueError) as e:
+            msg = f"Invalid {name} JSON: {e}"
+            raise ToolError(msg) from e
+        if not isinstance(decoded, dict):
+            msg = f"{name} must be a JSON object, got {type(decoded).__name__}"
+            raise ToolError(msg) from None
+        return decoded
+    return value
+
+
 def _apply_filters(
     items: t.Any,
     filters: dict[str, str] | str | None,
@@ -550,23 +603,10 @@ def _apply_filters(
     ToolError
         If a filter key uses an invalid lookup operator.
     """
-    if not filters:
+    coerced = _coerce_dict_arg("filters", filters)
+    if not coerced:
         return [serializer(item) for item in items]
-
-    # Workaround: Cursor's composer-1/composer-1.5 models and some other
-    # MCP clients serialize dict params as JSON strings instead of objects.
-    # Claude and GPT models through Cursor work fine; the bug is model-specific.
-    # See: https://forum.cursor.com/t/145807
-    #      https://github.com/anthropics/claude-code/issues/5504
-    if isinstance(filters, str):
-        try:
-            filters = json.loads(filters)
-        except (json.JSONDecodeError, ValueError) as e:
-            msg = f"Invalid filters JSON: {e}"
-            raise ToolError(msg) from e
-        if not isinstance(filters, dict):
-            msg = f"filters must be a JSON object, got {type(filters).__name__}"
-            raise ToolError(msg) from None
+    filters = coerced
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
     for key in filters:
