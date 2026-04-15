@@ -127,7 +127,35 @@ def _validate_buffer_name(name: str) -> str:
 
 
 def _allocate_buffer_name(logical_name: str | None) -> str:
-    """Allocate a unique MCP buffer name for a caller's logical label."""
+    """Allocate a unique MCP buffer name for a caller's logical label.
+
+    The returned name always has the shape
+    ``libtmux_mcp_<32-hex-uuid>_<logical_name>`` — the prefix defends
+    the tool surface against interacting with buffers it did not
+    create (OS-clipboard sync populates tmux's server-global namespace
+    too), and the uuid nonce prevents collisions when multiple agents
+    or parallel tool calls allocate buffers at the same time. When
+    ``logical_name`` is empty or ``None``, ``"buf"`` is substituted
+    to avoid a trailing-underscore name.
+
+    Examples
+    --------
+    >>> name = _allocate_buffer_name("clip")
+    >>> name.startswith("libtmux_mcp_")
+    True
+    >>> name.endswith("_clip")
+    True
+    >>> # 32 hex characters between the prefix and the logical suffix.
+    >>> len(name.removeprefix("libtmux_mcp_").rsplit("_", 1)[0])
+    32
+
+    Empty logical name collapses to ``"buf"``:
+
+    >>> _allocate_buffer_name("").endswith("_buf")
+    True
+    >>> _allocate_buffer_name(None).endswith("_buf")
+    True
+    """
     base = _validate_logical_name(logical_name or "")
     return f"{_MCP_BUFFER_PREFIX}{uuid.uuid4().hex}_{base}"
 
