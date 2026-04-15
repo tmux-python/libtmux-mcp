@@ -991,6 +991,44 @@ def test_wait_for_text_propagates_unexpected_progress_error(
         )
 
 
+def test_wait_for_text_suppresses_broken_resource_error(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``anyio.BrokenResourceError`` from progress is treated as transport-gone.
+
+    FastMCP's streamable-HTTP transport raises ``BrokenResourceError``
+    (not ``ClosedResourceError``) when the receive side of the in-memory
+    stream is closed — i.e. the peer went away. The wait loop must treat
+    this identically to the closed-stream case: silently skip the
+    progress notification and keep polling until the timeout.
+    """
+    import asyncio
+
+    import anyio
+
+    class _BrokenContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            raise anyio.BrokenResourceError
+
+    result = asyncio.run(
+        wait_for_text(
+            pattern="WILL_NEVER_MATCH_BROKEN_rpt5",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.2,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _BrokenContext()),
+        )
+    )
+    assert result.found is False
+    assert result.timed_out is True
+
+
 def test_wait_tools_do_not_block_event_loop(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:

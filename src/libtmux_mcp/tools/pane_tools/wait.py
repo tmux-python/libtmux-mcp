@@ -24,13 +24,17 @@ from libtmux_mcp.models import (
 #: Narrowly-scoped on purpose: a broader ``Exception`` catch would
 #: mask real programming errors (``TypeError`` on a renamed kwarg,
 #: ``AttributeError`` if ``ctx`` is wired wrong) behind a silent no-op.
-#: ``anyio.ClosedResourceError`` is what FastMCP's streamable-HTTP
-#: session raises when the peer has disconnected; ``BrokenPipeError``
-#: covers stdio transports; generic ``ConnectionError`` is the
-#: catch-all base for both socket-level families. Anything else
-#: propagates so the caller sees it.
+#: Both anyio stream errors must be caught: ``ClosedResourceError`` is
+#: raised when the *send* side of the stream is closed (our own
+#: shutdown path); ``BrokenResourceError`` is raised when the *receive*
+#: side is closed (peer disconnect) — FastMCP's own client catches
+#: both for the same reason. ``BrokenPipeError`` covers stdio
+#: transports; generic ``ConnectionError`` is the catch-all base for
+#: socket-level families. Anything else propagates so the caller
+#: sees it.
 _TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     anyio.ClosedResourceError,
+    anyio.BrokenResourceError,
     BrokenPipeError,
     ConnectionError,
 )
