@@ -39,7 +39,7 @@ def run_and_wait(
     timeout : float
         Maximum seconds to wait for the signal. Default 60.
     """
-    channel = f"libtmux_mcp_wait_{uuid.uuid4().hex[:8]}"
+    channel = f"libtmux_mcp_wait_{uuid.uuid4().hex}"
     shell_payload = (
         f"{command}; __mcp_status=$?; tmux wait-for -S {channel}; exit $__mcp_status"
     )

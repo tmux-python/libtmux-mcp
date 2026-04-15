@@ -66,9 +66,10 @@ def test_run_and_wait_channel_is_uuid_scoped() -> None:
     Regression guard for the critical bug where every call hardcoded
     ``mcp_done``, so concurrent agents racing on tmux's server-global
     channel namespace would cross-signal each other. Now the channel
-    is ``libtmux_mcp_wait_<uuid4hex[:8]>``, fresh per invocation and
-    consistent within one invocation (the name that appears in the
-    ``send_keys`` payload must match the ``wait_for_channel`` call).
+    is ``libtmux_mcp_wait_<uuid4hex>`` (full 128-bit UUID, fresh per
+    invocation) and consistent within one invocation — the name that
+    appears in the ``send_keys`` payload must match the
+    ``wait_for_channel`` call.
     """
     import re
 
@@ -77,7 +78,7 @@ def test_run_and_wait_channel_is_uuid_scoped() -> None:
     first = run_and_wait(command="pytest", pane_id="%1")
     second = run_and_wait(command="pytest", pane_id="%1")
 
-    pattern = re.compile(r"libtmux_mcp_wait_[0-9a-f]{8}")
+    pattern = re.compile(r"libtmux_mcp_wait_[0-9a-f]{32}")
     first_matches = pattern.findall(first)
     second_matches = pattern.findall(second)
 
