@@ -61,6 +61,12 @@ Destructive tools include safeguards against self-harm:
 
 These protections read both the `TMUX` and `TMUX_PANE` environment variables that tmux injects into pane child processes. The `TMUX` value is formatted `socket_path,server_pid,session_id` — libtmux-mcp parses the socket path and compares it to the target server's so the guard only fires when the caller is actually on the same tmux server. A kill across unrelated sockets is allowed; a kill of the caller's own pane/window/session/server is refused. If the caller's socket can't be determined (rare — `TMUX_PANE` set without `TMUX`), the guard errs on the side of blocking.
 
+### macOS `TMUX_TMPDIR` caveat
+
+The self-kill guard reconstructs the target server's socket path by combining {envvar}`TMUX_TMPDIR` (or `/tmp` if unset) with the configured socket name. On macOS, `TMUX_TMPDIR` commonly differs between interactive shells and background service environments — if the MCP process and the tmux server were launched under different values, the reconstructed target path won't match the caller's `TMUX` socket path and the guard may decline to fire. The target-side comparison still protects the common case (same shell, same launchd context), but a mismatched {envvar}`TMUX_TMPDIR` can degrade the protection into a no-op.
+
+Mitigation today: set {envvar}`TMUX_TMPDIR` explicitly in both the MCP server's environment and the shell that starts tmux, so both reconstructions resolve to the same path. The proper structural fix — querying tmux for its own socket via `display-message '#{socket_path}'` rather than reconstructing — is tracked outside this documentation.
+
 ## Footguns inside the `mutating` tier
 
 Most `mutating` tools are bounded: `resize_pane` only resizes, `rename_window` only renames. A few have broader reach because tmux itself exposes broader reach. Treat these as elevated risk even though they share the default tier:
