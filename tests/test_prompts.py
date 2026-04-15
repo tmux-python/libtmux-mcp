@@ -54,10 +54,43 @@ def test_run_and_wait_returns_string_template() -> None:
     from libtmux_mcp.prompts.recipes import run_and_wait
 
     text = run_and_wait(command="pytest", pane_id="%1", timeout=30.0)
-    assert "tmux wait-for -S mcp_done" in text
+    assert "tmux wait-for -S libtmux_mcp_wait_" in text
     assert "wait_for_channel" in text
     # Exit-status preservation is the whole point — pin it.
     assert "exit $__mcp_status" in text
+
+
+def test_run_and_wait_channel_is_uuid_scoped() -> None:
+    """Each ``run_and_wait`` call embeds a unique wait-for channel.
+
+    Regression guard for the critical bug where every call hardcoded
+    ``mcp_done``, so concurrent agents racing on tmux's server-global
+    channel namespace would cross-signal each other. Now the channel
+    is ``libtmux_mcp_wait_<uuid4hex[:8]>``, fresh per invocation and
+    consistent within one invocation (the name that appears in the
+    ``send_keys`` payload must match the ``wait_for_channel`` call).
+    """
+    import re
+
+    from libtmux_mcp.prompts.recipes import run_and_wait
+
+    first = run_and_wait(command="pytest", pane_id="%1")
+    second = run_and_wait(command="pytest", pane_id="%1")
+
+    pattern = re.compile(r"libtmux_mcp_wait_[0-9a-f]{8}")
+    first_matches = pattern.findall(first)
+    second_matches = pattern.findall(second)
+
+    # Two occurrences per rendering: one inside send_keys, one in
+    # wait_for_channel. Both must be the SAME channel name within a
+    # single rendering (consistency).
+    assert len(first_matches) == 2
+    assert first_matches[0] == first_matches[1]
+    assert len(second_matches) == 2
+    assert second_matches[0] == second_matches[1]
+
+    # And the two renderings must differ from each other (uniqueness).
+    assert first_matches[0] != second_matches[0]
 
 
 def test_interrupt_gracefully_does_not_escalate() -> None:
