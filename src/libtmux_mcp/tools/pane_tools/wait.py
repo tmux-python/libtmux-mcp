@@ -132,6 +132,18 @@ async def wait_for_text(
     -------
     WaitForTextResult
         Result with found status, matched lines, and timing info.
+
+    Notes
+    -----
+    **Safety tier.** Tagged ``readonly`` because the tool observes
+    pane state without mutating it. Readonly clients may therefore
+    block for the caller-supplied ``timeout`` (default 8 s, caller
+    may pass larger values). The capture call runs on the asyncio
+    default thread-pool executor, whose size caps concurrent waits
+    (``min(32, os.cpu_count() + 4)`` on CPython); a malicious
+    readonly client could saturate that pool with long-timeout
+    calls. If you need to rate-limit wait tools, do it at the
+    transport layer or with dedicated middleware.
     """
     search_pattern = pattern if regex else re.escape(pattern)
     flags = 0 if match_case else re.IGNORECASE
@@ -237,6 +249,18 @@ async def wait_for_content_change(
     -------
     ContentChangeResult
         Result with changed status and timing info.
+
+    Notes
+    -----
+    **Safety tier.** Tagged ``readonly`` because the tool observes
+    pane state without mutating it. Readonly clients may therefore
+    block for the caller-supplied ``timeout`` (default 8 s, caller
+    may pass larger values). The capture call runs on the asyncio
+    default thread-pool executor, whose size caps concurrent waits
+    (``min(32, os.cpu_count() + 4)`` on CPython); a malicious
+    readonly client could saturate that pool with long-timeout
+    calls. If you need to rate-limit wait tools, do it at the
+    transport layer or with dedicated middleware.
     """
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
