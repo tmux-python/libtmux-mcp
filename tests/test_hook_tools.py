@@ -90,6 +90,104 @@ def test_show_hook_unknown_name_raises(
         )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "bug: show_hooks(scope='server') misses pane-level hooks set via "
+        "set-hook -g (which tmux stores in the global-window options tree, "
+        "enumerated by show-hooks -gw, not -g). show_hook(hook_name=..., "
+        "scope='server') finds them because it runs a name-targeted lookup. "
+        "Fix lands in the next commit."
+    ),
+)
+def test_show_hooks_surfaces_globally_set_pane_hook(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """show_hooks and show_hook must agree on -g-set pane-level hooks.
+
+    Regression guard for the multi-agent-test finding. Repro:
+
+    1. ``tmux set-hook -g pane-focus-in 'display-message ...'`` stores
+       the hook in tmux's global-window options tree (because
+       ``pane-focus-in`` is a pane-level hook).
+    2. ``show_hook(hook_name='pane-focus-in', scope='server')`` finds
+       it because tmux's name-targeted lookup consults the correct
+       tree per hook name.
+    3. ``show_hooks(scope='server')`` returns no entry for
+       ``pane-focus-in`` because our tool currently maps
+       ``scope='server'`` to ``-g`` only (global-session tree), missing
+       the global-window tree that holds pane/window-level hooks.
+
+    The two tools share ``_resolve_hook_target`` but diverge at the
+    tmux CLI level: ``show-hooks -g NAME`` works for any named hook;
+    ``show-hooks -g`` (no name) only lists one tree. The fix makes
+    ``show_hooks(scope='server')`` enumerate both trees so the
+    invariant ``show_hook ⊆ show_hooks`` holds for every scope.
+    """
+    mcp_server.cmd("set-hook", "-g", "pane-focus-in", "display-message xfail_probe")
+    try:
+        singular = show_hook(
+            hook_name="pane-focus-in",
+            scope="server",
+            socket_name=mcp_server.socket_name,
+        )
+        plural = show_hooks(
+            scope="server",
+            socket_name=mcp_server.socket_name,
+        )
+
+        # Control: show_hook finds the -g-set pane hook.
+        singular_names = {e.hook_name for e in singular.entries}
+        assert "pane-focus-in" in singular_names, (
+            "show_hook could not find -g-set pane-focus-in; test setup failed"
+        )
+
+        # The bug: show_hooks misses what show_hook sees.
+        plural_names = {e.hook_name for e in plural.entries}
+        assert "pane-focus-in" in plural_names, (
+            f"show_hooks(scope='server') returned {plural_names} "
+            f"but show_hook found pane-focus-in — inconsistency."
+        )
+    finally:
+        mcp_server.cmd("set-hook", "-g", "-u", "pane-focus-in")
+    _ = mcp_session  # session fixture ensures the server has a usable target
+
+
+def test_tmux_splits_global_hooks_across_session_and_window_trees(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Document tmux's two-tree model for ``set-hook -g`` storage.
+
+    Diagnostic test: tmux stores a ``-g``-set hook in whichever global
+    options tree matches the hook's scope. Session-level hooks (e.g.
+    ``session-closed``) go into the global-session tree enumerated by
+    ``show-hooks -g``. Pane / window-level hooks (e.g.
+    ``pane-focus-in``) go into the global-window tree enumerated by
+    ``show-hooks -gw``. ``show-hooks -g`` (no ``-w``) only lists the
+    first tree — which is the root cause of the ``show_hooks``
+    inconsistency guarded above. Pinning this behaviour here means a
+    future tmux change that unifies the trees (or breaks this
+    contract) surfaces as a test failure rather than a silent drift.
+    """
+    mcp_server.cmd("set-hook", "-g", "session-closed", "display-message SESS")
+    mcp_server.cmd("set-hook", "-g", "pane-focus-in", "display-message PANE")
+    try:
+        session_tree = "\n".join(mcp_server.cmd("show-hooks", "-g").stdout)
+        window_tree = "\n".join(mcp_server.cmd("show-hooks", "-gw").stdout)
+
+        assert "session-closed[" in session_tree
+        assert "pane-focus-in" not in session_tree, (
+            "tmux now lists pane-focus-in in the global-session tree — "
+            "the two-tree assumption behind show_hooks(scope='server') "
+            "may need revisiting."
+        )
+        assert "pane-focus-in[" in window_tree
+    finally:
+        mcp_server.cmd("set-hook", "-g", "-u", "session-closed")
+        mcp_server.cmd("set-hook", "-g", "-u", "pane-focus-in")
+    _ = mcp_session
+
+
 def test_show_hooks_invalid_scope(mcp_server: Server) -> None:
     """Unknown scope value is rejected with a helpful ToolError."""
     with pytest.raises(ToolError, match="Invalid scope"):
