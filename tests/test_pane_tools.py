@@ -750,6 +750,60 @@ def test_search_panes_per_pane_matched_lines_cap(
     assert result.truncated is True
 
 
+def test_search_panes_per_pane_matched_lines_cap_deterministic(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """``max_matched_lines_per_pane`` tail-truncates matched_lines per pane.
+
+    Deterministic replacement for
+    :func:`test_search_panes_per_pane_matched_lines_cap`. That test relied
+    on a ``retry_until`` poll over ``capture_pane().count(...)``, which is
+    a Python ``list.count`` call — exact-element equality, not substring
+    search. On shells that render a PS1 prompt (e.g. bash on CI) each
+    echoed command appears as ``"$ echo MARKER"`` and no line matches
+    ``"echo MARKER"`` exactly, so the retry times out; on shells that
+    are still initializing (e.g. zsh mid-``compinit``) typed bytes land
+    as bare lines that do match exactly, and the test passes by accident.
+
+    This test instead uses the project's own ``wait_for_channel`` /
+    ``tmux wait-for`` primitive to synchronize on shell-command
+    completion, mirroring the ``run_and_wait`` recipe pattern. No
+    polling, no shell-readiness assumption — the ``capture_pane``
+    inside ``search_panes`` runs strictly after the four echoes have
+    executed, so the truncation assertion is deterministic on every
+    shell.
+
+    Four echoes produce at least eight marker-bearing lines in
+    ``capture_pane`` (command-line plus output-line for each), well
+    past the truncation threshold of three. Running this test on bash
+    gives a strict CI-compatible regression guard; running on zsh
+    confirms the same behavior regardless of PS1 state.
+    """
+    import uuid
+
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    marker = "PERLINE_MARKER_deterministic"
+    channel = f"mcp_test_percap_{uuid.uuid4().hex[:16]}"
+    payload = (
+        f"echo {marker}; echo {marker}; echo {marker}; echo {marker}; "
+        f"tmux wait-for -S {channel}"
+    )
+    mcp_pane.send_keys(payload, enter=True)
+    wait_for_channel(channel=channel, timeout=5.0, socket_name=mcp_server.socket_name)
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        max_matched_lines_per_pane=3,
+        socket_name=mcp_server.socket_name,
+    )
+    match = next((m for m in result.matches if m.pane_id == mcp_pane.pane_id), None)
+    assert match is not None
+    assert len(match.matched_lines) == 3
+    assert result.truncated is True
+
+
 # ---------------------------------------------------------------------------
 # search_panes is_caller annotation tests
 # ---------------------------------------------------------------------------
