@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 import time
 
+import anyio
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
@@ -20,6 +20,21 @@ from libtmux_mcp.models import (
     WaitForTextResult,
 )
 
+#: Exceptions that indicate "client transport is gone, keep polling".
+#: Narrowly-scoped on purpose: a broader ``Exception`` catch would
+#: mask real programming errors (``TypeError`` on a renamed kwarg,
+#: ``AttributeError`` if ``ctx`` is wired wrong) behind a silent no-op.
+#: ``anyio.ClosedResourceError`` is what FastMCP's streamable-HTTP
+#: session raises when the peer has disconnected; ``BrokenPipeError``
+#: covers stdio transports; generic ``ConnectionError`` is the
+#: catch-all base for both socket-level families. Anything else
+#: propagates so the caller sees it.
+_TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    anyio.ClosedResourceError,
+    BrokenPipeError,
+    ConnectionError,
+)
+
 
 async def _maybe_report_progress(
     ctx: Context | None,
@@ -31,14 +46,21 @@ async def _maybe_report_progress(
     """Call ``ctx.report_progress`` if a Context is available.
 
     Tests call the wait tools with ``ctx=None`` so progress plumbing is
-    optional. Failures from ``report_progress`` (e.g. client has closed
-    the connection) are suppressed because a progress report must never
-    be able to take down a tool call.
+    optional. Only transport-closed exceptions are suppressed — a
+    progress report that fails because the client has disconnected is
+    unsurprising and must not take down the tool call. Everything else
+    (programming errors, kwarg mismatches, FastMCP internal failures)
+    propagates so it shows up in logs and tests instead of being
+    silently swallowed.
     """
     if ctx is None:
         return
-    with contextlib.suppress(Exception):
+    try:
         await ctx.report_progress(progress=progress, total=total, message=message)
+    except _TRANSPORT_CLOSED_EXCEPTIONS:
+        # Client gone; the poll loop will either complete or hit its
+        # timeout and return normally. No progress notification leaks.
+        return
 
 
 @handle_tool_errors_async
