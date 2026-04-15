@@ -40,16 +40,19 @@ def run_and_wait(
         Maximum seconds to wait for the signal. Default 60.
     """
     channel = f"libtmux_mcp_wait_{uuid.uuid4().hex[:8]}"
+    shell_payload = (
+        f"{command}; __mcp_status=$?; tmux wait-for -S {channel}; exit $__mcp_status"
+    )
     return f"""Run this shell command in tmux pane {pane_id} and block
 until it finishes, preserving the command's exit status:
 
 ```
 send_keys(
-    pane_id="{pane_id}",
-    keys='{command}; __mcp_status=$?; tmux wait-for -S {channel}; exit $__mcp_status',
+    pane_id={pane_id!r},
+    keys={shell_payload!r},
 )
-wait_for_channel(channel="{channel}", timeout={timeout})
-capture_pane(pane_id="{pane_id}", max_lines=100)
+wait_for_channel(channel={channel!r}, timeout={timeout})
+capture_pane(pane_id={pane_id!r}, max_lines=100)
 ```
 
 After the channel signals, read the last ~100 lines to verify the
