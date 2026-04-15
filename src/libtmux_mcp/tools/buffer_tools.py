@@ -41,13 +41,13 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     _get_server,
     _resolve_pane,
+    _tmux_argv,
     handle_tool_errors,
 )
 from libtmux_mcp.models import BufferContent, BufferRef
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
-    from libtmux.server import Server
 
 #: Reserved prefix for MCP-allocated buffers. Anything matching this
 #: regex is considered agent-owned; anything else is the human user's
@@ -124,18 +124,6 @@ def _validate_buffer_name(name: str) -> str:
         msg = f"Invalid buffer name: {name!r}"
         raise ToolError(msg)
     return name
-
-
-def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
-    """Build a full tmux argv honouring socket_name / socket_path."""
-    tmux_bin: str = getattr(server, "tmux_bin", None) or "tmux"
-    argv: list[str] = [tmux_bin]
-    if server.socket_name:
-        argv.extend(["-L", server.socket_name])
-    if server.socket_path:
-        argv.extend(["-S", str(server.socket_path)])
-    argv.extend(tmux_args)
-    return argv
 
 
 def _allocate_buffer_name(logical_name: str | None) -> str:
