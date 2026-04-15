@@ -46,14 +46,6 @@ def test_create_session(mcp_server: Server) -> None:
     assert result.session_id is not None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bug: create_session returns SessionInfo without active_pane_id, "
-        "forcing agents to make a follow-up list_panes call for the "
-        "newly-created session's pane. Fix lands in the next commit."
-    ),
-)
 def test_create_session_returns_active_pane_id(mcp_server: Server) -> None:
     """create_session exposes the initial pane id of the new session.
 
@@ -76,17 +68,14 @@ def test_create_session_returns_active_pane_id(mcp_server: Server) -> None:
         socket_name=mcp_server.socket_name,
     )
 
-    # ``active_pane_id`` is added in the follow-up fix commit; the
-    # ``type: ignore`` below is intentional for the xfail window.
-    active_pane_id = getattr(result, "active_pane_id", None)
-    assert active_pane_id is not None
-    assert active_pane_id.startswith("%")
+    assert result.active_pane_id is not None
+    assert result.active_pane_id.startswith("%")
 
     panes = list_panes(
         session_name="mcp_test_active_pane",
         socket_name=mcp_server.socket_name,
     )
-    assert any(p.pane_id == active_pane_id for p in panes)
+    assert any(p.pane_id == result.active_pane_id for p in panes)
 
 
 def test_create_session_duplicate(mcp_server: Server, mcp_session: Session) -> None:

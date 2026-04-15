@@ -17,6 +17,16 @@ class SessionInfo(BaseModel):
         default=None, description="Attached client count"
     )
     session_created: str | None = Field(default=None, description="Creation timestamp")
+    active_pane_id: str | None = Field(
+        default=None,
+        description=(
+            "Pane id (``%N``) of the session's active pane. Guaranteed "
+            "non-None on ``create_session`` return (libtmux creates the "
+            "session with one initial pane). May be None from "
+            "``list_sessions`` rows for sessions in transient teardown "
+            "states where ``active_pane`` is unavailable."
+        ),
+    )
 
 
 class WindowInfo(BaseModel):
