@@ -115,15 +115,6 @@ CREATE_SESSION_ENV_STRING_FIXTURES: list[CreateSessionEnvStringFixture] = [
 ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bug: create_session rejects JSON-string environment "
-        "(Cursor composer-1/1.5 format). The existing filters-level "
-        "workaround in _filtered_serialize has not been extended to "
-        "the environment parameter. Fix lands in the next commit."
-    ),
-)
 @pytest.mark.parametrize(
     CreateSessionEnvStringFixture._fields,
     CREATE_SESSION_ENV_STRING_FIXTURES,
@@ -153,7 +144,7 @@ def test_create_session_environment_accepts_json_string(
         with pytest.raises(ToolError, match=error_match):
             create_session(
                 session_name=session_name,
-                environment=t.cast("t.Any", environment),
+                environment=environment,
                 socket_name=mcp_server.socket_name,
             )
         return

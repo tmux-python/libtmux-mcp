@@ -15,6 +15,7 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     _apply_filters,
     _caller_is_on_server,
+    _coerce_dict_arg,
     _get_caller_identity,
     _get_server,
     _invalidate_server,
@@ -62,7 +63,7 @@ def create_session(
     start_directory: str | None = None,
     x: int | None = None,
     y: int | None = None,
-    environment: dict[str, str] | None = None,
+    environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
 ) -> SessionInfo:
     """Create a new tmux session.
@@ -82,8 +83,11 @@ def create_session(
         Width of the initial window.
     y : int, optional
         Height of the initial window.
-    environment : dict, optional
-        Environment variables to set.
+    environment : dict or str, optional
+        Environment variables to set. Accepts either a dict of env
+        vars or a JSON-serialized string of the same — the latter is
+        the cursor-composer-1 workaround described in
+        :func:`libtmux_mcp._utils._coerce_dict_arg`.
     socket_name : str, optional
         tmux socket name. Defaults to LIBTMUX_SOCKET env var.
 
@@ -104,8 +108,9 @@ def create_session(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    if environment is not None:
-        kwargs["environment"] = environment
+    coerced_env = _coerce_dict_arg("environment", environment)
+    if coerced_env is not None:
+        kwargs["environment"] = coerced_env
     session = server.new_session(**kwargs)
     return _serialize_session(session)
 
