@@ -46,6 +46,49 @@ def test_create_session(mcp_server: Server) -> None:
     assert result.session_id is not None
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "bug: create_session returns SessionInfo without active_pane_id, "
+        "forcing agents to make a follow-up list_panes call for the "
+        "newly-created session's pane. Fix lands in the next commit."
+    ),
+)
+def test_create_session_returns_active_pane_id(mcp_server: Server) -> None:
+    """create_session exposes the initial pane id of the new session.
+
+    Regression guard for the multi-agent-test finding: three of four
+    agents (codex, gemini, cursor-agent) had to issue a follow-up
+    ``list_panes`` call after ``create_session`` to discover the pane
+    id they needed for ``load_buffer`` / ``paste_buffer`` workflows.
+    libtmux guarantees ``Session.active_pane`` is non-None immediately
+    after ``Server.new_session`` — the pane id is available without
+    any extra tmux round-trip, so ``SessionInfo`` should expose it.
+
+    The contract: ``result.active_pane_id`` is a tmux pane id string
+    (``"%N"``) that matches the first pane returned by ``list_panes``
+    for the session.
+    """
+    from libtmux_mcp.tools.window_tools import list_panes
+
+    result = create_session(
+        session_name="mcp_test_active_pane",
+        socket_name=mcp_server.socket_name,
+    )
+
+    # ``active_pane_id`` is added in the follow-up fix commit; the
+    # ``type: ignore`` below is intentional for the xfail window.
+    active_pane_id = getattr(result, "active_pane_id", None)
+    assert active_pane_id is not None
+    assert active_pane_id.startswith("%")
+
+    panes = list_panes(
+        session_name="mcp_test_active_pane",
+        socket_name=mcp_server.socket_name,
+    )
+    assert any(p.pane_id == active_pane_id for p in panes)
+
+
 def test_create_session_duplicate(mcp_server: Server, mcp_session: Session) -> None:
     """create_session raises error for duplicate session name."""
     from fastmcp.exceptions import ToolError
