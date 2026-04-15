@@ -32,8 +32,22 @@ import typing as t
 
 from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
-from libtmux._internal.sparse_array import SparseArray
 from libtmux.constants import OptionScope
+
+try:
+    from libtmux._internal.sparse_array import SparseArray
+except ImportError:  # pragma: no cover — defensive against upstream rename
+    # libtmux's ``SparseArray`` lives under the ``_internal`` namespace,
+    # so an upstream rename or module move could break this import on a
+    # minor-version bump. Fall back to a sentinel class that never
+    # matches ``isinstance`` — ``_flatten_hook_value`` already handles
+    # both ``dict`` and ``SparseArray`` uniformly via
+    # ``hasattr(value, "items")``, so dropping SparseArray matching is
+    # a clean degradation rather than a crash. Verified against
+    # libtmux 0.55.x; re-check on 0.56+.
+    class SparseArray:  # type: ignore[no-redef]
+        """Fallback stand-in when libtmux's private module is unreachable."""
+
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_RO,
