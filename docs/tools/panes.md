@@ -114,25 +114,36 @@ directly.
 }
 ```
 
-Response:
+Response is a `SearchPanesResult` wrapper: the matching panes live under
+`matches`, and the wrapper fields (`truncated`, `truncated_panes`,
+`total_panes_matched`, `offset`, `limit`) support pagination. For larger
+result sets, iterate by re-calling with `offset += len(matches)`; stop when
+`truncated == false` and `truncated_panes == []`.
 
 ```json
-[
-  {
-    "pane_id": "%0",
-    "pane_current_command": "zsh",
-    "pane_current_path": "/home/user/myproject",
-    "window_id": "@0",
-    "window_name": "editor",
-    "session_id": "$0",
-    "session_name": "dev",
-    "matched_lines": [
-      "FAIL: test_upload (AssertionError)",
-      "3 tests: 2 passed, 1 failed"
-    ],
-    "is_caller": false
-  }
-]
+{
+  "matches": [
+    {
+      "pane_id": "%0",
+      "pane_current_command": "zsh",
+      "pane_current_path": "/home/user/myproject",
+      "window_id": "@0",
+      "window_name": "editor",
+      "session_id": "$0",
+      "session_name": "dev",
+      "matched_lines": [
+        "FAIL: test_upload (AssertionError)",
+        "3 tests: 2 passed, 1 failed"
+      ],
+      "is_caller": false
+    }
+  ],
+  "truncated": false,
+  "truncated_panes": [],
+  "total_panes_matched": 1,
+  "offset": 0,
+  "limit": 500
+}
 ```
 
 ```{fastmcp-tool-input} pane_tools.search_panes
