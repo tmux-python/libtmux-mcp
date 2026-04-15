@@ -991,24 +991,49 @@ def test_wait_for_text_propagates_unexpected_progress_error(
         )
 
 
-def test_wait_tools_do_not_block_event_loop(mcp_server: Server, mcp_pane: Pane) -> None:
+def test_wait_tools_do_not_block_event_loop(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """wait_for_text runs its blocking capture off the main event loop.
 
     Regression guard for the critical bug that FastMCP async tools are
     direct-awaited on the main event loop. ``pane.capture_pane()`` is a
-    sync ``subprocess.run`` call; without ``asyncio.to_thread`` it would
-    block every other coroutine on the same loop for the duration of
-    each poll tick.
+    sync ``subprocess.run`` call; without ``asyncio.to_thread`` it
+    would block every other coroutine on the same loop for the
+    duration of each poll tick.
 
-    The test runs ``wait_for_text`` against a never-matching pattern
-    inside an ``asyncio.gather`` alongside a ticker coroutine that
-    increments a counter every 10 ms. Because the test only asserts the
-    counter *advanced* during the wait (counter > 0), the shape is
-    low-flake under loaded CI while still proving the invariant: a
-    blocking capture would starve the ticker and leave the counter at
-    zero or one.
+    Discriminator: monkeypatch ``pane.capture_pane`` so each call
+    blocks the calling *thread* for 80 ms via ``time.sleep``. With
+    ``asyncio.to_thread`` the default executor runs that off the
+    event loop and the ticker coroutine keeps firing every 10 ms;
+    without it, the event loop is pinned for the full 80 ms per poll
+    and the ticker can only advance during the brief
+    ``await asyncio.sleep(interval)`` gaps. The threshold (~40 ticks
+    expected with the fix vs. <= 6 without) cleanly fails the
+    un-fixed code while remaining robust against 2x CI slowdown.
+
+    The previous version of this test used the production
+    ``capture_pane`` (which returns instantly under tmux's normal
+    semantics) and asserted ``ticks >= 5``. Since ``await
+    asyncio.sleep(interval=0.05)`` between poll iterations already
+    yielded enough for the ticker to satisfy that bound, the test
+    passed even with ``asyncio.to_thread`` reverted — providing zero
+    actual defense against the bug it claimed to guard. The
+    monkeypatched slow capture is the discriminator.
+
+    See commit ``74ec8f0`` for the project's precedent on stabilizing
+    timing-sensitive tests under ``--reruns 0``.
     """
     import asyncio
+    import time as _time
+
+    from libtmux.pane import Pane as _LibtmuxPane
+
+    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
+        _time.sleep(0.08)
+        return []
+
+    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
 
     async def _drive() -> int:
         ticks = 0
@@ -1025,7 +1050,7 @@ def test_wait_tools_do_not_block_event_loop(mcp_server: Server, mcp_pane: Pane) 
                 await wait_for_text(
                     pattern="WILL_NEVER_MATCH_EVENT_LOOP_zqr9",
                     pane_id=mcp_pane.pane_id,
-                    timeout=0.3,
+                    timeout=0.4,
                     interval=0.05,
                     socket_name=mcp_server.socket_name,
                 )
@@ -1036,11 +1061,15 @@ def test_wait_tools_do_not_block_event_loop(mcp_server: Server, mcp_pane: Pane) 
         return ticks
 
     ticks = asyncio.run(_drive())
-    # A blocking capture loop would pin the event loop for the full
-    # 300 ms window, leaving the ticker unable to fire. With
-    # asyncio.to_thread the ticker fires ~30 times; assert a generous
-    # lower bound to stay robust on slow CI.
-    assert ticks >= 5, f"ticker advanced only {ticks} times — event loop is blocked"
+    # With asyncio.to_thread, ticker fires ~40 times in the 400 ms
+    # window. Without, only during the 50 ms inter-poll sleep gaps
+    # (~3 polls x ~5 ticks/sleep = ~15) plus 1 between captures = 6.
+    # The 20-tick threshold is robust against 2x CI slowdown and
+    # unambiguously fails the un-fixed code.
+    assert ticks >= 20, (
+        f"ticker advanced only {ticks} times — blocking capture is on the "
+        f"main event loop, not in asyncio.to_thread"
+    )
 
 
 # ---------------------------------------------------------------------------
