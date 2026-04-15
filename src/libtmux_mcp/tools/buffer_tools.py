@@ -184,6 +184,9 @@ def load_buffer(
         argv = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
         try:
             subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+        except subprocess.TimeoutExpired as e:
+            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
+            raise ToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
             msg = f"load-buffer failed: {stderr or e}"
@@ -272,6 +275,9 @@ def show_buffer(
             capture_output=True,
             timeout=5.0,
         )
+    except subprocess.TimeoutExpired as e:
+        msg = f"show-buffer timeout after 5s for {cname!r}"
+        raise ToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"show-buffer failed for {cname!r}: {stderr or e}"
@@ -304,6 +310,9 @@ def delete_buffer(
     argv = _tmux_argv(server, "delete-buffer", "-b", cname)
     try:
         subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+    except subprocess.TimeoutExpired as e:
+        msg = f"delete-buffer timeout after 5s for {cname!r}"
+        raise ToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"delete-buffer failed for {cname!r}: {stderr or e}"

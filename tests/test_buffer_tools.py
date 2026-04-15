@@ -144,3 +144,54 @@ def test_paste_buffer_into_pane(mcp_server: Server, mcp_pane: Pane) -> None:
 def test_content_is_in_sensitive_args() -> None:
     """``content`` is redacted by the audit middleware."""
     assert "content" in _SENSITIVE_ARG_NAMES
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "match_text"),
+    [
+        ("load_buffer", "load-buffer timeout"),
+        ("show_buffer", "show-buffer timeout"),
+        ("delete_buffer", "delete-buffer timeout"),
+    ],
+)
+def test_buffer_subprocess_timeout_surfaces_as_tool_error(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    match_text: str,
+) -> None:
+    """Hung tmux raises ``TimeoutExpired`` → clear ``ToolError``.
+
+    Regression guard: previously each buffer tool caught only
+    ``CalledProcessError``, so a ``subprocess.TimeoutExpired`` from the
+    5-second cap would escape through ``handle_tool_errors`` and
+    surface as a generic ``"Unexpected error: TimeoutExpired"``. The
+    new per-tool handler reports the operation name, the 5-second
+    cap, and the target buffer name.
+    """
+    import subprocess
+
+    del mcp_session
+
+    def _hang(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
+
+    monkeypatch.setattr("libtmux_mcp.tools.buffer_tools.subprocess.run", _hang)
+
+    tools: dict[str, t.Callable[..., t.Any]] = {
+        "load_buffer": load_buffer,
+        "show_buffer": show_buffer,
+        "delete_buffer": delete_buffer,
+    }
+    fn = tools[tool_name]
+    kwargs: dict[str, t.Any] = {"socket_name": mcp_server.socket_name}
+    if tool_name == "load_buffer":
+        kwargs.update({"content": "hang-test"})
+    else:
+        # show/delete need a valid MCP-namespaced buffer name so the
+        # validator doesn't intercept before the subprocess is called.
+        kwargs.update({"buffer_name": "libtmux_mcp_" + ("0" * 32) + "_x"})
+
+    with pytest.raises(ToolError, match=match_text):
+        fn(**kwargs)
