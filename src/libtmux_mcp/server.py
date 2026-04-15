@@ -172,10 +172,16 @@ mcp = FastMCP(
     #      response *before* ErrorHandlingMiddleware can transform
     #      exceptions; keeps the size cap independent of error path.
     #   3. ErrorHandlingMiddleware — transforms resource errors to
-    #      MCP code -32002; sits inside so it wraps the tool call
-    #      that Safety has already gated.
-    #   4. SafetyMiddleware — tier gate (fail-closed).
-    #   5. AuditMiddleware — innermost; logs the exact call/args.
+    #      MCP code -32002; sits inside so it wraps the audit + safety
+    #      pair.
+    #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
+    #      events (which raise ToolError before call_next inside
+    #      Safety) are still logged with outcome=error. Without this
+    #      ordering, denied access attempts would silently bypass the
+    #      audit log — a security-observability gap.
+    #   5. SafetyMiddleware — innermost gate (fail-closed). Denials
+    #      never reach the tool, but the audit record above captures
+    #      them for forensic review.
     middleware=[
         TimingMiddleware(),
         TailPreservingResponseLimitingMiddleware(
@@ -183,8 +189,8 @@ mcp = FastMCP(
             tools=_RESPONSE_LIMITED_TOOLS,
         ),
         ErrorHandlingMiddleware(transform_errors=True),
-        SafetyMiddleware(max_tier=_safety_level),
         AuditMiddleware(),
+        SafetyMiddleware(max_tier=_safety_level),
     ],
     on_duplicate="error",
 )
