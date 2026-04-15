@@ -199,6 +199,54 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
 }
 
 
+def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
+    """Build a full tmux argv list honouring ``socket_name`` and ``socket_path``.
+
+    Internal helper shared by every module that has to invoke the tmux
+    binary directly via :func:`subprocess.run` (the buffer, wait-for,
+    and paste_text tools). libtmux's own :meth:`Server.cmd` wraps the
+    same logic but does not expose a timeout, so tools that need
+    bounded blocking have to shell out themselves — and when they do
+    they must honour the caller's socket.
+
+    Parameters
+    ----------
+    server : libtmux.server.Server
+        The resolved server whose socket to target.
+    *tmux_args : str
+        tmux subcommand and its flags, e.g. ``"load-buffer", "-b", name``.
+
+    Returns
+    -------
+    list[str]
+        Complete argv ready for :func:`subprocess.run`.
+
+    Examples
+    --------
+    >>> class _S:
+    ...     tmux_bin = "tmux"
+    ...     socket_name = "s"
+    ...     socket_path = None
+    >>> _tmux_argv(t.cast("Server", _S()), "list-sessions")
+    ['tmux', '-L', 's', 'list-sessions']
+
+    >>> class _P:
+    ...     tmux_bin = "tmux"
+    ...     socket_name = None
+    ...     socket_path = "/tmp/tmux-1000/default"
+    >>> _tmux_argv(t.cast("Server", _P()), "ls")
+    ['tmux', '-S', '/tmp/tmux-1000/default', 'ls']
+    """
+    tmux_bin: str = getattr(server, "tmux_bin", None) or "tmux"
+    argv: list[str] = [tmux_bin]
+    if server.socket_name:
+        argv.extend(["-L", server.socket_name])
+    if server.socket_path:
+        argv.extend(["-S", str(server.socket_path)])
+    argv.extend(tmux_args)
+    return argv
+
+
 _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}
 _server_cache_lock = threading.Lock()
 

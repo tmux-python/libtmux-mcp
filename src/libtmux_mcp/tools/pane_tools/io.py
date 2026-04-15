@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from libtmux_mcp._utils import (
     _get_server,
     _resolve_pane,
+    _tmux_argv,
     handle_tool_errors,
 )
 
@@ -290,8 +291,12 @@ def paste_text(
 
     # Use a unique named tmux buffer so we don't clobber the user's
     # unnamed paste buffer, and so we can reliably clean up on error
-    # paths (paste-buffer -b NAME -d deletes the named buffer).
-    buffer_name = f"mcp_paste_{uuid.uuid4().hex}"
+    # paths (paste-buffer -b NAME -d deletes the named buffer). The
+    # ``libtmux_mcp_paste_`` prefix matches the namespace the first-
+    # class buffer tools use, so a future operator-facing listing of
+    # MCP-owned buffers (filtering on ``libtmux_mcp_*``) catches both
+    # paste-through buffers and ``load_buffer`` buffers uniformly.
+    buffer_name = f"libtmux_mcp_paste_{uuid.uuid4().hex}"
     tmppath: str | None = None
     try:
         # Write text to a temp file and load into tmux buffer
@@ -300,17 +305,13 @@ def paste_text(
             tmppath = f.name  # bind first so cleanup works even if write fails
             f.write(text)
 
-        # Build tmux command args for loading the named buffer
-        tmux_bin: str = getattr(server, "tmux_bin", None) or "tmux"
-        load_args: list[str] = [tmux_bin]
-        if server.socket_name:
-            load_args.extend(["-L", server.socket_name])
-        if server.socket_path:
-            load_args.extend(["-S", str(server.socket_path)])
-        load_args.extend(["load-buffer", "-b", buffer_name, tmppath])
+        load_args = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
 
         try:
-            subprocess.run(load_args, check=True, capture_output=True)
+            subprocess.run(load_args, check=True, capture_output=True, timeout=5.0)
+        except subprocess.TimeoutExpired as e:
+            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
+            raise ToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
             msg = f"load-buffer failed: {stderr or e}"

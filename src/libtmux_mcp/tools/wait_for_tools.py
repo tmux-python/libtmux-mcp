@@ -34,12 +34,12 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING,
     TAG_MUTATING,
     _get_server,
+    _tmux_argv,
     handle_tool_errors,
 )
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
-    from libtmux.server import Server
 
 #: Allowed characters and length range for channel names. Channels are
 #: tmux-server-global and names are passed to ``tmux wait-for`` on the
@@ -94,18 +94,6 @@ def _validate_channel_name(name: str) -> str:
         msg = f"Invalid channel name: {name!r}"
         raise ToolError(msg)
     return name
-
-
-def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
-    """Build a full tmux argv list honouring the server's socket."""
-    tmux_bin: str = getattr(server, "tmux_bin", None) or "tmux"
-    argv: list[str] = [tmux_bin]
-    if server.socket_name:
-        argv.extend(["-L", server.socket_name])
-    if server.socket_path:
-        argv.extend(["-S", str(server.socket_path)])
-    argv.extend(tmux_args)
-    return argv
 
 
 @handle_tool_errors

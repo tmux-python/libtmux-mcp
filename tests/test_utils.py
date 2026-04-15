@@ -546,6 +546,53 @@ def test_valid_safety_levels_matches_tags() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _tmux_argv tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeServer(t.NamedTuple):
+    """Minimal Server stand-in for argv-building unit tests."""
+
+    socket_name: str | None
+    socket_path: str | None
+    tmux_bin: str | None = None
+
+
+@pytest.mark.parametrize(
+    ("server", "args", "expected"),
+    [
+        (
+            _FakeServer(socket_name="s", socket_path=None),
+            ("list-sessions",),
+            ["tmux", "-L", "s", "list-sessions"],
+        ),
+        (
+            _FakeServer(socket_name=None, socket_path="/tmp/tmux-1000/default"),
+            ("ls",),
+            ["tmux", "-S", "/tmp/tmux-1000/default", "ls"],
+        ),
+        (
+            _FakeServer(socket_name="s", socket_path="/tmp/tmux-1000/s"),
+            ("wait-for", "-S", "ch"),
+            ["tmux", "-L", "s", "-S", "/tmp/tmux-1000/s", "wait-for", "-S", "ch"],
+        ),
+        (
+            _FakeServer(socket_name=None, socket_path=None, tmux_bin="/opt/tmux"),
+            ("show-options",),
+            ["/opt/tmux", "show-options"],
+        ),
+    ],
+)
+def test_tmux_argv_honours_socket_and_binary(
+    server: _FakeServer, args: tuple[str, ...], expected: list[str]
+) -> None:
+    """``_tmux_argv`` covers the socket_name / socket_path / tmux_bin axes."""
+    from libtmux_mcp._utils import _tmux_argv
+
+    assert _tmux_argv(t.cast("t.Any", server), *args) == expected
+
+
+# ---------------------------------------------------------------------------
 # Error-handler decorator tests
 # ---------------------------------------------------------------------------
 
