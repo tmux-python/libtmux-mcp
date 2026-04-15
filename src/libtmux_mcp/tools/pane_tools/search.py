@@ -26,6 +26,50 @@ SEARCH_DEFAULT_MAX_LINES_PER_PANE = 50
 SEARCH_DEFAULT_LIMIT = 500
 
 
+def _pane_id_sort_key(m: PaneContentMatch) -> tuple[int, str]:
+    """Sort panes numerically by their tmux id.
+
+    tmux pane ids are strings like ``"%7"`` — a plain lex sort produces
+    ``["%0", "%1", "%10", "%2", ...]``, which is surprising to callers
+    paginating with ``offset``/``limit``. Strip the leading ``%`` and
+    cast to int so ``"%2"`` sorts before ``"%10"``; fall back to lex
+    order for any non-standard id (the tuple's first element ensures
+    numeric ids always precede weird ids).
+
+    Examples
+    --------
+    >>> from libtmux_mcp.models import PaneContentMatch
+    >>> ids = ["%0", "%10", "%2", "%20"]
+    >>> [
+    ...     m.pane_id
+    ...     for m in sorted(
+    ...         [PaneContentMatch(pane_id=i, matched_lines=[]) for i in ids],
+    ...         key=_pane_id_sort_key,
+    ...     )
+    ... ]
+    ['%0', '%2', '%10', '%20']
+
+    Non-standard ids fall to the tail in lex order:
+
+    >>> [
+    ...     m.pane_id
+    ...     for m in sorted(
+    ...         [
+    ...             PaneContentMatch(pane_id=i, matched_lines=[])
+    ...             for i in ["zzz", "%0", "weird"]
+    ...         ],
+    ...         key=_pane_id_sort_key,
+    ...     )
+    ... ]
+    ['%0', 'weird', 'zzz']
+    """
+    pid = m.pane_id.lstrip("%")
+    try:
+        return (0, f"{int(pid):09d}")
+    except ValueError:
+        return (1, m.pane_id)
+
+
 @handle_tool_errors
 def search_panes(
     pattern: str,
@@ -186,7 +230,7 @@ def search_panes(
             )
         )
 
-    all_matches.sort(key=lambda m: m.pane_id)
+    all_matches.sort(key=_pane_id_sort_key)
     total_panes_matched = len(all_matches)
 
     page_start = max(0, offset)

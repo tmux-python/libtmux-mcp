@@ -508,6 +508,61 @@ def test_search_panes_pagination_limit_and_offset(
     assert len(seen) == first.total_panes_matched
 
 
+def test_search_panes_numeric_pane_id_ordering(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Pagination returns panes in numeric, not lexicographic, order.
+
+    Regression guard: an earlier ``all_matches.sort(key=lambda m:
+    m.pane_id)`` produced ``["%0", "%1", "%10", "%2", ...]`` on any
+    session with ≥11 matching panes, which confused pagination (the
+    last "page 1" pane was ``%2`` rather than ``%1``). The fix sorts
+    via ``_pane_id_sort_key`` which casts the numeric portion.
+
+    Physical tmux panes don't fit in a single 80x24 window past ~6
+    before ``split-window`` fails with "no space for new pane"; this
+    test spreads panes across multiple windows so pane ids reliably
+    cross the ``%10`` boundary. The assertion is numeric monotonicity
+    of ids across the returned matches.
+    """
+    marker = "NUMSORT_MARKER_89vq"
+    # Spread panes across several windows so we get >= 12 panes without
+    # running out of per-window space. Each new_window seeds one pane;
+    # split() adds 1-2 more per window.
+    while True:
+        total_panes = sum(len(w.panes) for w in mcp_session.windows)
+        if total_panes >= 12:
+            break
+        window = mcp_session.new_window()
+        window.split()
+
+    panes = [p for w in mcp_session.windows for p in w.panes]
+    assert len(panes) >= 12
+    for pane in panes:
+        pane.send_keys(f"echo {marker}", enter=True)
+
+    def _ready() -> bool:
+        return all(marker in "\n".join(p.capture_pane()) for p in panes)
+
+    retry_until(_ready, 5, raises=True)
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        limit=100,
+        socket_name=mcp_server.socket_name,
+    )
+    ids = [m.pane_id for m in result.matches]
+    assert len(ids) >= 12
+    numeric = [int(i.lstrip("%")) for i in ids]
+    assert numeric == sorted(numeric), f"pane ids not in numeric order: {ids}"
+    # The bug's canonical manifestation: lex-sort places ``%10`` between
+    # ``%1`` and ``%2``. Pin that ``%2`` comes before ``%10`` as a
+    # stronger shape check than pure monotonicity.
+    assert 2 in numeric and 10 in numeric
+    assert numeric.index(2) < numeric.index(10)
+
+
 def test_search_panes_per_pane_matched_lines_cap(
     mcp_server: Server, mcp_session: Session, mcp_pane: Pane
 ) -> None:
