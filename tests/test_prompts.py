@@ -93,6 +93,30 @@ def test_run_and_wait_channel_is_uuid_scoped() -> None:
     assert first_matches[0] != second_matches[0]
 
 
+def test_run_and_wait_handles_quoted_commands() -> None:
+    """Single quotes in the command don't corrupt the rendered keys=...
+
+    Regression guard for the fragile ``keys='{command}; ...'`` wrap —
+    a command like ``python -c 'print(1)'`` closed the surrounding
+    single-quote prematurely, producing a syntactically invalid
+    ``send_keys`` call in the prompt output. The fix uses ``repr()``
+    so Python picks a quote style that round-trips safely.
+    """
+    import ast
+
+    from libtmux_mcp.prompts.recipes import run_and_wait
+
+    text = run_and_wait(command="python -c 'print(1)'", pane_id="%1")
+    # Extract the ``keys=`` argument as a Python literal and confirm
+    # it parses back to a string containing the original command.
+    keys_line = next(line for line in text.splitlines() if "keys=" in line)
+    _, _, payload = keys_line.partition("keys=")
+    payload = payload.rstrip(",").strip()
+    parsed = ast.literal_eval(payload)
+    assert isinstance(parsed, str)
+    assert "python -c 'print(1)'" in parsed
+
+
 def test_interrupt_gracefully_does_not_escalate() -> None:
     """``interrupt_gracefully`` refuses SIGQUIT auto-escalation."""
     from libtmux_mcp.prompts.recipes import interrupt_gracefully
