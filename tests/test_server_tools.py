@@ -78,6 +78,102 @@ def test_create_session_returns_active_pane_id(mcp_server: Server) -> None:
     assert any(p.pane_id == result.active_pane_id for p in panes)
 
 
+class CreateSessionEnvStringFixture(t.NamedTuple):
+    """Fixture for create_session ``environment`` JSON-string coercion."""
+
+    test_id: str
+    environment: str
+    expect_error: bool
+    error_match: str | None
+
+
+CREATE_SESSION_ENV_STRING_FIXTURES: list[CreateSessionEnvStringFixture] = [
+    CreateSessionEnvStringFixture(
+        test_id="string_env_valid",
+        environment='{"LIBTMUX_MCP_TEST":"hello"}',
+        expect_error=False,
+        error_match=None,
+    ),
+    CreateSessionEnvStringFixture(
+        test_id="string_env_invalid_json",
+        environment="{bad json",
+        expect_error=True,
+        error_match="Invalid environment JSON",
+    ),
+    CreateSessionEnvStringFixture(
+        test_id="string_env_not_object",
+        environment='"just a string"',
+        expect_error=True,
+        error_match="environment must be a JSON object",
+    ),
+    CreateSessionEnvStringFixture(
+        test_id="string_env_array",
+        environment='["not","a","dict"]',
+        expect_error=True,
+        error_match="environment must be a JSON object",
+    ),
+]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "bug: create_session rejects JSON-string environment "
+        "(Cursor composer-1/1.5 format). The existing filters-level "
+        "workaround in _filtered_serialize has not been extended to "
+        "the environment parameter. Fix lands in the next commit."
+    ),
+)
+@pytest.mark.parametrize(
+    CreateSessionEnvStringFixture._fields,
+    CREATE_SESSION_ENV_STRING_FIXTURES,
+    ids=[f.test_id for f in CREATE_SESSION_ENV_STRING_FIXTURES],
+)
+def test_create_session_environment_accepts_json_string(
+    mcp_server: Server,
+    test_id: str,
+    environment: str,
+    expect_error: bool,
+    error_match: str | None,
+) -> None:
+    """create_session accepts ``environment`` as a JSON string.
+
+    Regression guard for the Cursor composer-1/1.5 dict-stringification
+    bug. Mirrors ``tests/test_utils.py::test_apply_filters`` which
+    exercises the same fallback for the ``filters`` parameter on list
+    tools. The four fixtures match the filters test's four cases:
+    valid JSON object, invalid JSON, JSON that is not an object
+    (string scalar), JSON that is a list rather than an object.
+    """
+    from fastmcp.exceptions import ToolError
+
+    session_name = f"mcp_env_str_{test_id}"
+    if expect_error:
+        assert error_match is not None
+        with pytest.raises(ToolError, match=error_match):
+            create_session(
+                session_name=session_name,
+                environment=t.cast("t.Any", environment),
+                socket_name=mcp_server.socket_name,
+            )
+        return
+
+    result = create_session(
+        session_name=session_name,
+        environment=t.cast("t.Any", environment),
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.session_name == session_name
+
+    # Verify the environment variable was actually applied on the
+    # tmux server — this is the end-to-end contract, not just
+    # "doesn't raise".
+    show_env = mcp_server.cmd(
+        "show-environment", "-t", session_name, "LIBTMUX_MCP_TEST"
+    )
+    assert any("LIBTMUX_MCP_TEST=hello" in line for line in show_env.stdout)
+
+
 def test_create_session_duplicate(mcp_server: Server, mcp_session: Session) -> None:
     """create_session raises error for duplicate session name."""
     from fastmcp.exceptions import ToolError
