@@ -851,6 +851,50 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
     assert "Polling pane" in first_msg
 
 
+def test_wait_for_text_propagates_unexpected_progress_error(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Non-transport exceptions from ``ctx.report_progress`` propagate.
+
+    Regression guard: an earlier ``contextlib.suppress(Exception)`` in
+    ``_maybe_report_progress`` silently swallowed every exception from
+    ``ctx.report_progress`` — including programming errors like a
+    renamed kwarg or a misconfigured ``ctx``. The narrowed catch only
+    covers transport-closed exceptions; anything else (e.g.
+    ``RuntimeError`` from a stub that's been deliberately broken) must
+    reach the caller so the failure is diagnostic instead of a mystery
+    quiet hang.
+    """
+    import asyncio
+
+    class _FaultyContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            msg = "synthetic bug in progress-notification path"
+            raise RuntimeError(msg)
+
+    # The error surfaces through ``handle_tool_errors_async``, which
+    # maps any unexpected ``Exception`` to ``ToolError`` with the
+    # original type + message preserved in the translated text. The
+    # point of this regression guard is that the error reaches the
+    # error handler at all — previously the broad ``suppress`` ate it.
+    with pytest.raises(ToolError, match="synthetic bug"):
+        asyncio.run(
+            wait_for_text(
+                pattern="WILL_NEVER_MATCH_PROPAGATE_q2rj",
+                pane_id=mcp_pane.pane_id,
+                timeout=0.5,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+                ctx=t.cast("t.Any", _FaultyContext()),
+            )
+        )
+
+
 def test_wait_tools_do_not_block_event_loop(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text runs its blocking capture off the main event loop.
 
