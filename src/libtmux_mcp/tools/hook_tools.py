@@ -34,21 +34,6 @@ from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
 from libtmux.constants import OptionScope
 
-try:
-    from libtmux._internal.sparse_array import SparseArray
-except ImportError:  # pragma: no cover — defensive against upstream rename
-    # libtmux's ``SparseArray`` lives under the ``_internal`` namespace,
-    # so an upstream rename or module move could break this import on a
-    # minor-version bump. Fall back to a sentinel class that never
-    # matches ``isinstance`` — ``_flatten_hook_value`` already handles
-    # both ``dict`` and ``SparseArray`` uniformly via
-    # ``hasattr(value, "items")``, so dropping SparseArray matching is
-    # a clean degradation rather than a crash. Verified against
-    # libtmux 0.55.x; re-check on 0.56+.
-    class SparseArray:  # type: ignore[no-redef]
-        """Fallback stand-in when libtmux's private module is unreachable."""
-
-
 from libtmux_mcp._utils import (
     ANNOTATIONS_RO,
     TAG_READONLY,
@@ -132,17 +117,15 @@ def _flatten_hook_value(
     * ``dict[int, str]`` — array hook returned by ``show_hook(name)``.
     * :class:`SparseArray` — array hook returned by some paths.
 
-    All of them flatten into a list of :class:`HookEntry` rows. An
-    empty list means "hook is unset".
+    Both array shapes implement ``.items()`` yielding ``(int, str)``,
+    so a single ``hasattr`` check handles them uniformly. Scalars
+    flatten into a single ``HookEntry`` with ``index=None``. An empty
+    list means "hook is unset".
     """
     if value is None:
         return []
-    if isinstance(value, SparseArray):
-        return [
-            HookEntry(hook_name=hook_name, index=int(idx), command=str(cmd))
-            for idx, cmd in value.items()
-        ]
-    if isinstance(value, dict):
+    if hasattr(value, "items"):
+        # SparseArray or dict[int, str] — both yield (int, str) pairs.
         return [
             HookEntry(hook_name=hook_name, index=int(idx), command=str(cmd))
             for idx, cmd in value.items()
