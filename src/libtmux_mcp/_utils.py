@@ -179,12 +179,22 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
-#: Annotations for tools that drive a shell — ``send_keys``, ``paste_text``,
-#: ``pipe_pane``. Distinguished from :data:`ANNOTATIONS_CREATE` by
-#: ``openWorldHint=True``: shell-driving tools interact with an
-#: open-ended environment (file system, network, external processes) via
-#: whatever command the caller runs, which is the canonical open-world
-#: MCP interaction.
+#: Annotations for tools that move user-supplied payloads into a shell
+#: context. Five consumers today:
+#:
+#: * ``send_keys``, ``paste_text``, ``pipe_pane`` — the canonical
+#:   shell-driving tools; caller's keys/text/stream reaches the shell
+#:   prompt or pipes into an external command respectively.
+#: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
+#:   into a tmux paste buffer; ``paste_buffer`` pushes that content
+#:   into a target pane where the shell receives it as input. The two
+#:   are split into a stage/fire pair so callers can validate before
+#:   paste, but both participate in the same open-world transfer.
+#:
+#: Distinguished from :data:`ANNOTATIONS_CREATE` by ``openWorldHint=True``:
+#: the effects of these tools extend into whatever command or content
+#: the caller supplies, which is the canonical open-world MCP
+#: interaction.
 ANNOTATIONS_SHELL: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": False,
