@@ -317,12 +317,15 @@ def test_tail_preserving_passthrough_when_under_cap() -> None:
 def test_server_middleware_stack_order() -> None:
     """The production middleware stack is wired in the intended order.
 
-    The ordering is load-bearing (see server.py comment): TimingMiddleware
-    must be outermost so it observes total wall time; AuditMiddleware
-    must be innermost so it logs the call/args directly adjacent to the
-    tool invocation. A refactor that accidentally reorders these would
-    degrade observability without an obvious failure mode, so pin the
-    sequence explicitly.
+    The ordering is load-bearing (see server.py comment):
+    TimingMiddleware must be outermost so it observes total wall
+    time; AuditMiddleware must sit *outside* SafetyMiddleware so
+    tier-denial events (which raise ``ToolError`` before
+    ``call_next``) are still recorded — without this ordering,
+    forbidden-access attempts silently bypass the audit log. A
+    refactor that swaps Audit and Safety would degrade
+    security observability without an obvious test failure, so pin
+    the sequence explicitly.
     """
     from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
     from fastmcp.server.middleware.timing import TimingMiddleware
@@ -342,8 +345,8 @@ def test_server_middleware_stack_order() -> None:
         TimingMiddleware,
         TailPreservingResponseLimitingMiddleware,
         ErrorHandlingMiddleware,
-        SafetyMiddleware,
         AuditMiddleware,
+        SafetyMiddleware,
     ]
 
 
@@ -363,3 +366,46 @@ def test_error_handling_middleware_transforms_errors() -> None:
         mw for mw in mcp.middleware if isinstance(mw, ErrorHandlingMiddleware)
     )
     assert err_mw.transform_errors is True
+
+
+def test_audit_records_safety_denial(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A tool denied by SafetyMiddleware still appears in the audit log.
+
+    Composes Audit and Safety in the production order (Audit outside
+    Safety) by manually nesting their ``on_call_tool`` handlers: the
+    inner ``call_next`` from Audit dispatches to Safety, which raises
+    ``ToolError`` for an over-tier tool. Audit should record that as
+    ``outcome=error error_type=ToolError`` rather than skipping the
+    record. Without this ordering, denied access attempts would
+    silently bypass forensic logging.
+    """
+    from fastmcp.exceptions import ToolError
+
+    audit = AuditMiddleware()
+    ctx = _fake_context(name="kill_server", arguments={})
+
+    # SafetyMiddleware.on_call_tool consults
+    # context.fastmcp_context.fastmcp.get_tool(...). With
+    # fastmcp_context=None the safety check short-circuits, so we
+    # simulate the denial more directly: ``call_next`` is a coroutine
+    # that raises the same ``ToolError`` SafetyMiddleware would when
+    # blocking an over-tier call. The test's invariant is that the
+    # AuditMiddleware sitting *outside* Safety still records the
+    # attempt with outcome=error.
+    msg = "Tool 'kill_server' is not available at the current safety level."
+
+    async def _safety_denial(_ctx: t.Any) -> None:
+        raise ToolError(msg)
+
+    with (
+        caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"),
+        pytest.raises(ToolError, match="not available"),
+    ):
+        asyncio.run(audit.on_call_tool(ctx, _safety_denial))
+
+    rendered = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert "tool=kill_server" in rendered
+    assert "outcome=error" in rendered
+    assert "error_type=ToolError" in rendered
