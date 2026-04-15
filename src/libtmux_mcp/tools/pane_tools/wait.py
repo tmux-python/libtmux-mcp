@@ -139,7 +139,13 @@ async def wait_for_text(
             message=f"Polling pane {pane.pane_id} for pattern",
         )
 
-        lines = pane.capture_pane(start=content_start, end=content_end)
+        # FastMCP direct-awaits async tools on the main event loop; the
+        # libtmux capture_pane call is a blocking subprocess.run. Push
+        # to the default executor so concurrent tool calls are not
+        # starved during long waits.
+        lines = await asyncio.to_thread(
+            pane.capture_pane, start=content_start, end=content_end
+        )
         hits = [line for line in lines if compiled.search(line)]
         if hits:
             matched_lines.extend(hits)
@@ -216,7 +222,9 @@ async def wait_for_content_change(
     )
 
     assert pane.pane_id is not None
-    initial_content = pane.capture_pane()
+    # See comment in wait_for_text: push the blocking capture off the
+    # main event loop via asyncio.to_thread.
+    initial_content = await asyncio.to_thread(pane.capture_pane)
     start_time = time.monotonic()
     deadline = start_time + timeout
     changed = False
@@ -230,7 +238,7 @@ async def wait_for_content_change(
             message=f"Watching pane {pane.pane_id} for change",
         )
 
-        current = pane.capture_pane()
+        current = await asyncio.to_thread(pane.capture_pane)
         if current != initial_content:
             changed = True
             break
