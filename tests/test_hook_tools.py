@@ -90,16 +90,6 @@ def test_show_hook_unknown_name_raises(
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "bug: show_hooks(scope='server') misses pane-level hooks set via "
-        "set-hook -g (which tmux stores in the global-window options tree, "
-        "enumerated by show-hooks -gw, not -g). show_hook(hook_name=..., "
-        "scope='server') finds them because it runs a name-targeted lookup. "
-        "Fix lands in the next commit."
-    ),
-)
 def test_show_hooks_surfaces_globally_set_pane_hook(
     mcp_server: Server, mcp_session: Session
 ) -> None:

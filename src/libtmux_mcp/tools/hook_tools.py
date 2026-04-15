@@ -104,6 +104,25 @@ def _resolve_hook_target(
     return server, opt_scope
 
 
+def _split_indexed_hook_name(key: str) -> tuple[str, int | None]:
+    """Parse ``pane-focus-in[0]`` → ``('pane-focus-in', 0)``.
+
+    ``show_hooks`` (plural, enumerating path) returns keys with the
+    tmux-native ``NAME[N]`` array suffix baked into the dict key, while
+    ``show_hook`` (singular, name-targeted path) returns a nested
+    ``{int: str}`` mapping with a clean name. Splitting the indexed
+    form at the MCP serialization layer normalizes both paths into the
+    same ``HookEntry`` shape so agents don't have to distinguish them.
+    """
+    if key.endswith("]") and "[" in key:
+        base, bracket = key.rsplit("[", 1)
+        try:
+            return base, int(bracket[:-1])
+        except ValueError:
+            return key, None
+    return key, None
+
+
 def _flatten_hook_value(
     hook_name: str,
     value: t.Any,
@@ -121,16 +140,21 @@ def _flatten_hook_value(
     so a single ``hasattr`` check handles them uniformly. Scalars
     flatten into a single ``HookEntry`` with ``index=None``. An empty
     list means "hook is unset".
+
+    The ``hook_name`` may arrive in the ``NAME[N]`` form from the
+    plural enumeration path; it's split into clean name + index here
+    to match the shape the singular name-lookup path emits.
     """
     if value is None:
         return []
+    name, suffix_index = _split_indexed_hook_name(hook_name)
     if hasattr(value, "items"):
         # SparseArray or dict[int, str] — both yield (int, str) pairs.
         return [
-            HookEntry(hook_name=hook_name, index=int(idx), command=str(cmd))
+            HookEntry(hook_name=name, index=int(idx), command=str(cmd))
             for idx, cmd in value.items()
         ]
-    return [HookEntry(hook_name=hook_name, index=None, command=str(value))]
+    return [HookEntry(hook_name=name, index=suffix_index, command=str(value))]
 
 
 @handle_tool_errors
@@ -141,6 +165,17 @@ def show_hooks(
     socket_name: str | None = None,
 ) -> HookListResult:
     """List configured tmux hooks at the given scope.
+
+    ``scope="server"`` enumerates hooks installed via
+    ``tmux set-hook -g ...``. tmux splits those globals across two
+    options trees by hook category: session-level hooks
+    (``session-closed``, ``client-*``, etc.) live in the
+    global-session tree enumerated by ``show-hooks -g``, while
+    pane/window-level hooks (``pane-focus-in``, ``window-resized``,
+    etc.) live in the global-window tree enumerated by
+    ``show-hooks -gw``. This tool consults both trees and merges the
+    results so the enumeration matches what a name-targeted
+    :func:`show_hook` call would return.
 
     Parameters
     ----------
@@ -162,6 +197,18 @@ def show_hooks(
     """
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
     raw: dict[str, t.Any] = obj.show_hooks(global_=global_, scope=opt_scope)
+
+    if scope == "server" and target is None:
+        # Also consult the global-window options tree. tmux doesn't
+        # unify ``-g`` listings across the session and window trees;
+        # ``show-hooks -g`` alone misses pane/window-level globals.
+        # Without this merge, ``show_hook(name)`` would find a hook
+        # that ``show_hooks()`` silently drops — the inconsistency
+        # guarded by ``test_show_hooks_surfaces_globally_set_pane_hook``.
+        raw_window = obj.show_hooks(global_=True, scope=OptionScope.Window)
+        for name, value in raw_window.items():
+            raw.setdefault(name, value)
+
     entries: list[HookEntry] = []
     for name, value in sorted(raw.items()):
         entries.extend(_flatten_hook_value(name, value))
