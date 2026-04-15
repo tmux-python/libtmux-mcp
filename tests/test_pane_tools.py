@@ -546,7 +546,8 @@ def test_search_panes_literal_input_skips_slow_path_probe(
 @pytest.mark.parametrize(
     ("pattern", "regex", "expected_fast_path"),
     [
-        # Literal input with metacharacters — the bug's target case.
+        # Literal input with regex metacharacters — the earlier bug's
+        # target case. Raw input is glob-safe for tmux, fast path.
         ("192.168.1.1", False, True),
         # Literal with no metacharacters — always fast path.
         ("plain_marker", False, True),
@@ -556,22 +557,117 @@ def test_search_panes_literal_input_skips_slow_path_probe(
         (r"err(or|no)", True, False),
         # Regex dot-star — slow path.
         (r".*", True, False),
+        # tmux format-injection bytes in a literal — MUST fall to slow
+        # path regardless of regex flag, because tmux's #{C:...} format
+        # block has no escape for `}` (premature close) or `#{` (nested
+        # format-variable evaluation).
+        ("foo}", False, False),
+        ("log #{err}", False, False),
+        # Same hazards with regex=True — still slow path; tmux sees the
+        # raw pattern either way.
+        ("x}y", True, False),
+        ("a#{b}", True, False),
     ],
 )
 def test_search_panes_fast_path_decision(
     pattern: str, regex: bool, expected_fast_path: bool
 ) -> None:
-    """Unit-test the ``is_plain_text`` branch on the pattern + regex flag.
+    """Unit-test the ``is_plain_text`` decision on pattern + regex flag.
 
     Mirrors the exact expression in ``search_panes`` so a future
-    refactor cannot silently reintroduce the escape-aware check that
-    misclassified literals.
+    refactor cannot silently reintroduce either of the two hazards it
+    guards against: the escape-aware metacharacter check that
+    misclassified literals, or the tmux format-string injection on
+    ``}`` / ``#{``.
     """
     import re as _re
 
     _regex_meta = _re.compile(r"[\\.*+?{}()\[\]|^$]")
-    is_plain_text = not (regex and _regex_meta.search(pattern))
+    _tmux_format_injection = _re.compile(r"\}|#\{")
+    if _tmux_format_injection.search(pattern):
+        is_plain_text = False
+    elif regex:
+        is_plain_text = not _regex_meta.search(pattern)
+    else:
+        is_plain_text = True
     assert is_plain_text is expected_fast_path
+
+
+def test_search_panes_tmux_format_injection_is_neutralized(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Literal patterns containing ``}`` or ``#{`` don't return every pane.
+
+    Regression guard for the Critical tmux format-string injection in
+    commit ``decc994`` (pre-existing, widened by the regex-fast-path
+    fix): ``search_panes(pattern="foo}", regex=False)`` previously
+    interpolated the raw ``}`` into ``#{C:foo}}`` — tmux's format
+    parser closed the block at the first ``}``, evaluated the
+    remainder (``}``) as truthy, and marked *every* pane as a match.
+
+    Two panes are exercised: one seeded with the literal marker,
+    one without. Only the seeded pane should appear in ``matches``.
+    """
+    marker = "INJECT_MARKER_xyz}qq9"  # contains `}` — the injection trigger
+    mcp_pane.send_keys(f"echo {marker}", enter=True)
+    # Add a second pane that lacks the marker — if the fast path is
+    # still injecting, every pane including this one shows up.
+    clean_pane = mcp_session.active_window.split()
+    clean_pane.send_keys("echo UNRELATED_content", enter=True)
+
+    retry_until(
+        lambda: marker in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = search_panes(
+        pattern=marker,
+        regex=False,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    matched_ids = {m.pane_id for m in result.matches}
+    assert mcp_pane.pane_id in matched_ids
+    assert clean_pane.pane_id not in matched_ids, (
+        f"tmux format injection re-opened: clean pane {clean_pane.pane_id} "
+        f"erroneously matched. Full match list: {matched_ids}"
+    )
+
+
+def test_search_panes_nested_format_variable_is_neutralized(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Literal patterns containing ``#{`` don't trigger tmux format eval.
+
+    Companion to the ``}`` injection test. ``#{`` inside the pattern
+    opens a nested tmux format variable; without neutralization, tmux
+    would evaluate ``#{pane_id}`` as the current pane's id and match
+    every pane whose content contains its own id — a subtler but
+    equally wrong outcome.
+    """
+    marker = "NEST_#{pane_id}_ABC"
+    mcp_pane.send_keys(f"echo {marker!r}", enter=True)
+    retry_until(
+        lambda: "NEST" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = search_panes(
+        pattern=marker,
+        regex=False,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    # The test's value is that the call returns *without* raising and
+    # without marking unrelated panes. An exact match on the literal
+    # `#{pane_id}` bytes in scrollback isn't required.
+    assert isinstance(result.matches, list)  # didn't crash
+    # No pane other than mcp_pane should be in the match set, since no
+    # other pane's content contains NEST_ at all.
+    for m in result.matches:
+        assert m.pane_id == mcp_pane.pane_id
 
 
 def test_search_panes_numeric_pane_id_ordering(
