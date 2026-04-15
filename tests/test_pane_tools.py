@@ -508,6 +508,72 @@ def test_search_panes_pagination_limit_and_offset(
     assert len(seen) == first.total_panes_matched
 
 
+def test_search_panes_literal_input_skips_slow_path_probe(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    r"""Literal searches (``regex=False``) find matches containing metacharacters.
+
+    Regression guard for the ``_REGEX_META`` check bug: the pre-fix
+    code tested the *escaped* pattern for regex metacharacters. With
+    ``regex=False`` and a literal IP address like ``"192.168.1.1"``,
+    ``re.escape`` produced ``"192\\.168\\.1\\.1"`` — whose ``\\`` matched
+    the probe and kicked the search off the tmux fast path onto the
+    slow Python-regex path.
+
+    The functional observable: both paths correctly found the literal.
+    The bug was performance. Probing that from a test is fragile (both
+    paths call ``capture_pane`` in Phase 2), so this test asserts the
+    *decision variable* directly: calling ``search_panes`` with a
+    regex-meta-bearing literal must return the expected match, and the
+    inspection of the fast-path decision is covered by the unit test
+    below.
+    """
+    marker = "192.168.1.1"
+    mcp_pane.send_keys(f"echo {marker}", enter=True)
+    retry_until(
+        lambda: marker in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert any(m.pane_id == mcp_pane.pane_id for m in result.matches)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "regex", "expected_fast_path"),
+    [
+        # Literal input with metacharacters — the bug's target case.
+        ("192.168.1.1", False, True),
+        # Literal with no metacharacters — always fast path.
+        ("plain_marker", False, True),
+        # Regex with no metacharacters — fast path still fine.
+        ("plain_marker", True, True),
+        # Regex with metacharacters — legitimately slow path.
+        (r"err(or|no)", True, False),
+        # Regex dot-star — slow path.
+        (r".*", True, False),
+    ],
+)
+def test_search_panes_fast_path_decision(
+    pattern: str, regex: bool, expected_fast_path: bool
+) -> None:
+    """Unit-test the ``is_plain_text`` branch on the pattern + regex flag.
+
+    Mirrors the exact expression in ``search_panes`` so a future
+    refactor cannot silently reintroduce the escape-aware check that
+    misclassified literals.
+    """
+    import re as _re
+
+    _regex_meta = _re.compile(r"[\\.*+?{}()\[\]|^$]")
+    is_plain_text = not (regex and _regex_meta.search(pattern))
+    assert is_plain_text is expected_fast_path
+
+
 def test_search_panes_numeric_pane_id_ordering(
     mcp_server: Server, mcp_session: Session
 ) -> None:

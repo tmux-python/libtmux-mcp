@@ -149,11 +149,19 @@ def search_panes(
 
     uses_scrollback = content_start is not None or content_end is not None
 
-    # Detect if the effective pattern contains regex metacharacters that
-    # would break tmux's glob-based #{C:} filter. When regex is needed,
-    # skip the tmux fast path and capture all panes for Python-side matching.
+    # Decide whether the tmux-side ``#{C:...}`` fast path can safely
+    # serve the query. The previous check evaluated a regex-metacharacter
+    # probe against ``search_pattern``, which is ``re.escape(pattern)``
+    # when ``regex=False`` — so a literal ``"192.168.1.1"`` became
+    # ``"192\\.168\\.1\\.1"`` and the ``\\`` matched, erroneously
+    # pushing a safe literal onto the slow scrollback-capture path.
+    #
+    # Correct design: when ``regex=False`` the caller's input is a
+    # literal by definition and always glob-safe for tmux; only test
+    # for metacharacters when ``regex=True`` (where a pattern that
+    # contains metacharacters genuinely can't be delegated to tmux).
     _REGEX_META = re.compile(r"[\\.*+?{}()\[\]|^$]")
-    is_plain_text = not _REGEX_META.search(search_pattern)
+    is_plain_text = not (regex and _REGEX_META.search(pattern))
 
     if not uses_scrollback and is_plain_text:
         # Phase 1: Fast filter via tmux's C-level window_pane_search().
