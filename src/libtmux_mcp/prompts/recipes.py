@@ -10,6 +10,8 @@ recipes. Keep the set small and deliberate.
 
 from __future__ import annotations
 
+import uuid
+
 
 def run_and_wait(
     command: str,
@@ -23,6 +25,11 @@ def run_and_wait(
     failure paths so a crash never deadlocks the agent on an
     edge-triggered signal. See ``docs/topics/prompting.md``.
 
+    Each invocation embeds a fresh UUID-scoped channel name so
+    concurrent agents (or parallel prompt calls from a single agent)
+    cannot cross-signal each other on tmux's server-global channel
+    namespace — the channel is unique to this one prompt rendering.
+
     Parameters
     ----------
     command : str
@@ -32,15 +39,16 @@ def run_and_wait(
     timeout : float
         Maximum seconds to wait for the signal. Default 60.
     """
+    channel = f"libtmux_mcp_wait_{uuid.uuid4().hex[:8]}"
     return f"""Run this shell command in tmux pane {pane_id} and block
 until it finishes, preserving the command's exit status:
 
 ```
 send_keys(
     pane_id="{pane_id}",
-    keys='{command}; __mcp_status=$?; tmux wait-for -S mcp_done; exit $__mcp_status',
+    keys='{command}; __mcp_status=$?; tmux wait-for -S {channel}; exit $__mcp_status',
 )
-wait_for_channel(channel="mcp_done", timeout={timeout})
+wait_for_channel(channel="{channel}", timeout={timeout})
 capture_pane(pane_id="{pane_id}", max_lines=100)
 ```
 
