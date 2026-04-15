@@ -599,12 +599,21 @@ def _serialize_session(session: Session) -> SessionInfo:
     from libtmux_mcp.models import SessionInfo
 
     assert session.session_id is not None
+    # Defensive ``getattr``: ``Session.active_pane`` exists on every
+    # supported libtmux version, but older builds may raise instead of
+    # returning ``None`` for sessions mid-teardown. Treating a missing
+    # attribute or missing pane id as ``None`` lets ``list_sessions``
+    # tolerate transient state without breaking serialization.
+    active_pane = getattr(session, "active_pane", None)
+    active_pane_id = active_pane.pane_id if active_pane is not None else None
+
     return SessionInfo(
         session_id=session.session_id,
         session_name=session.session_name,
         window_count=len(session.windows),
         session_attached=getattr(session, "session_attached", None),
         session_created=getattr(session, "session_created", None),
+        active_pane_id=active_pane_id,
     )
 
 
