@@ -38,6 +38,20 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 - Exit copy mode → {tool}`exit-copy-mode`
 - Log output to file → {tool}`pipe-pane`
 
+**Coordinating across panes?**
+- Block until signalled → {tool}`wait-for-channel`
+- Signal a waiter → {tool}`signal-channel`
+
+**Staging multi-line input?**
+- Stage content → {tool}`load-buffer`
+- Push into pane → {tool}`paste-buffer`
+- Read back → {tool}`show-buffer`
+- Free server state → {tool}`delete-buffer`
+
+**Auditing tmux hooks?**
+- Enumerate → {tool}`show-hooks`
+- Inspect one → {tool}`show-hook`
+
 **Changing settings?**
 - tmux options → {tool}`show-option` / {tool}`set-option`
 - Environment vars → {tool}`show-environment` / {tool}`set-environment`
@@ -125,6 +139,24 @@ Wait for any screen change.
 :link: display-message
 :link-type: ref
 Query arbitrary tmux format strings.
+:::
+
+:::{grid-item-card} show_buffer
+:link: show-buffer
+:link-type: ref
+Read back an MCP-staged paste buffer.
+:::
+
+:::{grid-item-card} show_hooks
+:link: show-hooks
+:link-type: ref
+Enumerate configured tmux hooks at a scope.
+:::
+
+:::{grid-item-card} show_hook
+:link: show-hook
+:link-type: ref
+Inspect a single tmux hook by name.
 :::
 
 ::::
@@ -262,6 +294,30 @@ Exit copy mode.
 Paste multi-line text via tmux buffer.
 :::
 
+:::{grid-item-card} load_buffer
+:link: load-buffer
+:link-type: ref
+Stage multi-line text into an MCP-namespaced tmux buffer.
+:::
+
+:::{grid-item-card} paste_buffer
+:link: paste-buffer
+:link-type: ref
+Paste an MCP buffer into a target pane.
+:::
+
+:::{grid-item-card} wait_for_channel
+:link: wait-for-channel
+:link-type: ref
+Block until a tmux ``wait-for`` channel is signalled.
+:::
+
+:::{grid-item-card} signal_channel
+:link: signal-channel
+:link-type: ref
+Wake clients blocked on a ``wait-for`` channel.
+:::
+
 ::::
 
 ## Destroy
@@ -295,6 +351,12 @@ Destroy a pane.
 Kill the entire tmux server.
 :::
 
+:::{grid-item-card} delete_buffer
+:link: delete-buffer
+:link-type: ref
+Delete an MCP-staged tmux paste buffer.
+:::
+
 ::::
 
 ```{toctree}
@@ -304,4 +366,7 @@ sessions
 windows
 panes
 options
+buffers
+waits
+hooks
 ```

@@ -73,6 +73,9 @@ conf["fastmcp_tool_modules"] = [
     "libtmux_mcp.tools.pane_tools",
     "libtmux_mcp.tools.option_tools",
     "libtmux_mcp.tools.env_tools",
+    "libtmux_mcp.tools.buffer_tools",
+    "libtmux_mcp.tools.wait_for_tools",
+    "libtmux_mcp.tools.hook_tools",
 ]
 conf["fastmcp_area_map"] = {
     "server_tools": "sessions",
@@ -81,6 +84,9 @@ conf["fastmcp_area_map"] = {
     "pane_tools": "panes",
     "option_tools": "options",
     "env_tools": "options",
+    "buffer_tools": "buffers",
+    "wait_for_tools": "waits",
+    "hook_tools": "hooks",
 }
 conf["fastmcp_model_module"] = "libtmux_mcp.models"
 conf["fastmcp_model_classes"] = (
