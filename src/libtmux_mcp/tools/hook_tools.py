@@ -72,6 +72,14 @@ def _resolve_hook_target(
     different argv depending on whether the scope flag is set, and
     passing a redundant explicit scope to a Session/Window/Pane object
     triggers ``"too many arguments"`` on some tmux builds.
+
+    TODO(libtmux upstream): ``Session.show_hook(scope=OptionScope.Session)``
+    mis-builds the CLI argv and produces ``"too many arguments"`` on
+    current tmux builds. Resetting ``scope`` to ``None`` after we've
+    resolved to a concrete object makes libtmux use the object's
+    default, which sidesteps the mis-built argv. File upstream once
+    reduced to a minimal repro — the fix belongs in libtmux's
+    ``HooksMixin._show_hook`` argv-assembly path.
     """
     server = _get_server(socket_name=socket_name)
     opt_scope = _SCOPE_MAP.get(scope) if scope is not None else None
@@ -192,16 +200,14 @@ def show_hook(
     try:
         value = obj.show_hook(hook_name, global_=global_, scope=opt_scope)
     except libtmux_exc.OptionError as e:
-        # tmux rejects ``show-hooks <name>`` for unset hooks with
-        # ``too many arguments``. Treat "hook is unset" as the empty
-        # result. Surface every other OptionError (bad scope, etc.)
-        # so bad input isn't silently masked.
-        err = str(e)
-        if (
-            "too many arguments" in err
-            or "unknown hook" in err
-            or "invalid option" in err
-        ):
+        # tmux rejects ``show-hooks <name>`` for *unset* hooks with
+        # "too many arguments" on every build the project supports —
+        # that specific message is the only one treated as the empty
+        # result. Genuine name errors ("unknown hook", "invalid option"
+        # on typos or wrong scope) must surface to the caller so agents
+        # can correct their input instead of silently getting an empty
+        # list they read as "hook is unset".
+        if "too many arguments" in str(e):
             return HookListResult(entries=[])
         raise
     return HookListResult(entries=_flatten_hook_value(hook_name, value))
