@@ -150,18 +150,35 @@ def search_panes(
     uses_scrollback = content_start is not None or content_end is not None
 
     # Decide whether the tmux-side ``#{C:...}`` fast path can safely
-    # serve the query. The previous check evaluated a regex-metacharacter
-    # probe against ``search_pattern``, which is ``re.escape(pattern)``
-    # when ``regex=False`` — so a literal ``"192.168.1.1"`` became
-    # ``"192\\.168\\.1\\.1"`` and the ``\\`` matched, erroneously
-    # pushing a safe literal onto the slow scrollback-capture path.
+    # serve the query. Two distinct hazards gate the decision:
     #
-    # Correct design: when ``regex=False`` the caller's input is a
-    # literal by definition and always glob-safe for tmux; only test
-    # for metacharacters when ``regex=True`` (where a pattern that
-    # contains metacharacters genuinely can't be delegated to tmux).
+    # 1. Regex metacharacters in a ``regex=True`` pattern — tmux's glob
+    #    matcher cannot interpret them, so they must take the slow
+    #    Python-regex path. Checked against the raw ``pattern``, NOT
+    #    the escaped ``search_pattern``; the previous form incorrectly
+    #    tested ``re.escape(pattern)``, so any literal input that
+    #    happened to contain a metacharacter (e.g. "192.168.1.1" →
+    #    "192\\.168\\.1\\.1" — now matches because of ``\\``) was
+    #    pushed onto the slow path.
+    #
+    # 2. tmux format-string injection — ``#{C:pattern}`` is a tmux
+    #    format block. ``}`` in the pattern closes the block early
+    #    (evaluated as truthy, matching every pane as a false
+    #    positive); ``#{`` inside the pattern starts a nested format
+    #    variable. tmux provides no escape mechanism for these bytes
+    #    inside the format block, so the only safe option is to route
+    #    around: when the raw pattern contains either sequence, fall
+    #    through to the slow Python-regex path. This applies whether
+    #    or not ``regex`` is True — the injection risk is tmux-side,
+    #    not regex-side.
     _REGEX_META = re.compile(r"[\\.*+?{}()\[\]|^$]")
-    is_plain_text = not (regex and _REGEX_META.search(pattern))
+    _TMUX_FORMAT_INJECTION = re.compile(r"\}|#\{")
+    if _TMUX_FORMAT_INJECTION.search(pattern):
+        is_plain_text = False
+    elif regex:
+        is_plain_text = not _REGEX_META.search(pattern)
+    else:
+        is_plain_text = True
 
     if not uses_scrollback and is_plain_text:
         # Phase 1: Fast filter via tmux's C-level window_pane_search().
