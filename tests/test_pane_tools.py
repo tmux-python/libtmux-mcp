@@ -1668,15 +1668,16 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
 def test_paste_text_does_not_leak_named_buffer(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
-    """paste_text must not leave its ``libtmux_mcp_paste_*`` buffer behind.
+    """paste_text must not leave its ``libtmux_mcp_*_paste`` buffer behind.
 
     Regression guard for the pre-fix behavior: the earlier
     implementation used tmux's default unnamed buffer AND relied on
     `paste-buffer -d` to clean up. If paste-buffer failed mid-flight
     the buffer leaked. The fix generates a unique
-    ``libtmux_mcp_paste_<uuid>`` named buffer per call and adds a
-    best-effort ``delete-buffer -b`` in ``finally`` so the server is
-    left in a clean state on both success and failure paths.
+    ``libtmux_mcp_<uuid>_paste`` named buffer per call (matching the
+    ``buffer_tools._BUFFER_NAME_RE`` shape) and adds a best-effort
+    ``delete-buffer -b`` in ``finally`` so the server is left in a
+    clean state on both success and failure paths.
 
     The ``libtmux_mcp_`` prefix matches the namespace used by
     :mod:`libtmux_mcp.tools.buffer_tools`, so an operator filtering
@@ -1694,7 +1695,7 @@ def test_paste_text_does_not_leak_named_buffer(
 
     listing = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}")
     buffer_names = "\n".join(listing.stdout or [])
-    assert "libtmux_mcp_paste_" not in buffer_names, (
+    assert "libtmux_mcp_" not in buffer_names, (
         f"paste_text leaked a named buffer: {buffer_names!r}"
     )
 

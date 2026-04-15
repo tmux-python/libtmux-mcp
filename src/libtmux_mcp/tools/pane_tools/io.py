@@ -292,11 +292,11 @@ def paste_text(
     # Use a unique named tmux buffer so we don't clobber the user's
     # unnamed paste buffer, and so we can reliably clean up on error
     # paths (paste-buffer -b NAME -d deletes the named buffer). The
-    # ``libtmux_mcp_paste_`` prefix matches the namespace the first-
-    # class buffer tools use, so a future operator-facing listing of
-    # MCP-owned buffers (filtering on ``libtmux_mcp_*``) catches both
-    # paste-through buffers and ``load_buffer`` buffers uniformly.
-    buffer_name = f"libtmux_mcp_paste_{uuid.uuid4().hex}"
+    # shape matches ``buffer_tools._BUFFER_NAME_RE`` exactly —
+    # ``libtmux_mcp_<32-hex>_<logical>`` — so a future operator-facing
+    # listing of MCP-owned buffers sees paste-through buffers and
+    # ``load_buffer`` buffers uniformly under one regex.
+    buffer_name = f"libtmux_mcp_{uuid.uuid4().hex}_paste"
     tmppath: str | None = None
     try:
         # Write text to a temp file and load into tmux buffer
