@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
 import typing as t
 
 import pytest
@@ -398,4 +400,65 @@ def test_list_servers_missing_tmpdir_returns_empty(
     """
     monkeypatch.setenv("TMUX_TMPDIR", "/nonexistent-list-servers-test")
     results = list_servers()
+    assert results == []
+
+
+def test_list_servers_extra_socket_paths_surfaces_custom_path(
+    mcp_server: Server,
+    mcp_session: Session,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``extra_socket_paths`` surfaces a ``tmux -S /path/...`` daemon.
+
+    Regression guard: the canonical ``$TMUX_TMPDIR`` scan misses any
+    tmux started with ``-S /arbitrary/path``. ``extra_socket_paths``
+    lets callers who know about such paths include them in the result
+    without having to do a second tool call.
+
+    Re-uses the pytest-libtmux fixture socket as the "extra" path by
+    pointing the canonical scan at an empty dir — that proves the
+    extra-paths code path is the reason the server appears in the
+    result, not the canonical scan.
+    """
+    del mcp_session
+    from libtmux_mcp.models import ServerInfo
+
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+    fixture_socket = (
+        pathlib.Path("/tmp")
+        / f"tmux-{os.geteuid()}"
+        / (mcp_server.socket_name or "default")
+    )
+    assert fixture_socket.is_socket(), "fixture socket must exist for the test"
+
+    results = list_servers(extra_socket_paths=[str(fixture_socket)])
+
+    assert isinstance(results, list)
+    # Canonical scan saw an empty tmpdir, so everything below came from
+    # the extra-paths probe.
+    socket_paths = [r.socket_path for r in results]
+    assert str(fixture_socket) in socket_paths
+    found = next(r for r in results if r.socket_path == str(fixture_socket))
+    assert isinstance(found, ServerInfo)
+    assert found.is_alive is True
+
+
+def test_list_servers_extra_socket_paths_skips_nonexistent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """Nonexistent / non-socket extras are silently skipped, not fatal.
+
+    Agents supplying stale paths (stored from a previous session,
+    config file, etc.) must not crash the whole discovery call.
+    """
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+    bogus = tmp_path / "never-existed.sock"
+    regular_file = tmp_path / "not-a-socket.txt"
+    regular_file.write_text("decoy")
+
+    results = list_servers(
+        extra_socket_paths=[str(bogus), str(regular_file)],
+    )
     assert results == []
