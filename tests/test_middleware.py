@@ -14,6 +14,7 @@ from mcp.types import CallToolRequestParams
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.middleware import (
     AuditMiddleware,
+    ReadonlyRetryMiddleware,
     SafetyMiddleware,
     _redact_digest,
     _summarize_args,
@@ -415,3 +416,125 @@ def test_audit_records_safety_denial(
     assert "tool=kill_server" in rendered
     assert "outcome=error" in rendered
     assert "error_type=ToolError" in rendered
+
+
+# ---------------------------------------------------------------------------
+# ReadonlyRetryMiddleware tests
+# ---------------------------------------------------------------------------
+
+
+class _StubTool:
+    """Minimal tool stand-in for ``get_tool`` lookups."""
+
+    def __init__(self, tags: set[str]) -> None:
+        self.tags = tags
+
+
+class _StubFastMCP:
+    """Awaitable ``get_tool`` returning a single stub tool."""
+
+    def __init__(self, tool: _StubTool) -> None:
+        self._tool = tool
+
+    async def get_tool(self, _name: str) -> _StubTool:
+        return self._tool
+
+
+class _StubFastMCPContext:
+    """Just enough to satisfy ``context.fastmcp_context.fastmcp.get_tool``."""
+
+    def __init__(self, fastmcp: _StubFastMCP) -> None:
+        self.fastmcp = fastmcp
+
+
+def _retry_context(tags: set[str]) -> MiddlewareContext[CallToolRequestParams]:
+    """Build a MiddlewareContext that returns a tool with the given tags."""
+    fastmcp_context = _StubFastMCPContext(_StubFastMCP(_StubTool(tags)))
+    return MiddlewareContext(
+        message=CallToolRequestParams(name="x", arguments={}),
+        fastmcp_context=t.cast("t.Any", fastmcp_context),
+    )
+
+
+class _FlakyCallNext:
+    """Async callable that raises N times before succeeding."""
+
+    def __init__(self, raises_n_times: int, exception: Exception) -> None:
+        self.exception = exception
+        self.remaining = raises_n_times
+        self.calls = 0
+
+    async def __call__(self, _context: t.Any) -> str:
+        self.calls += 1
+        if self.remaining > 0:
+            self.remaining -= 1
+            raise self.exception
+        return "ok"
+
+
+def test_readonly_retry_recovers_from_libtmux_exception() -> None:
+    """Readonly tool is retried once on ``LibTmuxException`` and succeeds.
+
+    Models the production scenario the middleware exists to fix: a
+    transient socket error from libtmux on the first call, then a
+    successful call after the cache evicts the dead Server. Without
+    the retry the agent would see a ``ToolError`` on the first
+    ``list_sessions``-style call.
+    """
+    from libtmux import exc as libtmux_exc
+
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_READONLY})
+    call_next = _FlakyCallNext(
+        raises_n_times=1,
+        exception=libtmux_exc.LibTmuxException("transient socket error"),
+    )
+
+    result = asyncio.run(middleware.on_call_tool(ctx, call_next))
+
+    assert result == "ok"
+    assert call_next.calls == 2  # initial failure + one retry
+
+
+def test_readonly_retry_skips_mutating_tool() -> None:
+    """Mutating tool is NOT retried on ``LibTmuxException``.
+
+    Critical safety property: re-running ``send_keys``,
+    ``create_session``, or any other mutating call on a transient
+    error would silently double the side effect. This test pins the
+    "no retry for non-readonly" gate.
+    """
+    from libtmux import exc as libtmux_exc
+
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_MUTATING})
+    call_next = _FlakyCallNext(
+        raises_n_times=1,
+        exception=libtmux_exc.LibTmuxException("transient socket error"),
+    )
+
+    with pytest.raises(libtmux_exc.LibTmuxException, match="transient"):
+        asyncio.run(middleware.on_call_tool(ctx, call_next))
+
+    assert call_next.calls == 1  # no retry — fail on first call
+
+
+def test_readonly_retry_skips_non_libtmux_exception() -> None:
+    """Even readonly tools don't retry on exceptions outside the trigger set.
+
+    Default ``retry_exceptions=(LibTmuxException,)`` is narrow on
+    purpose — a ``ValueError`` from caller-side input is a
+    programming error, not a transient socket hiccup, and retrying
+    it would just delay the real failure.
+    """
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_READONLY})
+    call_next = _FlakyCallNext(
+        raises_n_times=1,
+        exception=ValueError("bad caller input"),
+    )
+
+    with pytest.raises(ValueError, match="bad caller input"):
+        asyncio.run(middleware.on_call_tool(ctx, call_next))
+
+    assert call_next.calls == 1  # no retry — wrong exception type
