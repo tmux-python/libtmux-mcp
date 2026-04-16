@@ -10,6 +10,7 @@ from libtmux_mcp.tools.server_tools import (
     create_session,
     get_server_info,
     kill_server,
+    list_servers,
     list_sessions,
 )
 
@@ -362,3 +363,39 @@ def test_read_heavy_tools_return_pydantic_models(
 
     info = get_server_info(socket_name=mcp_server.socket_name)
     assert isinstance(info, ServerInfo)
+
+
+def test_list_servers_finds_live_socket(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``list_servers`` enumerates the current user's tmux sockets.
+
+    The fixture server is a real tmux process with a real socket
+    under ``$TMUX_TMPDIR/tmux-$UID/``; the discovery tool must see
+    it and report it alive.
+    """
+    del mcp_session
+    from libtmux_mcp.models import ServerInfo
+
+    results = list_servers()
+    assert isinstance(results, list)
+    assert all(isinstance(r, ServerInfo) for r in results)
+    names = [r.socket_name for r in results]
+    assert mcp_server.socket_name in names
+    # The fixture's socket must be reported alive.
+    found = next(r for r in results if r.socket_name == mcp_server.socket_name)
+    assert found.is_alive is True
+
+
+def test_list_servers_missing_tmpdir_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No ``tmux-<uid>/`` directory → empty list, no error.
+
+    On a freshly provisioned container or a user who has never run
+    tmux, the directory does not exist. The tool must degrade
+    gracefully rather than raising.
+    """
+    monkeypatch.setenv("TMUX_TMPDIR", "/nonexistent-list-servers-test")
+    results = list_servers()
+    assert results == []
