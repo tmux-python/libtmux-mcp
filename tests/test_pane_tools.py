@@ -1246,7 +1246,7 @@ def test_wait_for_text_propagates_cancellation(
 
 
 def test_wait_for_content_change_propagates_cancellation(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``wait_for_content_change`` raises ``CancelledError`` (not ``ToolError``).
 
@@ -1254,8 +1254,18 @@ def test_wait_for_content_change_propagates_cancellation(
     both wait tools share the same ``while True:`` poll-and-sleep
     pattern wrapped by ``handle_tool_errors_async``, so both must
     surface MCP cancellation as ``asyncio.CancelledError``.
+
+    Stubs ``Pane.capture_pane`` to always return the same line list so
+    the ``current != initial_content`` exit can never fire — without
+    the stub the test races shell prompt redraw, cursor blink, and
+    zsh async hooks (vcs_info, git prompt) on CI runners and exits
+    via ``changed=True`` before the cancel arrives.
     """
     import asyncio
+
+    from libtmux.pane import Pane as _LibtmuxPane
+
+    monkeypatch.setattr(_LibtmuxPane, "capture_pane", lambda *_a, **_kw: ["stable"])
 
     async def _runner() -> None:
         task = asyncio.create_task(
