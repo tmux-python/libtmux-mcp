@@ -1055,6 +1055,159 @@ def test_wait_for_text_suppresses_broken_resource_error(
     assert result.timed_out is True
 
 
+def test_wait_for_text_warns_on_invalid_regex(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` emits ``ctx.warning`` when the regex won't compile.
+
+    Regression guard: agents calling with ``regex=True`` and a malformed
+    pattern previously saw only a generic ``ToolError``. The new
+    ``_maybe_log`` helper at ``wait.py`` lets the same condition surface
+    as a ``notifications/message`` warning so MCP client log panels
+    record the cause independent of the tool result.
+    """
+    import asyncio
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    with pytest.raises(ToolError, match="Invalid regex"):
+        asyncio.run(
+            wait_for_text(
+                pattern="[unclosed",
+                regex=True,
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+                ctx=t.cast("t.Any", _RecordingContext()),
+            )
+        )
+
+    # The ``warning`` ran before the ``ToolError`` was raised.
+    assert (
+        "warning",
+        "Invalid regex pattern: missing ), unterminated subpattern at position 0",
+    ) in log_calls or any(
+        level == "warning" and "Invalid regex" in msg for level, msg in log_calls
+    )
+
+
+def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
+    """``wait_for_text`` warns the client when the poll loop times out.
+
+    Sibling guard to the invalid-regex warning. The timeout case is
+    where operators most need a structured signal — the tool returns
+    ``timed_out=True`` in the result but agents and human log readers
+    have to dig into the ``WaitForTextResult`` to notice. The warning
+    surfaces it directly.
+    """
+    import asyncio
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    result = asyncio.run(
+        wait_for_text(
+            pattern="WILL_NEVER_MATCH_TIMEOUT_qZx9",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.2,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _RecordingContext()),
+        )
+    )
+
+    assert result.timed_out is True
+    assert any(
+        level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
+    ), f"expected a timeout warning, got: {log_calls}"
+
+
+def test_wait_for_content_change_warns_on_timeout(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_content_change`` warns the client on timeout.
+
+    Same contract as ``wait_for_text`` — the silently-quiescent pane
+    case otherwise looks identical to a successful detection at the
+    log layer. Operators benefit from a ``no content change before
+    Xs timeout`` warning.
+
+    Uses the same settle-loop pattern as
+    ``test_wait_for_content_change_timeout`` so the assertion is
+    deterministic on slow CI.
+    """
+    import asyncio
+    import time
+
+    settle_streak_required = 3
+    settle_poll_interval = 0.1
+    previous = mcp_pane.capture_pane()
+    streak = 0
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        time.sleep(settle_poll_interval)
+        current = mcp_pane.capture_pane()
+        if current == previous:
+            streak += 1
+            if streak >= settle_streak_required:
+                break
+        else:
+            streak = 0
+            previous = current
+    else:
+        pytest.fail("pane content did not settle within 5s")
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    result = asyncio.run(
+        wait_for_content_change(
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _RecordingContext()),
+        )
+    )
+    assert result.timed_out is True
+    assert any(
+        level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
+    ), f"expected a timeout warning, got: {log_calls}"
+
+
 def test_wait_for_text_propagates_cancellation(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
