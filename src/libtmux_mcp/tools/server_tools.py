@@ -178,8 +178,13 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
     try:
         result = server.cmd("display-message", "-p", "#{version}")
         version = result.stdout[0] if result.stdout else None
-    except Exception:
-        pass
+    except Exception as err:
+        # Best-effort — tmux ancient versions lack ``#{version}``,
+        # permissions may deny display-message, etc. Mirrors the same
+        # logging style used by ``_probe_server_by_path`` so operators
+        # see a uniform signal when custom sockets fail to report
+        # metadata.
+        logger.debug("get_server_info: version query raised %s", err)
     return ServerInfo(
         is_alive=alive,
         socket_name=server.socket_name,
