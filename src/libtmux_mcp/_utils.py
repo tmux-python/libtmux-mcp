@@ -148,7 +148,14 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
     """Return True if ``caller`` looks like it is on the same tmux server.
 
     Compares socket paths via :func:`os.path.realpath` so symlinked temp
-    dirs still match. Decision table:
+    dirs still match, then falls back to basename comparison when
+    realpath disagrees — the authoritative caller-side ``$TMUX`` name
+    and the target's declared ``socket_name`` are both unaffected by
+    ``$TMUX_TMPDIR`` divergence (the macOS launchd case), so a
+    last-chance name match still blocks a self-kill when the path
+    comparison was fooled by env mismatch.
+
+    Decision table:
 
     * ``caller is None`` → ``False``. The process isn't inside tmux at
       all, so there is no caller-side pane to protect and no self-kill
@@ -159,8 +166,16 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
       destructive action.
     * target server has no resolvable socket path → ``True``. Same
       conservative reasoning.
-    * Otherwise → ``True`` iff ``os.path.realpath`` of the caller's
-      socket path equals the target's effective socket path.
+    * realpath of caller's socket path matches target's effective path
+      → ``True`` (primary positive signal).
+    * basename of caller's socket path equals target's
+      ``socket_name`` (or ``"default"``) → ``True``. Conservative
+      last-chance block for env-mismatch scenarios where reconstruction
+      produced a wrong path but the name was authoritative on both
+      sides. Trades off one exotic false positive (two daemons with
+      identical socket_name under different tmpdirs) for a real safety
+      property.
+    * Otherwise → ``False``.
 
     When a conservative block is a false positive, the caller's error
     message directs the user to run tmux manually.
@@ -173,9 +188,17 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
     if not target:
         return True
     try:
-        return os.path.realpath(caller.socket_path) == os.path.realpath(target)
+        if os.path.realpath(caller.socket_path) == os.path.realpath(target):
+            return True
     except OSError:
-        return caller.socket_path == target
+        if caller.socket_path == target:
+            return True
+    # Final conservative check: names match even though paths didn't.
+    # Survives ``$TMUX_TMPDIR`` divergence between the MCP process and
+    # the caller's shell (macOS launchd).
+    caller_basename = pathlib.PurePath(caller.socket_path).name
+    target_name = server.socket_name or "default"
+    return caller_basename == target_name
 
 
 # ---------------------------------------------------------------------------
