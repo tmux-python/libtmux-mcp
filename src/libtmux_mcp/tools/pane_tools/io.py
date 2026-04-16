@@ -256,6 +256,12 @@ def paste_text(
     avoiding the issues of sending text line-by-line via send_keys.
     Supports bracketed paste mode for terminals that handle it.
 
+    **When to use this vs. load_buffer + paste_buffer:** ``paste_text``
+    is the fire-and-forget path — the buffer is created, pasted, and
+    deleted in one call. Use ``load_buffer`` + ``paste_buffer`` when
+    you need to stage content first, paste it into multiple panes, or
+    inspect it with ``show_buffer`` before pasting.
+
     Parameters
     ----------
     text : str

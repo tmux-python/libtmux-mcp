@@ -181,6 +181,12 @@ def load_buffer(
     Agents MUST use the returned :attr:`BufferRef.buffer_name` on
     subsequent paste/show/delete calls.
 
+    **When to use this vs. paste_text:** ``load_buffer`` is the
+    stage-then-fire path — you get a handle back and can inspect via
+    ``show_buffer``, paste into multiple panes via ``paste_buffer``,
+    or hold the content for later. Use ``paste_text`` for a simple
+    one-shot paste with no follow-up.
+
     Parameters
     ----------
     content : str
