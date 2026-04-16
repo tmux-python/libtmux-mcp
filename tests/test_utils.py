@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import typing as t
 
 import pytest
@@ -456,6 +457,46 @@ def test_caller_is_on_server_rejects_different_socket(
     monkeypatch.setenv("TMUX", "/tmp/tmux-99999/unrelated,1,$0")
     monkeypatch.setenv("TMUX_PANE", "%1")
     assert _caller_is_on_server(mcp_server, _get_caller_identity()) is False
+
+
+def test_caller_is_on_server_basename_fallback_survives_tmpdir_divergence(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-kill guard still blocks when ``$TMUX_TMPDIR`` diverges.
+
+    Scenario: MCP process has the wrong ``$TMUX_TMPDIR`` (macOS under
+    launchd). The ``display-message`` query fails because tmux can't
+    find the socket using our env. ``_effective_socket_path`` falls
+    back to env-based reconstruction, which produces a path that does
+    NOT match the caller's ``$TMUX`` realpath. Without a basename
+    fallback the guard would mistakenly open — but the caller's socket
+    name and the target's ``socket_name`` DO still agree (they live in
+    different namespaces than ``$TMUX_TMPDIR``), so the conservative
+    last-chance match still fires and blocks.
+    """
+    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+
+    def _boom(*_a: object, **_kw: object) -> object:
+        msg = "display-message rejected"
+        raise exc.LibTmuxException(msg)
+
+    # Force the display-message query path to fail by clearing the
+    # cached socket_path and making cmd raise.
+    monkeypatch.setattr(mcp_server, "socket_path", None)
+    monkeypatch.setattr(mcp_server, "cmd", _boom)
+    # Point reconstruction at a bogus tmpdir that could never match
+    # the caller's path — only the basename-fallback can save us.
+    monkeypatch.setenv("TMUX_TMPDIR", "/nonexistent-guard-test-tmpdir")
+    # Caller's $TMUX points at the REAL tmpdir with a path whose
+    # basename matches server.socket_name. Realpath comparison will
+    # fail (bogus vs. real path, neither exists at /nonexistent…).
+    caller_socket_path = f"/correct-tmpdir/tmux-{os.geteuid()}/{mcp_server.socket_name}"
+    monkeypatch.setenv("TMUX", f"{caller_socket_path},1,$0")
+    monkeypatch.setenv("TMUX_PANE", "%1")
+
+    assert _caller_is_on_server(mcp_server, _get_caller_identity()) is True
+    # Restore real ``cmd`` before the fixture tears down with kill-server.
+    monkeypatch.undo()
 
 
 def test_caller_is_on_server_conservative_when_socket_unknown(
