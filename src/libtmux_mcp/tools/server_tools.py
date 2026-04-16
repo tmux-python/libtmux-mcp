@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import pathlib
+import socket
 import typing as t
 
 from fastmcp.exceptions import ToolError
@@ -182,10 +186,84 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
     )
 
 
+def _is_tmux_socket_live(path: pathlib.Path) -> bool:
+    """Return True if a tmux socket has a listener accepting connections.
+
+    Uses a UNIX-domain ``connect()`` with a short timeout rather than
+    shelling out to ``tmux``. ``$TMUX_TMPDIR/tmux-$UID/`` routinely
+    accumulates thousands of stale socket inodes from past servers —
+    probing each one with ``tmux -L <name> ls`` would make
+    :func:`list_servers` O(sockets * tmux-spawn-cost), easily tens of
+    seconds on well-aged machines. Socket connect is kernel-fast (sub
+    millisecond) and returns ``ECONNREFUSED`` immediately for dead
+    inodes.
+    """
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(0.1)
+    try:
+        s.connect(str(path))
+    except (OSError, TimeoutError):
+        return False
+    else:
+        return True
+    finally:
+        with contextlib.suppress(OSError):
+            s.close()
+
+
+@handle_tool_errors
+def list_servers() -> list[ServerInfo]:
+    """Discover every live tmux server on this machine.
+
+    Scans ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/`` for socket files —
+    the canonical location where tmux creates per-server sockets
+    (see tmux.c's ``expand_paths`` + ``TMUX_SOCK`` template). Only
+    sockets with a live listener are reported; stale inodes (a common
+    case on long-running systems where ``$TMUX_TMPDIR`` can carry
+    thousands of orphans) are silently filtered.
+
+    Use this to find other running tmux servers the agent is not
+    directly attached to — e.g. when a user has separate tmux servers
+    for work, side projects, and CI. Once discovered, pass
+    ``socket_name=<result.socket_name>`` to any other tool.
+
+    Returns
+    -------
+    list[ServerInfo]
+        One entry per live tmux server found under the current user's
+        ``$TMUX_TMPDIR``. Empty when the directory is missing or no
+        servers are running.
+    """
+    tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
+    uid_dir = pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}"
+    if not uid_dir.is_dir():
+        return []
+    results: list[ServerInfo] = []
+    for entry in sorted(uid_dir.iterdir()):
+        try:
+            if not entry.is_socket():
+                continue
+        except OSError:
+            continue
+        # Cheap liveness probe before the more expensive
+        # ``get_server_info`` call. Stale sockets are the common case.
+        if not _is_tmux_socket_live(entry):
+            continue
+        try:
+            info = get_server_info(socket_name=entry.name)
+        except ToolError:
+            continue
+        results.append(info)
+    return results
+
+
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
     mcp.tool(title="List Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         list_sessions
+    )
+    mcp.tool(title="List Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+        list_servers
     )
     mcp.tool(
         title="Create Session", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
