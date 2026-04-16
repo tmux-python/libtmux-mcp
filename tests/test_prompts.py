@@ -138,10 +138,10 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     ``tail -f`` take over the terminal and never draw a shell prompt,
     so the wait would block until timeout.
 
-    The corrected recipe (a) waits for the shell prompt BEFORE sending
-    the launch command (when a prompt is a meaningful signal), and (b)
-    uses ``wait_for_content_change`` AFTER launch for an optional
-    "program started" confirmation.
+    The corrected recipe uses ``wait_for_content_change`` after launch
+    for an optional "program started" confirmation — a screen-change
+    check that works for every shell and every program, no glyph
+    matching required.
     """
     from libtmux_mcp.prompts.recipes import build_dev_workspace
 
@@ -149,12 +149,9 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     # The stale guidance must be gone.
     assert "wait for the prompt" not in text
     assert "Between each step, wait for the prompt" not in text
-    # The new guidance must name the right primitive for post-launch
-    # confirmation: content-change, not prompt-match.
+    # Post-launch confirmation still uses the right primitive:
+    # content-change, not prompt-match.
     assert "wait_for_content_change" in text
-    # wait_for_text should still appear — but only for the pre-launch
-    # shell-readiness check, which is where prompt matching is valid.
-    assert "wait_for_text" in text
 
 
 def _extract_tool_calls(

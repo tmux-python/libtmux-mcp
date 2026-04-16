@@ -117,22 +117,20 @@ a logs tail on the bottom-right:
 3. ``split_window(pane_id="%B", direction="right")`` — splits pane B
    horizontally (pane C, the logs pane). Capture the returned
    ``pane_id`` as ``%C``.
-4. Before sending anything, confirm each new pane's shell is ready
-   to accept input:
-   ``wait_for_text(pane_id="%A", pattern=r"\\$ |\\# |\\% ", regex=True, timeout=5.0)``
-   (and the same for ``%B`` and ``%C``). Do NOT wait for a prompt
-   *after* launching vim or a long-running tailing command —
-   those programs grab the full terminal and never draw a shell
-   prompt; the wait would block until timeout.
-5. Launch the three programs via ``send_keys``:
-   ``send_keys(pane_id="%A", keys="vim")``,
-   ``send_keys(pane_id="%B", keys="")`` (leave the shell idle), and
-   ``send_keys(pane_id="%C", keys={log_command!r})``.
-6. After launching the editor and the log command, optionally
-   confirm each program drew its UI via
+4. Launch the editor and the log command via ``send_keys``:
+   ``send_keys(pane_id="%A", keys="vim")`` and
+   ``send_keys(pane_id="%C", keys={log_command!r})``. Leave pane B
+   at its fresh shell prompt — nothing needs to be sent there. No
+   pre-launch wait is required: tmux buffers keystrokes into the
+   pane's PTY whether or not the shell has finished drawing, so
+   ``send_keys`` immediately after ``split_window`` is safe and
+   shell-agnostic.
+5. Optionally confirm each program drew its UI via
    ``wait_for_content_change(pane_id="%A", timeout=3.0)``
    (and similarly for ``%C``). This is a "did the screen change?"
-   check — strictly different from waiting for a shell prompt.
+   check — it works whether the pane shows a prompt glyph, a vim
+   splash screen, or a log tail, so no shell-specific regex is
+   needed.
 
 Use pane IDs (``%N``) for all subsequent targeting — they are stable
 across layout changes; window renames are not.
