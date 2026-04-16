@@ -124,3 +124,161 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
 
     text = interrupt_gracefully(pane_id="%3")
     assert "do NOT escalate automatically" in text
+
+
+def _extract_tool_calls(
+    rendered: str, tool_names: set[str]
+) -> list[tuple[str, list[str]]]:
+    """Extract ``tool_name(kw=..., ...)`` call sites from prompt text.
+
+    Walks the rendered prompt, finds each token that matches a known
+    tool name followed by ``(``, paren-matches with string-awareness,
+    and parses the slice via :mod:`ast`. Returns ``(tool_name, kwnames)``
+    tuples for every successfully parsed call. Parse failures are
+    silently skipped because prompts intentionally contain prose
+    snippets that may resemble calls (e.g. ``split_window(target=pane A)``
+    when that is being described but not executed).
+    """
+    import ast
+    import warnings
+
+    results: list[tuple[str, list[str]]] = []
+    i = 0
+    n = len(rendered)
+    while i < n:
+        for name in tool_names:
+            end = i + len(name)
+            prev_is_ident = i > 0 and (
+                rendered[i - 1].isalnum() or rendered[i - 1] == "_"
+            )
+            if (
+                rendered[i:end] == name
+                and not prev_is_ident
+                and end < n
+                and rendered[end] == "("
+            ):
+                # Paren-match with quote awareness.
+                depth = 0
+                j = end
+                quote: str | None = None
+                while j < n:
+                    c = rendered[j]
+                    if quote is not None:
+                        if c == "\\":
+                            j += 2
+                            continue
+                        if c == quote:
+                            quote = None
+                    elif c in ("'", '"'):
+                        quote = c
+                    elif c == "(":
+                        depth += 1
+                    elif c == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    j += 1
+                if depth != 0:
+                    break
+                snippet = rendered[i : j + 1]
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", SyntaxWarning)
+                        tree = ast.parse(snippet, mode="eval")
+                except SyntaxError:
+                    break
+                if isinstance(tree.body, ast.Call) and isinstance(
+                    tree.body.func, ast.Name
+                ):
+                    results.append(
+                        (
+                            tree.body.func.id,
+                            [kw.arg for kw in tree.body.keywords if kw.arg],
+                        )
+                    )
+                i = j + 1
+                break
+        else:
+            i += 1
+            continue
+    return results
+
+
+def test_prompt_tool_calls_match_real_signatures() -> None:
+    """Every ``tool_name(param=...)`` in every prompt matches a real signature.
+
+    Regression guard for the ``build_dev_workspace`` drift where the
+    prompt told clients to call ``create_session(name=...)`` while the
+    real parameter is ``session_name`` — a failure mode that makes the
+    "discover via prompt" workflow actively misleading.
+
+    The test renders each recipe with plausible sample arguments,
+    extracts every ``known_tool(...)`` call from the output, and
+    asserts each keyword argument is a real parameter on the matching
+    Python tool function. Uses :func:`inspect.signature` against the
+    raw tool functions as the source of truth.
+    """
+    import inspect
+
+    from libtmux_mcp.prompts import recipes as recipes_mod
+    from libtmux_mcp.tools import (
+        buffer_tools,
+        hook_tools,
+        option_tools,
+        pane_tools,
+        server_tools,
+        session_tools,
+        wait_for_tools,
+        window_tools,
+    )
+
+    modules = (
+        buffer_tools,
+        hook_tools,
+        option_tools,
+        pane_tools,
+        server_tools,
+        session_tools,
+        wait_for_tools,
+        window_tools,
+    )
+    tool_params: dict[str, set[str]] = {}
+    for mod in modules:
+        for name, obj in vars(mod).items():
+            if name.startswith("_") or not callable(obj):
+                continue
+            try:
+                sig = inspect.signature(obj)
+            except (TypeError, ValueError):
+                continue
+            # handle_tool_errors wraps tools but preserves __wrapped__.
+            fn = getattr(obj, "__wrapped__", obj)
+            try:
+                sig = inspect.signature(fn)
+            except (TypeError, ValueError):
+                continue
+            params = {p.name for p in sig.parameters.values() if p.name != "ctx"}
+            if params:
+                tool_params.setdefault(name, set()).update(params)
+
+    samples: list[tuple[str, dict[str, object]]] = [
+        ("run_and_wait", {"command": "pytest", "pane_id": "%1", "timeout": 30.0}),
+        ("diagnose_failing_pane", {"pane_id": "%1"}),
+        ("build_dev_workspace", {"session_name": "dev"}),
+        ("interrupt_gracefully", {"pane_id": "%1"}),
+    ]
+    for recipe_name, kwargs in samples:
+        fn = getattr(recipes_mod, recipe_name)
+        rendered = fn(**kwargs)
+        calls = _extract_tool_calls(rendered, set(tool_params))
+        assert calls, (
+            f"no tool calls extracted from {recipe_name!r} — either the "
+            f"prompt body changed drastically or the extractor regressed"
+        )
+        for tool_name, kw_names in calls:
+            valid = tool_params[tool_name]
+            for kw in kw_names:
+                assert kw in valid, (
+                    f"{recipe_name}: {tool_name}({kw}=...) is invalid — "
+                    f"{tool_name} accepts {sorted(valid)}"
+                )
