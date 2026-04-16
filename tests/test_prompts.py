@@ -204,6 +204,35 @@ def _extract_tool_calls(
     return results
 
 
+@pytest.mark.parametrize(
+    ("recipe_name", "kwargs"),
+    [
+        ("run_and_wait", {"command": "pytest", "pane_id": "%1"}),
+        ("diagnose_failing_pane", {"pane_id": "%1"}),
+        ("build_dev_workspace", {"session_name": "dev"}),
+        ("interrupt_gracefully", {"pane_id": "%1"}),
+    ],
+)
+def test_every_prompt_recipe_returns_str(
+    recipe_name: str, kwargs: dict[str, object]
+) -> None:
+    """Every prompt recipe returns a non-empty ``str``.
+
+    Regression guard mirroring the read-heavy tool shape tests in
+    ``tests/test_server_tools.py`` and ``tests/test_pane_tools.py``:
+    prompts must return a string template so MCP ``get_prompt`` calls
+    return a usable body. A future refactor that accidentally returns
+    a Pydantic model, dict, or ``None`` would silently break the MCP
+    prompt surface; this parametrized test fails loudly.
+    """
+    from libtmux_mcp.prompts import recipes
+
+    fn = getattr(recipes, recipe_name)
+    result = fn(**kwargs)
+    assert isinstance(result, str)
+    assert result, f"{recipe_name} returned an empty string"
+
+
 def test_prompt_tool_calls_match_real_signatures() -> None:
     """Every ``tool_name(param=...)`` in every prompt matches a real signature.
 
