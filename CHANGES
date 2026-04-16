@@ -17,6 +17,10 @@ _Notes on upcoming releases will be added here_
   Migration for clients iterating the old shape: replace
   `for m in search_panes(...)` with
   `for m in search_panes(...).matches`.
+- `fastmcp>=3.2.4` minimum (was `>=3.1.0`). Required for
+  `ReadonlyRetryMiddleware` to retry through the production tool
+  decorator path; under earlier fastmcp versions the middleware was
+  a no-op.
 
 ### What's new
 
@@ -27,6 +31,35 @@ _Notes on upcoming releases will be added here_
   `load_buffer` staging can no longer dump unbounded content into the
   model context on a single `show_buffer` call. Pass `max_lines=None`
   for a full-buffer read.
+- New tools: `list_servers`, `snapshot_pane`, `wait_for_text`,
+  `wait_for_content_change`, `wait_for_channel` / `signal_channel`,
+  buffer lifecycle (`load_buffer`, `paste_buffer`, `show_buffer`,
+  `delete_buffer`), hook introspection (`show_hook`, `show_hooks`),
+  plus pane / session / window helpers (`pipe_pane`,
+  `display_message`, copy-mode entry/exit, `paste_text`,
+  `select_pane`, `swap_pane`, `select_window`, `move_window`).
+- Middleware stack: `TimingMiddleware`, `ErrorHandlingMiddleware`,
+  `AuditMiddleware` (digest-redacted argument summaries with
+  sensitive-payload protection), `SafetyMiddleware` (tier-gated
+  tool visibility), `ReadonlyRetryMiddleware` (transparent retry of
+  readonly tools on transient `LibTmuxException` — mutating tools
+  never retry), `TailPreservingResponseLimitingMiddleware` (caps
+  oversized output while keeping the tail).
+- Four recipe prompts: `run_and_wait`, `diagnose_failing_pane`,
+  `build_dev_workspace`, `interrupt_gracefully`. Optional
+  `PromptsAsTools` transform (env-gated via
+  `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1`) lets tools-only MCP clients
+  reach them.
+- `wait_for_text` / `wait_for_content_change` emit
+  `ctx.report_progress` and `ctx.warning` notifications, and
+  propagate `asyncio.CancelledError` cleanly so MCP clients can
+  abort long waits.
+- Best-effort lifespan-shutdown GC for leaked `libtmux_mcp_*` paste
+  buffers — agents that miss `delete_buffer` no longer pollute the
+  tmux server's buffer namespace across MCP restarts.
+- Tool input schemas now carry per-parameter `description` fields
+  auto-extracted from existing NumPy-style docstrings (free with
+  the fastmcp 3.2.4 bump).
 
 ### Fixes
 
@@ -37,6 +70,29 @@ _Notes on upcoming releases will be added here_
   `/var/log/syslog` example is replaced with an OS-neutral
   `watch -n 1 date` default; callers can override via the new
   `log_command` parameter.
+- `build_dev_workspace` no longer instructs agents to wait for shell
+  prompts after launching screen-grabbing programs (`vim`, `watch`,
+  `tail -f`). Eliminates a class of false-positive timeouts on
+  agents following the recipe literally.
+- macOS `TMUX_TMPDIR` self-kill guard: `_effective_socket_path`
+  queries tmux directly via `display-message #{socket_path}` before
+  falling back to env-based reconstruction; `_caller_is_on_server`
+  adds a basename-match fallback to close the residual launchd-
+  divergence gap.
+- `search_panes` neutralizes tmux format-string injection in the
+  regex fast path.
+- `ReadonlyRetryMiddleware` retry warnings route through
+  `libtmux_mcp.retry` (was fastmcp's stock `fastmcp.retry`) so they
+  appear on the project's audit-stream namespace.
+
+### Documentation
+
+- New per-tool docs pages: `buffers.md`, `hooks.md`, `waits.md`,
+  `tools/index.md`. Updated `panes.md` documents the
+  `SearchPanesResult` shape and migration from the previous flat
+  list. `docs/topics/safety.md` documents the macOS `TMUX_TMPDIR`
+  self-kill caveat, the audit log, `pipe_pane`, and
+  `set_environment`.
 
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
