@@ -11,7 +11,6 @@ from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
-    from libtmux.session import Session
 
     from libtmux_mcp.server import _ServerCacheKey
 
@@ -222,8 +221,9 @@ def test_server_constructed_with_lifespan() -> None:
     assert mcp._lifespan is _lifespan
 
 
+@pytest.mark.usefixtures("mcp_session")
 def test_gc_mcp_buffers_deletes_mcp_prefixed_and_spares_others(
-    mcp_server: Server, mcp_session: Session
+    mcp_server: Server,
 ) -> None:
     """``_gc_mcp_buffers`` deletes ``libtmux_mcp_*`` buffers only.
 
@@ -233,7 +233,6 @@ def test_gc_mcp_buffers_deletes_mcp_prefixed_and_spares_others(
     clipboard sync, user-authored buffers) — those are the human user's
     content.
     """
-    del mcp_session
     from libtmux_mcp.server import _gc_mcp_buffers
     from libtmux_mcp.tools.buffer_tools import load_buffer
 

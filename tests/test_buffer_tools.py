@@ -21,7 +21,6 @@ from libtmux_mcp.tools.buffer_tools import (
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
-    from libtmux.session import Session
 
 
 @pytest.mark.parametrize("name", ["my-buffer", "clipboard.v2", "a", "x" * 64])
@@ -57,15 +56,13 @@ def test_buffer_name_accepts_full_shape() -> None:
     assert _validate_buffer_name(name) == name
 
 
-def test_load_buffer_allocates_unique_name(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_load_buffer_allocates_unique_name(mcp_server: Server) -> None:
     """Two ``load_buffer`` calls produce distinct buffers.
 
     The UUID nonce in the allocated name prevents collisions even when
     the caller reuses the same logical name.
     """
-    del mcp_session
     a = load_buffer(
         content="first",
         logical_name="clipboard",
@@ -88,9 +85,9 @@ def test_load_buffer_allocates_unique_name(
     delete_buffer(b.buffer_name, socket_name=mcp_server.socket_name)
 
 
-def test_buffer_round_trip(mcp_server: Server, mcp_session: Session) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_buffer_round_trip(mcp_server: Server) -> None:
     """Load -> show -> delete round-trip preserves content exactly."""
-    del mcp_session
     payload = "line1\nline2\nline3"
     ref = load_buffer(
         content=payload,
@@ -146,9 +143,8 @@ def test_content_is_in_sensitive_args() -> None:
     assert "content" in _SENSITIVE_ARG_NAMES
 
 
-def test_show_buffer_tail_preserves_on_truncation(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_show_buffer_tail_preserves_on_truncation(mcp_server: Server) -> None:
     """``show_buffer`` tail-preserves when content exceeds ``max_lines``.
 
     Regression guard: prior to bounded output, ``show_buffer`` returned
@@ -159,7 +155,6 @@ def test_show_buffer_tail_preserves_on_truncation(
     ``True``, and ``content_truncated_lines`` reports how many were
     dropped so the caller can re-request with ``max_lines=None``.
     """
-    del mcp_session
     payload = "\n".join(f"line-{i}" for i in range(20))
     ref = load_buffer(
         content=payload,
@@ -181,11 +176,9 @@ def test_show_buffer_tail_preserves_on_truncation(
         delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
 
 
-def test_show_buffer_full_read_when_max_lines_none(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_show_buffer_full_read_when_max_lines_none(mcp_server: Server) -> None:
     """``max_lines=None`` disables truncation for full-buffer recovery."""
-    del mcp_session
     payload = "\n".join(f"line-{i}" for i in range(50))
     ref = load_buffer(
         content=payload,
@@ -205,11 +198,9 @@ def test_show_buffer_full_read_when_max_lines_none(
         delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
 
 
-def test_show_buffer_no_truncation_under_cap(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_show_buffer_no_truncation_under_cap(mcp_server: Server) -> None:
     """Small buffers are returned verbatim with truncation flags off."""
-    del mcp_session
     payload = "one\ntwo\nthree"
     ref = load_buffer(
         content=payload,
@@ -237,9 +228,9 @@ def test_show_buffer_no_truncation_under_cap(
         ("delete_buffer", "delete-buffer timeout"),
     ],
 )
+@pytest.mark.usefixtures("mcp_session")
 def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     mcp_server: Server,
-    mcp_session: Session,
     monkeypatch: pytest.MonkeyPatch,
     tool_name: str,
     match_text: str,
@@ -254,8 +245,6 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     cap, and the target buffer name.
     """
     import subprocess
-
-    del mcp_session
 
     def _hang(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
