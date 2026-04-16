@@ -6,6 +6,38 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+- `search_panes` now returns a structured `SearchPanesResult` wrapper
+  instead of a bare `list[PaneContentMatch]`. The previous top-level
+  list is available as `result.matches`; new fields surface pagination
+  state (`truncated`, `truncated_panes`, `total_panes_matched`,
+  `offset`, `limit`) so agents can detect when the result set was
+  capped and re-request subsequent pages with a higher `offset`.
+  Migration for clients iterating the old shape: replace
+  `for m in search_panes(...)` with
+  `for m in search_panes(...).matches`.
+
+### What's new
+
+- `show_buffer` now bounds its response with `max_lines` (default 500,
+  matches `capture_pane`) and reports truncation via
+  `BufferContent.content_truncated` and
+  `BufferContent.content_truncated_lines`. A pathological
+  `load_buffer` staging can no longer dump unbounded content into the
+  model context on a single `show_buffer` call. Pass `max_lines=None`
+  for a full-buffer read.
+
+### Fixes
+
+- `build_dev_workspace` prompt recipe now uses the real tool parameter
+  names (`session_name=`, `pane_id=`, `direction=`) instead of
+  non-existent aliases. A new prompt-alignment test prevents future
+  drift between prompt text and tool signatures. The Linux-specific
+  `/var/log/syslog` example is replaced with an OS-neutral
+  `watch -n 1 date` default; callers can override via the new
+  `log_command` parameter.
+
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
 ### What's new
