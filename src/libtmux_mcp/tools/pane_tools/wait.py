@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 
@@ -19,6 +20,8 @@ from libtmux_mcp.models import (
     ContentChangeResult,
     WaitForTextResult,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Exceptions that indicate "client transport is gone, keep polling".
 #: Narrowly-scoped on purpose: a broader ``Exception`` catch would
@@ -168,31 +171,43 @@ async def wait_for_text(
     deadline = start_time + timeout
     found = False
 
-    while True:
-        elapsed = time.monotonic() - start_time
-        await _maybe_report_progress(
-            ctx,
-            progress=elapsed,
-            total=timeout,
-            message=f"Polling pane {pane.pane_id} for pattern",
-        )
+    try:
+        while True:
+            elapsed = time.monotonic() - start_time
+            await _maybe_report_progress(
+                ctx,
+                progress=elapsed,
+                total=timeout,
+                message=f"Polling pane {pane.pane_id} for pattern",
+            )
 
-        # FastMCP direct-awaits async tools on the main event loop; the
-        # libtmux capture_pane call is a blocking subprocess.run. Push
-        # to the default executor so concurrent tool calls are not
-        # starved during long waits.
-        lines = await asyncio.to_thread(
-            pane.capture_pane, start=content_start, end=content_end
-        )
-        hits = [line for line in lines if compiled.search(line)]
-        if hits:
-            matched_lines.extend(hits)
-            found = True
-            break
+            # FastMCP direct-awaits async tools on the main event loop; the
+            # libtmux capture_pane call is a blocking subprocess.run. Push
+            # to the default executor so concurrent tool calls are not
+            # starved during long waits.
+            lines = await asyncio.to_thread(
+                pane.capture_pane, start=content_start, end=content_end
+            )
+            hits = [line for line in lines if compiled.search(line)]
+            if hits:
+                matched_lines.extend(hits)
+                found = True
+                break
 
-        if time.monotonic() >= deadline:
-            break
-        await asyncio.sleep(interval)
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        # MCP cancellation: client hung up or aborted the request.
+        # Re-raise so fastmcp's transport layer can complete shutdown
+        # — never return a partial WaitForTextResult, which would mask
+        # the cancellation as a timed-out wait.
+        logger.debug(
+            "wait_for_text cancelled after %.3fs on pane %s",
+            time.monotonic() - start_time,
+            pane.pane_id,
+        )
+        raise
 
     elapsed = time.monotonic() - start_time
     return WaitForTextResult(
@@ -279,23 +294,32 @@ async def wait_for_content_change(
     deadline = start_time + timeout
     changed = False
 
-    while True:
-        elapsed = time.monotonic() - start_time
-        await _maybe_report_progress(
-            ctx,
-            progress=elapsed,
-            total=timeout,
-            message=f"Watching pane {pane.pane_id} for change",
+    try:
+        while True:
+            elapsed = time.monotonic() - start_time
+            await _maybe_report_progress(
+                ctx,
+                progress=elapsed,
+                total=timeout,
+                message=f"Watching pane {pane.pane_id} for change",
+            )
+
+            current = await asyncio.to_thread(pane.capture_pane)
+            if current != initial_content:
+                changed = True
+                break
+
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        # MCP cancellation — see ``wait_for_text`` for rationale.
+        logger.debug(
+            "wait_for_content_change cancelled after %.3fs on pane %s",
+            time.monotonic() - start_time,
+            pane.pane_id,
         )
-
-        current = await asyncio.to_thread(pane.capture_pane)
-        if current != initial_content:
-            changed = True
-            break
-
-        if time.monotonic() >= deadline:
-            break
-        await asyncio.sleep(interval)
+        raise
 
     elapsed = time.monotonic() - start_time
     return ContentChangeResult(
