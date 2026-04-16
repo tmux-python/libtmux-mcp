@@ -127,7 +127,12 @@ if _safety_level not in VALID_SAFETY_LEVELS:
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output is terminal scrollback benefit from this backstop;
 #: structured responses from list/get tools stay under the cap naturally.
-_RESPONSE_LIMITED_TOOLS = ["capture_pane", "search_panes", "snapshot_pane"]
+_RESPONSE_LIMITED_TOOLS = [
+    "capture_pane",
+    "search_panes",
+    "snapshot_pane",
+    "show_buffer",
+]
 
 
 @contextlib.asynccontextmanager

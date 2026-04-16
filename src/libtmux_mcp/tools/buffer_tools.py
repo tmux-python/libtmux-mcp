@@ -45,6 +45,14 @@ from libtmux_mcp._utils import (
     handle_tool_errors,
 )
 from libtmux_mcp.models import BufferContent, BufferRef
+from libtmux_mcp.tools.pane_tools.io import (
+    CAPTURE_DEFAULT_MAX_LINES,
+    _truncate_lines_tail,
+)
+
+#: Default line cap for :func:`show_buffer`. Reuses the scrollback
+#: default so agents see one consistent bound across read-heavy tools.
+SHOW_BUFFER_DEFAULT_MAX_LINES = CAPTURE_DEFAULT_MAX_LINES
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -265,21 +273,35 @@ def paste_buffer(
 @handle_tool_errors
 def show_buffer(
     buffer_name: str,
+    max_lines: int | None = SHOW_BUFFER_DEFAULT_MAX_LINES,
     socket_name: str | None = None,
 ) -> BufferContent:
     """Read back the contents of an MCP-owned buffer.
+
+    Output is tail-preserved: when the buffer exceeds ``max_lines`` the
+    oldest lines are dropped and :attr:`BufferContent.content_truncated`
+    is set so the caller can tell truncation happened and opt in to a
+    full read via ``max_lines=None``. This mirrors ``capture_pane`` —
+    one consistent bounded-output contract across read-heavy tools so
+    a pathological ``load_buffer`` staging cannot blow the agent's
+    context window on a single ``show_buffer`` call.
 
     Parameters
     ----------
     buffer_name : str
         Must match the full MCP-namespaced form.
+    max_lines : int or None
+        Maximum number of lines to return. Defaults to
+        :data:`SHOW_BUFFER_DEFAULT_MAX_LINES`. Pass ``None`` for no
+        truncation.
     socket_name : str, optional
         tmux socket name.
 
     Returns
     -------
     BufferContent
-        Structured result with ``buffer_name`` and ``content``.
+        Structured result with ``buffer_name``, ``content``, and the
+        truncation fields.
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_buffer_name(buffer_name)
@@ -298,8 +320,19 @@ def show_buffer(
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"show-buffer failed for {cname!r}: {stderr or e}"
         raise ToolError(msg) from e
-    content = completed.stdout.decode(errors="replace")
-    return BufferContent(buffer_name=cname, content=content)
+    raw = completed.stdout.decode(errors="replace")
+    # Preserve a possible trailing newline so round-tripping through
+    # load_buffer/show_buffer stays byte-identical when truncation
+    # does not fire.
+    lines = raw.splitlines()
+    kept, truncated, dropped = _truncate_lines_tail(lines, max_lines)
+    content = "\n".join(kept) if truncated else raw
+    return BufferContent(
+        buffer_name=cname,
+        content=content,
+        content_truncated=truncated,
+        content_truncated_lines=dropped,
+    )
 
 
 @handle_tool_errors
