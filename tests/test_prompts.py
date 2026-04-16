@@ -154,6 +154,34 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     assert "wait_for_content_change" in text
 
 
+def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
+    r"""No shell-specific prompt regex, no ``send_keys(keys="")`` line.
+
+    Regression guard for two residual ergonomic issues that F1's
+    rewrite did not catch:
+
+    * The literal regex ``\$ |\# |\% `` only matches default
+      bash/zsh prompts; starship, oh-my-zsh, pure, p10k, fish all
+      miss and would hang for 5s per pane.
+    * ``send_keys(pane_id="%B", keys="")`` is not a no-op —
+      libtmux's ``Pane.send_keys`` sends an Enter keystroke when
+      ``enter=True`` (the default). The comment "(leave the shell
+      idle)" actively misled readers.
+
+    Both lines were deleted; this test pins that removal.
+    """
+    from libtmux_mcp.prompts.recipes import build_dev_workspace
+
+    text = build_dev_workspace(session_name="dev")
+    # Shell-specific prompt glyph regex must be gone.
+    assert r"\$ |\# |\% " not in text
+    # The stray-Enter-into-idle-shell line must be gone.
+    assert 'send_keys(pane_id="%B", keys="")' not in text
+    # Positive pin: post-launch UI confirmation is still available
+    # via the shell-agnostic content-change primitive.
+    assert "wait_for_content_change" in text
+
+
 def _extract_tool_calls(
     rendered: str, tool_names: set[str]
 ) -> list[tuple[str, list[str]]]:
