@@ -117,12 +117,22 @@ a logs tail on the bottom-right:
 3. ``split_window(pane_id="%B", direction="right")`` — splits pane B
    horizontally (pane C, the logs pane). Capture the returned
    ``pane_id`` as ``%C``.
-4. Launch the three programs via ``send_keys``:
+4. Before sending anything, confirm each new pane's shell is ready
+   to accept input:
+   ``wait_for_text(pane_id="%A", pattern=r"\\$ |\\# |\\% ", regex=True, timeout=5.0)``
+   (and the same for ``%B`` and ``%C``). Do NOT wait for a prompt
+   *after* launching vim or a long-running tailing command —
+   those programs grab the full terminal and never draw a shell
+   prompt; the wait would block until timeout.
+5. Launch the three programs via ``send_keys``:
    ``send_keys(pane_id="%A", keys="vim")``,
    ``send_keys(pane_id="%B", keys="")`` (leave the shell idle), and
    ``send_keys(pane_id="%C", keys={log_command!r})``.
-   Between each step, wait for the prompt via ``wait_for_text``
-   before moving on.
+6. After launching the editor and the log command, optionally
+   confirm each program drew its UI via
+   ``wait_for_content_change(pane_id="%A", timeout=3.0)``
+   (and similarly for ``%C``). This is a "did the screen change?"
+   check — strictly different from waiting for a shell prompt.
 
 Use pane IDs (``%N``) for all subsequent targeting — they are stable
 across layout changes; window renames are not.
