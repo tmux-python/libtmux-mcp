@@ -326,12 +326,17 @@ def test_server_middleware_stack_order() -> None:
     refactor that swaps Audit and Safety would degrade
     security observability without an obvious test failure, so pin
     the sequence explicitly.
+
+    ReadonlyRetryMiddleware sits between Audit and Safety so retried
+    calls are audited once each (Audit wraps the retry loop) and
+    tier-denied tools never reach retry (Safety stops them first).
     """
     from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
     from fastmcp.server.middleware.timing import TimingMiddleware
 
     from libtmux_mcp.middleware import (
         AuditMiddleware,
+        ReadonlyRetryMiddleware,
         SafetyMiddleware,
         TailPreservingResponseLimitingMiddleware,
     )
@@ -341,11 +346,12 @@ def test_server_middleware_stack_order() -> None:
     # FastMCP auto-appends an internal DereferenceRefsMiddleware at the
     # end of the stack; we care about the ordering of the middleware
     # *we* configured. Slice off the suffix before comparing.
-    assert types[:5] == [
+    assert types[:6] == [
         TimingMiddleware,
         TailPreservingResponseLimitingMiddleware,
         ErrorHandlingMiddleware,
         AuditMiddleware,
+        ReadonlyRetryMiddleware,
         SafetyMiddleware,
     ]
 

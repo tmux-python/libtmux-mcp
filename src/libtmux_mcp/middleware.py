@@ -26,8 +26,10 @@ import typing as t
 
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from fastmcp.server.middleware.error_handling import RetryMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
+from libtmux import exc as libtmux_exc
 from mcp.types import TextContent
 
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
@@ -232,6 +234,69 @@ class AuditMiddleware(Middleware):
 #: it only fires when a tool forgot to declare its own cap or the user
 #: opted out via ``max_lines=None``.
 DEFAULT_RESPONSE_LIMIT_BYTES = 50_000
+
+
+class ReadonlyRetryMiddleware(Middleware):
+    """Retry transient libtmux failures, but only for readonly tools.
+
+    Wraps fastmcp's :class:`fastmcp.server.middleware.error_handling.RetryMiddleware`
+    so retries are bounded by the safety tier the tool is registered
+    under. Mutating and destructive tools (``send_keys``,
+    ``create_session``, ``kill_server``, …) pass straight through —
+    re-running them on a transient socket error would silently double
+    side effects, which is unacceptable. Readonly tools
+    (``list_sessions``, ``capture_pane``, ``snapshot_pane``, …) are
+    safe to retry because they observe state without mutating it.
+
+    Default retry trigger is :class:`libtmux.exc.LibTmuxException` —
+    libtmux wraps the subprocess failures we actually want to retry
+    (socket EAGAIN, transient connect errors). The fastmcp default
+    ``(ConnectionError, TimeoutError)`` does NOT match these, so the
+    upstream defaults would be a silent no-op.
+
+    Place this in the middleware stack **inside** ``AuditMiddleware``
+    (so retried calls are audited once each) and **outside**
+    ``SafetyMiddleware`` (so tier-denied tools never reach retry).
+    """
+
+    def __init__(
+        self,
+        max_retries: int = 1,
+        base_delay: float = 0.1,
+        max_delay: float = 1.0,
+        backoff_multiplier: float = 2.0,
+        retry_exceptions: tuple[type[Exception], ...] = (libtmux_exc.LibTmuxException,),
+        logger_: logging.Logger | None = None,
+    ) -> None:
+        """Configure the underlying retry policy.
+
+        Defaults are deliberately small. ``max_retries=1`` keeps audit
+        log noise minimal (one retry per failed call, not three). The
+        100 ms / 1 s backoff window matches the expected duration of a
+        transient libtmux socket hiccup — a longer backoff would just
+        delay a real failure without adding meaningful retry headroom.
+        """
+        self._retry = RetryMiddleware(
+            max_retries=max_retries,
+            base_delay=base_delay,
+            max_delay=max_delay,
+            backoff_multiplier=backoff_multiplier,
+            retry_exceptions=retry_exceptions,
+            logger=logger_,
+        )
+
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext,
+        call_next: t.Any,
+    ) -> t.Any:
+        """Delegate to the upstream retry only for tools tagged readonly."""
+        if context.fastmcp_context:
+            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
+            if tool and TAG_READONLY in tool.tags:
+                return await self._retry.on_request(context, call_next)
+        return await call_next(context)
+
 
 #: Header prefixed to a truncated response. Intentionally matches the
 #: format used by the per-tool ``capture_pane`` truncation so clients

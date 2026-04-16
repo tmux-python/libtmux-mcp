@@ -29,6 +29,7 @@ from libtmux_mcp._utils import (
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
     AuditMiddleware,
+    ReadonlyRetryMiddleware,
     SafetyMiddleware,
     TailPreservingResponseLimitingMiddleware,
 )
@@ -221,7 +222,11 @@ mcp = FastMCP(
     #      Safety) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.
-    #   5. SafetyMiddleware — innermost gate (fail-closed). Denials
+    #   5. ReadonlyRetryMiddleware — inside Audit so retries are
+    #      audited once each, outside Safety so tier-denied tools
+    #      never reach retry. Only readonly tools are retried;
+    #      mutating/destructive tools pass straight through.
+    #   6. SafetyMiddleware — innermost gate (fail-closed). Denials
     #      never reach the tool, but the audit record above captures
     #      them for forensic review.
     middleware=[
@@ -232,6 +237,7 @@ mcp = FastMCP(
         ),
         ErrorHandlingMiddleware(transform_errors=True),
         AuditMiddleware(),
+        ReadonlyRetryMiddleware(),
         SafetyMiddleware(max_tier=_safety_level),
     ],
     on_duplicate="error",
