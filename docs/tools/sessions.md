@@ -177,8 +177,19 @@ Response:
   "session_name": "dev",
   "window_count": 1,
   "session_attached": "0",
-  "session_created": "1774521872"
+  "session_created": "1774521872",
+  "active_pane_id": "%0"
 }
+```
+
+```{tip}
+The returned ``active_pane_id`` is the pane ID (``%N``) of the
+session's initial pane. It's guaranteed non-``None`` immediately
+after ``create_session`` (libtmux always creates the session with
+one initial pane), so you can target subsequent ``send_keys`` /
+``split_window`` / ``capture_pane`` calls directly without a
+follow-up {tooliconl}`list-panes` round-trip — saving an MCP call
+in the most common "new session, then act on it" workflow.
 ```
 
 ```{fastmcp-tool-input} server_tools.create_session
