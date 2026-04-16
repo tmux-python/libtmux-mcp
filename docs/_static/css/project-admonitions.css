@@ -1,0 +1,183 @@
+/* Project-specific admonition styling for libtmux-mcp docs.
+ *
+ * These classes are *semantic* extensions added by the project and are not
+ * shipped by the gp-sphinx theme, so they live here rather than upstream.
+ * Restored from the pre-gp-sphinx-migration ``custom.css`` (commit c822f02^).
+ *
+ *   .admonition.prompt         — chat-bubble prompts (user → LLM)
+ *   .admonition.agent-thought  — gray-bar agent chain-of-thought narration
+ *   span.prompt                — inline italic prompt with curly quotes
+ *   div.system-prompt,
+ *   div.server-prompt          — labeled dark code panels for AGENTS.md /
+ *                                server-emitted prompts
+ */
+
+/* ── Prompt blocks (user → LLM) ───────────────────────────
+ * Styled admonition for copy-paste prompts. Chat-bubble
+ * aesthetic with speech icon. Says "type this into your LLM."
+ * ────────────────────────────────────────────────────────── */
+div.admonition.prompt {
+  border: 1px solid color-mix(in srgb, var(--color-link) 25%, transparent);
+  border-left: 3px solid var(--color-link);
+  background: color-mix(in srgb, var(--color-link) 4%, var(--color-background-primary));
+  border-radius: 6px;
+  padding: 0.75rem 1rem 0.75rem 2.2rem;
+  margin: 1.25rem 0;
+  box-shadow: none;
+  position: relative;
+}
+
+/* Speech bubble icon */
+div.admonition.prompt::before {
+  content: "\1F4AC";
+  position: absolute;
+  left: 0.65rem;
+  top: 0.7rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.45;
+}
+
+div.admonition.prompt > .admonition-title {
+  display: none;
+}
+
+div.admonition.prompt > p {
+  font-size: 0.95rem;
+  font-style: italic;
+  color: var(--color-foreground-primary);
+}
+
+div.admonition.prompt > p:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Copy button — inserted afterend of p:last-child, so it
+ * lands inside the prompt div. position:relative on the
+ * prompt div provides the positioning context. */
+div.admonition.prompt > button.copybtn {
+  background: transparent !important;
+  cursor: pointer;
+  border: none !important;
+}
+
+div.admonition.prompt:hover > button.copybtn,
+div.admonition.prompt > button.copybtn.success {
+  opacity: 1;
+}
+
+div.admonition.prompt > p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Agent reasoning blocks ──────────────────────────────
+ * Styled admonition for agent chain-of-thought. Neutral
+ * gray bar + italic + muted opacity = "internal narration,
+ * not something you do."
+ * ────────────────────────────────────────────────────────── */
+div.admonition.agent-thought {
+  border: none;
+  border-left: 3px solid var(--color-foreground-border);
+  background: transparent;
+  padding: 0.6rem 1rem;
+  margin: 1rem 0;
+  box-shadow: none;
+}
+
+div.admonition.agent-thought > .admonition-title {
+  display: none;
+}
+
+div.admonition.agent-thought > p {
+  font-style: italic;
+  color: var(--color-foreground-secondary);
+  font-size: 0.9rem;
+}
+
+div.admonition.agent-thought > p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Inline prompt dialog ────────────────────────────────
+ * Inline styled span for user-to-LLM prompts. Supports
+ * full nested markup via MyST attrs_inline extension:
+ *   [Run `pytest` in my build pane]{.prompt}
+ * No line-height or word-wrap disruption. WCAG AA contrast.
+ * ────────────────────────────────────────────────────────── */
+span.prompt {
+  font-style: italic;
+  color: var(--color-foreground-primary);
+}
+
+span.prompt::before {
+  content: "\201C";
+  color: var(--color-foreground-muted);
+}
+
+span.prompt::after {
+  content: "\201D";
+  color: var(--color-foreground-muted);
+}
+
+/* ── Labeled code panels ─────────────────────────────────
+ * Copyable prose in labeled dark panels. Two variants:
+ * .system-prompt — user-authored fragments for AGENTS.md
+ * .server-prompt — libtmux-mcp's built-in instructions
+ * Keeps sphinx-copybutton via .highlight > pre selector.
+ * ────────────────────────────────────────────────────────── */
+div.system-prompt,
+div.server-prompt {
+  margin: 1.25rem 0;
+  position: relative;
+}
+
+div.system-prompt > div.highlight,
+div.server-prompt > div.highlight {
+  background: #1f2329 !important;
+  border: 1px solid color-mix(in srgb, var(--color-link) 20%, transparent);
+  border-left: 3px solid var(--color-link);
+  border-radius: 6px;
+  position: relative;
+  padding-top: 1.3rem;
+}
+
+div.system-prompt > div.highlight > pre,
+div.server-prompt > div.highlight > pre {
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Internal label — quiet uppercase whisper */
+div.system-prompt > div.highlight::before,
+div.server-prompt > div.highlight::before {
+  position: absolute;
+  top: 0.45rem;
+  left: 0.85rem;
+  font-family: var(--font-stack);
+  font-size: 0.55rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9590b8;
+  background: transparent;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+div.system-prompt > div.highlight::before {
+  content: "System prompt";
+}
+
+div.server-prompt > div.highlight::before {
+  content: "Built-in server prompt";
+}
+
+/* Fix copy button background to match panel */
+div.system-prompt .copybtn,
+div.server-prompt .copybtn {
+  background: #1f2329 !important;
+}
