@@ -126,6 +126,37 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
     assert "do NOT escalate automatically" in text
 
 
+def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
+    """``build_dev_workspace`` guides post-launch waits to content-change.
+
+    The recipe must not tell agents to wait for a shell prompt after
+    launching vim or a long-running tailing command.
+
+    Regression guard: the earlier rewrite of this recipe preserved a
+    stale "wait for the prompt between each step" line that would
+    deadlock an agent following it literally — vim and ``watch`` /
+    ``tail -f`` take over the terminal and never draw a shell prompt,
+    so the wait would block until timeout.
+
+    The corrected recipe (a) waits for the shell prompt BEFORE sending
+    the launch command (when a prompt is a meaningful signal), and (b)
+    uses ``wait_for_content_change`` AFTER launch for an optional
+    "program started" confirmation.
+    """
+    from libtmux_mcp.prompts.recipes import build_dev_workspace
+
+    text = build_dev_workspace(session_name="dev")
+    # The stale guidance must be gone.
+    assert "wait for the prompt" not in text
+    assert "Between each step, wait for the prompt" not in text
+    # The new guidance must name the right primitive for post-launch
+    # confirmation: content-change, not prompt-match.
+    assert "wait_for_content_change" in text
+    # wait_for_text should still appear — but only for the pre-launch
+    # shell-readiness check, which is where prompt matching is valid.
+    assert "wait_for_text" in text
+
+
 def _extract_tool_calls(
     rendered: str, tool_names: set[str]
 ) -> list[tuple[str, list[str]]]:
