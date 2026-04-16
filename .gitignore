@@ -205,3 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Playwright MCP test artifacts (console logs / snapshots written by
+# mcp__playwright when empirically verifying docs behavior)
+.playwright-mcp/
