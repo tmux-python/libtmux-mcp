@@ -103,6 +103,38 @@ def test_pane_content_resource(
     assert isinstance(result, str)
 
 
+def test_every_hierarchy_resource_returns_str(
+    resource_functions: dict[str, t.Any],
+    mcp_session: Session,
+    mcp_pane: Pane,
+) -> None:
+    """Every registered hierarchy resource returns a ``str``.
+
+    Regression guard mirroring the read-heavy tool shape tests —
+    resources wire to MCP clients as raw body strings (JSON text or
+    plain text), so a future refactor that accidentally returns a
+    dict or Pydantic instance would break the MCP resource surface.
+    This parametrized test fails loudly on that drift.
+    """
+    invocations: list[tuple[str, tuple[t.Any, ...]]] = [
+        ("tmux://sessions{?socket_name}", ()),
+        (
+            "tmux://sessions/{session_name}{?socket_name}",
+            (mcp_session.session_name,),
+        ),
+        (
+            "tmux://sessions/{session_name}/windows{?socket_name}",
+            (mcp_session.session_name,),
+        ),
+        ("tmux://panes/{pane_id}{?socket_name}", (mcp_pane.pane_id,)),
+        ("tmux://panes/{pane_id}/content{?socket_name}", (mcp_pane.pane_id,)),
+    ]
+    for uri, args in invocations:
+        fn = resource_functions[uri]
+        result = fn(*args)
+        assert isinstance(result, str), f"{uri} returned {type(result).__name__}"
+
+
 @pytest.mark.parametrize(
     ("uri", "expected_mime"),
     [
