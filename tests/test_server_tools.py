@@ -367,16 +367,14 @@ def test_read_heavy_tools_return_pydantic_models(
     assert isinstance(info, ServerInfo)
 
 
-def test_list_servers_finds_live_socket(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_list_servers_finds_live_socket(mcp_server: Server) -> None:
     """``list_servers`` enumerates the current user's tmux sockets.
 
     The fixture server is a real tmux process with a real socket
     under ``$TMUX_TMPDIR/tmux-$UID/``; the discovery tool must see
     it and report it alive.
     """
-    del mcp_session
     from libtmux_mcp.models import ServerInfo
 
     results = list_servers()
@@ -403,9 +401,9 @@ def test_list_servers_missing_tmpdir_returns_empty(
     assert results == []
 
 
+@pytest.mark.usefixtures("mcp_session")
 def test_list_servers_extra_socket_paths_surfaces_custom_path(
     mcp_server: Server,
-    mcp_session: Session,
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -421,7 +419,6 @@ def test_list_servers_extra_socket_paths_surfaces_custom_path(
     extra-paths code path is the reason the server appears in the
     result, not the canonical scan.
     """
-    del mcp_session
     from libtmux_mcp.models import ServerInfo
 
     monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))

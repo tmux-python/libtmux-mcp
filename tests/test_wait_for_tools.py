@@ -17,7 +17,6 @@ from libtmux_mcp.tools.wait_for_tools import (
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
-    from libtmux.session import Session
 
 
 @pytest.mark.parametrize(
@@ -39,16 +38,15 @@ def test_validate_channel_name_rejects_invalid(name: str) -> None:
         _validate_channel_name(name)
 
 
-def test_signal_channel_no_waiter_is_noop(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_signal_channel_no_waiter_is_noop(mcp_server: Server) -> None:
     """``tmux wait-for -S`` on an unwaited channel returns successfully.
 
-    Depends on ``mcp_session`` rather than bare ``mcp_server`` so the
-    tmux server process is actually running — the Server fixture only
-    constructs an unstarted Server instance.
+    The ``mcp_session`` fixture is required even though the test does
+    not touch it — the bare ``mcp_server`` fixture only constructs an
+    unstarted Server instance, so ``mcp_session`` is what actually
+    boots the tmux process.
     """
-    del mcp_session  # forces server boot via fixture dependency
     result = signal_channel(
         channel="wf_test_noop",
         socket_name=mcp_server.socket_name,
@@ -56,11 +54,9 @@ def test_signal_channel_no_waiter_is_noop(
     assert "signalled" in result
 
 
-def test_wait_for_channel_returns_when_signalled(
-    mcp_server: Server, mcp_session: Session
-) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_for_channel_returns_when_signalled(mcp_server: Server) -> None:
     """A signalled channel unblocks ``wait_for_channel`` immediately."""
-    del mcp_session
     channel = "wf_signalled_test"
 
     def _signal_after_delay() -> None:
@@ -80,9 +76,9 @@ def test_wait_for_channel_returns_when_signalled(
         thread.join()
 
 
-def test_wait_for_channel_times_out(mcp_server: Server, mcp_session: Session) -> None:
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_for_channel_times_out(mcp_server: Server) -> None:
     """Unsignalled channel raises a timeout ``ToolError`` within the cap."""
-    del mcp_session
     start = time.monotonic()
     with pytest.raises(ToolError, match="wait-for timeout"):
         wait_for_channel(
