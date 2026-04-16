@@ -385,6 +385,68 @@ def test_caller_is_on_server_matches_realpath(
     assert _caller_is_on_server(mcp_server, _get_caller_identity()) is True
 
 
+def test_effective_socket_path_prefers_display_message_query(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_effective_socket_path`` asks tmux for its own socket path.
+
+    When libtmux doesn't carry ``Server.socket_path``, the helper
+    delegates to tmux via ``display-message -p '#{socket_path}'``
+    before falling back to env-reconstruction. Asking tmux directly
+    makes the answer authoritative — it reflects what tmux actually
+    opened rather than what our process env reconstructs.
+
+    This narrows (but does not fully close) the macOS
+    ``TMUX_TMPDIR`` gap: the query itself still depends on our env
+    being able to reach the server, so if the MCP process's
+    ``$TMUX_TMPDIR`` diverges from the running tmux's, the query
+    fails and we fall back. The full structural fix requires
+    consulting the caller's ``$TMUX`` path — see ``docs/topics/safety.md``.
+    """
+    from libtmux_mcp._utils import _effective_socket_path
+
+    # Clear libtmux's cached socket_path so the query path is exercised.
+    monkeypatch.setattr(mcp_server, "socket_path", None)
+
+    effective = _effective_socket_path(mcp_server)
+    assert effective is not None
+    # The resolved path must include the server's socket_name.
+    assert mcp_server.socket_name is not None
+    assert mcp_server.socket_name in effective
+    # Real tmux reports an absolute path.
+    assert effective.startswith("/")
+
+
+def test_effective_socket_path_falls_back_when_query_fails(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If ``display-message`` raises, reconstruction is used.
+
+    Guarantees the fallback path stays reachable so self-kill-guard
+    logic keeps working when tmux is unreachable, misconfigured, or
+    refuses the query. Without this fallback a broken tmux would
+    silently disable the caller-identity check.
+
+    Undoes the ``cmd`` monkeypatch before returning so the fixture's
+    teardown ``kill-server`` call on the real method still works.
+    """
+    from libtmux_mcp._utils import _effective_socket_path
+
+    def _boom(*_a: object, **_kw: object) -> object:
+        msg = "display-message rejected"
+        raise exc.LibTmuxException(msg)
+
+    monkeypatch.setattr(mcp_server, "socket_path", None)
+    monkeypatch.setattr(mcp_server, "cmd", _boom)
+    effective = _effective_socket_path(mcp_server)
+    # Restore real ``cmd`` before the fixture tears down with kill-server.
+    monkeypatch.undo()
+
+    assert effective is not None
+    assert mcp_server.socket_name is not None
+    assert mcp_server.socket_name in effective
+
+
 def test_caller_is_on_server_rejects_different_socket(
     mcp_server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
