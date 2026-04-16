@@ -56,6 +56,13 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 - tmux options → {tool}`show-option` / {tool}`set-option`
 - Environment vars → {tool}`show-environment` / {tool}`set-environment`
 
+**Reaching for a workflow recipe?** The server also ships four
+short MCP prompts the client renders for the model — see
+{doc}`/tools/prompts`. They cover the most common patterns
+(run-and-wait, diagnose-failing-pane, build-dev-workspace,
+interrupt-gracefully) with embedded UUID-scoped wait channels and
+shell-agnostic guidance.
+
 ## Inspect
 
 Read tmux state without changing anything.
