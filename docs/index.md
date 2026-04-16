@@ -93,6 +93,7 @@ clients
 :caption: Use it
 
 tools/index
+tools/prompts
 recipes
 configuration
 ```
