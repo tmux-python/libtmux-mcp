@@ -85,7 +85,10 @@ def diagnose_failing_pane(pane_id: str) -> str:
 """
 
 
-def build_dev_workspace(session_name: str) -> str:
+def build_dev_workspace(
+    session_name: str,
+    log_command: str = "watch -n 1 date",
+) -> str:
     """Construct a simple 3-pane development session.
 
     Produces editor (top), terminal (bottom-left), logs (bottom-right)
@@ -95,23 +98,34 @@ def build_dev_workspace(session_name: str) -> str:
     ----------
     session_name : str
         Name for the new session.
+    log_command : str
+        Command to run in the logs pane. Defaults to an OS-neutral
+        ``watch -n 1 date`` so the recipe does not assume Linux log
+        paths. Pass e.g. ``"tail -f /var/log/syslog"`` on Linux or
+        ``"log stream --level info"`` on macOS.
     """
     return f"""Set up a 3-pane development workspace named
 {session_name!r} with editor on top, a shell on the bottom-left, and
 a logs tail on the bottom-right:
 
-1. ``create_session(name="{session_name}")`` — creates the session
-   with a single pane (pane A, the editor).
-2. ``split_window(target=pane A, vertical=True)`` — splits off the
-   bottom half (pane B, the terminal).
-3. ``split_window(target=pane B, vertical=False)`` — splits pane B
-   horizontally (pane C, the logs pane).
-4. Send ``vim``, an idle shell, and ``tail -f /var/log/syslog``
-   respectively using ``send_keys``. Always wait for the prompt via
-   ``wait_for_text`` before moving to the next step.
+1. ``create_session(session_name="{session_name}")`` — creates the
+   session with a single pane (pane A, the editor). Capture the
+   returned ``active_pane_id`` as ``%A``.
+2. ``split_window(pane_id="%A", direction="below")`` — splits off
+   the bottom half (pane B, the terminal). Capture the returned
+   ``pane_id`` as ``%B``.
+3. ``split_window(pane_id="%B", direction="right")`` — splits pane B
+   horizontally (pane C, the logs pane). Capture the returned
+   ``pane_id`` as ``%C``.
+4. Launch the three programs via ``send_keys``:
+   ``send_keys(pane_id="%A", keys="vim")``,
+   ``send_keys(pane_id="%B", keys="")`` (leave the shell idle), and
+   ``send_keys(pane_id="%C", keys={log_command!r})``.
+   Between each step, wait for the prompt via ``wait_for_text``
+   before moving on.
 
 Use pane IDs (``%N``) for all subsequent targeting — they are stable
-across layout changes, window renames are not.
+across layout changes; window renames are not.
 """
 
 
