@@ -599,3 +599,17 @@ def test_readonly_retry_recovers_on_decorated_tool(
         f"fastmcp<3.2.4 RetryMiddleware._should_retry not walking "
         f"__cause__. Bump pyproject.toml fastmcp pin to >=3.2.4."
     )
+
+
+def test_readonly_retry_logger_uses_project_namespace() -> None:
+    """Retry warnings route through ``libtmux_mcp.retry``, not ``fastmcp.retry``.
+
+    Operators routing logs by the ``libtmux_mcp.*`` namespace prefix
+    (matching ``libtmux_mcp.audit``) need retry events to appear on
+    the same channel. fastmcp's stock ``RetryMiddleware`` defaults
+    to ``fastmcp.retry`` (``error_handling.py:181``); without an
+    explicit override, retry warnings would silently bypass any
+    project-namespace audit-stream routing.
+    """
+    middleware = ReadonlyRetryMiddleware()
+    assert middleware._retry.logger.name == "libtmux_mcp.retry"

@@ -275,7 +275,16 @@ class ReadonlyRetryMiddleware(Middleware):
         100 ms / 1 s backoff window matches the expected duration of a
         transient libtmux socket hiccup — a longer backoff would just
         delay a real failure without adding meaningful retry headroom.
+
+        ``logger_`` defaults to ``logging.getLogger("libtmux_mcp.retry")``
+        when not supplied — keeps retry events on the project's
+        ``libtmux_mcp.*`` namespace so operators routing the audit
+        stream capture them. Without this default, fastmcp's stock
+        ``RetryMiddleware`` would log to ``fastmcp.retry`` and miss
+        any project-namespace log routing.
         """
+        if logger_ is None:
+            logger_ = logging.getLogger("libtmux_mcp.retry")
         self._retry = RetryMiddleware(
             max_retries=max_retries,
             base_delay=base_delay,
