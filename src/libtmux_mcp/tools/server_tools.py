@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import pathlib
 import socket
@@ -27,6 +28,8 @@ from libtmux_mcp._utils import (
     handle_tool_errors,
 )
 from libtmux_mcp.models import ServerInfo, SessionInfo
+
+logger = logging.getLogger(__name__)
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -211,49 +214,106 @@ def _is_tmux_socket_live(path: pathlib.Path) -> bool:
             s.close()
 
 
+def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
+    """Return a :class:`ServerInfo` for a live socket at ``socket_path``.
+
+    Mirrors :func:`get_server_info`'s serialization but keys the Server
+    by ``socket_path`` (-S) rather than socket name (-L) so callers can
+    probe arbitrary ``tmux -S /path/...`` daemons that live outside
+    ``$TMUX_TMPDIR``. Returns ``None`` when the path is not a socket,
+    has no listener, or the server cannot be queried. Probe failures
+    are logged at debug level so operators can surface "why isn't my
+    custom socket appearing?" via verbose logging.
+    """
+    try:
+        if not socket_path.is_socket():
+            return None
+    except OSError as err:
+        logger.debug("probe %s: is_socket raised %s", socket_path, err)
+        return None
+    if not _is_tmux_socket_live(socket_path):
+        return None
+    server = _get_server(socket_path=str(socket_path))
+    try:
+        alive = server.is_alive()
+    except Exception as err:
+        logger.debug("probe %s: is_alive raised %s", socket_path, err)
+        return None
+    version: str | None = None
+    try:
+        result = server.cmd("display-message", "-p", "#{version}")
+        version = result.stdout[0] if result.stdout else None
+    except Exception as err:
+        logger.debug("probe %s: version query raised %s", socket_path, err)
+    return ServerInfo(
+        is_alive=alive,
+        socket_name=server.socket_name,
+        socket_path=str(socket_path),
+        session_count=len(server.sessions) if alive else 0,
+        version=version,
+    )
+
+
 @handle_tool_errors
-def list_servers() -> list[ServerInfo]:
-    """Discover every live tmux server on this machine.
+def list_servers(
+    extra_socket_paths: list[str] | None = None,
+) -> list[ServerInfo]:
+    """Discover live tmux servers under the current user's ``$TMUX_TMPDIR``.
 
-    Scans ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/`` for socket files —
-    the canonical location where tmux creates per-server sockets
-    (see tmux.c's ``expand_paths`` + ``TMUX_SOCK`` template). Only
-    sockets with a live listener are reported; stale inodes (a common
-    case on long-running systems where ``$TMUX_TMPDIR`` can carry
-    thousands of orphans) are silently filtered.
+    Scans ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/`` for socket files — the
+    canonical location where tmux creates per-server sockets (see
+    tmux.c's ``expand_paths`` + ``TMUX_SOCK`` template). Only sockets
+    with a live listener are reported; stale inodes (a common case on
+    long-running systems where ``$TMUX_TMPDIR`` can carry thousands of
+    orphans) are silently filtered.
 
-    Use this to find other running tmux servers the agent is not
-    directly attached to — e.g. when a user has separate tmux servers
-    for work, side projects, and CI. Once discovered, pass
-    ``socket_name=<result.socket_name>`` to any other tool.
+    **Scope caveat**: custom ``tmux -S /some/path/...`` servers that
+    live OUTSIDE ``$TMUX_TMPDIR`` are not returned by the scan alone —
+    there is no canonical registry for arbitrary socket paths. Supply
+    known paths via ``extra_socket_paths`` to include them in the
+    result, or pass the path to other tools via their ``socket_name``
+    / ``socket_path`` parameters once known.
+
+    Parameters
+    ----------
+    extra_socket_paths : list of str, optional
+        Additional filesystem paths to probe alongside the
+        ``$TMUX_TMPDIR`` scan. Each path is checked for liveness (UNIX
+        ``connect()``) and queried for server metadata. Paths that do
+        not exist, are not sockets, or have no listener are silently
+        skipped.
 
     Returns
     -------
     list[ServerInfo]
-        One entry per live tmux server found under the current user's
-        ``$TMUX_TMPDIR``. Empty when the directory is missing or no
-        servers are running.
+        One entry per live tmux server found. Canonical-directory
+        results come first, followed by successful ``extra_socket_paths``
+        probes in the supplied order. Empty when nothing lives under
+        ``$TMUX_TMPDIR`` and no extras are supplied or reachable.
     """
     tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
     uid_dir = pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}"
-    if not uid_dir.is_dir():
-        return []
     results: list[ServerInfo] = []
-    for entry in sorted(uid_dir.iterdir()):
-        try:
-            if not entry.is_socket():
+    if uid_dir.is_dir():
+        for entry in sorted(uid_dir.iterdir()):
+            try:
+                if not entry.is_socket():
+                    continue
+            except OSError:
                 continue
-        except OSError:
-            continue
-        # Cheap liveness probe before the more expensive
-        # ``get_server_info`` call. Stale sockets are the common case.
-        if not _is_tmux_socket_live(entry):
-            continue
-        try:
-            info = get_server_info(socket_name=entry.name)
-        except ToolError:
-            continue
-        results.append(info)
+            # Cheap liveness probe before the more expensive
+            # ``get_server_info`` call. Stale sockets are the common case.
+            if not _is_tmux_socket_live(entry):
+                continue
+            try:
+                info = get_server_info(socket_name=entry.name)
+            except ToolError:
+                continue
+            results.append(info)
+    for raw_path in extra_socket_paths or []:
+        extra = _probe_server_by_path(pathlib.Path(raw_path))
+        if extra is not None:
+            results.append(extra)
     return results
 
 
