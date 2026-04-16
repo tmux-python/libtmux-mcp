@@ -120,6 +120,13 @@ Response is a `SearchPanesResult` wrapper: the matching panes live under
 result sets, iterate by re-calling with `offset += len(matches)`; stop when
 `truncated == false` and `truncated_panes == []`.
 
+:::{note} Migrating from the flat-list shape
+Earlier alpha releases returned a bare `list[PaneContentMatch]`.
+Clients iterating the old shape directly (e.g. `for m in search_panes(...)`)
+must switch to `for m in search_panes(...).matches`. See the
+[CHANGES](../../CHANGES) entry for context.
+:::
+
 ```json
 {
   "matches": [
