@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import time
+import typing as t
 
 import anyio
 from fastmcp import Context
@@ -67,6 +68,31 @@ async def _maybe_report_progress(
     except _TRANSPORT_CLOSED_EXCEPTIONS:
         # Client gone; the poll loop will either complete or hit its
         # timeout and return normally. No progress notification leaks.
+        return
+
+
+_LogLevel = t.Literal["debug", "info", "warning", "error"]
+
+
+async def _maybe_log(
+    ctx: Context | None,
+    *,
+    level: _LogLevel,
+    message: str,
+) -> None:
+    """Call the matching ``ctx.{level}`` if a Context is available.
+
+    Sibling to :func:`_maybe_report_progress` for client-visible log
+    notifications (``notifications/message`` in MCP). Same suppression
+    contract: silent only when the transport is gone, propagating
+    everything else so programming errors stay loud.
+    """
+    if ctx is None:
+        return
+    method = getattr(ctx, level)
+    try:
+        await method(message)
+    except _TRANSPORT_CLOSED_EXCEPTIONS:
         return
 
 
@@ -154,6 +180,7 @@ async def wait_for_text(
         compiled = re.compile(search_pattern, flags)
     except re.error as e:
         msg = f"Invalid regex pattern: {e}"
+        await _maybe_log(ctx, level="warning", message=msg)
         raise ToolError(msg) from e
 
     server = _get_server(socket_name=socket_name)
@@ -210,6 +237,14 @@ async def wait_for_text(
         raise
 
     elapsed = time.monotonic() - start_time
+    if not found:
+        await _maybe_log(
+            ctx,
+            level="warning",
+            message=(
+                f"Pattern not found in pane {pane.pane_id} before {timeout}s timeout"
+            ),
+        )
     return WaitForTextResult(
         found=found,
         matched_lines=matched_lines,
@@ -322,6 +357,14 @@ async def wait_for_content_change(
         raise
 
     elapsed = time.monotonic() - start_time
+    if not changed:
+        await _maybe_log(
+            ctx,
+            level="warning",
+            message=(
+                f"No content change in pane {pane.pane_id} before {timeout}s timeout"
+            ),
+        )
     return ContentChangeResult(
         changed=changed,
         pane_id=pane.pane_id,

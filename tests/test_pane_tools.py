@@ -944,6 +944,9 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
         ) -> None:
             progress_calls.append((progress, total, message))
 
+        async def warning(self, message: str) -> None:
+            return  # log notifications not asserted in this test
+
     stub = _StubContext()
     result = asyncio.run(
         wait_for_text(
@@ -1030,6 +1033,12 @@ def test_wait_for_text_suppresses_broken_resource_error(
             total: float | None = None,
             message: str = "",
         ) -> None:
+            raise anyio.BrokenResourceError
+
+        async def warning(self, message: str) -> None:
+            # Same transport-closed shape on the log channel — the
+            # wait loop's timeout-warning call must also be suppressed
+            # silently when the peer is gone.
             raise anyio.BrokenResourceError
 
     result = asyncio.run(
