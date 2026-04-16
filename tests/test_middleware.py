@@ -538,3 +538,64 @@ def test_readonly_retry_skips_non_libtmux_exception() -> None:
         asyncio.run(middleware.on_call_tool(ctx, call_next))
 
     assert call_next.calls == 1  # no retry — wrong exception type
+
+
+def test_readonly_retry_recovers_on_decorated_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: retry fires through the production decorator wrap path.
+
+    Regression guard for the fastmcp <3.2.4 production no-op where
+    ``RetryMiddleware._should_retry`` did not walk ``__cause__``.
+    Every libtmux-mcp tool is wrapped by ``handle_tool_errors`` /
+    ``handle_tool_errors_async`` (``_utils.py:842-850``), which
+    converts ``LibTmuxException`` to ``ToolError(...) from
+    LibTmuxException``. At the middleware layer the exception type
+    is ``ToolError``, not ``LibTmuxException`` — so the retry
+    decision must walk ``__cause__`` to see the real failure type.
+
+    The unit tests above use ``_FlakyCallNext`` which raises
+    ``LibTmuxException`` directly, bypassing the decorator. They
+    pass on every fastmcp version. This test invokes the real
+    ``list_sessions`` tool through the middleware, exercising the
+    decorator wrap path that broke in production:
+
+    * On fastmcp 3.2.3: would fail with ``calls == 1`` (no retry).
+    * On fastmcp >= 3.2.4: passes with ``calls == 2``.
+
+    The ``pyproject.toml`` floor (``fastmcp>=3.2.4``) keeps this
+    test green; an accidental downgrade would re-introduce the bug
+    and fail this test loudly.
+    """
+    from libtmux import Server, exc as libtmux_exc
+
+    from libtmux_mcp.tools.server_tools import list_sessions
+
+    calls = {"count": 0}
+
+    def _flaky_sessions(_self: Server) -> list[t.Any]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            msg = "transient socket error"
+            raise libtmux_exc.LibTmuxException(msg)
+        return []  # second call succeeds with no tmux required
+
+    monkeypatch.setattr(Server, "sessions", property(_flaky_sessions))
+
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_READONLY})
+
+    async def real_call_next(_context: t.Any) -> t.Any:
+        # ``list_sessions`` is sync + ``@handle_tool_errors`` decorated.
+        # Wrapping the sync call in an async function is enough — the
+        # exception path is what we care about.
+        return list_sessions(socket_name="retry-integration-smoke")
+
+    result = asyncio.run(middleware.on_call_tool(ctx, real_call_next))
+
+    assert result == []
+    assert calls["count"] == 2, (
+        f"retry did not fire (calls={calls['count']}). Likely cause: "
+        f"fastmcp<3.2.4 RetryMiddleware._should_retry not walking "
+        f"__cause__. Bump pyproject.toml fastmcp pin to >=3.2.4."
+    )
