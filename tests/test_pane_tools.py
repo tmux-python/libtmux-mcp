@@ -1046,6 +1046,72 @@ def test_wait_for_text_suppresses_broken_resource_error(
     assert result.timed_out is True
 
 
+def test_wait_for_text_propagates_cancellation(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` raises ``CancelledError`` (not ``ToolError``).
+
+    Regression guard for MCP cancellation semantics.
+    ``handle_tool_errors_async`` in ``_utils.py:827-850`` catches
+    ``Exception`` (not ``BaseException``); since
+    ``asyncio.CancelledError`` is a ``BaseException`` (Python 3.8+) it
+    propagates today. Locking that in: if a future change broadens the
+    decorator to ``BaseException`` it would silently break MCP
+    cancellation, and this test fires.
+
+    Uses ``task.cancel()`` rather than ``asyncio.wait_for`` so the
+    raised exception is the inner ``CancelledError`` directly, not
+    ``wait_for``'s ``TimeoutError`` wrapper.
+    """
+    import asyncio
+
+    async def _runner() -> None:
+        task = asyncio.create_task(
+            wait_for_text(
+                pattern="WILL_NEVER_MATCH_CANCEL_aBcD",
+                pane_id=mcp_pane.pane_id,
+                timeout=10.0,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await asyncio.sleep(0.1)  # let the poll loop start
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_runner())
+
+
+def test_wait_for_content_change_propagates_cancellation(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_content_change`` raises ``CancelledError`` (not ``ToolError``).
+
+    Sibling guard to ``test_wait_for_text_propagates_cancellation`` —
+    both wait tools share the same ``while True:`` poll-and-sleep
+    pattern wrapped by ``handle_tool_errors_async``, so both must
+    surface MCP cancellation as ``asyncio.CancelledError``.
+    """
+    import asyncio
+
+    async def _runner() -> None:
+        task = asyncio.create_task(
+            wait_for_content_change(
+                pane_id=mcp_pane.pane_id,
+                timeout=10.0,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await asyncio.sleep(0.1)
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_runner())
+
+
 def test_wait_tools_do_not_block_event_loop(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
