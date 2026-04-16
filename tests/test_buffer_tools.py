@@ -146,6 +146,89 @@ def test_content_is_in_sensitive_args() -> None:
     assert "content" in _SENSITIVE_ARG_NAMES
 
 
+def test_show_buffer_tail_preserves_on_truncation(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``show_buffer`` tail-preserves when content exceeds ``max_lines``.
+
+    Regression guard: prior to bounded output, ``show_buffer`` returned
+    ``stdout.decode()`` verbatim for an arbitrarily large staged buffer
+    (``load_buffer`` has no byte cap). That let a single call dump an
+    unbounded payload into the agent's context. The bounded path mirrors
+    ``capture_pane``: oldest lines drop, ``content_truncated`` flips to
+    ``True``, and ``content_truncated_lines`` reports how many were
+    dropped so the caller can re-request with ``max_lines=None``.
+    """
+    del mcp_session
+    payload = "\n".join(f"line-{i}" for i in range(20))
+    ref = load_buffer(
+        content=payload,
+        logical_name="trunc",
+        socket_name=mcp_server.socket_name,
+    )
+    try:
+        seen = show_buffer(
+            ref.buffer_name,
+            max_lines=5,
+            socket_name=mcp_server.socket_name,
+        )
+        assert seen.content_truncated is True
+        assert seen.content_truncated_lines == 15
+        # Tail preservation: the last 5 lines survive, the first 15 are gone.
+        kept = seen.content.splitlines()
+        assert kept == [f"line-{i}" for i in range(15, 20)]
+    finally:
+        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+
+
+def test_show_buffer_full_read_when_max_lines_none(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``max_lines=None`` disables truncation for full-buffer recovery."""
+    del mcp_session
+    payload = "\n".join(f"line-{i}" for i in range(50))
+    ref = load_buffer(
+        content=payload,
+        logical_name="full",
+        socket_name=mcp_server.socket_name,
+    )
+    try:
+        seen = show_buffer(
+            ref.buffer_name,
+            max_lines=None,
+            socket_name=mcp_server.socket_name,
+        )
+        assert seen.content_truncated is False
+        assert seen.content_truncated_lines == 0
+        assert seen.content.rstrip("\n") == payload
+    finally:
+        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+
+
+def test_show_buffer_no_truncation_under_cap(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Small buffers are returned verbatim with truncation flags off."""
+    del mcp_session
+    payload = "one\ntwo\nthree"
+    ref = load_buffer(
+        content=payload,
+        logical_name="small",
+        socket_name=mcp_server.socket_name,
+    )
+    try:
+        seen = show_buffer(
+            ref.buffer_name,
+            max_lines=100,
+            socket_name=mcp_server.socket_name,
+        )
+        assert seen.content_truncated is False
+        assert seen.content_truncated_lines == 0
+        assert seen.content.rstrip("\n") == payload
+    finally:
+        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+
+
 @pytest.mark.parametrize(
     ("tool_name", "match_text"),
     [
