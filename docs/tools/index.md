@@ -111,6 +111,12 @@ Wait for text to appear in a pane.
 Get tmux server info.
 :::
 
+:::{grid-item-card} list_servers
+:link: list-servers
+:link-type: ref
+Discover live tmux servers under `$TMUX_TMPDIR`.
+:::
+
 :::{grid-item-card} show_option
 :link: show-option
 :link-type: ref
