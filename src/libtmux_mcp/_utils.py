@@ -105,9 +105,40 @@ def _effective_socket_path(server: Server) -> str | None:
     a real path under ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/<name>``. This
     helper reproduces that resolution so :func:`_caller_is_on_server` can
     compare against the caller's ``TMUX`` socket path.
+
+    Resolution order:
+
+    1. ``Server.socket_path`` if libtmux already has it.
+    2. ``tmux display-message -p '#{socket_path}'`` against the target
+       server — authoritative because tmux itself reports the path it
+       is actually using, regardless of our process environment.
+       Necessary on macOS where ``$TMUX_TMPDIR`` under launchd diverges
+       from the interactive shell (see ``docs/topics/safety.md`` for
+       the self-kill guard gap this closes).
+    3. Fallback: reconstruct from ``$TMUX_TMPDIR`` + euid + socket name.
+       This path is reached only when the target server is unreachable
+       (e.g. not running), in which case no self-kill is possible and
+       the conservative caller check still blocks via
+       ``_caller_is_on_server``'s None-socket branch.
     """
     if server.socket_path:
         return str(server.socket_path)
+    # Preferred: ask tmux directly. ``display-message -p`` prints the
+    # value to stdout and exits, so this is cheap. Wrapped defensively
+    # because the server may be down, the format may be unsupported on
+    # ancient tmux, or permissions may deny the call.
+    try:
+        resolved = server.cmd(
+            "display-message",
+            "-p",
+            "#{socket_path}",
+        ).stdout
+    except (exc.LibTmuxException, OSError):
+        resolved = None
+    if resolved:
+        first = resolved[0].strip()
+        if first:
+            return first
     tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
     socket_name = server.socket_name or "default"
     return str(pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}" / socket_name)
