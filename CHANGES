@@ -10,14 +10,16 @@ _FastMCP alignment: new tools, prompts, and middleware (#15)_
 
 ### Breaking changes
 
-- {tooliconl}`search-panes` now returns `SearchPanesResult` instead of
-  `list[PaneContentMatch]`. Matches moved to `.matches`; new
-  `truncated`, `truncated_panes`, `total_panes_matched`, `offset`,
-  `limit` fields enable pagination. Migrate
-  `for m in search_panes(...)` → `for m in search_panes(...).matches`.
+- {tooliconl}`search-panes` now returns
+  {class}`~libtmux_mcp.models.SearchPanesResult` instead of
+  `list[`{class}`~libtmux_mcp.models.PaneContentMatch``]`. Matches
+  moved to `.matches`; new `truncated`, `truncated_panes`,
+  `total_panes_matched`, `offset`, `limit` fields enable pagination.
+  Migrate `for m in search_panes(...)` →
+  `for m in search_panes(...).matches`.
 - Minimum `fastmcp>=3.2.4` (was `>=3.1.0`). Required for
-  `ReadonlyRetryMiddleware` and per-parameter input-schema
-  descriptions.
+  {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` and
+  per-parameter input-schema descriptions.
 
 ### What's new
 
@@ -49,13 +51,17 @@ _FastMCP alignment: new tools, prompts, and middleware (#15)_
 
 **Middleware stack**
 
-- `TimingMiddleware`, `ErrorHandlingMiddleware`, `AuditMiddleware`
-  (digest-redacted argument summaries), `SafetyMiddleware` (tier-gated
-  tool visibility), `ReadonlyRetryMiddleware` (transparent retry of
-  readonly tools on transient {exc}`libtmux.exc.LibTmuxException`;
-  mutating tools never retry),
-  `TailPreservingResponseLimitingMiddleware` (trims oversized output
-  from the head so the active prompt survives).
+- `TimingMiddleware`, `ErrorHandlingMiddleware`,
+  {class}`~libtmux_mcp.middleware.AuditMiddleware` (digest-redacted
+  argument summaries),
+  {class}`~libtmux_mcp.middleware.SafetyMiddleware` (tier-gated tool
+  visibility),
+  {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware`
+  (transparent retry of readonly tools on transient
+  {exc}`libtmux.exc.LibTmuxException`; mutating tools never retry),
+  {class}`~libtmux_mcp.middleware.TailPreservingResponseLimitingMiddleware`
+  (trims oversized output from the head so the active prompt
+  survives).
 
 **Bounded outputs**
 
@@ -71,8 +77,8 @@ _FastMCP alignment: new tools, prompts, and middleware (#15)_
   auto-extracted from NumPy-style docstrings.
 - Lifespan startup probe fails fast with {exc}`RuntimeError` if
   `tmux` is missing on `PATH`.
-- `SessionInfo.active_pane_id` surfaces the pane id returned by
-  {tooliconl}`create-session`.
+- {attr}`~libtmux_mcp.models.SessionInfo.active_pane_id` surfaces the
+  pane id returned by {tooliconl}`create-session`.
 
 ### Fixes
 
