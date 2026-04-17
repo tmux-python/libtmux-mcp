@@ -142,7 +142,6 @@ def setup(app: Sphinx) -> None:
     _gp_setup(app)
     app.connect("autodoc-process-docstring", _convert_md_xrefs)
     app.add_js_file("js/prompt-copy.js", loading_method="defer")
-    app.add_js_file("js/spa-copybutton-reinit.js", loading_method="defer")
     app.add_css_file("css/project-admonitions.css")
 
 
