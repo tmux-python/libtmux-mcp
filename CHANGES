@@ -6,93 +6,96 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+_FastMCP alignment: new tools, prompts, and middleware (#15)_
+
 ### Breaking changes
 
-- `search_panes` now returns a structured `SearchPanesResult` wrapper
-  instead of a bare `list[PaneContentMatch]`. The previous top-level
-  list is available as `result.matches`; new fields surface pagination
-  state (`truncated`, `truncated_panes`, `total_panes_matched`,
-  `offset`, `limit`) so agents can detect when the result set was
-  capped and re-request subsequent pages with a higher `offset`.
-  Migration for clients iterating the old shape: replace
-  `for m in search_panes(...)` with
-  `for m in search_panes(...).matches`.
-- `fastmcp>=3.2.4` minimum (was `>=3.1.0`). Required for
-  `ReadonlyRetryMiddleware` to retry through the production tool
-  decorator path; under earlier fastmcp versions the middleware was
-  a no-op.
+- {tooliconl}`search-panes` now returns `SearchPanesResult` instead of
+  `list[PaneContentMatch]`. Matches moved to `.matches`; new
+  `truncated`, `truncated_panes`, `total_panes_matched`, `offset`,
+  `limit` fields enable pagination. Migrate
+  `for m in search_panes(...)` → `for m in search_panes(...).matches`.
+- Minimum `fastmcp>=3.2.4` (was `>=3.1.0`). Required for
+  `ReadonlyRetryMiddleware` and per-parameter input-schema
+  descriptions.
 
 ### What's new
 
-- `show_buffer` now bounds its response with `max_lines` (default 500,
-  matches `capture_pane`) and reports truncation via
-  `BufferContent.content_truncated` and
-  `BufferContent.content_truncated_lines`. A pathological
-  `load_buffer` staging can no longer dump unbounded content into the
-  model context on a single `show_buffer` call. Pass `max_lines=None`
-  for a full-buffer read.
-- New tools: `list_servers`, `snapshot_pane`, `wait_for_text`,
-  `wait_for_content_change`, `wait_for_channel` / `signal_channel`,
-  buffer lifecycle (`load_buffer`, `paste_buffer`, `show_buffer`,
-  `delete_buffer`), hook introspection (`show_hook`, `show_hooks`),
-  plus pane / session / window helpers (`pipe_pane`,
-  `display_message`, copy-mode entry/exit, `paste_text`,
-  `select_pane`, `swap_pane`, `select_window`, `move_window`).
-- Middleware stack: `TimingMiddleware`, `ErrorHandlingMiddleware`,
-  `AuditMiddleware` (digest-redacted argument summaries with
-  sensitive-payload protection), `SafetyMiddleware` (tier-gated
+**New tools**
+
+- Discovery: {tooliconl}`list-servers`.
+- Waits: {tooliconl}`wait-for-text`,
+  {tooliconl}`wait-for-content-change`, {tooliconl}`wait-for-channel`,
+  {tooliconl}`signal-channel`. All bounded, emit
+  `ctx.report_progress` / `ctx.warning`, and propagate
+  {exc}`asyncio.CancelledError` cleanly.
+- Buffers: {tooliconl}`load-buffer`, {tooliconl}`paste-buffer`,
+  {tooliconl}`show-buffer`, {tooliconl}`delete-buffer`.
+  Agent-namespaced as `libtmux_mcp_<uuid>_<name>` to prevent
+  collisions; leaked buffers GC'd on graceful shutdown.
+- Hooks (read-only): {tooliconl}`show-hook`, {tooliconl}`show-hooks`.
+- Panes / windows: {tooliconl}`snapshot-pane`, {tooliconl}`pipe-pane`,
+  {tooliconl}`display-message`, {tooliconl}`paste-text`,
+  {tooliconl}`select-pane`, {tooliconl}`swap-pane`,
+  {tooliconl}`select-window`, {tooliconl}`move-window`,
+  {tooliconl}`enter-copy-mode`, {tooliconl}`exit-copy-mode`.
+
+**Prompt recipes**
+
+- Four prompts: `run_and_wait`, `diagnose_failing_pane`,
+  `build_dev_workspace`, `interrupt_gracefully`. Set
+  `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1` to expose them as tools for
+  tools-only MCP clients.
+
+**Middleware stack**
+
+- `TimingMiddleware`, `ErrorHandlingMiddleware`, `AuditMiddleware`
+  (digest-redacted argument summaries), `SafetyMiddleware` (tier-gated
   tool visibility), `ReadonlyRetryMiddleware` (transparent retry of
-  readonly tools on transient `LibTmuxException` — mutating tools
-  never retry), `TailPreservingResponseLimitingMiddleware` (caps
-  oversized output while keeping the tail).
-- Four recipe prompts: `run_and_wait`, `diagnose_failing_pane`,
-  `build_dev_workspace`, `interrupt_gracefully`. Optional
-  `PromptsAsTools` transform (env-gated via
-  `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1`) lets tools-only MCP clients
-  reach them.
-- `wait_for_text` / `wait_for_content_change` emit
-  `ctx.report_progress` and `ctx.warning` notifications, and
-  propagate `asyncio.CancelledError` cleanly so MCP clients can
-  abort long waits.
-- Best-effort lifespan-shutdown GC for leaked `libtmux_mcp_*` paste
-  buffers — agents that miss `delete_buffer` no longer pollute the
-  tmux server's buffer namespace across MCP restarts.
-- Tool input schemas now carry per-parameter `description` fields
-  auto-extracted from existing NumPy-style docstrings (free with
-  the fastmcp 3.2.4 bump).
+  readonly tools on transient {exc}`libtmux.exc.LibTmuxException`;
+  mutating tools never retry),
+  `TailPreservingResponseLimitingMiddleware` (trims oversized output
+  from the head so the active prompt survives).
+
+**Bounded outputs**
+
+- {tooliconl}`capture-pane`, {tooliconl}`snapshot-pane`,
+  {tooliconl}`show-buffer` accept `max_lines` (default 500) with
+  tail-preserving truncation and typed `content_truncated` /
+  `content_truncated_lines` signals. Pass `max_lines=None` to opt
+  out.
+
+**Other**
+
+- Tool input schemas carry per-parameter `description` fields
+  auto-extracted from NumPy-style docstrings.
+- Lifespan startup probe fails fast with {exc}`RuntimeError` if
+  `tmux` is missing on `PATH`.
+- `SessionInfo.active_pane_id` surfaces the pane id returned by
+  {tooliconl}`create-session`.
 
 ### Fixes
 
-- `build_dev_workspace` prompt recipe now uses the real tool parameter
-  names (`session_name=`, `pane_id=`, `direction=`) instead of
-  non-existent aliases. A new prompt-alignment test prevents future
-  drift between prompt text and tool signatures. The Linux-specific
-  `/var/log/syslog` example is replaced with an OS-neutral
-  `watch -n 1 date` default; callers can override via the new
-  `log_command` parameter.
-- `build_dev_workspace` no longer instructs agents to wait for shell
-  prompts after launching screen-grabbing programs (`vim`, `watch`,
-  `tail -f`). Eliminates a class of false-positive timeouts on
-  agents following the recipe literally.
-- macOS `TMUX_TMPDIR` self-kill guard: `_effective_socket_path`
-  queries tmux directly via `display-message #{socket_path}` before
-  falling back to env-based reconstruction; `_caller_is_on_server`
-  adds a basename-match fallback to close the residual launchd-
+- {tooliconl}`search-panes` neutralizes tmux format-string injection
+  in the regex fast path.
+- macOS `TMUX_TMPDIR` self-kill guard: resolves the server socket via
+  `tmux display-message #{socket_path}` before env-based
+  reconstruction; basename-match fallback closes the launchd
   divergence gap.
-- `search_panes` neutralizes tmux format-string injection in the
-  regex fast path.
-- `ReadonlyRetryMiddleware` retry warnings route through
-  `libtmux_mcp.retry` (was fastmcp's stock `fastmcp.retry`) so they
-  appear on the project's audit-stream namespace.
+- `build_dev_workspace` prompt uses the real tool parameter names
+  (`session_name=`, `pane_id=`, `direction=`) and no longer waits for
+  shell prompts after launching screen-grabbing programs (`vim`,
+  `watch`, `tail -f`). New `log_command` parameter replaces the
+  Linux-only `/var/log/syslog` default.
+- `ReadonlyRetryMiddleware` retry warnings log under
+  `libtmux_mcp.retry`.
 
 ### Documentation
 
-- New per-tool docs pages: `buffers.md`, `hooks.md`, `waits.md`,
-  `tools/index.md`. Updated `panes.md` documents the
-  `SearchPanesResult` shape and migration from the previous flat
-  list. `docs/topics/safety.md` documents the macOS `TMUX_TMPDIR`
-  self-kill caveat, the audit log, `pipe_pane`, and
-  `set_environment`.
+- New per-tool pages: `buffers.md`, `hooks.md`, `waits.md`,
+  `tools/index.md`. `panes.md` documents the `SearchPanesResult`
+  migration. `safety.md` covers the macOS `TMUX_TMPDIR` caveat, the
+  audit log, `pipe_pane`, and `set_environment`.
 
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
