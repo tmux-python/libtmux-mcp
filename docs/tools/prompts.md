@@ -29,9 +29,10 @@ tools instead.
 
 ---
 
-(run-and-wait)=
-
 ## `run_and_wait`
+
+```{fastmcp-prompt} run_and_wait
+```
 
 **Use when** the agent needs to execute a single shell command and
 must know whether it succeeded before deciding the next step.
@@ -43,11 +44,8 @@ never cross-signal each other. The server side blocks until the
 channel is signalled — strictly cheaper in agent turns than a
 ``capture_pane`` retry loop.
 
-**Parameters:**
-
-- ``command`` (str) — the shell command to run.
-- ``pane_id`` (str) — target pane (e.g. ``%1``).
-- ``timeout`` (float, default ``60.0``) — maximum seconds to wait.
+```{fastmcp-prompt-input} run_and_wait
+```
 
 **Sample render** (``command="pytest"``, ``pane_id="%1"``):
 
@@ -76,9 +74,10 @@ success or failure.
 
 ---
 
-(diagnose-failing-pane)=
-
 ## `diagnose_failing_pane`
+
+```{fastmcp-prompt} diagnose_failing_pane
+```
 
 **Use when** something visibly went wrong in a pane and the agent
 needs to investigate before deciding what to fix. Produces a plan,
@@ -91,9 +90,8 @@ follow-up ``get_pane_info`` round-trip. It also explicitly forbids
 the agent from acting before it has a hypothesis, which prevents
 "fix the symptom" anti-patterns.
 
-**Parameters:**
-
-- ``pane_id`` (str) — the pane to diagnose.
+```{fastmcp-prompt-input} diagnose_failing_pane
+```
 
 **Sample render** (``pane_id="%1"``):
 
@@ -111,9 +109,10 @@ Something went wrong in tmux pane %1. Diagnose it:
 
 ---
 
-(build-dev-workspace)=
-
 ## `build_dev_workspace`
+
+```{fastmcp-prompt} build_dev_workspace
+```
 
 **Use when** the operator wants a fresh 3-pane workspace with editor
 on top, terminal bottom-left, and a logs pane bottom-right — the
@@ -128,13 +127,12 @@ also explicitly avoids waiting for shell prompts after launching
 deadlock an agent following naïve "wait for the prompt between each
 step" advice.
 
-**Parameters:**
+```{fastmcp-prompt-input} build_dev_workspace
+```
 
-- ``session_name`` (str) — name for the new session.
-- ``log_command`` (str, default ``"watch -n 1 date"``) — command to
-  run in the logs pane. Pass e.g. ``"tail -f /var/log/syslog"`` on
-  Linux or ``"log stream --level info"`` on macOS to override the
-  OS-neutral default.
+Pass e.g. ``"tail -f /var/log/syslog"`` on Linux or
+``"log stream --level info"`` on macOS as the ``log_command`` to
+override the OS-neutral default.
 
 **Sample render** (``session_name="dev"``):
 
@@ -173,9 +171,10 @@ across layout changes; window renames are not.
 
 ---
 
-(interrupt-gracefully)=
-
 ## `interrupt_gracefully`
+
+```{fastmcp-prompt} interrupt_gracefully
+```
 
 **Use when** the agent needs to stop a running command and confirm
 control returned to the shell — without escalating beyond SIGINT.
@@ -187,9 +186,8 @@ times out. That prevents the most dangerous failure mode — an agent
 auto-escalating to ``C-\\`` (SIGQUIT, may core-dump) or ``kill``
 without operator consent — by drawing a clear escalation boundary.
 
-**Parameters:**
-
-- ``pane_id`` (str) — target pane.
+```{fastmcp-prompt-input} interrupt_gracefully
+```
 
 **Sample render** (``pane_id="%1"``):
 

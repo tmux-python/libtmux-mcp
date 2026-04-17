@@ -88,6 +88,7 @@ conf["fastmcp_area_map"] = {
     "wait_for_tools": "waits",
     "hook_tools": "hooks",
 }
+conf["fastmcp_server_module"] = "libtmux_mcp.server:mcp"
 conf["fastmcp_model_module"] = "libtmux_mcp.models"
 conf["fastmcp_model_classes"] = (
     "SessionInfo",
