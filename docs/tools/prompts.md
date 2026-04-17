@@ -29,8 +29,6 @@ tools instead.
 
 ---
 
-## `run_and_wait`
-
 ```{fastmcp-prompt} run_and_wait
 ```
 
@@ -74,8 +72,6 @@ success or failure.
 
 ---
 
-## `diagnose_failing_pane`
-
 ```{fastmcp-prompt} diagnose_failing_pane
 ```
 
@@ -108,8 +104,6 @@ Something went wrong in tmux pane %1. Diagnose it:
 ```
 
 ---
-
-## `build_dev_workspace`
 
 ```{fastmcp-prompt} build_dev_workspace
 ```
@@ -170,8 +164,6 @@ across layout changes; window renames are not.
 ````
 
 ---
-
-## `interrupt_gracefully`
 
 ```{fastmcp-prompt} interrupt_gracefully
 ```
