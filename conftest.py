@@ -24,7 +24,7 @@ from libtmux.window import Window
 if t.TYPE_CHECKING:
     import pathlib
 
-pytest_plugins = ["pytester"]
+pytest_plugins = ["pytester", "sphinx.testing.fixtures"]
 
 
 @pytest.fixture(autouse=True)

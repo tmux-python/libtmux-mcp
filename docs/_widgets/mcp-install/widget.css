@@ -1,0 +1,127 @@
+/* MCP install widget — Furo-var driven. Dark mode follows automatically. */
+
+.lm-mcp-install {
+  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  border-radius: 0.25rem;
+  background: var(--color-background-primary);
+  overflow: hidden;
+  margin: 1rem 0;
+  font-size: 0.95em;
+}
+
+.lm-mcp-install__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  background: var(--color-background-secondary);
+  border-bottom: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+}
+
+.lm-mcp-install__tabs--methods {
+  background: color-mix(in srgb, var(--color-background-secondary) 60%, var(--color-background-primary));
+}
+
+.lm-mcp-install__tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-foreground-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.45rem 0.9rem;
+  margin: 0;
+  white-space: nowrap;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+
+.lm-mcp-install__tab:hover {
+  color: var(--color-foreground-primary);
+  background: var(--color-background-hover, rgba(0, 0, 0, 0.04));
+}
+
+.lm-mcp-install__tab:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
+.lm-mcp-install__tab[aria-selected="true"] {
+  color: var(--color-brand-primary);
+  border-bottom-color: var(--color-brand-primary);
+  background: var(--color-background-primary);
+}
+
+.lm-mcp-install__body {
+  padding: 0.9rem 1rem;
+}
+
+.lm-mcp-install__panel[hidden] {
+  display: none !important;
+}
+
+.lm-mcp-install__panel:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 4px;
+  border-radius: 0.25rem;
+}
+
+.lm-mcp-install__preamble {
+  margin: 0 0 0.4rem 0;
+  color: var(--color-foreground-secondary);
+  font-size: 0.93em;
+}
+
+.lm-mcp-install__preamble a {
+  color: var(--color-brand-content, var(--color-brand-primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lm-mcp-install__code {
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  border-radius: 0.25rem;
+  padding: 0.6rem 0.8rem;
+  margin: 0 0 0.6rem 0;
+  overflow-x: auto;
+  font-family: var(--font-stack--monospace);
+  font-size: 0.88em;
+  line-height: 1.5;
+}
+
+.lm-mcp-install__code code {
+  background: transparent;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+  color: var(--color-foreground-primary);
+}
+
+.lm-mcp-install__code--prereq {
+  border-left: 3px solid var(--color-brand-primary);
+}
+
+.lm-mcp-install__config-file {
+  margin: 0.5rem 0 0 0;
+  color: var(--color-foreground-muted);
+  font-size: 0.85em;
+}
+
+.lm-mcp-install__config-file code {
+  font-size: 0.95em;
+}
+
+/* Compact variant: tighter padding, smaller type. Used on index.md above-the-fold. */
+.lm-mcp-install--compact .lm-mcp-install__tab {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.9em;
+}
+
+.lm-mcp-install--compact .lm-mcp-install__body {
+  padding: 0.7rem 0.8rem;
+}
+
+.lm-mcp-install--compact .lm-mcp-install__code {
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85em;
+}
