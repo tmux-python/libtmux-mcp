@@ -2,17 +2,65 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import pathlib
 import typing as t
 
 import pytest
+from libtmux.server import Server
 
 from libtmux_mcp._utils import _server_cache
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
-    from libtmux.server import Server
     from libtmux.session import Session
     from libtmux.window import Window
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _reap_leaked_libtmux_test_sockets() -> t.Generator[None, None, None]:
+    """Reap leaked ``libtmux_test*`` daemons and socket files post-suite.
+
+    libtmux's pytest plugin creates per-test tmux servers on
+    ``libtmux_test<N>`` sockets but does not reliably kill the daemons
+    or ``unlink`` the socket files on teardown — see
+    `tmux-python/libtmux#660 <https://github.com/tmux-python/libtmux/issues/660>`_.
+    Without this finalizer ``/tmp/tmux-<uid>/`` accumulates hundreds of
+    stale socket entries across test runs (10k+ on long-lived dev
+    machines per the #20 report).
+
+    Scope is ``session``: runs after every ``pytest`` invocation. Prefix
+    match on ``libtmux_test`` only — matches the literal prefix set by
+    libtmux's ``pytest_plugin.py`` and never touches the developer's
+    real ``default`` socket or any non-test socket. Safe under ``xdist``:
+    each worker is its own pytest session and the socket operations
+    (``kill_server`` / ``unlink``) are idempotent.
+    """
+    yield
+
+    # ``geteuid`` is Unix-only; the tmux server socket directory only
+    # exists on POSIX. Skip on platforms without it rather than erroring.
+    if not hasattr(os, "geteuid"):
+        return
+
+    tmpdir = pathlib.Path(f"/tmp/tmux-{os.geteuid()}")
+    if not tmpdir.is_dir():
+        return
+
+    for socket_path in tmpdir.glob("libtmux_test*"):
+        # Defensive cleanup: if the server is still alive, kill it; then
+        # unlink the socket file whether or not kill succeeded (tmux
+        # sometimes leaves the file on disk after the daemon exits).
+        # Any step may fail because the socket has already vanished,
+        # permissions changed, or a concurrent run raced us — none of
+        # that is actionable here, so swallow the error and move on.
+        with contextlib.suppress(Exception):
+            server = Server(socket_name=socket_path.name)
+            if server.is_alive():
+                server.kill()
+        with contextlib.suppress(OSError):
+            socket_path.unlink(missing_ok=True)
 
 
 @pytest.fixture(autouse=True)

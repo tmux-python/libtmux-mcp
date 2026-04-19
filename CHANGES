@@ -6,6 +6,16 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Testing
+
+- Added a session-scoped autouse fixture in `tests/conftest.py` that
+  reaps leaked `libtmux_test*` tmux daemons and socket files under
+  `/tmp/tmux-<uid>/` after every test run. Works around upstream
+  [tmux-python/libtmux#660](https://github.com/tmux-python/libtmux/issues/660),
+  whose pytest plugin does not reliably kill servers or unlink socket
+  files during teardown. Idempotent and safe under `pytest-xdist`
+  (#20).
+
 ## libtmux-mcp 0.1.0a2 (2026-04-19)
 
 _FastMCP alignment: new tools, prompts, and middleware (#15)_
