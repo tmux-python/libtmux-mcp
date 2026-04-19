@@ -93,7 +93,8 @@ clients
 :caption: Use it
 
 tools/index
-tools/prompts
+prompts
+resources
 recipes
 configuration
 ```
