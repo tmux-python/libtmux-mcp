@@ -15,6 +15,8 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.timing import TimingMiddleware
 
+from libtmux_mcp._server_class import LibtmuxMcpServer
+
 if t.TYPE_CHECKING:
     from libtmux.server import Server
 
@@ -211,7 +213,7 @@ def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
                 logger.debug("buffer GC: delete-buffer %s failed: %s", name, err)
 
 
-mcp = FastMCP(
+mcp: FastMCP = LibtmuxMcpServer(
     name="libtmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),

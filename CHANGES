@@ -18,15 +18,24 @@ _Notes on upcoming releases will be added here_
 
 ### Fixes
 
-- Server MCP `instructions` now include an explicit "emit JSON-quoted
-  strings" directive to guide clients away from the malformed-JSON
-  serialization observed on Cursor agent Auto Mode, where string
-  values like `"$10"` or `"cv"` were sent unquoted and rejected at
-  the MCP transport before libtmux-mcp could run. The bug's root
-  cause is client-side; the instruction is the only server-side
-  lever available (the transport rejects malformed frames before any
-  FastMCP middleware fires). See `docs/clients.md` for the full
-  workaround notice (#17).
+- Repair malformed JSON frames from buggy MCP clients — e.g.
+  Cursor agent Auto Mode, which intermittently emits
+  `{"session_id": $10}` / `{"session_name": cv}` (unquoted string
+  values). Two mitigations ship together. (1) Server MCP
+  `instructions` now include an explicit "emit JSON-quoted strings"
+  directive for models that honor server-level MCP instructions.
+  (2) A new `LibtmuxMcpServer(FastMCP)` subclass wraps the MCP
+  SDK's stdio transport via the public
+  `stdio_server(stdin=...)` API and conservatively quotes
+  unquoted tmux IDs (`$N`, `%N`, `@N`) and bare identifiers before
+  JSON parsing — so the tool call completes even when the model
+  ignores the directive. Valid JSON is a fixed point of the repair;
+  numbers and JSON keywords are never touched. Opt out with
+  `LIBTMUX_MCP_DISABLE_JSON_REPAIR=1`. See `docs/clients.md` for
+  the full notice. Upstream follow-up: a
+  [jlowin/fastmcp](https://github.com/jlowin/fastmcp) request to
+  thread `stdin=` through `FastMCP.run_stdio_async()` would let
+  this subclass shrink to a one-liner (#17).
 - Pane `is_caller` annotation no longer false-positives across tmux
   sockets. `_serialize_pane`, `snapshot_pane`, and `search_panes` all
   compared `pane.pane_id == TMUX_PANE` without verifying the caller's

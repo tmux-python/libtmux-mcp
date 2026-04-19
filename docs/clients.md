@@ -312,9 +312,14 @@ On some model paths, Cursor's agent serializes MCP tool arguments with string va
 - `Unexpected token '$', "{"session_id": $10}" is not valid JSON`
 - `Unexpected token 'c', "{"session_name": cv}" is not valid JSON`
 
-**Mitigation shipped in libtmux-mcp**: the server's MCP `instructions` now carry an explicit "emit JSON-quoted strings" directive that the client surfaces to the model alongside tool schemas. Models that honor server-level MCP instructions should produce valid JSON.
+**Mitigation shipped in libtmux-mcp**:
+
+1. **Prompt-level.** The server's MCP `instructions` now carry an explicit "emit JSON-quoted strings" directive that the client surfaces to the model alongside tool schemas. Models that honor server-level MCP instructions should produce valid JSON.
+2. **Transport-level.** libtmux-mcp wraps the MCP SDK's stdio transport with a conservative quote-repair layer (`libtmux_mcp._json_repair`). On each inbound frame, malformed `"key": VALUE` pairs where VALUE is a tmux ID (`$10`, `%1`, `@5`) or bare identifier (`cv`, `my.session`) are quoted before `json.loads` runs — so the tool call completes even if the client's model ignores the prompt directive. Valid JSON is a fixed point of the repair; JSON keywords (`true`, `false`, `null`) are never quoted; numbers are never touched.
+
+The transport-level repair is implemented as a plain subclass of `FastMCP` (`libtmux_mcp._server_class.LibtmuxMcpServer`) that threads a wrapping stdin into the MCP SDK's public `stdio_server(stdin=...)` API — no monkey-patching of library internals. Operators who need the un-repaired stream (e.g. for reproducing client bugs cleanly) can opt out with `LIBTMUX_MCP_DISABLE_JSON_REPAIR=1` in the server's environment.
 
 **Belt-and-suspenders**: prefer `pane_id` (e.g. `"%1"`) for pane targeting whenever possible — pane IDs are globally unique within a tmux server and are the recommended default anyway. See {doc}`topics/troubleshooting` for the broader targeting guidance.
 
-Tracked upstream at [tmux-python/libtmux-mcp#17](https://github.com/tmux-python/libtmux-mcp/issues/17). The root cause is in the client; libtmux-mcp's Python handlers never see the malformed payload, so there is no server-side recovery path beyond the instructions channel.
+Tracked at [tmux-python/libtmux-mcp#17](https://github.com/tmux-python/libtmux-mcp/issues/17).
 :::
