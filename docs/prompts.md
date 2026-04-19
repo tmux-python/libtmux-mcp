@@ -10,13 +10,13 @@ counterpart to the longer narrative recipes in {doc}`/recipes`.
 
 Four prompts ship today:
 
-- {ref}`run-and-wait` — execute a shell command and block until it
+- {ref}`fastmcp-prompt-run-and-wait` — execute a shell command and block until it
   finishes, preserving exit status.
-- {ref}`diagnose-failing-pane` — gather pane context and produce a
+- {ref}`fastmcp-prompt-diagnose-failing-pane` — gather pane context and produce a
   root-cause hypothesis without taking action.
-- {ref}`build-dev-workspace` — set up a 3-pane editor / shell / logs
+- {ref}`fastmcp-prompt-build-dev-workspace` — set up a 3-pane editor / shell / logs
   layout shell-agnostically.
-- {ref}`interrupt-gracefully` — send SIGINT and verify the shell
+- {ref}`fastmcp-prompt-interrupt-gracefully` — send SIGINT and verify the shell
   prompt returns, refusing to auto-escalate.
 
 ```{tip}
