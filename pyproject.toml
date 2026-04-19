@@ -69,6 +69,7 @@ dev = [
   "pytest-mock",
   "pytest-watcher",
   "pytest-xdist",
+  "syrupy>=5.1.0",
   # Coverage
   "codecov",
   "coverage",
