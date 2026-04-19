@@ -10,6 +10,7 @@ import typing as t
 import jinja2
 import markupsafe
 from docutils import nodes
+from sphinx.builders.html import StandaloneHTMLBuilder
 
 if t.TYPE_CHECKING:
     from sphinx.environment import BuildEnvironment
@@ -112,24 +113,33 @@ def make_highlight_filter(env: BuildEnvironment) -> HighlightFilter:
     r"""Return a Jinja filter that runs Sphinx's Pygments highlighter.
 
     Output matches ``sphinx.writers.html5.HTML5Translator.visit_literal_block``
-    byte-for-byte (sphinx/writers/html5.py:604-630): the inner ``highlight_block``
-    call already returns ``<div class="highlight"><pre>...</pre></div>\n``; we
-    wrap it with the ``<div class="highlight-{lang} notranslate">...</div>\n``
-    starttag Sphinx produces. This means sphinx-copybutton's default selector
+    byte-for-byte: the inner ``highlight_block`` call already returns
+    ``<div class="highlight"><pre>...</pre></div>\n``; we wrap it with the
+    ``<div class="highlight-{lang} notranslate">...</div>\n`` starttag Sphinx
+    produces. This means sphinx-copybutton's default selector
     (``div.highlight pre``) matches and the prompt-strip regex from gp-sphinx's
     ``DEFAULT_COPYBUTTON_PROMPT_TEXT`` works automatically.
-    """
-    # ``highlighter`` is declared on StandaloneHTMLBuilder
-    # (sphinx/builders/html/__init__.py:246), not on the Builder base mypy
-    # sees here -- hence the type-ignore. Callers are guaranteed an HTML
-    # builder by the ``builder.format == "html"`` guard in
-    # ``install_widget_assets``.
-    highlighter = env.app.builder.highlighter  # type: ignore[attr-defined]
 
-    def _highlight(code: str, language: str = "default") -> markupsafe.Markup:
-        inner = highlighter.highlight_block(code, language)
-        return markupsafe.Markup(
-            f'<div class="highlight-{language} notranslate">{inner}</div>\n'
-        )
+    ``highlighter`` is declared on ``StandaloneHTMLBuilder`` and its subclasses
+    (``DirectoryHTMLBuilder``, ``SingleFileHTMLBuilder``), not on the ``Builder``
+    base. For non-HTML builders (``text``, ``linkcheck``, ``gettext``, ``man``,
+    ...), fall back to an HTML-escaped ``<pre>`` block; it still flows through
+    the ``nodes.raw("html", ...)`` output path and is harmlessly ignored by
+    non-HTML writers.
+    """
+    builder = env.app.builder
+    if isinstance(builder, StandaloneHTMLBuilder):
+        highlighter = builder.highlighter
+
+        def _highlight(code: str, language: str = "default") -> markupsafe.Markup:
+            inner = highlighter.highlight_block(code, language)
+            return markupsafe.Markup(
+                f'<div class="highlight-{language} notranslate">{inner}</div>\n'
+            )
+    else:
+
+        def _highlight(code: str, language: str = "default") -> markupsafe.Markup:
+            escaped = markupsafe.escape(code)
+            return markupsafe.Markup(f"<pre>{escaped}</pre>\n")
 
     return _highlight

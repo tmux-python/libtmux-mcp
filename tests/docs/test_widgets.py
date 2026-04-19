@@ -200,6 +200,21 @@ def test_widget_dependency_noted(
     assert any("mcp-install" in d and "widget.html" in d for d in dep_strs)
 
 
+def test_widget_renders_with_text_builder(
+    make_app: MakeApp,
+    real_widget_srcdir: pathlib.Path,
+) -> None:
+    """``{mcp-install}`` must not crash under non-HTML builders (text)."""
+    (real_widget_srcdir / "index.md").write_text(
+        "# Home\n\n```{mcp-install}\n```\n",
+        encoding="utf-8",
+    )
+    app = make_app("text", srcdir=real_widget_srcdir, freshenv=True)
+    app.build()  # would AttributeError before the highlight-filter isinstance fix
+    assert app.statuscode == 0
+    assert (pathlib.Path(app.outdir) / "index.txt").is_file()
+
+
 # ---------- parity: highlight filter vs. Sphinx native literal_block ------
 
 
