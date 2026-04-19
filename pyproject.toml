@@ -69,6 +69,7 @@ dev = [
   "pytest-mock",
   "pytest-watcher",
   "pytest-xdist",
+  "syrupy>=5.1.0",
   # Coverage
   "codecov",
   "coverage",
@@ -120,6 +121,10 @@ files = [
   "src",
   "tests",
 ]
+# ``docs/_ext`` is not in ``files`` to avoid double-naming the widgets package
+# (mypy would see it as both ``widgets`` and ``docs._ext.widgets``); the path
+# entry alone lets imports like ``from widgets import ...`` in tests resolve.
+mypy_path = ["docs/_ext"]
 
 [[tool.mypy.overrides]]
 module = ["docutils", "docutils.*"]

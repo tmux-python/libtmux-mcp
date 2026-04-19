@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Mapping
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 import jinja2
+import markupsafe
 from docutils import nodes
 
 if TYPE_CHECKING:
@@ -14,7 +16,13 @@ if TYPE_CHECKING:
     from sphinx.writers.html5 import HTML5Translator
 
 
-class widget_container(nodes.container):
+class HighlightFilter(Protocol):
+    """Callable signature for the Jinja ``highlight`` filter."""
+
+    def __call__(self, code: str, language: str = "default") -> markupsafe.Markup: ...
+
+
+class widget_container(nodes.container):  # type: ignore[misc]  # docutils nodes are untyped
     """Wraps a widget's rendered HTML; visit/depart emit the outer div."""
 
 
@@ -87,6 +95,7 @@ class BaseWidget(ABC):
             trim_blocks=True,
             lstrip_blocks=True,
         )
+        jenv.filters["highlight"] = make_highlight_filter(env)
         template = jenv.from_string(source)
         context: dict[str, Any] = {
             **cls.default_options,
@@ -95,3 +104,27 @@ class BaseWidget(ABC):
             "widget_name": cls.name,
         }
         return template.render(**context)
+
+
+def make_highlight_filter(env: BuildEnvironment) -> HighlightFilter:
+    r"""Return a Jinja filter that runs Sphinx's Pygments highlighter.
+
+    Output matches ``sphinx.writers.html5.HTML5Translator.visit_literal_block``
+    byte-for-byte (sphinx/writers/html5.py:604-630): the inner ``highlight_block``
+    call already returns ``<div class="highlight"><pre>...</pre></div>\n``; we
+    wrap it with the ``<div class="highlight-{lang} notranslate">...</div>\n``
+    starttag Sphinx produces. This means sphinx-copybutton's default selector
+    (``div.highlight pre``) matches and the prompt-strip regex from gp-sphinx's
+    ``DEFAULT_COPYBUTTON_PROMPT_TEXT`` works automatically.
+    """
+    # Only HTML builders expose ``highlighter``; sphinx.builders.Builder (the
+    # typed base) does not declare it, so mypy can't see it without a cast.
+    highlighter = env.app.builder.highlighter  # type: ignore[attr-defined]
+
+    def _highlight(code: str, language: str = "default") -> markupsafe.Markup:
+        inner = highlighter.highlight_block(code, language)
+        return markupsafe.Markup(
+            f'<div class="highlight-{language} notranslate">{inner}</div>\n'
+        )
+
+    return _highlight

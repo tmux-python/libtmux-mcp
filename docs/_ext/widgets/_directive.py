@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from docutils import nodes
 from sphinx.util.docutils import SphinxDirective
@@ -16,7 +16,7 @@ def make_widget_directive(widget_cls: type[BaseWidget]) -> type[SphinxDirective]
 
     Each widget gets its own Directive subclass (not a single dispatcher) because
     docutils parses ``:option:`` lines against ``option_spec`` *before* calling
-    ``run()`` — so the spec must be static per directive name.
+    ``run()`` -- so the spec must be static per directive name.
     """
 
     class _WidgetDirective(SphinxDirective):
@@ -24,9 +24,11 @@ def make_widget_directive(widget_cls: type[BaseWidget]) -> type[SphinxDirective]
         required_arguments = 0
         optional_arguments = 0
         final_argument_whitespace = False
-        option_spec = dict(widget_cls.option_spec)  # copy — don't share mutable
+        # Copy the widget's option_spec so per-directive mutations don't leak.
+        option_spec: ClassVar[dict[str, Any]] = dict(widget_cls.option_spec)
 
         def run(self) -> list[nodes.Node]:
+            """Render the widget and return a single ``widget_container`` node."""
             merged: dict[str, Any] = {
                 **widget_cls.default_options,
                 **self.options,
@@ -42,14 +44,14 @@ def make_widget_directive(widget_cls: type[BaseWidget]) -> type[SphinxDirective]
             try:
                 return widget_cls.render(options=options, env=self.env)
             except FileNotFoundError as exc:
-                raise self.severe(
-                    f"widget {widget_cls.name!r}: template not found — "
-                    f"expected {exc.filename}",
-                ) from exc
+                msg = (
+                    f"widget {widget_cls.name!r}: template not found -- "
+                    f"expected {exc.filename}"
+                )
+                raise self.severe(msg) from exc
             except Exception as exc:  # Jinja UndefinedError, etc.
-                raise self.error(
-                    f"widget {widget_cls.name!r} render failed: {exc}",
-                ) from exc
+                msg = f"widget {widget_cls.name!r} render failed: {exc}"
+                raise self.error(msg) from exc
 
         def _note_asset_dependencies(self) -> None:
             assets_dir = widget_cls.assets_dir(Path(self.env.srcdir))

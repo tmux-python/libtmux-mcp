@@ -15,8 +15,7 @@ def discover() -> dict[str, type[BaseWidget]]:
     ``MyWidget(BaseWidget)`` that sets ``name = "mywidget"`` — the discovery sweep
     at ``setup()`` time registers it automatically.
     """
-    from . import __name__ as pkg_name
-    from . import __path__ as pkg_path
+    from . import __name__ as pkg_name, __path__ as pkg_path
 
     registry: dict[str, type[BaseWidget]] = {}
     for info in pkgutil.iter_modules(pkg_path):
@@ -28,15 +27,17 @@ def discover() -> dict[str, type[BaseWidget]]:
                 continue
             existing = registry.get(obj.name)
             if existing is not None and existing is not obj:
-                raise RuntimeError(
+                msg = (
                     f"Duplicate widget name {obj.name!r}: "
                     f"{existing.__module__} vs {obj.__module__}"
                 )
+                raise RuntimeError(msg)
             registry[obj.name] = obj
     return registry
 
 
 def _is_widget_class(obj: object) -> bool:
+    """Return True iff ``obj`` is a concrete ``BaseWidget`` subclass with a name."""
     return (
         isinstance(obj, type)
         and issubclass(obj, BaseWidget)
