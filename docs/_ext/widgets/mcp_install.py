@@ -158,7 +158,7 @@ def build_panels(
                 Panel(
                     client=client,
                     method=method,
-                    # "console" = ShellSessionLexer — recognises the leading
+                    # "console" = BashSessionLexer -- recognises the leading
                     # ``$ `` as Generic.Prompt and emits ``<span class="gp">``,
                     # which the gp-sphinx copybutton regex strips on copy.
                     language="json" if is_json else "console",
