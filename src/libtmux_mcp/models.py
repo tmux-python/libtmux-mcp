@@ -69,8 +69,13 @@ class PaneInfo(BaseModel):
     is_caller: bool | None = Field(
         default=None,
         description=(
-            "True if this pane is the MCP caller's own pane "
-            "(detected via TMUX_PANE env var)"
+            "MCP caller identity for this pane. ``True`` when the pane "
+            "matches the caller's ``TMUX_PANE`` *and* lives on the same "
+            "tmux socket as the caller's ``TMUX`` (verified via socket "
+            "realpath); ``False`` otherwise, including the case where "
+            "the pane id matches but the socket does not or cannot be "
+            "proven to; ``None`` when the MCP process is not running "
+            "inside tmux at all."
         ),
     )
 
@@ -93,8 +98,13 @@ class PaneContentMatch(BaseModel):
     is_caller: bool | None = Field(
         default=None,
         description=(
-            "True if this pane is the MCP caller's own pane "
-            "(detected via TMUX_PANE env var)"
+            "MCP caller identity for this pane. ``True`` when the pane "
+            "matches the caller's ``TMUX_PANE`` *and* lives on the same "
+            "tmux socket as the caller's ``TMUX`` (verified via socket "
+            "realpath); ``False`` otherwise, including the case where "
+            "the pane id matches but the socket does not or cannot be "
+            "proven to; ``None`` when the MCP process is not running "
+            "inside tmux at all."
         ),
     )
 
@@ -178,7 +188,15 @@ class PaneSnapshot(BaseModel):
     )
     is_caller: bool | None = Field(
         default=None,
-        description="True if this is the MCP caller's own pane",
+        description=(
+            "MCP caller identity for this pane. ``True`` when the pane "
+            "matches the caller's ``TMUX_PANE`` *and* lives on the same "
+            "tmux socket as the caller's ``TMUX`` (verified via socket "
+            "realpath); ``False`` otherwise, including the case where "
+            "the pane id matches but the socket does not or cannot be "
+            "proven to; ``None`` when the MCP process is not running "
+            "inside tmux at all."
+        ),
     )
     content_truncated: bool = Field(
         default=False,
