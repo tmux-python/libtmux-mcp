@@ -254,14 +254,31 @@ type
 
 ### Doctests
 
-**All functions and methods MUST have working doctests.** Doctests serve as both documentation and tests.
+This repo is an **MCP server**, not a general-purpose library. Most tools
+require a live tmux server to do anything meaningful, so a blanket
+doctest mandate doesn't fit the shape of the code. Scope doctests to
+functions where they actually work offline.
 
-**CRITICAL RULES:**
-- Doctests MUST actually execute - never comment out function calls or similar
-- Doctests MUST NOT be converted to `.. code-block::` as a workaround (code-blocks don't run)
-- If you cannot create a working doctest, **STOP and ask for help**
+**Where doctests SHOULD be used:**
+- Pure helper functions (parsers, formatters, digest / redaction
+  logic, small utilities) that can run with no external state.
+- Examples in module-level docstrings that illustrate a concept without
+  hitting tmux, the filesystem, or the network.
 
-**`# doctest: +SKIP` is NOT permitted** - it's just another workaround that doesn't test anything. Use the fixtures properly - tmux is required to run tests anyway.
+**Where doctests are exempt:**
+- Any tool function that calls `_get_server`, touches a `Session`,
+  `Window`, or `Pane`, or otherwise requires tmux to be running. Use a
+  unit test with fixtures instead.
+- Functions that do I/O, spawn subprocesses, or read environment.
+
+**CRITICAL RULES for doctests that exist:**
+- They MUST actually execute — never comment out function calls or
+  similar.
+- They MUST NOT be converted to `.. code-block::` as a workaround
+  (code-blocks don't run).
+- `# doctest: +SKIP` is discouraged. If a function can't run offline,
+  write a unit test instead of a skipped doctest — a skipped test is
+  just noise.
 
 **When output varies, use ellipsis:**
 ```python

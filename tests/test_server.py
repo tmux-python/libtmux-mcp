@@ -9,6 +9,11 @@ import pytest
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
 
+if t.TYPE_CHECKING:
+    from libtmux.server import Server
+
+    from libtmux_mcp.server import _ServerCacheKey
+
 
 class BuildInstructionsFixture(t.NamedTuple):
     """Test fixture for _build_instructions."""
@@ -132,8 +137,144 @@ def test_base_instructions_content() -> None:
     assert "metadata vs content" in _BASE_INSTRUCTIONS
 
 
+def test_base_instructions_surface_flagship_read_tools() -> None:
+    """_BASE_INSTRUCTIONS mentions the richer read tools by name.
+
+    ``display_message`` (tmux format queries) and ``snapshot_pane``
+    (content + metadata in one call) are strictly more expressive than
+    ``capture_pane`` for most contexts, but agents that never see them
+    named in the instructions default to ``capture_pane`` + a follow-up
+    ``get_pane_info``. Naming both explicitly changes that default.
+    """
+    assert "display_message" in _BASE_INSTRUCTIONS
+    assert "snapshot_pane" in _BASE_INSTRUCTIONS
+
+
+def test_base_instructions_prefer_wait_over_poll() -> None:
+    """_BASE_INSTRUCTIONS names wait_for_text and wait_for_content_change.
+
+    The wait tools block server-side, which is dramatically cheaper in
+    agent turns than ``capture_pane`` in a retry loop. Making them
+    discoverable from the instructions is a no-cost UX win.
+    """
+    assert "wait_for_text" in _BASE_INSTRUCTIONS
+    assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+
+
 def test_build_instructions_always_includes_safety() -> None:
     """_build_instructions always includes the safety level."""
     result = _build_instructions(safety_level=TAG_MUTATING)
     assert "Safety level:" in result
     assert "LIBTMUX_SAFETY" in result
+
+
+# ---------------------------------------------------------------------------
+# Lifespan tests
+# ---------------------------------------------------------------------------
+
+
+def test_lifespan_missing_tmux_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup raises a clear RuntimeError when tmux is not on PATH."""
+    import asyncio
+
+    from libtmux_mcp.server import _lifespan
+
+    def _missing_tmux(_name: str) -> None:
+        return None
+
+    monkeypatch.setattr("libtmux_mcp.server.shutil.which", _missing_tmux)
+
+    async def _enter() -> None:
+        async with _lifespan(_app=None):  # type: ignore[arg-type]
+            pytest.fail("lifespan should have raised before yielding")
+
+    with pytest.raises(RuntimeError, match="tmux binary not found"):
+        asyncio.run(_enter())
+
+
+def test_lifespan_clears_server_cache_on_exit() -> None:
+    """Clean lifespan exit empties the process-wide ``_server_cache``."""
+    import asyncio
+
+    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp.server import _lifespan
+
+    # Seed the cache with a sentinel entry — the actual value doesn't
+    # matter; we're checking that exit clears it.
+    _server_cache[("sentinel_socket", None, None)] = t.cast("t.Any", object())
+
+    async def _cycle() -> None:
+        async with _lifespan(_app=None):  # type: ignore[arg-type]
+            # While the lifespan is active the cache still holds state.
+            assert _server_cache
+
+    asyncio.run(_cycle())
+    assert _server_cache == {}
+
+
+def test_server_constructed_with_lifespan() -> None:
+    """The production FastMCP instance is wired with ``_lifespan``."""
+    from libtmux_mcp.server import _lifespan, mcp
+
+    assert mcp._lifespan is _lifespan
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_gc_mcp_buffers_deletes_mcp_prefixed_and_spares_others(
+    mcp_server: Server,
+) -> None:
+    """``_gc_mcp_buffers`` deletes ``libtmux_mcp_*`` buffers only.
+
+    Best-effort lifespan GC for leaked paste buffers — agents are
+    supposed to ``delete_buffer`` after use, but an interrupted call
+    chain can leak. The GC must NEVER touch non-MCP buffers (OS
+    clipboard sync, user-authored buffers) — those are the human user's
+    content.
+    """
+    from libtmux_mcp.server import _gc_mcp_buffers
+    from libtmux_mcp.tools.buffer_tools import load_buffer
+
+    # Seed: one MCP-owned buffer via the canonical path, one human-owned
+    # buffer directly via tmux so it is outside the MCP prefix.
+    ref = load_buffer(
+        content="agent-staged",
+        logical_name="leaky",
+        socket_name=mcp_server.socket_name,
+    )
+    mcp_server.cmd("set-buffer", "-b", "human_buffer", "user-content")
+
+    names_before = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
+    assert ref.buffer_name in names_before
+    assert "human_buffer" in names_before
+
+    _gc_mcp_buffers({(mcp_server.socket_name, None, None): mcp_server})
+
+    names_after = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
+    assert ref.buffer_name not in names_after, "GC must delete MCP-namespaced buffers"
+    assert "human_buffer" in names_after, "GC must not touch non-MCP buffers"
+
+    # Clean up the human buffer so the fixture teardown stays tidy.
+    mcp_server.cmd("delete-buffer", "-b", "human_buffer")
+
+
+def test_gc_mcp_buffers_swallows_errors() -> None:
+    """GC logs but never raises when tmux is unreachable."""
+    from libtmux_mcp.server import _gc_mcp_buffers
+
+    class _BrokenServer:
+        def cmd(self, *_a: object, **_kw: object) -> object:
+            msg = "tmux is dead"
+            raise RuntimeError(msg)
+
+    # Must not raise — lifespan shutdown cannot tolerate exceptions here.
+    # Cast is needed because _BrokenServer only implements ``cmd``; the
+    # real cache stores full Server instances, but GC is best-effort and
+    # consumes only the ``cmd`` method so a partial stub is sufficient.
+    _gc_mcp_buffers(
+        t.cast(
+            "t.Mapping[_ServerCacheKey, t.Any]",
+            {(None, None, None): _BrokenServer()},
+        )
+    )

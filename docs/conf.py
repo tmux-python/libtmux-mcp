@@ -20,6 +20,7 @@ project_root = cwd.parent
 project_src = project_root / "src"
 
 sys.path.insert(0, str(project_src))
+sys.path.insert(0, str(cwd / "_ext"))
 
 # package data
 about: dict[str, str] = {}
@@ -39,6 +40,7 @@ conf = merge_sphinx_config(
         "sphinx_autodoc_api_style",
         "sphinx.ext.todo",
         "sphinx_autodoc_fastmcp",
+        "widgets",
     ],
     intersphinx_mapping={
         "python": ("https://docs.python.org/", None),
@@ -73,6 +75,9 @@ conf["fastmcp_tool_modules"] = [
     "libtmux_mcp.tools.pane_tools",
     "libtmux_mcp.tools.option_tools",
     "libtmux_mcp.tools.env_tools",
+    "libtmux_mcp.tools.buffer_tools",
+    "libtmux_mcp.tools.wait_for_tools",
+    "libtmux_mcp.tools.hook_tools",
 ]
 conf["fastmcp_area_map"] = {
     "server_tools": "sessions",
@@ -81,19 +86,30 @@ conf["fastmcp_area_map"] = {
     "pane_tools": "panes",
     "option_tools": "options",
     "env_tools": "options",
+    "buffer_tools": "buffers",
+    "wait_for_tools": "waits",
+    "hook_tools": "hooks",
 }
+conf["fastmcp_server_module"] = "libtmux_mcp.server:mcp"
 conf["fastmcp_model_module"] = "libtmux_mcp.models"
 conf["fastmcp_model_classes"] = (
     "SessionInfo",
     "WindowInfo",
     "PaneInfo",
     "PaneContentMatch",
+    "SearchPanesResult",
+    "PaneSnapshot",
     "ServerInfo",
     "OptionResult",
     "OptionSetResult",
     "EnvironmentResult",
     "EnvironmentSetResult",
     "WaitForTextResult",
+    "ContentChangeResult",
+    "HookEntry",
+    "HookListResult",
+    "BufferRef",
+    "BufferContent",
 )
 conf["fastmcp_section_badge_map"] = {
     "Inspect": "readonly",
@@ -129,7 +145,6 @@ def setup(app: Sphinx) -> None:
     _gp_setup(app)
     app.connect("autodoc-process-docstring", _convert_md_xrefs)
     app.add_js_file("js/prompt-copy.js", loading_method="defer")
-    app.add_js_file("js/spa-copybutton-reinit.js", loading_method="defer")
     app.add_css_file("css/project-admonitions.css")
 
 

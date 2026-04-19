@@ -75,6 +75,76 @@ Response:
 ```{fastmcp-tool-input} server_tools.get_server_info
 ```
 
+---
+
+```{fastmcp-tool} server_tools.list_servers
+```
+
+**Use when** you need to discover other live tmux servers on this
+machine — for example, when an agent's tools were configured for the
+default server but the user is also running a separate tmux for a
+side project.
+
+**Avoid when** you already know the socket name or path you want to
+target — pass it directly to the tool that needs it via `socket_name`.
+
+**Side effects:** None. Readonly. Stale socket files are filtered
+via a kernel-fast UNIX `connect()` probe so the call stays under one
+second even on machines with thousands of orphaned `tmux-<uid>/`
+inodes.
+
+**Scope:** Only servers under `${TMUX_TMPDIR:-/tmp}/tmux-<uid>/` are
+discovered by the canonical scan. Custom `tmux -S /some/path/...`
+daemons that live outside that directory must be supplied via
+`extra_socket_paths`.
+
+**Example:**
+
+```json
+{
+  "tool": "list_servers",
+  "arguments": {}
+}
+```
+
+Response:
+
+```json
+[
+  {
+    "is_alive": true,
+    "socket_name": "default",
+    "socket_path": null,
+    "session_count": 3,
+    "version": "3.6a"
+  },
+  {
+    "is_alive": true,
+    "socket_name": "ci-runner",
+    "socket_path": null,
+    "session_count": 1,
+    "version": "3.6a"
+  }
+]
+```
+
+To include a custom-path daemon:
+
+```json
+{
+  "tool": "list_servers",
+  "arguments": {
+    "extra_socket_paths": ["/home/user/.cache/tmux/socket"]
+  }
+}
+```
+
+Paths that do not exist, are not sockets, or have no listener are
+silently skipped.
+
+```{fastmcp-tool-input} server_tools.list_servers
+```
+
 ## Act
 
 ```{fastmcp-tool} server_tools.create_session
@@ -107,8 +177,19 @@ Response:
   "session_name": "dev",
   "window_count": 1,
   "session_attached": "0",
-  "session_created": "1774521872"
+  "session_created": "1774521872",
+  "active_pane_id": "%0"
 }
+```
+
+```{tip}
+The returned ``active_pane_id`` is the pane ID (``%N``) of the
+session's initial pane. It's guaranteed non-``None`` immediately
+after ``create_session`` (libtmux always creates the session with
+one initial pane), so you can target subsequent ``send_keys`` /
+``split_window`` / ``capture_pane`` calls directly without a
+follow-up {tooliconl}`list-panes` round-trip — saving an MCP call
+in the most common "new session, then act on it" workflow.
 ```
 
 ```{fastmcp-tool-input} server_tools.create_session

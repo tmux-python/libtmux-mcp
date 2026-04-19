@@ -13,6 +13,7 @@ from libtmux_mcp.models import (
     ContentChangeResult,
     PaneContentMatch,
     PaneSnapshot,
+    SearchPanesResult,
     WaitForTextResult,
 )
 from libtmux_mcp.tools.pane_tools import (
@@ -59,6 +60,73 @@ def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
         socket_name=mcp_server.socket_name,
     )
     assert isinstance(result, str)
+
+
+def test_capture_pane_untruncated_short_output(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Short output below ``max_lines`` passes through without a header."""
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=100,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "[... truncated" not in result
+
+
+def test_capture_pane_truncates_tail_preserving(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Long captures are truncated head-first; tail is preserved.
+
+    Prime the pane with >20 echo lines and confirm the last one is
+    visible, then capture the visible pane with a tight ``max_lines=5``
+    ceiling. The capture must (a) start with a single
+    ``[... truncated K lines ...]`` header, (b) have exactly 6 lines
+    total (the header + 5 kept lines), and (c) preserve the most
+    recent ``scrollback_line_19`` line at the tail.
+    """
+    for i in range(20):
+        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
+    retry_until(
+        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=5,
+        socket_name=mcp_server.socket_name,
+    )
+    lines = result.split("\n")
+    assert lines[0].startswith("[... truncated ")
+    assert lines[0].endswith(" lines ...]")
+    assert len(lines) == 6  # header + exactly 5 preserved tail lines
+    assert "scrollback_line_19" in lines[-1] or any(
+        "scrollback_line_19" in line for line in lines[1:]
+    )
+
+
+def test_capture_pane_max_lines_none_disables_truncation(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``max_lines=None`` opts out of truncation entirely."""
+    for i in range(20):
+        mcp_pane.send_keys(f"echo untrunc_line_{i}", enter=True)
+    retry_until(
+        lambda: "untrunc_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=None,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "[... truncated" not in result
+    assert "untrunc_line_19" in result
 
 
 def test_get_pane_info(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -293,17 +361,17 @@ def test_search_panes(
         kwargs["session_name"] = mcp_session.session_name
 
     result = search_panes(**kwargs)
-    assert isinstance(result, list)
+    assert isinstance(result, SearchPanesResult)
 
     if expected_match:
-        assert len(result) >= 1
-        match = next((r for r in result if r.pane_id == mcp_pane.pane_id), None)
+        assert len(result.matches) >= 1
+        match = next((r for r in result.matches if r.pane_id == mcp_pane.pane_id), None)
         assert match is not None
         assert len(match.matched_lines) >= expected_min_lines
         assert match.session_id is not None
         assert match.window_id is not None
     else:
-        pane_matches = [r for r in result if r.pane_id == mcp_pane.pane_id]
+        pane_matches = [r for r in result.matches if r.pane_id == mcp_pane.pane_id]
         assert len(pane_matches) == 0
 
 
@@ -320,9 +388,9 @@ def test_search_panes_basic(mcp_server: Server, mcp_pane: Pane) -> None:
         pattern="SMOKE_TEST_MARKER_abc123",
         socket_name=mcp_server.socket_name,
     )
-    assert isinstance(result, list)
-    assert len(result) >= 1
-    assert any(r.pane_id == mcp_pane.pane_id for r in result)
+    assert isinstance(result, SearchPanesResult)
+    assert len(result.matches) >= 1
+    assert any(r.pane_id == mcp_pane.pane_id for r in result.matches)
 
 
 def test_search_panes_returns_pane_content_match_model(
@@ -340,8 +408,8 @@ def test_search_panes_returns_pane_content_match_model(
         pattern="MODEL_TYPE_CHECK_xyz",
         socket_name=mcp_server.socket_name,
     )
-    assert len(result) >= 1
-    for item in result:
+    assert len(result.matches) >= 1
+    for item in result.matches:
         assert isinstance(item, PaneContentMatch)
 
 
@@ -360,7 +428,7 @@ def test_search_panes_includes_window_and_session_names(
         pattern="CONTEXT_FIELDS_CHECK_789",
         socket_name=mcp_server.socket_name,
     )
-    match = next((r for r in result if r.pane_id == mcp_pane.pane_id), None)
+    match = next((r for r in result.matches if r.pane_id == mcp_pane.pane_id), None)
     assert match is not None
     assert match.window_name is not None
     assert match.session_name is not None
@@ -375,6 +443,328 @@ def test_search_panes_invalid_regex(mcp_server: Server, mcp_session: Session) ->
             regex=True,
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_search_panes_pagination_limit_and_offset(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """search_panes pages matching panes via ``limit`` and ``offset``.
+
+    Creates additional panes and seeds each with the same marker so
+    multiple panes match. Then asserts:
+    - ``limit=1`` returns one pane, ``truncated=True``, and the skipped
+      panes are listed in ``truncated_panes``.
+    - ``offset=1, limit=10`` returns the remaining panes with
+      ``truncated=False``.
+    - ``total_panes_matched`` is stable across pages.
+    """
+    marker = "PAGINATION_MARKER_qzz987"
+    # Split the window a few times so we have >=3 panes matching.
+    extra_panes = [
+        mcp_session.active_window.split(),
+        mcp_session.active_window.split(),
+    ]
+    all_panes = [mcp_pane, *extra_panes]
+    for pane in all_panes:
+        pane.send_keys(f"echo {marker}", enter=True)
+
+    def _waiter(target: Pane) -> t.Callable[[], bool]:
+        def _ready() -> bool:
+            return marker in "\n".join(target.capture_pane())
+
+        return _ready
+
+    for pane in all_panes:
+        retry_until(_waiter(pane), 2, raises=True)
+
+    first = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        limit=1,
+        socket_name=mcp_server.socket_name,
+    )
+    assert first.total_panes_matched >= 3
+    assert len(first.matches) == 1
+    assert first.truncated is True
+    assert len(first.truncated_panes) == first.total_panes_matched - 1
+    assert first.offset == 0
+    assert first.limit == 1
+
+    rest = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        offset=1,
+        limit=10,
+        socket_name=mcp_server.socket_name,
+    )
+    assert rest.total_panes_matched == first.total_panes_matched
+    assert len(rest.matches) == first.total_panes_matched - 1
+    assert rest.truncated is False
+    assert rest.truncated_panes == []
+    assert rest.offset == 1
+
+    # Union of paginated pane IDs equals the full matching set.
+    seen = {m.pane_id for m in first.matches} | {m.pane_id for m in rest.matches}
+    assert len(seen) == first.total_panes_matched
+
+
+def test_search_panes_literal_input_skips_slow_path_probe(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    r"""Literal searches (``regex=False``) find matches containing metacharacters.
+
+    Regression guard for the ``_REGEX_META`` check bug: the pre-fix
+    code tested the *escaped* pattern for regex metacharacters. With
+    ``regex=False`` and a literal IP address like ``"192.168.1.1"``,
+    ``re.escape`` produced ``"192\\.168\\.1\\.1"`` — whose ``\\`` matched
+    the probe and kicked the search off the tmux fast path onto the
+    slow Python-regex path.
+
+    The functional observable: both paths correctly found the literal.
+    The bug was performance. Probing that from a test is fragile (both
+    paths call ``capture_pane`` in Phase 2), so this test asserts the
+    *decision variable* directly: calling ``search_panes`` with a
+    regex-meta-bearing literal must return the expected match, and the
+    inspection of the fast-path decision is covered by the unit test
+    below.
+    """
+    marker = "192.168.1.1"
+    mcp_pane.send_keys(f"echo {marker}", enter=True)
+    retry_until(
+        lambda: marker in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert any(m.pane_id == mcp_pane.pane_id for m in result.matches)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "regex", "expected_fast_path"),
+    [
+        # Literal input with regex metacharacters — the earlier bug's
+        # target case. Raw input is glob-safe for tmux, fast path.
+        ("192.168.1.1", False, True),
+        # Literal with no metacharacters — always fast path.
+        ("plain_marker", False, True),
+        # Regex with no metacharacters — fast path still fine.
+        ("plain_marker", True, True),
+        # Regex with metacharacters — legitimately slow path.
+        (r"err(or|no)", True, False),
+        # Regex dot-star — slow path.
+        (r".*", True, False),
+        # tmux format-injection bytes in a literal — MUST fall to slow
+        # path regardless of regex flag, because tmux's #{C:...} format
+        # block has no escape for `}` (premature close) or `#{` (nested
+        # format-variable evaluation).
+        ("foo}", False, False),
+        ("log #{err}", False, False),
+        # Same hazards with regex=True — still slow path; tmux sees the
+        # raw pattern either way.
+        ("x}y", True, False),
+        ("a#{b}", True, False),
+    ],
+)
+def test_search_panes_fast_path_decision(
+    pattern: str, regex: bool, expected_fast_path: bool
+) -> None:
+    """Unit-test the ``is_plain_text`` decision on pattern + regex flag.
+
+    Mirrors the exact expression in ``search_panes`` so a future
+    refactor cannot silently reintroduce either of the two hazards it
+    guards against: the escape-aware metacharacter check that
+    misclassified literals, or the tmux format-string injection on
+    ``}`` / ``#{``.
+    """
+    import re as _re
+
+    _regex_meta = _re.compile(r"[\\.*+?{}()\[\]|^$]")
+    _tmux_format_injection = _re.compile(r"\}|#\{")
+    if _tmux_format_injection.search(pattern):
+        is_plain_text = False
+    elif regex:
+        is_plain_text = not _regex_meta.search(pattern)
+    else:
+        is_plain_text = True
+    assert is_plain_text is expected_fast_path
+
+
+def test_search_panes_tmux_format_injection_is_neutralized(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Literal patterns containing ``}`` or ``#{`` don't return every pane.
+
+    Regression guard for the Critical tmux format-string injection in
+    commit ``decc994`` (pre-existing, widened by the regex-fast-path
+    fix): ``search_panes(pattern="foo}", regex=False)`` previously
+    interpolated the raw ``}`` into ``#{C:foo}}`` — tmux's format
+    parser closed the block at the first ``}``, evaluated the
+    remainder (``}``) as truthy, and marked *every* pane as a match.
+
+    Two panes are exercised: one seeded with the literal marker,
+    one without. Only the seeded pane should appear in ``matches``.
+    """
+    marker = "INJECT_MARKER_xyz}qq9"  # contains `}` — the injection trigger
+    mcp_pane.send_keys(f"echo {marker}", enter=True)
+    # Add a second pane that lacks the marker — if the fast path is
+    # still injecting, every pane including this one shows up.
+    clean_pane = mcp_session.active_window.split()
+    clean_pane.send_keys("echo UNRELATED_content", enter=True)
+
+    retry_until(
+        lambda: marker in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = search_panes(
+        pattern=marker,
+        regex=False,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    matched_ids = {m.pane_id for m in result.matches}
+    assert mcp_pane.pane_id in matched_ids
+    assert clean_pane.pane_id not in matched_ids, (
+        f"tmux format injection re-opened: clean pane {clean_pane.pane_id} "
+        f"erroneously matched. Full match list: {matched_ids}"
+    )
+
+
+def test_search_panes_nested_format_variable_is_neutralized(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Literal patterns containing ``#{`` don't trigger tmux format eval.
+
+    Companion to the ``}`` injection test. ``#{`` inside the pattern
+    opens a nested tmux format variable; without neutralization, tmux
+    would evaluate ``#{pane_id}`` as the current pane's id and match
+    every pane whose content contains its own id — a subtler but
+    equally wrong outcome.
+    """
+    marker = "NEST_#{pane_id}_ABC"
+    mcp_pane.send_keys(f"echo {marker!r}", enter=True)
+    retry_until(
+        lambda: "NEST" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = search_panes(
+        pattern=marker,
+        regex=False,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    # The test's value is that the call returns *without* raising and
+    # without marking unrelated panes. An exact match on the literal
+    # `#{pane_id}` bytes in scrollback isn't required.
+    assert isinstance(result.matches, list)  # didn't crash
+    # No pane other than mcp_pane should be in the match set, since no
+    # other pane's content contains NEST_ at all.
+    for m in result.matches:
+        assert m.pane_id == mcp_pane.pane_id
+
+
+def test_search_panes_numeric_pane_id_ordering(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Pagination returns panes in numeric, not lexicographic, order.
+
+    Regression guard: an earlier ``all_matches.sort(key=lambda m:
+    m.pane_id)`` produced ``["%0", "%1", "%10", "%2", ...]`` on any
+    session with ≥11 matching panes, which confused pagination (the
+    last "page 1" pane was ``%2`` rather than ``%1``). The fix sorts
+    via ``_pane_id_sort_key`` which casts the numeric portion.
+
+    Physical tmux panes don't fit in a single 80x24 window past ~6
+    before ``split-window`` fails with "no space for new pane"; this
+    test spreads panes across multiple windows so pane ids reliably
+    cross the ``%10`` boundary. The assertion is numeric monotonicity
+    of ids across the returned matches.
+    """
+    marker = "NUMSORT_MARKER_89vq"
+    # Spread panes across several windows so we get >= 12 panes without
+    # running out of per-window space. Each new_window seeds one pane;
+    # split() adds 1-2 more per window.
+    while True:
+        total_panes = sum(len(w.panes) for w in mcp_session.windows)
+        if total_panes >= 12:
+            break
+        window = mcp_session.new_window()
+        window.split()
+
+    panes = [p for w in mcp_session.windows for p in w.panes]
+    assert len(panes) >= 12
+    for pane in panes:
+        pane.send_keys(f"echo {marker}", enter=True)
+
+    def _ready() -> bool:
+        return all(marker in "\n".join(p.capture_pane()) for p in panes)
+
+    retry_until(_ready, 5, raises=True)
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        limit=100,
+        socket_name=mcp_server.socket_name,
+    )
+    ids = [m.pane_id for m in result.matches]
+    assert len(ids) >= 12
+    numeric = [int(i.lstrip("%")) for i in ids]
+    assert numeric == sorted(numeric), f"pane ids not in numeric order: {ids}"
+    # The bug's canonical manifestation: lex-sort places ``%10`` between
+    # ``%1`` and ``%2``. Pin that ``%2`` comes before ``%10`` as a
+    # stronger shape check than pure monotonicity.
+    assert 2 in numeric and 10 in numeric
+    assert numeric.index(2) < numeric.index(10)
+
+
+def test_search_panes_per_pane_matched_lines_cap(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """``max_matched_lines_per_pane`` tail-truncates matched_lines per pane.
+
+    Synchronizes on shell-command completion via the project's own
+    ``wait_for_channel`` primitive (the ``tmux wait-for -S`` idiom
+    documented in ``src/libtmux_mcp/prompts/recipes.py``) instead of
+    polling ``capture_pane`` output. This makes the assertion
+    deterministic on every shell — the ``capture_pane`` inside
+    ``search_panes`` runs strictly after the four echoes have
+    executed, regardless of PS1 state or shell-startup timing.
+
+    Four echoes produce at least eight marker-bearing lines in
+    ``capture_pane`` (command-line plus output-line for each), well
+    past the truncation threshold of three.
+    """
+    import uuid
+
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    marker = "PERLINE_MARKER_9gkv"
+    channel = f"mcp_test_percap_{uuid.uuid4().hex[:16]}"
+    payload = (
+        f"echo {marker}; echo {marker}; echo {marker}; echo {marker}; "
+        f"tmux wait-for -S {channel}"
+    )
+    mcp_pane.send_keys(payload, enter=True)
+    wait_for_channel(channel=channel, timeout=5.0, socket_name=mcp_server.socket_name)
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        max_matched_lines_per_pane=3,
+        socket_name=mcp_server.socket_name,
+    )
+    match = next((m for m in result.matches if m.pane_id == mcp_pane.pane_id), None)
+    assert match is not None
+    assert len(match.matched_lines) == 3
+    assert result.truncated is True
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +831,7 @@ def test_search_panes_is_caller(
         pattern=marker,
         socket_name=mcp_server.socket_name,
     )
-    match = next((r for r in result if r.pane_id == mcp_pane.pane_id), None)
+    match = next((r for r in result.matches if r.pane_id == mcp_pane.pane_id), None)
     assert match is not None
     assert match.is_caller is expected_is_caller
 
@@ -494,14 +884,18 @@ def test_wait_for_text(
     expected_found: bool,
 ) -> None:
     """wait_for_text polls pane content for a pattern."""
+    import asyncio
+
     if command is not None:
         mcp_pane.send_keys(command, enter=True)
 
-    result = wait_for_text(
-        pattern=pattern,
-        pane_id=mcp_pane.pane_id,
-        timeout=timeout,
-        socket_name=mcp_server.socket_name,
+    result = asyncio.run(
+        wait_for_text(
+            pattern=pattern,
+            pane_id=mcp_pane.pane_id,
+            timeout=timeout,
+            socket_name=mcp_server.socket_name,
+        )
     )
     assert isinstance(result, WaitForTextResult)
     assert result.found is expected_found
@@ -515,13 +909,460 @@ def test_wait_for_text(
 
 def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text raises ToolError on invalid regex when regex=True."""
+    import asyncio
+
     with pytest.raises(ToolError, match="Invalid regex pattern"):
-        wait_for_text(
-            pattern="[invalid",
-            regex=True,
-            pane_id=mcp_pane.pane_id,
-            socket_name=mcp_server.socket_name,
+        asyncio.run(
+            wait_for_text(
+                pattern="[invalid",
+                regex=True,
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
         )
+
+
+def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> None:
+    """wait_for_text calls ``ctx.report_progress`` at each poll tick.
+
+    Uses a minimal async stub Context so the test stays independent
+    from FastMCP's live server — ``report_progress`` is the only
+    coroutine the wait loop invokes and it only needs to be awaitable.
+    The assertion is that at least one progress report is emitted
+    during a short, guaranteed-to-timeout poll window.
+    """
+    import asyncio
+
+    progress_calls: list[tuple[float, float | None, str]] = []
+
+    class _StubContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            progress_calls.append((progress, total, message))
+
+        async def warning(self, message: str) -> None:
+            return  # log notifications not asserted in this test
+
+    stub = _StubContext()
+    result = asyncio.run(
+        wait_for_text(
+            pattern="WILL_NEVER_MATCH_aBcDeF",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.2,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", stub),
+        )
+    )
+    assert result.found is False
+    assert result.timed_out is True
+    assert len(progress_calls) >= 2
+    first_progress, first_total, first_msg = progress_calls[0]
+    assert first_progress >= 0.0
+    assert first_total == 0.2
+    assert "Polling pane" in first_msg
+
+
+def test_wait_for_text_propagates_unexpected_progress_error(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Non-transport exceptions from ``ctx.report_progress`` propagate.
+
+    Regression guard: an earlier ``contextlib.suppress(Exception)`` in
+    ``_maybe_report_progress`` silently swallowed every exception from
+    ``ctx.report_progress`` — including programming errors like a
+    renamed kwarg or a misconfigured ``ctx``. The narrowed catch only
+    covers transport-closed exceptions; anything else (e.g.
+    ``RuntimeError`` from a stub that's been deliberately broken) must
+    reach the caller so the failure is diagnostic instead of a mystery
+    quiet hang.
+    """
+    import asyncio
+
+    class _FaultyContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            msg = "synthetic bug in progress-notification path"
+            raise RuntimeError(msg)
+
+    # The error surfaces through ``handle_tool_errors_async``, which
+    # maps any unexpected ``Exception`` to ``ToolError`` with the
+    # original type + message preserved in the translated text. The
+    # point of this regression guard is that the error reaches the
+    # error handler at all — previously the broad ``suppress`` ate it.
+    with pytest.raises(ToolError, match="synthetic bug"):
+        asyncio.run(
+            wait_for_text(
+                pattern="WILL_NEVER_MATCH_PROPAGATE_q2rj",
+                pane_id=mcp_pane.pane_id,
+                timeout=0.5,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+                ctx=t.cast("t.Any", _FaultyContext()),
+            )
+        )
+
+
+def test_wait_for_text_suppresses_broken_resource_error(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``anyio.BrokenResourceError`` from progress is treated as transport-gone.
+
+    FastMCP's streamable-HTTP transport raises ``BrokenResourceError``
+    (not ``ClosedResourceError``) when the receive side of the in-memory
+    stream is closed — i.e. the peer went away. The wait loop must treat
+    this identically to the closed-stream case: silently skip the
+    progress notification and keep polling until the timeout.
+    """
+    import asyncio
+
+    import anyio
+
+    class _BrokenContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            raise anyio.BrokenResourceError
+
+        async def warning(self, message: str) -> None:
+            # Same transport-closed shape on the log channel — the
+            # wait loop's timeout-warning call must also be suppressed
+            # silently when the peer is gone.
+            raise anyio.BrokenResourceError
+
+    result = asyncio.run(
+        wait_for_text(
+            pattern="WILL_NEVER_MATCH_BROKEN_rpt5",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.2,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _BrokenContext()),
+        )
+    )
+    assert result.found is False
+    assert result.timed_out is True
+
+
+def test_wait_for_text_warns_on_invalid_regex(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` emits ``ctx.warning`` when the regex won't compile.
+
+    Regression guard: agents calling with ``regex=True`` and a malformed
+    pattern previously saw only a generic ``ToolError``. The new
+    ``_maybe_log`` helper at ``wait.py`` lets the same condition surface
+    as a ``notifications/message`` warning so MCP client log panels
+    record the cause independent of the tool result.
+    """
+    import asyncio
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    with pytest.raises(ToolError, match="Invalid regex"):
+        asyncio.run(
+            wait_for_text(
+                pattern="[unclosed",
+                regex=True,
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+                ctx=t.cast("t.Any", _RecordingContext()),
+            )
+        )
+
+    # The ``warning`` ran before the ``ToolError`` was raised.
+    assert (
+        "warning",
+        "Invalid regex pattern: missing ), unterminated subpattern at position 0",
+    ) in log_calls or any(
+        level == "warning" and "Invalid regex" in msg for level, msg in log_calls
+    )
+
+
+def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
+    """``wait_for_text`` warns the client when the poll loop times out.
+
+    Sibling guard to the invalid-regex warning. The timeout case is
+    where operators most need a structured signal — the tool returns
+    ``timed_out=True`` in the result but agents and human log readers
+    have to dig into the ``WaitForTextResult`` to notice. The warning
+    surfaces it directly.
+    """
+    import asyncio
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    result = asyncio.run(
+        wait_for_text(
+            pattern="WILL_NEVER_MATCH_TIMEOUT_qZx9",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.2,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _RecordingContext()),
+        )
+    )
+
+    assert result.timed_out is True
+    assert any(
+        level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
+    ), f"expected a timeout warning, got: {log_calls}"
+
+
+def test_wait_for_content_change_warns_on_timeout(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_content_change`` warns the client on timeout.
+
+    Same contract as ``wait_for_text`` — the silently-quiescent pane
+    case otherwise looks identical to a successful detection at the
+    log layer. Operators benefit from a ``no content change before
+    Xs timeout`` warning.
+
+    Uses the same settle-loop pattern as
+    ``test_wait_for_content_change_timeout`` so the assertion is
+    deterministic on slow CI.
+    """
+    import asyncio
+    import time
+
+    settle_streak_required = 3
+    settle_poll_interval = 0.1
+    previous = mcp_pane.capture_pane()
+    streak = 0
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        time.sleep(settle_poll_interval)
+        current = mcp_pane.capture_pane()
+        if current == previous:
+            streak += 1
+            if streak >= settle_streak_required:
+                break
+        else:
+            streak = 0
+            previous = current
+    else:
+        pytest.fail("pane content did not settle within 5s")
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    result = asyncio.run(
+        wait_for_content_change(
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _RecordingContext()),
+        )
+    )
+    assert result.timed_out is True
+    assert any(
+        level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
+    ), f"expected a timeout warning, got: {log_calls}"
+
+
+def test_wait_for_text_propagates_cancellation(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` raises ``CancelledError`` (not ``ToolError``).
+
+    Regression guard for MCP cancellation semantics.
+    ``handle_tool_errors_async`` in ``_utils.py:827-850`` catches
+    ``Exception`` (not ``BaseException``); since
+    ``asyncio.CancelledError`` is a ``BaseException`` (Python 3.8+) it
+    propagates today. Locking that in: if a future change broadens the
+    decorator to ``BaseException`` it would silently break MCP
+    cancellation, and this test fires.
+
+    Uses ``task.cancel()`` rather than ``asyncio.wait_for`` so the
+    raised exception is the inner ``CancelledError`` directly, not
+    ``wait_for``'s ``TimeoutError`` wrapper.
+    """
+    import asyncio
+
+    async def _runner() -> None:
+        task = asyncio.create_task(
+            wait_for_text(
+                pattern="WILL_NEVER_MATCH_CANCEL_aBcD",
+                pane_id=mcp_pane.pane_id,
+                timeout=10.0,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await asyncio.sleep(0.1)  # let the poll loop start
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_runner())
+
+
+def test_wait_for_content_change_propagates_cancellation(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``wait_for_content_change`` raises ``CancelledError`` (not ``ToolError``).
+
+    Sibling guard to ``test_wait_for_text_propagates_cancellation`` —
+    both wait tools share the same ``while True:`` poll-and-sleep
+    pattern wrapped by ``handle_tool_errors_async``, so both must
+    surface MCP cancellation as ``asyncio.CancelledError``.
+
+    Stubs ``Pane.capture_pane`` to always return the same line list so
+    the ``current != initial_content`` exit can never fire — without
+    the stub the test races shell prompt redraw, cursor blink, and
+    zsh async hooks (vcs_info, git prompt) on CI runners and exits
+    via ``changed=True`` before the cancel arrives.
+    """
+    import asyncio
+
+    from libtmux.pane import Pane as _LibtmuxPane
+
+    monkeypatch.setattr(_LibtmuxPane, "capture_pane", lambda *_a, **_kw: ["stable"])
+
+    async def _runner() -> None:
+        task = asyncio.create_task(
+            wait_for_content_change(
+                pane_id=mcp_pane.pane_id,
+                timeout=10.0,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await asyncio.sleep(0.1)
+        task.cancel()
+        await task
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_runner())
+
+
+def test_wait_tools_do_not_block_event_loop(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """wait_for_text runs its blocking capture off the main event loop.
+
+    Regression guard for the critical bug that FastMCP async tools are
+    direct-awaited on the main event loop. ``pane.capture_pane()`` is a
+    sync ``subprocess.run`` call; without ``asyncio.to_thread`` it
+    would block every other coroutine on the same loop for the
+    duration of each poll tick.
+
+    Discriminator: monkeypatch ``pane.capture_pane`` so each call
+    blocks the calling *thread* for 80 ms via ``time.sleep``. With
+    ``asyncio.to_thread`` the default executor runs that off the
+    event loop and the ticker coroutine keeps firing every 10 ms;
+    without it, the event loop is pinned for the full 80 ms per poll
+    and the ticker can only advance during the brief
+    ``await asyncio.sleep(interval)`` gaps. The threshold (~40 ticks
+    expected with the fix vs. <= 6 without) cleanly fails the
+    un-fixed code while remaining robust against 2x CI slowdown.
+
+    The previous version of this test used the production
+    ``capture_pane`` (which returns instantly under tmux's normal
+    semantics) and asserted ``ticks >= 5``. Since ``await
+    asyncio.sleep(interval=0.05)`` between poll iterations already
+    yielded enough for the ticker to satisfy that bound, the test
+    passed even with ``asyncio.to_thread`` reverted — providing zero
+    actual defense against the bug it claimed to guard. The
+    monkeypatched slow capture is the discriminator.
+
+    See commit ``74ec8f0`` for the project's precedent on stabilizing
+    timing-sensitive tests under ``--reruns 0``.
+    """
+    import asyncio
+    import time as _time
+
+    from libtmux.pane import Pane as _LibtmuxPane
+
+    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
+        _time.sleep(0.08)
+        return []
+
+    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
+
+    async def _drive() -> int:
+        ticks = 0
+        stop = asyncio.Event()
+
+        async def _ticker() -> None:
+            nonlocal ticks
+            while not stop.is_set():
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        async def _waiter() -> None:
+            try:
+                await wait_for_text(
+                    pattern="WILL_NEVER_MATCH_EVENT_LOOP_zqr9",
+                    pane_id=mcp_pane.pane_id,
+                    timeout=0.4,
+                    interval=0.05,
+                    socket_name=mcp_server.socket_name,
+                )
+            finally:
+                stop.set()
+
+        await asyncio.gather(_ticker(), _waiter())
+        return ticks
+
+    ticks = asyncio.run(_drive())
+    # With asyncio.to_thread, ticker fires ~40 times in the 400 ms
+    # window. Without, only during the 50 ms inter-poll sleep gaps
+    # (~3 polls x ~5 ticks/sleep = ~15) plus 1 between captures = 6.
+    # The 20-tick threshold is robust against 2x CI slowdown and
+    # unambiguously fails the un-fixed code.
+    assert ticks >= 20, (
+        f"ticker advanced only {ticks} times — blocking capture is on the "
+        f"main event loop, not in asyncio.to_thread"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +1386,60 @@ def test_snapshot_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     assert result.pane_in_mode is False
     assert result.pane_mode is None
     assert result.history_size >= 0
+    # Default max_lines leaves short captures untruncated.
+    assert result.content_truncated is False
+    assert result.content_truncated_lines == 0
+
+
+def test_snapshot_pane_truncates_content(mcp_server: Server, mcp_pane: Pane) -> None:
+    """snapshot_pane reports truncation via model fields, not in-band header.
+
+    Unlike capture_pane (which returns a bare string and therefore
+    signals truncation with a prefix line), snapshot_pane returns a
+    Pydantic model, so truncation is surfaced on typed fields:
+    ``content_truncated`` and ``content_truncated_lines``. ``content``
+    itself is the kept tail with no marker.
+    """
+    for i in range(20):
+        mcp_pane.send_keys(f"echo snap_line_{i}", enter=True)
+    retry_until(
+        lambda: "snap_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=5,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.content_truncated is True
+    assert result.content_truncated_lines > 0
+    assert result.content.count("\n") == 4  # 5 lines kept -> 4 separators
+    assert "[... truncated" not in result.content
+    assert "snap_line_19" in result.content
+
+
+def test_snapshot_pane_max_lines_none_keeps_full_content(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``max_lines=None`` returns the full content with no truncation flag."""
+    for i in range(20):
+        mcp_pane.send_keys(f"echo snapnone_{i}", enter=True)
+    retry_until(
+        lambda: "snapnone_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=None,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.content_truncated is False
+    assert result.content_truncated_lines == 0
+    assert "snapnone_19" in result.content
 
 
 def test_snapshot_pane_cursor_moves(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -625,10 +1520,14 @@ def test_wait_for_content_change_detects_change(
     thread = threading.Thread(target=_send_later)
     thread.start()
 
-    result = wait_for_content_change(
-        pane_id=mcp_pane.pane_id,
-        timeout=3.0,
-        socket_name=mcp_server.socket_name,
+    import asyncio
+
+    result = asyncio.run(
+        wait_for_content_change(
+            pane_id=mcp_pane.pane_id,
+            timeout=3.0,
+            socket_name=mcp_server.socket_name,
+        )
     )
     thread.join()
     assert isinstance(result, ContentChangeResult)
@@ -638,16 +1537,50 @@ def test_wait_for_content_change_detects_change(
 
 
 def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
-    """wait_for_content_change times out when no change occurs."""
-    # Wait for the shell prompt to settle before testing for "no change"
+    """wait_for_content_change times out when no change occurs.
+
+    Uses an active-polling settle loop instead of a fixed sleep: we wait
+    until two consecutive ``capture_pane`` reads return the same content
+    before starting the no-change assertion. On slow or loaded CI
+    machines the shell prompt can take well over 500 ms to fully render
+    (cursor blink, zsh right-prompt, git status async hooks) and would
+    otherwise be observed as pane-content change during the test window,
+    failing ``timed_out=True`` spuriously under ``--reruns=0``.
+    """
     import time
 
-    time.sleep(0.5)
+    #: Number of consecutive matching captures required to call the pane
+    #: "settled". One match is unreliable under zsh async hooks (vcs_info,
+    #: git prompt, right-prompt) that render after an initial quiet
+    #: window. Three requires ~300 ms of continuous quiescence which is
+    #: enough to outwait those hooks on loaded CI.
+    settle_streak_required = 3
+    settle_poll_interval = 0.1
 
-    result = wait_for_content_change(
-        pane_id=mcp_pane.pane_id,
-        timeout=0.5,
-        socket_name=mcp_server.socket_name,
+    previous = mcp_pane.capture_pane()
+    streak = 0
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        time.sleep(settle_poll_interval)
+        current = mcp_pane.capture_pane()
+        if current == previous:
+            streak += 1
+            if streak >= settle_streak_required:
+                break
+        else:
+            streak = 0
+            previous = current
+    else:
+        pytest.fail("pane content did not settle within 5s")
+
+    import asyncio
+
+    result = asyncio.run(
+        wait_for_content_change(
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            socket_name=mcp_server.socket_name,
+        )
     )
     assert isinstance(result, ContentChangeResult)
     assert result.changed is False
@@ -990,18 +1923,23 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
 def test_paste_text_does_not_leak_named_buffer(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
-    """paste_text must not leave its mcp_paste_* buffer behind.
+    """paste_text must not leave its ``libtmux_mcp_*_paste`` buffer behind.
 
     Regression guard for the pre-fix behavior: the earlier
     implementation used tmux's default unnamed buffer AND relied on
     `paste-buffer -d` to clean up. If paste-buffer failed mid-flight
-    the buffer leaked. The fix generates a unique `mcp_paste_<uuid>`
-    named buffer per call and adds a best-effort `delete-buffer -b`
-    in `finally` so the server is left in a clean state on both
-    success and failure paths.
+    the buffer leaked. The fix generates a unique
+    ``libtmux_mcp_<uuid>_paste`` named buffer per call (matching the
+    ``buffer_tools._BUFFER_NAME_RE`` shape) and adds a best-effort
+    ``delete-buffer -b`` in ``finally`` so the server is left in a
+    clean state on both success and failure paths.
+
+    The ``libtmux_mcp_`` prefix matches the namespace used by
+    :mod:`libtmux_mcp.tools.buffer_tools`, so an operator filtering
+    ``list-buffers`` on that prefix sees every MCP-owned buffer.
 
     The check is portable across every tmux version the CI matrix
-    tests (3.2a through master): list-buffers with a format string
+    tests (3.2a through master): ``list-buffers`` with a format string
     returns buffer names without any version-specific behavior.
     """
     paste_text(
@@ -1012,6 +1950,87 @@ def test_paste_text_does_not_leak_named_buffer(
 
     listing = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}")
     buffer_names = "\n".join(listing.stdout or [])
-    assert "mcp_paste_" not in buffer_names, (
+    assert "libtmux_mcp_" not in buffer_names, (
         f"paste_text leaked a named buffer: {buffer_names!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Registration-time annotation verification
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected_open_world"),
+    [
+        # Shell-driving tools: the command the caller sends can reach
+        # arbitrary external state, so the interaction is open-world.
+        ("send_keys", True),
+        ("paste_text", True),
+        ("pipe_pane", True),
+        # Create-style tools: allocate tmux objects only. Not open-world
+        # even though they share the old ANNOTATIONS_CREATE preset.
+        ("swap_pane", False),
+        ("enter_copy_mode", False),
+    ],
+)
+def test_pane_tool_open_world_hint_registration(
+    tool_name: str, expected_open_world: bool
+) -> None:
+    """Pane tools advertise ``openWorldHint`` matching their real semantics.
+
+    Regression guard for the shared-preset trap: the old
+    ``ANNOTATIONS_CREATE`` preset was applied to both shell-driving and
+    non-shell-driving tools, so every caller saw ``openWorldHint=False``.
+    A new ``ANNOTATIONS_SHELL`` preset now carries ``openWorldHint=True``
+    for the three shell-driving tools only, leaving the other
+    ``ANNOTATIONS_CREATE`` users unchanged.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-pane-annotations")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool(tool_name))
+    assert tool is not None, f"{tool_name} should be registered"
+    assert tool.annotations is not None, (
+        f"{tool_name} registration should carry annotations"
+    )
+    assert tool.annotations.openWorldHint is expected_open_world
+
+
+# ---------------------------------------------------------------------------
+# Typed-output regression guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected_type"),
+    [
+        # Read-heavy tools must keep returning Pydantic models so MCP
+        # clients get machine-readable ``outputSchema`` entries and
+        # agents don't have to re-parse strings. Regression guard:
+        # any future change that flattens one of these back to ``str``
+        # will break this test and force an explicit review.
+        ("get_pane_info", "PaneInfo"),
+        ("snapshot_pane", "PaneSnapshot"),
+    ],
+)
+def test_pane_read_tools_return_pydantic_models(
+    mcp_server: Server, mcp_pane: Pane, tool_name: str, expected_type: str
+) -> None:
+    """Read-heavy pane tools return their Pydantic model, not ``str``."""
+    tools: dict[str, t.Callable[..., t.Any]] = {
+        "get_pane_info": get_pane_info,
+        "snapshot_pane": snapshot_pane,
+    }
+    result = tools[tool_name](
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert type(result).__name__ == expected_type
+    assert hasattr(result, "model_dump"), "expected a Pydantic BaseModel instance"

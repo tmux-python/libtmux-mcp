@@ -17,6 +17,16 @@ class SessionInfo(BaseModel):
         default=None, description="Attached client count"
     )
     session_created: str | None = Field(default=None, description="Creation timestamp")
+    active_pane_id: str | None = Field(
+        default=None,
+        description=(
+            "Pane id (``%N``) of the session's active pane. Guaranteed "
+            "non-None on ``create_session`` return (libtmux creates the "
+            "session with one initial pane). May be None from "
+            "``list_sessions`` rows for sessions in transient teardown "
+            "states where ``active_pane`` is unavailable."
+        ),
+    )
 
 
 class WindowInfo(BaseModel):
@@ -169,6 +179,127 @@ class PaneSnapshot(BaseModel):
     is_caller: bool | None = Field(
         default=None,
         description="True if this is the MCP caller's own pane",
+    )
+    content_truncated: bool = Field(
+        default=False,
+        description=(
+            "True if ``content`` was tail-preserved to stay within "
+            "``max_lines``; oldest lines were dropped."
+        ),
+    )
+    content_truncated_lines: int = Field(
+        default=0,
+        description="Number of lines dropped from the head when truncating.",
+    )
+
+
+class SearchPanesResult(BaseModel):
+    """Paginated result of :func:`search_panes`.
+
+    Wrapping the match list lets us surface bounded-output information
+    that a bare ``list[PaneContentMatch]`` cannot: whether pagination
+    truncated the result set, which panes were skipped, and the
+    ``offset``/``limit`` that produced this page. Agents can re-request
+    with a higher ``offset`` to retrieve subsequent pages.
+    """
+
+    matches: list[PaneContentMatch] = Field(
+        default_factory=list,
+        description="PaneContentMatch entries for this page.",
+    )
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the result set was truncated by ``limit`` or "
+            "by ``max_matched_lines_per_pane`` on any pane."
+        ),
+    )
+    truncated_panes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Pane IDs that matched but were skipped because the global "
+            "``limit`` was already satisfied. Re-request with a larger "
+            "``offset`` to retrieve them."
+        ),
+    )
+    total_panes_matched: int = Field(
+        description=(
+            "Total number of panes that matched the pattern before "
+            "``offset`` / ``limit`` were applied."
+        ),
+    )
+    offset: int = Field(description="The ``offset`` that produced this page.")
+    limit: int | None = Field(description="The ``limit`` that produced this page.")
+
+
+class HookEntry(BaseModel):
+    """One entry in a tmux hook array.
+
+    Hooks like ``session-renamed`` are arrays — they can have multiple
+    commands registered at sparse indices. :class:`HookEntry` flattens
+    one index+command pair into a serialisable row.
+    """
+
+    hook_name: str = Field(description="Hook name (e.g. 'pane-exited').")
+    index: int | None = Field(
+        default=None,
+        description=(
+            "Array index for array-style hooks (e.g. session-renamed[3]). "
+            "``None`` for scalar hooks."
+        ),
+    )
+    command: str = Field(description="tmux command string registered at that index.")
+
+
+class HookListResult(BaseModel):
+    """Structured result of :func:`show_hooks` / :func:`show_hook`.
+
+    Flat list of :class:`HookEntry` instances so MCP clients can iterate
+    without caring whether the underlying tmux hook is scalar or array-
+    shaped.
+    """
+
+    entries: list[HookEntry] = Field(default_factory=list)
+
+
+class BufferRef(BaseModel):
+    """Handle returned by :func:`load_buffer` for later buffer operations.
+
+    Agent-created tmux paste buffers are namespaced with a per-call UUID
+    to avoid collisions on the server-global buffer namespace when
+    concurrent agents (or parallel tool calls from a single agent) are
+    staging content. Callers must use the ``buffer_name`` this model
+    carries on subsequent ``paste_buffer`` / ``show_buffer`` /
+    ``delete_buffer`` calls.
+    """
+
+    buffer_name: str = Field(
+        description=(
+            "The actual tmux buffer name (with prefix and UUID nonce). "
+            "Pass this back to paste_buffer/show_buffer/delete_buffer."
+        ),
+    )
+    logical_name: str | None = Field(
+        default=None,
+        description="Optional logical name supplied by the caller, if any.",
+    )
+
+
+class BufferContent(BaseModel):
+    """Structured result of :func:`show_buffer`."""
+
+    buffer_name: str = Field(description="Agent-namespaced buffer name.")
+    content: str = Field(description="Buffer contents as text.")
+    content_truncated: bool = Field(
+        default=False,
+        description=(
+            "True if ``content`` was tail-preserved to stay within "
+            "``max_lines``; oldest lines were dropped."
+        ),
+    )
+    content_truncated_lines: int = Field(
+        default=0,
+        description="Number of lines dropped from the head when truncating.",
     )
 
 

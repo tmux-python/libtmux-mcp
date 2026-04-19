@@ -71,6 +71,18 @@ def set_environment(
     Use to set variables that will be inherited by new panes and windows.
     Changes do not affect already-running processes.
 
+    .. warning::
+       Values set here propagate into **every** shell tmux later spawns
+       in the targeted scope — including panes the user opens manually,
+       not just panes the agent drives. A caller that writes ``PATH``,
+       ``LD_PRELOAD``, or ``AWS_*`` variables can influence future
+       commands the human user types directly. Treat this as
+       elevated-risk within the ``mutating`` safety tier. The audit log
+       redacts the ``value`` argument, but the side effects persist on
+       disk/memory until tmux is restarted. Prefer ``env VAR=value
+       command`` via :func:`send_keys` when you only need the override
+       for a single command. See :doc:`/topics/safety`.
+
     Parameters
     ----------
     name : str

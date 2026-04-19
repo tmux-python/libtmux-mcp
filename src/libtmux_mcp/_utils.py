@@ -6,13 +6,16 @@ for all MCP tool functions.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import logging
 import os
+import pathlib
 import threading
 import typing as t
 
+from fastmcp.exceptions import ToolError
 from libtmux import exc
 from libtmux._internal.query_list import LOOKUP_NAME_MAP
 from libtmux.server import Server
@@ -27,9 +30,175 @@ if t.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclasses.dataclass(frozen=True)
+class CallerIdentity:
+    """Identity of the tmux pane hosting this MCP server process.
+
+    Parsed from the ``TMUX`` and ``TMUX_PANE`` environment variables that
+    tmux injects into every child of a pane. ``TMUX`` has the format
+    ``socket_path,server_pid,session_id`` (see tmux ``environ.c:281``).
+
+    Used to scope self-protection checks to the caller's own tmux server —
+    a pane ID like ``%1`` is only unique within a single server, so
+    comparisons must also verify the socket path matches.
+    """
+
+    socket_path: str | None
+    server_pid: int | None
+    session_id: str | None
+    pane_id: str | None
+
+
+def _get_caller_identity() -> CallerIdentity | None:
+    """Return the caller's tmux identity, or None if not inside tmux.
+
+    Reads ``TMUX`` for socket_path/server_pid/session_id and ``TMUX_PANE``
+    for the pane id. Tolerant of missing/malformed ``TMUX`` values —
+    callers should check individual fields rather than relying on all
+    being populated.
+    """
+    pane_id = os.environ.get("TMUX_PANE")
+    tmux_env = os.environ.get("TMUX")
+
+    if not tmux_env and not pane_id:
+        return None
+
+    socket_path: str | None = None
+    server_pid: int | None = None
+    session_id: str | None = None
+
+    if tmux_env:
+        parts = tmux_env.split(",", 2)
+        if parts:
+            socket_path = parts[0] or None
+        if len(parts) >= 2 and parts[1]:
+            try:
+                server_pid = int(parts[1])
+            except ValueError:
+                server_pid = None
+        if len(parts) >= 3 and parts[2]:
+            session_id = parts[2]
+
+    return CallerIdentity(
+        socket_path=socket_path,
+        server_pid=server_pid,
+        session_id=session_id,
+        pane_id=pane_id,
+    )
+
+
 def _get_caller_pane_id() -> str | None:
-    """Return the TMUX_PANE of the calling process, or None if not in tmux."""
-    return os.environ.get("TMUX_PANE")
+    """Return the TMUX_PANE of the calling process, or None if not in tmux.
+
+    Thin wrapper around :func:`_get_caller_identity` kept for callers that
+    only need the pane id (notably :func:`_serialize_pane`).
+    """
+    caller = _get_caller_identity()
+    return caller.pane_id if caller else None
+
+
+def _effective_socket_path(server: Server) -> str | None:
+    """Return the filesystem socket path a Server will actually use.
+
+    libtmux leaves ``Server.socket_path`` as ``None`` when only
+    ``socket_name`` (or neither) was supplied, but tmux still resolves to
+    a real path under ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/<name>``. This
+    helper reproduces that resolution so :func:`_caller_is_on_server` can
+    compare against the caller's ``TMUX`` socket path.
+
+    Resolution order:
+
+    1. ``Server.socket_path`` if libtmux already has it.
+    2. ``tmux display-message -p '#{socket_path}'`` against the target
+       server — authoritative because tmux itself reports the path it
+       is actually using, regardless of our process environment.
+       Necessary on macOS where ``$TMUX_TMPDIR`` under launchd diverges
+       from the interactive shell (see ``docs/topics/safety.md`` for
+       the self-kill guard gap this closes).
+    3. Fallback: reconstruct from ``$TMUX_TMPDIR`` + euid + socket name.
+       This path is reached only when the target server is unreachable
+       (e.g. not running), in which case no self-kill is possible and
+       the conservative caller check still blocks via
+       ``_caller_is_on_server``'s None-socket branch.
+    """
+    if server.socket_path:
+        return str(server.socket_path)
+    # Preferred: ask tmux directly. ``display-message -p`` prints the
+    # value to stdout and exits, so this is cheap. Wrapped defensively
+    # because the server may be down, the format may be unsupported on
+    # ancient tmux, or permissions may deny the call.
+    try:
+        resolved = server.cmd(
+            "display-message",
+            "-p",
+            "#{socket_path}",
+        ).stdout
+    except (exc.LibTmuxException, OSError):
+        resolved = None
+    if resolved:
+        first = resolved[0].strip()
+        if first:
+            return first
+    tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
+    socket_name = server.socket_name or "default"
+    return str(pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}" / socket_name)
+
+
+def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
+    """Return True if ``caller`` looks like it is on the same tmux server.
+
+    Compares socket paths via :func:`os.path.realpath` so symlinked temp
+    dirs still match, then falls back to basename comparison when
+    realpath disagrees — the authoritative caller-side ``$TMUX`` name
+    and the target's declared ``socket_name`` are both unaffected by
+    ``$TMUX_TMPDIR`` divergence (the macOS launchd case), so a
+    last-chance name match still blocks a self-kill when the path
+    comparison was fooled by env mismatch.
+
+    Decision table:
+
+    * ``caller is None`` → ``False``. The process isn't inside tmux at
+      all, so there is no caller-side pane to protect and no self-kill
+      is possible.
+    * caller has a pane id but no socket path (e.g. ``TMUX_PANE`` set
+      without ``TMUX``) → ``True``. We can't rule out that the caller
+      is on the target server, so err on the side of blocking a
+      destructive action.
+    * target server has no resolvable socket path → ``True``. Same
+      conservative reasoning.
+    * realpath of caller's socket path matches target's effective path
+      → ``True`` (primary positive signal).
+    * basename of caller's socket path equals target's
+      ``socket_name`` (or ``"default"``) → ``True``. Conservative
+      last-chance block for env-mismatch scenarios where reconstruction
+      produced a wrong path but the name was authoritative on both
+      sides. Trades off one exotic false positive (two daemons with
+      identical socket_name under different tmpdirs) for a real safety
+      property.
+    * Otherwise → ``False``.
+
+    When a conservative block is a false positive, the caller's error
+    message directs the user to run tmux manually.
+    """
+    if caller is None:
+        return False
+    if not caller.socket_path:
+        return caller.pane_id is not None
+    target = _effective_socket_path(server)
+    if not target:
+        return True
+    try:
+        if os.path.realpath(caller.socket_path) == os.path.realpath(target):
+            return True
+    except OSError:
+        if caller.socket_path == target:
+            return True
+    # Final conservative check: names match even though paths didn't.
+    # Survives ``$TMUX_TMPDIR`` divergence between the MCP process and
+    # the caller's shell (macOS launchd).
+    caller_basename = pathlib.PurePath(caller.socket_path).name
+    target_name = server.socket_name or "default"
+    return caller_basename == target_name
 
 
 # ---------------------------------------------------------------------------
@@ -64,12 +233,82 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+#: Annotations for tools that move user-supplied payloads into a shell
+#: context. Five consumers today:
+#:
+#: * ``send_keys``, ``paste_text``, ``pipe_pane`` — the canonical
+#:   shell-driving tools; caller's keys/text/stream reaches the shell
+#:   prompt or pipes into an external command respectively.
+#: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
+#:   into a tmux paste buffer; ``paste_buffer`` pushes that content
+#:   into a target pane where the shell receives it as input. The two
+#:   are split into a stage/fire pair so callers can validate before
+#:   paste, but both participate in the same open-world transfer.
+#:
+#: Distinguished from :data:`ANNOTATIONS_CREATE` by ``openWorldHint=True``:
+#: the effects of these tools extend into whatever command or content
+#: the caller supplies, which is the canonical open-world MCP
+#: interaction.
+ANNOTATIONS_SHELL: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
 ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": False,
     "openWorldHint": False,
 }
+
+
+def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
+    """Build a full tmux argv list honouring ``socket_name`` and ``socket_path``.
+
+    Internal helper shared by every module that has to invoke the tmux
+    binary directly via :func:`subprocess.run` (the buffer, wait-for,
+    and paste_text tools). libtmux's own :meth:`Server.cmd` wraps the
+    same logic but does not expose a timeout, so tools that need
+    bounded blocking have to shell out themselves — and when they do
+    they must honour the caller's socket.
+
+    Parameters
+    ----------
+    server : libtmux.server.Server
+        The resolved server whose socket to target.
+    *tmux_args : str
+        tmux subcommand and its flags, e.g. ``"load-buffer", "-b", name``.
+
+    Returns
+    -------
+    list[str]
+        Complete argv ready for :func:`subprocess.run`.
+
+    Examples
+    --------
+    >>> class _S:
+    ...     tmux_bin = "tmux"
+    ...     socket_name = "s"
+    ...     socket_path = None
+    >>> _tmux_argv(t.cast("Server", _S()), "list-sessions")
+    ['tmux', '-L', 's', 'list-sessions']
+
+    >>> class _P:
+    ...     tmux_bin = "tmux"
+    ...     socket_name = None
+    ...     socket_path = "/tmp/tmux-1000/default"
+    >>> _tmux_argv(t.cast("Server", _P()), "ls")
+    ['tmux', '-S', '/tmp/tmux-1000/default', 'ls']
+    """
+    tmux_bin: str = getattr(server, "tmux_bin", None) or "tmux"
+    argv: list[str] = [tmux_bin]
+    if server.socket_name:
+        argv.extend(["-L", server.socket_name])
+    if server.socket_path:
+        argv.extend(["-S", str(server.socket_path)])
+    argv.extend(tmux_args)
+    return argv
 
 
 _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}
@@ -337,6 +576,59 @@ def _resolve_pane(
 M = t.TypeVar("M")
 
 
+def _coerce_dict_arg(
+    name: str,
+    value: dict[str, t.Any] | str | None,
+) -> dict[str, t.Any] | None:
+    """Coerce a tool parameter to a dict, accepting JSON-string form.
+
+    Workaround: Cursor's composer-1/composer-1.5 models and some other
+    MCP clients serialize dict params as JSON strings instead of
+    objects. Claude and GPT models through Cursor work fine; the bug
+    is model-specific. This helper is the canonical place to absorb
+    the string form so each tool can stay dict-typed on the Python
+    side. Callers pass ``name`` so the error messages identify the
+    offending parameter.
+
+    See:
+        https://forum.cursor.com/t/145807
+        https://github.com/anthropics/claude-code/issues/5504
+
+    Parameters
+    ----------
+    name : str
+        Parameter name, used in error messages.
+    value : dict, str, or None
+        Either an already-decoded dict, a JSON string of a dict, or
+        ``None``.
+
+    Returns
+    -------
+    dict or None
+        The decoded dict, or ``None`` if the input was ``None`` or an
+        empty string.
+
+    Raises
+    ------
+    ToolError
+        If ``value`` is a string that is not valid JSON, or decodes to
+        a JSON value that is not an object.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, ValueError) as e:
+            msg = f"Invalid {name} JSON: {e}"
+            raise ToolError(msg) from e
+        if not isinstance(decoded, dict):
+            msg = f"{name} must be a JSON object, got {type(decoded).__name__}"
+            raise ToolError(msg) from None
+        return decoded
+    return value
+
+
 def _apply_filters(
     items: t.Any,
     filters: dict[str, str] | str | None,
@@ -365,25 +657,10 @@ def _apply_filters(
     ToolError
         If a filter key uses an invalid lookup operator.
     """
-    if not filters:
+    coerced = _coerce_dict_arg("filters", filters)
+    if not coerced:
         return [serializer(item) for item in items]
-
-    from fastmcp.exceptions import ToolError
-
-    # Workaround: Cursor's composer-1/composer-1.5 models and some other
-    # MCP clients serialize dict params as JSON strings instead of objects.
-    # Claude and GPT models through Cursor work fine; the bug is model-specific.
-    # See: https://forum.cursor.com/t/145807
-    #      https://github.com/anthropics/claude-code/issues/5504
-    if isinstance(filters, str):
-        try:
-            filters = json.loads(filters)
-        except (json.JSONDecodeError, ValueError) as e:
-            msg = f"Invalid filters JSON: {e}"
-            raise ToolError(msg) from e
-        if not isinstance(filters, dict):
-            msg = f"filters must be a JSON object, got {type(filters).__name__}"
-            raise ToolError(msg) from None
+    filters = coerced
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
     for key in filters:
@@ -416,12 +693,21 @@ def _serialize_session(session: Session) -> SessionInfo:
     from libtmux_mcp.models import SessionInfo
 
     assert session.session_id is not None
+    # Defensive ``getattr``: ``Session.active_pane`` exists on every
+    # supported libtmux version, but older builds may raise instead of
+    # returning ``None`` for sessions mid-teardown. Treating a missing
+    # attribute or missing pane id as ``None`` lets ``list_sessions``
+    # tolerate transient state without breaking serialization.
+    active_pane = getattr(session, "active_pane", None)
+    active_pane_id = active_pane.pane_id if active_pane is not None else None
+
     return SessionInfo(
         session_id=session.session_id,
         session_name=session.session_name,
         window_count=len(session.windows),
         session_attached=getattr(session, "session_attached", None),
         session_created=getattr(session, "session_created", None),
+        active_pane_id=active_pane_id,
     )
 
 
@@ -492,15 +778,39 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
+def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
+    """Translate a libtmux / unexpected exception into a ``ToolError``.
+
+    Shared between the sync and async ``handle_tool_errors*`` decorators
+    so the two paths stay byte-for-byte identical in what agents see.
+    """
+    if isinstance(e, exc.TmuxCommandNotFound):
+        msg = "tmux binary not found. Ensure tmux is installed and in PATH."
+        return ToolError(msg)
+    if isinstance(e, exc.TmuxSessionExists):
+        return ToolError(str(e))
+    if isinstance(e, exc.BadSessionName):
+        return ToolError(str(e))
+    if isinstance(e, exc.TmuxObjectDoesNotExist):
+        return ToolError(f"Object not found: {e}")
+    if isinstance(e, exc.PaneNotFound):
+        return ToolError(f"Pane not found: {e}")
+    if isinstance(e, exc.LibTmuxException):
+        return ToolError(f"tmux error: {e}")
+    logger.exception("unexpected error in MCP tool %s", fn_name)
+    return ToolError(f"Unexpected error: {type(e).__name__}: {e}")
+
+
 def handle_tool_errors(
     fn: t.Callable[P, R],
 ) -> t.Callable[P, R]:
-    """Decorate MCP tool functions with standardized error handling.
+    """Decorate synchronous MCP tool functions with standardized error handling.
 
     Catches libtmux exceptions and re-raises as ``ToolError`` so that
     MCP responses have ``isError=True`` with a descriptive message.
+    Use :func:`handle_tool_errors_async` for ``async def`` tools — this
+    wrapper only supports plain sync callables.
     """
-    from fastmcp.exceptions import ToolError
 
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -508,25 +818,33 @@ def handle_tool_errors(
             return fn(*args, **kwargs)
         except ToolError:
             raise
-        except exc.TmuxCommandNotFound as e:
-            msg = "tmux binary not found. Ensure tmux is installed and in PATH."
-            raise ToolError(msg) from e
-        except exc.TmuxSessionExists as e:
-            raise ToolError(str(e)) from e
-        except exc.BadSessionName as e:
-            raise ToolError(str(e)) from e
-        except exc.TmuxObjectDoesNotExist as e:
-            msg = f"Object not found: {e}"
-            raise ToolError(msg) from e
-        except exc.PaneNotFound as e:
-            msg = f"Pane not found: {e}"
-            raise ToolError(msg) from e
-        except exc.LibTmuxException as e:
-            msg = f"tmux error: {e}"
-            raise ToolError(msg) from e
         except Exception as e:
-            logger.exception("unexpected error in MCP tool %s", fn.__name__)
-            msg = f"Unexpected error: {type(e).__name__}: {e}"
-            raise ToolError(msg) from e
+            raise _map_exception_to_tool_error(fn.__name__, e) from e
+
+    return wrapper
+
+
+def handle_tool_errors_async(
+    fn: t.Callable[P, t.Coroutine[t.Any, t.Any, R]],
+) -> t.Callable[P, t.Coroutine[t.Any, t.Any, R]]:
+    """Decorate asynchronous MCP tool functions with standardized error handling.
+
+    Async counterpart to :func:`handle_tool_errors`. Required for tools
+    that accept a :class:`fastmcp.Context` parameter because Context's
+    ``report_progress``/``elicit``/``read_resource`` methods are
+    coroutines that only run inside ``async def`` tools.
+
+    Maps the same libtmux exception set to the same ``ToolError``
+    messages as the sync decorator by delegating to a shared helper.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return await fn(*args, **kwargs)
+        except ToolError:
+            raise
+        except Exception as e:
+            raise _map_exception_to_tool_error(fn.__name__, e) from e
 
     return wrapper

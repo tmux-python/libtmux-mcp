@@ -29,12 +29,6 @@ Pydantic models for requests and responses.
 Safety-tier enforcement and request hooks.
 :::
 
-:::{grid-item-card} Resources
-:link: resources
-:link-type: doc
-MCP resource providers.
-:::
-
 :::{grid-item-card} Utils
 :link: utils
 :link-type: doc
@@ -50,6 +44,5 @@ server
 tools
 models
 middleware
-resources
 utils
 ```

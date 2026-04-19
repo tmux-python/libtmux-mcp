@@ -6,6 +6,103 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+_FastMCP alignment: new tools, prompts, and middleware (#15)_
+
+### Breaking changes
+
+- {tooliconl}`search-panes` now returns
+  {class}`~libtmux_mcp.models.SearchPanesResult` instead of
+  `list[`{class}`~libtmux_mcp.models.PaneContentMatch``]`. Matches
+  moved to `.matches`; new `truncated`, `truncated_panes`,
+  `total_panes_matched`, `offset`, `limit` fields enable pagination.
+  Migrate `for m in search_panes(...)` →
+  `for m in search_panes(...).matches`.
+- Minimum `fastmcp>=3.2.4` (was `>=3.1.0`). Required for
+  {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` and
+  per-parameter input-schema descriptions.
+
+### What's new
+
+**New tools**
+
+- Discovery: {tooliconl}`list-servers`.
+- Waits: {tooliconl}`wait-for-text`,
+  {tooliconl}`wait-for-content-change`, {tooliconl}`wait-for-channel`,
+  {tooliconl}`signal-channel`. All bounded, emit
+  `ctx.report_progress` / `ctx.warning`, and propagate
+  {exc}`asyncio.CancelledError` cleanly.
+- Buffers: {tooliconl}`load-buffer`, {tooliconl}`paste-buffer`,
+  {tooliconl}`show-buffer`, {tooliconl}`delete-buffer`.
+  Agent-namespaced as `libtmux_mcp_<uuid>_<name>` to prevent
+  collisions; leaked buffers GC'd on graceful shutdown.
+- Hooks (read-only): {tooliconl}`show-hook`, {tooliconl}`show-hooks`.
+- Panes / windows: {tooliconl}`snapshot-pane`, {tooliconl}`pipe-pane`,
+  {tooliconl}`display-message`, {tooliconl}`paste-text`,
+  {tooliconl}`select-pane`, {tooliconl}`swap-pane`,
+  {tooliconl}`select-window`, {tooliconl}`move-window`,
+  {tooliconl}`enter-copy-mode`, {tooliconl}`exit-copy-mode`.
+
+**Prompt recipes**
+
+- Four prompts: `run_and_wait`, `diagnose_failing_pane`,
+  `build_dev_workspace`, `interrupt_gracefully`. Set
+  `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1` to expose them as tools for
+  tools-only MCP clients.
+
+**Middleware stack**
+
+- `TimingMiddleware`, `ErrorHandlingMiddleware`,
+  {class}`~libtmux_mcp.middleware.AuditMiddleware` (digest-redacted
+  argument summaries),
+  {class}`~libtmux_mcp.middleware.SafetyMiddleware` (tier-gated tool
+  visibility),
+  {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware`
+  (transparent retry of readonly tools on transient
+  {exc}`libtmux.exc.LibTmuxException`; mutating tools never retry),
+  {class}`~libtmux_mcp.middleware.TailPreservingResponseLimitingMiddleware`
+  (trims oversized output from the head so the active prompt
+  survives).
+
+**Bounded outputs**
+
+- {tooliconl}`capture-pane`, {tooliconl}`snapshot-pane`,
+  {tooliconl}`show-buffer` accept `max_lines` (default 500) with
+  tail-preserving truncation and typed `content_truncated` /
+  `content_truncated_lines` signals. Pass `max_lines=None` to opt
+  out.
+
+**Other**
+
+- Tool input schemas carry per-parameter `description` fields
+  auto-extracted from NumPy-style docstrings.
+- Lifespan startup probe fails fast with {exc}`RuntimeError` if
+  `tmux` is missing on `PATH`.
+- {attr}`~libtmux_mcp.models.SessionInfo.active_pane_id` surfaces the
+  pane id returned by {tooliconl}`create-session`.
+
+### Fixes
+
+- {tooliconl}`search-panes` neutralizes tmux format-string injection
+  in the regex fast path.
+- macOS `TMUX_TMPDIR` self-kill guard: resolves the server socket via
+  `tmux display-message #{socket_path}` before env-based
+  reconstruction; basename-match fallback closes the launchd
+  divergence gap.
+- `build_dev_workspace` prompt uses the real tool parameter names
+  (`session_name=`, `pane_id=`, `direction=`) and no longer waits for
+  shell prompts after launching screen-grabbing programs (`vim`,
+  `watch`, `tail -f`). New `log_command` parameter replaces the
+  Linux-only `/var/log/syslog` default.
+- `ReadonlyRetryMiddleware` retry warnings log under
+  `libtmux_mcp.retry`.
+
+### Documentation
+
+- New per-tool pages: `buffers.md`, `hooks.md`, `waits.md`,
+  `tools/index.md`. `panes.md` documents the `SearchPanesResult`
+  migration. `safety.md` covers the macOS `TMUX_TMPDIR` caveat, the
+  audit log, `pipe_pane`, and `set_environment`.
+
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
 ### What's new
