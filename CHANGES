@@ -26,6 +26,14 @@ _Notes on upcoming releases will be added here_
   `_caller_is_on_server` (the same socket-scoped comparator used by
   the self-kill guard) via the new `_compute_is_caller` helper
   (#22, fixes #19).
+- {tooliconl}`wait-for-channel` and {tooliconl}`signal-channel` no
+  longer block the FastMCP event loop. Both were sync `def` handlers
+  running `subprocess.run(timeout=N)` on the main loop — for the
+  duration of the wait the server could not service other tool calls,
+  MCP pings, or client cancellations. Ported to `async def` +
+  {func}`asyncio.to_thread`, matching the pattern already used by
+  {tooliconl}`wait-for-text` / {tooliconl}`wait-for-content-change`
+  (#21, fixes #18).
 
 ## libtmux-mcp 0.1.0a2 (2026-04-19)
 
