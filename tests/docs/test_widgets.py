@@ -287,9 +287,9 @@ def _sphinx_native_html(
     (srcdir / "native.rst").write_text(rst, encoding="utf-8")
     app.build()
     html = (pathlib.Path(app.outdir) / "native.html").read_text(encoding="utf-8")
-    # Match Sphinx's highlight wrapper (writers/html5.py:626-629); the two
-    # trailing ``</div>\n`` (inner Pygments close + outer Sphinx close) anchor
-    # the end of the block.
+    # Match Sphinx's highlight wrapper produced by
+    # ``HTML5Translator.visit_literal_block``; the two trailing ``</div>\n``
+    # (inner Pygments close + outer Sphinx close) anchor the end of the block.
     pattern = re.compile(
         rf'<div class="highlight-{re.escape(language)} notranslate">'
         r".*?</div>\n</div>\n",
