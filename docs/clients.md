@@ -7,18 +7,30 @@ Copy-pasteable configuration for every supported MCP client. If your client isn'
 ## Claude Code
 
 `````{tab} uvx
+With [uv](https://docs.astral.sh/uv/) installed:
+
 ```console
 $ claude mcp add libtmux -- uvx libtmux-mcp
 ```
 `````
 
 `````{tab} pipx
+With [pipx](https://pipx.pypa.io/) installed:
+
 ```console
 $ claude mcp add libtmux -- pipx run libtmux-mcp
 ```
 `````
 
 `````{tab} pip install
+Install the packages first:
+
+```console
+$ pip install --user --upgrade libtmux libtmux-mcp
+```
+
+Then register:
+
 ```console
 $ claude mcp add libtmux -- libtmux-mcp
 ```
@@ -31,6 +43,8 @@ Config file: `.mcp.json` (project) or `~/.claude.json` (global).
 Add to `claude_desktop_config.json`:
 
 `````{tab} uvx
+With [uv](https://docs.astral.sh/uv/) installed:
+
 ```json
 {
     "mcpServers": {
@@ -44,6 +58,8 @@ Add to `claude_desktop_config.json`:
 `````
 
 `````{tab} pipx
+With [pipx](https://pipx.pypa.io/) installed:
+
 ```json
 {
     "mcpServers": {
@@ -57,6 +73,14 @@ Add to `claude_desktop_config.json`:
 `````
 
 `````{tab} pip install
+Install the packages first:
+
+```console
+$ pip install --user --upgrade libtmux libtmux-mcp
+```
+
+Then use this config:
+
 ```json
 {
     "mcpServers": {
@@ -71,18 +95,30 @@ Add to `claude_desktop_config.json`:
 ## Codex CLI
 
 `````{tab} uvx
+With [uv](https://docs.astral.sh/uv/) installed:
+
 ```console
 $ codex mcp add libtmux -- uvx libtmux-mcp
 ```
 `````
 
 `````{tab} pipx
+With [pipx](https://pipx.pypa.io/) installed:
+
 ```console
 $ codex mcp add libtmux -- pipx run libtmux-mcp
 ```
 `````
 
 `````{tab} pip install
+Install the packages first:
+
+```console
+$ pip install --user --upgrade libtmux libtmux-mcp
+```
+
+Then register:
+
 ```console
 $ codex mcp add libtmux -- libtmux-mcp
 ```
@@ -104,18 +140,30 @@ args = ["libtmux-mcp"]
 ## Gemini CLI
 
 `````{tab} uvx
+With [uv](https://docs.astral.sh/uv/) installed:
+
 ```console
 $ gemini mcp add libtmux uvx -- libtmux-mcp
 ```
 `````
 
 `````{tab} pipx
+With [pipx](https://pipx.pypa.io/) installed:
+
 ```console
 $ gemini mcp add libtmux pipx -- run libtmux-mcp
 ```
 `````
 
 `````{tab} pip install
+Install the packages first:
+
+```console
+$ pip install --user --upgrade libtmux libtmux-mcp
+```
+
+Then register:
+
 ```console
 $ gemini mcp add libtmux libtmux-mcp
 ```
@@ -128,6 +176,8 @@ Config file: `~/.gemini/settings.json` (JSON format, same schema as Claude Deskt
 Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 
 `````{tab} uvx
+With [uv](https://docs.astral.sh/uv/) installed:
+
 ```json
 {
     "mcpServers": {
@@ -141,6 +191,8 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 `````
 
 `````{tab} pipx
+With [pipx](https://pipx.pypa.io/) installed:
+
 ```json
 {
     "mcpServers": {
@@ -154,6 +206,14 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
 `````
 
 `````{tab} pip install
+Install the packages first:
+
+```console
+$ pip install --user --upgrade libtmux libtmux-mcp
+```
+
+Then use this config:
+
 ```json
 {
     "mcpServers": {
