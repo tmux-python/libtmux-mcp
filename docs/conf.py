@@ -80,15 +80,15 @@ conf["fastmcp_tool_modules"] = [
     "libtmux_mcp.tools.hook_tools",
 ]
 conf["fastmcp_area_map"] = {
-    "server_tools": "sessions",
-    "session_tools": "sessions",
-    "window_tools": "windows",
-    "pane_tools": "panes",
-    "option_tools": "options",
-    "env_tools": "options",
-    "buffer_tools": "buffers",
-    "wait_for_tools": "waits",
-    "hook_tools": "hooks",
+    "server_tools": "server/index",
+    "session_tools": "session/index",
+    "window_tools": "window/index",
+    "pane_tools": "pane/index",
+    "option_tools": "server/index",
+    "env_tools": "server/index",
+    "buffer_tools": "buffer/index",
+    "wait_for_tools": "pane/index",
+    "hook_tools": "hook/index",
 }
 conf["fastmcp_server_module"] = "libtmux_mcp.server:mcp"
 conf["fastmcp_model_module"] = "libtmux_mcp.models"

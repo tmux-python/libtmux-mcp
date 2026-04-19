@@ -374,12 +374,12 @@ Delete an MCP-staged tmux paste buffer.
 
 ```{toctree}
 :hidden:
+:caption: Tools by tmux scope
 
-sessions
-windows
-panes
-options
-buffers
-waits
-hooks
+server/index
+session/index
+window/index
+pane/index
+buffer/index
+hook/index
 ```
