@@ -1,5 +1,19 @@
 # Wait for channel
 
+tmux's `wait-for` command exposes named, server-global channels that clients can signal and block on. These give agents an explicit synchronization primitive — strictly cheaper in agent turns than polling pane content via {tooliconl}`capture-pane` or {tooliconl}`wait-for-text`.
+
+The composition pattern: {tooliconl}`send-keys` a command that emits the signal on its exit, then `wait_for_channel`. The signal MUST fire on both success and failure paths or the wait will block until the timeout.
+
+```python
+send_keys(
+    pane_id="%1",
+    keys="pytest; status=$?; tmux wait-for -S tests_done; exit $status",
+)
+wait_for_channel("tests_done", timeout=60)
+```
+
+The `; status=$?; tmux wait-for -S NAME; exit $status` idiom is the load-bearing safety contract — `wait-for` is edge-triggered, so a crash before the signal would deadlock until the wait's `timeout`.
+
 ```{fastmcp-tool} wait_for_tools.wait_for_channel
 ```
 
@@ -18,7 +32,3 @@ rather than blocking indefinitely.
 
 ```{fastmcp-tool-input} wait_for_tools.wait_for_channel
 ```
-
----
-
-## Signal
