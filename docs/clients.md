@@ -301,3 +301,20 @@ $ gemini mcp add \
 - **Absolute paths**: Some clients require absolute paths in config. Use `$HOME/...` or the full path instead of `~/...`.
 - **Virtual environments**: If using pip install, ensure the venv is activated or the `libtmux-mcp` binary is on your PATH.
 - **Socket isolation**: Set `LIBTMUX_SOCKET` in the `env` block to isolate the MCP server from your default tmux. See {ref}`configuration`.
+
+## Known client issues
+
+:::{warning}
+**Cursor agent Auto Mode: string tool arguments may arrive unquoted.**
+
+On some model paths, Cursor's agent serializes MCP tool arguments with string values that are missing their surrounding JSON quotes — producing payloads like `{"session_id": $10}` or `{"session_name": cv}` that fail at the transport's JSON-parse step *before* libtmux-mcp's Python handlers run. Symptom on the client side:
+
+- `Unexpected token '$', "{"session_id": $10}" is not valid JSON`
+- `Unexpected token 'c', "{"session_name": cv}" is not valid JSON`
+
+**Mitigation shipped in libtmux-mcp**: the server's MCP `instructions` now carry an explicit "emit JSON-quoted strings" directive that the client surfaces to the model alongside tool schemas. Models that honor server-level MCP instructions should produce valid JSON.
+
+**Belt-and-suspenders**: prefer `pane_id` (e.g. `"%1"`) for pane targeting whenever possible — pane IDs are globally unique within a tmux server and are the recommended default anyway. See {doc}`topics/troubleshooting` for the broader targeting guidance.
+
+Tracked upstream at [tmux-python/libtmux-mcp#17](https://github.com/tmux-python/libtmux-mcp/issues/17). The root cause is in the client; libtmux-mcp's Python handlers never see the malformed payload, so there is no server-side recovery path beyond the instructions channel.
+:::
