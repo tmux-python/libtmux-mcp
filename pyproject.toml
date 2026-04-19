@@ -41,7 +41,7 @@ include = [
 
 dependencies = [
   "libtmux>=0.55.0,<1.0",
-  "fastmcp>=3.1.0,<4.0.0",
+  "fastmcp>=3.2.4,<4.0.0",
 ]
 
 [project.urls]
@@ -69,6 +69,7 @@ dev = [
   "pytest-mock",
   "pytest-watcher",
   "pytest-xdist",
+  "syrupy>=5.1.0",
   # Coverage
   "codecov",
   "coverage",
@@ -115,9 +116,17 @@ files = [
   "src",
   "tests",
 ]
+# ``docs/_ext`` is not in ``files`` to avoid double-naming the widgets package
+# (mypy would see it as both ``widgets`` and ``docs._ext.widgets``); the path
+# entry alone lets imports like ``from widgets import ...`` in tests resolve.
+# ``exclude`` is also required so that ``uv run mypy .`` in CI -- which
+# traverses every path under the current dir -- doesn't rediscover the same
+# files under their ``docs._ext.`` prefix and error "Source file found twice".
+mypy_path = ["docs/_ext"]
+exclude = ["^docs/"]
 
 [[tool.mypy.overrides]]
-module = ["sphinx_autodoc_fastmcp", "sphinx_autodoc_fastmcp.*", "docutils", "docutils.*"]
+module = ["docutils", "docutils.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
@@ -213,8 +222,8 @@ addopts = [
   "--tb=short",
   "--no-header",
   "--showlocals",
+  "--doctest-modules",
   "--doctest-docutils-modules",
-  "-p no:doctest",
   "--reruns=2"
 ]
 doctest_optionflags = [

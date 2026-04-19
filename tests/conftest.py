@@ -23,6 +23,21 @@ def _clear_server_cache() -> t.Generator[None, None, None]:
     _server_cache.clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_tmux_caller_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remove TMUX / TMUX_PANE so host terminal doesn't leak into tests.
+
+    Without this, running the suite inside tmux would make caller-identity
+    checks see the developer's real socket and break self-protection
+    tests non-deterministically. Tests that want to exercise the guards
+    set these explicitly.
+    """
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+
+
 @pytest.fixture
 def mcp_server(server: Server) -> Server:
     """Provide a libtmux Server pre-registered in the MCP cache.

@@ -10,6 +10,10 @@ This server maps tmux's object hierarchy — sessions, windows, panes — into M
 **Pre-alpha.** APIs may change. [Feedback welcome](https://github.com/tmux-python/libtmux-mcp/issues).
 ```
 
+```{mcp-install}
+:variant: compact
+```
+
 ---
 
 ::::{grid} 1 1 2 2
@@ -27,6 +31,20 @@ Install, connect, get a first result. Under 2 minutes.
 :link-type: doc
 
 Every tool, grouped by intent and safety tier.
+:::
+
+:::{grid-item-card} Prompts
+:link: prompts
+:link-type: doc
+
+Four workflow recipes the client renders for the model.
+:::
+
+:::{grid-item-card} Resources
+:link: resources
+:link-type: doc
+
+Snapshot views of the tmux hierarchy via `tmux://` URIs.
 :::
 
 :::{grid-item-card} Safety tiers
@@ -93,6 +111,8 @@ clients
 :caption: Use it
 
 tools/index
+prompts
+resources
 recipes
 configuration
 ```

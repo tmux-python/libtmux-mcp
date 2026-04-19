@@ -6,11 +6,12 @@ One happy path from zero to a working tool invocation.
 
 ## 1. Install
 
-```console
-$ claude mcp add libtmux -- uvx libtmux-mcp
+Pick your MCP client and install method:
+
+```{mcp-install}
 ```
 
-Using a different client? See {ref}`installation` and {ref}`clients`.
+See {ref}`clients` for dev-checkout setup, full config-file locations, and common pitfalls.
 
 ## 2. Verify
 

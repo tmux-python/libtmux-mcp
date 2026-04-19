@@ -1,0 +1,29 @@
+# serializer version: 1
+# name: test_highlight_filter_matches_sphinx_native[console-claude-code-uvx][highlight_console-claude-code-uvx]
+  '''
+  <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>libtmux<span class="w"> </span>--<span class="w"> </span>uvx<span class="w"> </span>libtmux-mcp
+  </pre></div>
+  </div>
+  '''
+# ---
+# name: test_highlight_filter_matches_sphinx_native[console-pip-prereq][highlight_console-pip-prereq]
+  '''
+  <div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="gp">$ </span>pip<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span>--upgrade<span class="w"> </span>libtmux<span class="w"> </span>libtmux-mcp
+  </pre></div>
+  </div>
+  '''
+# ---
+# name: test_highlight_filter_matches_sphinx_native[json-mcp-config-uvx][highlight_json-mcp-config-uvx]
+  '''
+  <div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+  <span class="w">    </span><span class="nt">&quot;mcpServers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+  <span class="w">        </span><span class="nt">&quot;libtmux&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+  <span class="w">            </span><span class="nt">&quot;command&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;uvx&quot;</span><span class="p">,</span>
+  <span class="w">            </span><span class="nt">&quot;args&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;libtmux-mcp&quot;</span><span class="p">]</span>
+  <span class="w">        </span><span class="p">}</span>
+  <span class="w">    </span><span class="p">}</span>
+  <span class="p">}</span>
+  </pre></div>
+  </div>
+  '''
+# ---

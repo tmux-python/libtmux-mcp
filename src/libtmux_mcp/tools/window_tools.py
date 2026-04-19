@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp.exceptions import ToolError
 from libtmux.constants import PaneDirection
 
 from libtmux_mcp._utils import (
@@ -15,7 +16,8 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     _apply_filters,
-    _get_caller_pane_id,
+    _caller_is_on_server,
+    _get_caller_identity,
     _get_server,
     _resolve_pane,
     _resolve_session,
@@ -149,8 +151,6 @@ def split_window(
     if direction is not None:
         pane_dir = _DIRECTION_MAP.get(direction)
         if pane_dir is None:
-            from fastmcp.exceptions import ToolError
-
             valid = ", ".join(sorted(_DIRECTION_MAP))
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ToolError(msg)
@@ -249,22 +249,18 @@ def kill_window(
     str
         Confirmation message.
     """
-    from fastmcp.exceptions import ToolError
+    server = _get_server(socket_name=socket_name)
+    window = _resolve_window(server, window_id=window_id)
 
-    caller = _get_caller_pane_id()
-    if caller is not None:
-        server = _get_server(socket_name=socket_name)
-        window = _resolve_window(server, window_id=window_id)
-        caller_pane = server.panes.get(pane_id=caller, default=None)
+    caller = _get_caller_identity()
+    if _caller_is_on_server(server, caller) and caller is not None and caller.pane_id:
+        caller_pane = server.panes.get(pane_id=caller.pane_id, default=None)
         if caller_pane is not None and caller_pane.window_id == window_id:
             msg = (
                 "Refusing to kill the window containing this MCP server's pane. "
                 "Use a manual tmux command if intended."
             )
             raise ToolError(msg)
-    else:
-        server = _get_server(socket_name=socket_name)
-        window = _resolve_window(server, window_id=window_id)
 
     wid = window.window_id
     window.kill()

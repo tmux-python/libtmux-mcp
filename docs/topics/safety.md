@@ -59,7 +59,52 @@ Destructive tools include safeguards against self-harm:
 - {tool}`kill-window` refuses to kill the window containing the MCP pane
 - {tool}`kill-pane` refuses to kill the pane running the MCP server
 
-These protections use the `TMUX_PANE` environment variable to detect the caller's own pane.
+These protections read both the `TMUX` and `TMUX_PANE` environment variables that tmux injects into pane child processes. The `TMUX` value is formatted `socket_path,server_pid,session_id` — libtmux-mcp parses the socket path and compares it to the target server's so the guard only fires when the caller is actually on the same tmux server. A kill across unrelated sockets is allowed; a kill of the caller's own pane/window/session/server is refused. If the caller's socket can't be determined (rare — `TMUX_PANE` set without `TMUX`), the guard errs on the side of blocking.
+
+### macOS `TMUX_TMPDIR` caveat
+
+The self-kill guard reconstructs the target server's socket path by combining {envvar}`TMUX_TMPDIR` (or `/tmp` if unset) with the configured socket name. On macOS, `TMUX_TMPDIR` commonly differs between interactive shells and background service environments — if the MCP process and the tmux server were launched under different values, the reconstructed target path won't match the caller's `TMUX` socket path and the guard may decline to fire. The target-side comparison still protects the common case (same shell, same launchd context), but a mismatched {envvar}`TMUX_TMPDIR` can degrade the protection into a no-op.
+
+Mitigation today: set {envvar}`TMUX_TMPDIR` explicitly in both the MCP server's environment and the shell that starts tmux, so both reconstructions resolve to the same path. The proper structural fix — querying tmux for its own socket via `display-message '#{socket_path}'` rather than reconstructing — is tracked outside this documentation.
+
+## Footguns inside the `mutating` tier
+
+Most `mutating` tools are bounded: `resize_pane` only resizes, `rename_window` only renames. A few have broader reach because tmux itself exposes broader reach. Treat these as elevated risk even though they share the default tier:
+
+### `pipe_pane`
+
+{tool}`pipe-pane` pipes a pane's output to a shell command that the server runs. In practice this means the caller chooses an arbitrary path or pipeline on the server host. There is no allow-list. Assume it can create files anywhere the server process can write.
+
+Mitigations:
+
+- Run the server as an unprivileged user with a scoped home directory.
+- Consider `LIBTMUX_SAFETY=readonly` for untrusted MCP clients.
+- Audit log records (see below) capture the `output_path` argument so reviewers can spot unexpected destinations.
+
+### `set_environment`
+
+{tool}`set-environment` writes into tmux's global, session, or window environment. Those values propagate into every shell tmux spawns afterwards. An agent that writes `PATH`, `LD_PRELOAD`, or `AWS_*` variables can influence every future command on that scope — including commands the user runs directly, not just commands the agent issues.
+
+Mitigations:
+
+- The audit log redacts the `value` argument to a `{len, sha256_prefix}` digest so log files don't leak the secrets agents set, but operators should still treat the tool as high-privilege.
+- If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via `send_keys` instead — the blast radius is one command, not every future child.
+
+### `send_keys` / `paste_text`
+
+These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via `send_keys` does not land in logs.
+
+## Audit log
+
+Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carrying:
+
+- `tool` — the tool name
+- `outcome` — `ok` or `error`, with `error_type` on failure
+- `duration_ms`
+- `client_id` / `request_id` — from the fastmcp context when available
+- `args` — a summary of arguments. Sensitive keys (`keys`, `text`, `value`) are replaced by `{len, sha256_prefix}`; non-sensitive strings over 200 characters are truncated.
+
+Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 
 ## Tool annotations
 

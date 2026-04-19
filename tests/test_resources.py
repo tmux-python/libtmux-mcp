@@ -101,3 +101,86 @@ def test_pane_content_resource(
     fn = resource_functions["tmux://panes/{pane_id}/content{?socket_name}"]
     result = fn(mcp_pane.pane_id)
     assert isinstance(result, str)
+
+
+def test_every_hierarchy_resource_returns_str(
+    resource_functions: dict[str, t.Any],
+    mcp_session: Session,
+    mcp_pane: Pane,
+) -> None:
+    """Every registered hierarchy resource returns a ``str``.
+
+    Regression guard mirroring the read-heavy tool shape tests —
+    resources wire to MCP clients as raw body strings (JSON text or
+    plain text), so a future refactor that accidentally returns a
+    dict or Pydantic instance would break the MCP resource surface.
+    This parametrized test fails loudly on that drift.
+    """
+    invocations: list[tuple[str, tuple[t.Any, ...]]] = [
+        ("tmux://sessions{?socket_name}", ()),
+        (
+            "tmux://sessions/{session_name}{?socket_name}",
+            (mcp_session.session_name,),
+        ),
+        (
+            "tmux://sessions/{session_name}/windows{?socket_name}",
+            (mcp_session.session_name,),
+        ),
+        ("tmux://panes/{pane_id}{?socket_name}", (mcp_pane.pane_id,)),
+        ("tmux://panes/{pane_id}/content{?socket_name}", (mcp_pane.pane_id,)),
+    ]
+    for uri, args in invocations:
+        fn = resource_functions[uri]
+        result = fn(*args)
+        assert isinstance(result, str), f"{uri} returned {type(result).__name__}"
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected_mime"),
+    [
+        ("tmux://sessions{?socket_name}", "application/json"),
+        ("tmux://sessions/{session_name}{?socket_name}", "application/json"),
+        (
+            "tmux://sessions/{session_name}/windows{?socket_name}",
+            "application/json",
+        ),
+        (
+            "tmux://sessions/{session_name}/windows/{window_index}{?socket_name}",
+            "application/json",
+        ),
+        ("tmux://panes/{pane_id}{?socket_name}", "application/json"),
+        ("tmux://panes/{pane_id}/content{?socket_name}", "text/plain"),
+    ],
+)
+def test_hierarchy_resources_advertise_mime_type(uri: str, expected_mime: str) -> None:
+    """Each registered hierarchy resource carries its declared mime_type.
+
+    Before this change the resources all returned bare ``json.dumps``
+    strings with no MIME annotation — clients had to sniff or assume.
+    Declaring mime_type explicitly at registration is what lets the
+    JSON resources report as ``application/json`` and the pane-content
+    resource report as ``text/plain``.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    mcp = FastMCP(name="test-resource-mime")
+    register(mcp)
+
+    resources = asyncio.run(mcp.list_resources())
+    templates = asyncio.run(mcp.list_resource_templates())
+    # Concrete URIs register as resources; templated URIs like
+    # "tmux://sessions/{session_name}..." register as resource templates.
+    by_uri: dict[str, t.Any] = {}
+    for tpl in templates:
+        key = getattr(tpl, "uri_template", None) or getattr(tpl, "uri", None)
+        if key is not None:
+            by_uri[str(key)] = tpl
+    for res in resources:
+        key = getattr(res, "uri", None)
+        if key is not None:
+            by_uri[str(key)] = res
+    candidate = by_uri.get(uri)
+    assert candidate is not None, f"resource {uri!r} not registered"
+    assert candidate.mime_type == expected_mime

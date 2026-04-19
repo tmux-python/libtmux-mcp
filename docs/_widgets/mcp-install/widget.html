@@ -1,0 +1,77 @@
+{#
+  MCP install widget: server-rendered client × method matrix.
+  widget_name, clients, methods, panels, pip_prereq, variant are provided by
+  MCPInstallWidget.context() / the directive's option merge.
+
+  Each code block runs through the `highlight` filter (defined in
+  widgets._base.make_highlight_filter) which wraps Sphinx's PygmentsBridge —
+  so the output is byte-identical to a native ``.. code-block::`` block,
+  meaning sphinx-copybutton + its prompt-strip regex work automatically.
+#}
+<div class="lm-mcp-install lm-mcp-install--{{ variant }}">
+  <div class="lm-mcp-install__tabs lm-mcp-install__tabs--clients"
+       role="tablist"
+       aria-label="MCP client">
+    {% for client in clients %}
+    <button type="button"
+            class="lm-mcp-install__tab"
+            role="tab"
+            data-tab-kind="client"
+            data-tab-value="{{ client.id }}"
+            aria-selected="{{ 'true' if loop.first else 'false' }}"
+            tabindex="{{ '0' if loop.first else '-1' }}">
+      {{ client.label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <div class="lm-mcp-install__tabs lm-mcp-install__tabs--methods"
+       role="tablist"
+       aria-label="Install method">
+    {% for method in methods %}
+    <button type="button"
+            class="lm-mcp-install__tab"
+            role="tab"
+            data-tab-kind="method"
+            data-tab-value="{{ method.id }}"
+            aria-selected="{{ 'true' if loop.first else 'false' }}"
+            tabindex="{{ '0' if loop.first else '-1' }}">
+      {{ method.label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <div class="lm-mcp-install__body">
+    {% for panel in panels %}
+    <div class="lm-mcp-install__panel"
+         role="tabpanel"
+         data-client="{{ panel.client.id }}"
+         data-method="{{ panel.method.id }}"
+         tabindex="0"
+         {% if not panel.is_default %}hidden{% endif %}>
+
+      {% if panel.method.doc_url %}
+      <p class="lm-mcp-install__preamble">
+        With <a href="{{ panel.method.doc_url }}" target="_blank" rel="noopener">{{ panel.method.label }}</a> installed:
+      </p>
+      {% elif panel.method.id == 'pip' %}
+      <p class="lm-mcp-install__preamble">Install the packages first:</p>
+      <div class="lm-mcp-install__code--prereq">
+        {{ ("$ " ~ pip_prereq) | highlight("console") }}
+      </div>
+      <p class="lm-mcp-install__preamble">
+        Then {{ 'register' if panel.client.kind == 'cli' else 'use this config' }}:
+      </p>
+      {% endif %}
+
+      {{ panel.body | highlight(panel.language) }}
+
+      {% if variant != 'compact' %}
+      <p class="lm-mcp-install__config-file">
+        Config file: <code>{{ panel.client.config_file }}</code>
+      </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
