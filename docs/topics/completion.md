@@ -18,13 +18,13 @@ session picker popup when filling ``session_name=`` on
 
 ## What libtmux-mcp currently exposes
 
-- **Prompt arguments** — the four recipes ({doc}`/tools/prompts`)
+- **Prompt arguments** — the four recipes ({doc}`/prompts`)
   advertise their argument names and types. FastMCP derives a default
   completion shape from the Python signatures:
   ``str`` arguments accept free text, ``float`` arguments accept
   numeric strings, no enum / list suggestions.
 - **Resource template parameters** —
-  {doc}`/reference/api/resources` URIs carry ``{session_name}``,
+  {doc}`/resources` URIs carry ``{session_name}``,
   ``{window_index}``, ``{pane_id}``, and ``{?socket_name}``
   placeholders. Completion suggestions are again derived from the
   function signatures' types, not from live tmux state.
@@ -47,5 +47,5 @@ into the prompt's arguments.
 ## Further reading
 
 - [MCP completion spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/completion)
-- {doc}`/tools/prompts` — the prompt argument surface
-- {doc}`/reference/api/resources` — the resource-template parameter surface
+- {doc}`/prompts` — the prompt argument surface
+- {doc}`/resources` — the resource-template parameter surface
