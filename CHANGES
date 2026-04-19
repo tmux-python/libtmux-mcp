@@ -25,7 +25,7 @@ _Notes on upcoming releases will be added here_
   for any `%0` on any other server. The annotation now reuses
   `_caller_is_on_server` (the same socket-scoped comparator used by
   the self-kill guard) via the new `_compute_is_caller` helper
-  (#19).
+  (#22, fixes #19).
 
 ## libtmux-mcp 0.1.0a2 (2026-04-19)
 
