@@ -24,6 +24,7 @@ This ensures the signal fires on both success and failure paths.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import subprocess
 import typing as t
@@ -35,7 +36,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     _get_server,
     _tmux_argv,
-    handle_tool_errors,
+    handle_tool_errors_async,
 )
 
 if t.TYPE_CHECKING:
@@ -96,8 +97,8 @@ def _validate_channel_name(name: str) -> str:
     return name
 
 
-@handle_tool_errors
-def wait_for_channel(
+@handle_tool_errors_async
+async def wait_for_channel(
     channel: str,
     timeout: float = 30.0,
     socket_name: str | None = None,
@@ -143,7 +144,15 @@ def wait_for_channel(
     cname = _validate_channel_name(channel)
     argv = _tmux_argv(server, "wait-for", cname)
     try:
-        subprocess.run(argv, check=True, capture_output=True, timeout=timeout)
+        # FastMCP direct-awaits async tools on its event loop. ``tmux
+        # wait-for`` blocks for the full timeout (up to 30 s by default)
+        # so the synchronous ``subprocess.run`` must run off the loop —
+        # otherwise no other tool call, MCP ping, or cancellation can
+        # be serviced for the duration of the wait. Mirror the pattern
+        # used by :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text`.
+        await asyncio.to_thread(
+            subprocess.run, argv, check=True, capture_output=True, timeout=timeout
+        )
     except subprocess.TimeoutExpired as e:
         msg = f"wait-for timeout: channel {cname!r} was not signalled within {timeout}s"
         raise ToolError(msg) from e
@@ -154,8 +163,8 @@ def wait_for_channel(
     return f"Channel {cname!r} was signalled"
 
 
-@handle_tool_errors
-def signal_channel(
+@handle_tool_errors_async
+async def signal_channel(
     channel: str,
     socket_name: str | None = None,
 ) -> str:
@@ -180,8 +189,12 @@ def signal_channel(
     cname = _validate_channel_name(channel)
     argv = _tmux_argv(server, "wait-for", "-S", cname)
     try:
-        subprocess.run(
-            argv, check=True, capture_output=True, timeout=_SIGNAL_TIMEOUT_SECONDS
+        await asyncio.to_thread(
+            subprocess.run,
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=_SIGNAL_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as e:
         msg = (

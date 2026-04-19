@@ -742,6 +742,7 @@ def test_search_panes_per_pane_matched_lines_cap(
     ``capture_pane`` (command-line plus output-line for each), well
     past the truncation threshold of three.
     """
+    import asyncio
     import uuid
 
     from libtmux_mcp.tools.wait_for_tools import wait_for_channel
@@ -753,7 +754,11 @@ def test_search_panes_per_pane_matched_lines_cap(
         f"tmux wait-for -S {channel}"
     )
     mcp_pane.send_keys(payload, enter=True)
-    wait_for_channel(channel=channel, timeout=5.0, socket_name=mcp_server.socket_name)
+    asyncio.run(
+        wait_for_channel(
+            channel=channel, timeout=5.0, socket_name=mcp_server.socket_name
+        )
+    )
 
     result = search_panes(
         pattern=marker,
