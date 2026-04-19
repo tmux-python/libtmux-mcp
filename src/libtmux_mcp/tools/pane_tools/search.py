@@ -7,7 +7,7 @@ import re
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._utils import (
-    _get_caller_pane_id,
+    _compute_is_caller,
     _get_server,
     _resolve_session,
     handle_tool_errors,
@@ -221,7 +221,6 @@ def search_panes(
     # sort the matching panes by pane_id for deterministic ordering,
     # then slice by offset / limit. Per-pane matched_lines is
     # tail-truncated to keep the most recent matches.
-    caller_pane_id = _get_caller_pane_id()
     all_matches: list[PaneContentMatch] = []
     per_pane_truncated = False
     for pane_id_str in matching_pane_ids:
@@ -251,7 +250,7 @@ def search_panes(
                 session_id=pane.session_id,
                 session_name=getattr(session_obj, "session_name", None),
                 matched_lines=matched_lines,
-                is_caller=(pane_id_str == caller_pane_id if caller_pane_id else None),
+                is_caller=_compute_is_caller(pane),
             )
         )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from libtmux_mcp._utils import (
-    _get_caller_pane_id,
+    _compute_is_caller,
     _get_server,
     _resolve_pane,
     handle_tool_errors,
@@ -160,7 +160,6 @@ def snapshot_pane(
     pane_mode_raw = parts[5]
     scroll_raw = parts[6]
 
-    caller_pane_id = _get_caller_pane_id()
     return PaneSnapshot(
         pane_id=pane.pane_id or "",
         content=content,
@@ -175,7 +174,7 @@ def snapshot_pane(
         title=parts[8] if parts[8] else None,
         pane_current_command=parts[9] if parts[9] else None,
         pane_current_path=parts[10] if parts[10] else None,
-        is_caller=(pane.pane_id == caller_pane_id if caller_pane_id else None),
+        is_caller=_compute_is_caller(pane),
         content_truncated=truncated,
         content_truncated_lines=dropped,
     )

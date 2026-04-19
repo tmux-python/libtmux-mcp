@@ -783,10 +783,14 @@ class SearchPanesCallerFixture(t.NamedTuple):
 
 SEARCH_PANES_CALLER_FIXTURES: list[SearchPanesCallerFixture] = [
     SearchPanesCallerFixture(
-        test_id="caller_pane_annotated",
+        # TMUX_PANE without TMUX: the strict comparator cannot verify the
+        # caller's socket and returns ``False`` rather than conservatively
+        # assuming same-server. Full-TMUX-env coverage lives in
+        # ``tests/test_utils.py::test_serialize_pane_is_caller_false_across_sockets``.
+        test_id="caller_pane_no_tmux_env",
         tmux_pane_env=None,
         use_real_pane_id=True,
-        expected_is_caller=True,
+        expected_is_caller=False,
     ),
     SearchPanesCallerFixture(
         test_id="outside_tmux_no_annotation",

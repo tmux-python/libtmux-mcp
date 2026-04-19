@@ -16,6 +16,17 @@ _Notes on upcoming releases will be added here_
   conftest reaper is needed in libtmux-mcp — the upstream fixtures
   self-clean.
 
+### Fixes
+
+- Pane `is_caller` annotation no longer false-positives across tmux
+  sockets. `_serialize_pane`, `snapshot_pane`, and `search_panes` all
+  compared `pane.pane_id == TMUX_PANE` without verifying the caller's
+  socket, so a caller on socket A pane `%0` was marked `is_caller=True`
+  for any `%0` on any other server. The annotation now reuses
+  `_caller_is_on_server` (the same socket-scoped comparator used by
+  the self-kill guard) via the new `_compute_is_caller` helper
+  (#19).
+
 ## libtmux-mcp 0.1.0a2 (2026-04-19)
 
 _FastMCP alignment: new tools, prompts, and middleware (#15)_

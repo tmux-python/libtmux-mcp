@@ -87,14 +87,42 @@ def _get_caller_identity() -> CallerIdentity | None:
     )
 
 
-def _get_caller_pane_id() -> str | None:
-    """Return the TMUX_PANE of the calling process, or None if not in tmux.
+def _compute_is_caller(pane: Pane) -> bool | None:
+    """Decide whether ``pane`` is the MCP caller's own tmux pane.
 
-    Thin wrapper around :func:`_get_caller_identity` kept for callers that
-    only need the pane id (notably :func:`_serialize_pane`).
+    The returned value is used as the ``is_caller`` annotation on
+    :class:`~libtmux_mcp.models.PaneInfo`,
+    :class:`~libtmux_mcp.models.PaneSnapshot`, and
+    :class:`~libtmux_mcp.models.PaneContentMatch`.
+
+    Tri-state semantics match the original bare-equality check:
+
+    * ``None`` — process is not inside tmux at all (neither ``TMUX`` nor
+      ``TMUX_PANE`` are set). No caller exists, so the annotation
+      carries no signal.
+    * ``True`` — the caller's ``TMUX_PANE`` matches ``pane.pane_id``
+      *and* :func:`_caller_is_strictly_on_server` confirms the
+      caller's socket realpath equals the target's.
+    * ``False`` — the pane ids differ, or they match but the socket
+      does not (or cannot be proven to). A bare pane-id equality
+      check would have returned ``True`` here, which is the
+      cross-socket false-positive fixed by
+      tmux-python/libtmux-mcp#19.
+
+    Uses :func:`_caller_is_strictly_on_server` rather than
+    :func:`_caller_is_on_server`: the kill-guard comparator is
+    conservative-True-when-uncertain (right for blocking destructive
+    actions, wrong for an informational annotation that should
+    demand a positive match). The strict variant declines the
+    basename fallback, the unresolvable-target branch, and the
+    socket-path-unset branch so ambiguous cases resolve to ``False``.
     """
     caller = _get_caller_identity()
-    return caller.pane_id if caller else None
+    if caller is None or caller.pane_id is None:
+        return None
+    return caller.pane_id == pane.pane_id and _caller_is_strictly_on_server(
+        pane.server, caller
+    )
 
 
 def _effective_socket_path(server: Server) -> str | None:
@@ -199,6 +227,45 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
     caller_basename = pathlib.PurePath(caller.socket_path).name
     target_name = server.socket_name or "default"
     return caller_basename == target_name
+
+
+def _caller_is_strictly_on_server(
+    server: Server, caller: CallerIdentity | None
+) -> bool:
+    """Return True only on a confirmed socket-path match.
+
+    Counterpart to :func:`_caller_is_on_server` for the informational
+    :attr:`~libtmux_mcp.models.PaneInfo.is_caller` annotation. The
+    destructive-action guard is biased toward True-when-uncertain so a
+    macOS ``$TMUX_TMPDIR`` divergence cannot fool it into permitting
+    self-kill; the annotation cannot absorb that bias — ambiguous cases
+    are exactly the cross-socket false positives documented by
+    tmux-python/libtmux-mcp#19. This function therefore declines every
+    branch other than a confirmed ``realpath`` match.
+
+    Decision table:
+
+    * ``caller is None`` → ``False``. No caller identity.
+    * ``caller.socket_path`` unset (``TMUX_PANE`` set without ``TMUX``)
+      → ``False``. We cannot verify the caller is on this server.
+    * target server's effective socket path unresolvable → ``False``.
+    * ``realpath`` of caller's socket path equals target's effective
+      path → ``True``. Primary and only positive signal.
+    * Fallback on ``OSError`` from ``realpath``: exact string match
+      → ``True``. Still a positive signal, just without the resolve
+      step.
+    * Otherwise → ``False`` (including the basename-only match that
+      :func:`_caller_is_on_server` permits as a conservative block).
+    """
+    if caller is None or not caller.socket_path:
+        return False
+    target = _effective_socket_path(server)
+    if not target:
+        return False
+    try:
+        return os.path.realpath(caller.socket_path) == os.path.realpath(target)
+    except OSError:
+        return caller.socket_path == target
 
 
 # ---------------------------------------------------------------------------
@@ -757,7 +824,6 @@ def _serialize_pane(pane: Pane) -> PaneInfo:
     from libtmux_mcp.models import PaneInfo
 
     assert pane.pane_id is not None
-    caller_pane_id = _get_caller_pane_id()
     return PaneInfo(
         pane_id=pane.pane_id,
         pane_index=getattr(pane, "pane_index", None),
@@ -770,7 +836,7 @@ def _serialize_pane(pane: Pane) -> PaneInfo:
         pane_active=getattr(pane, "pane_active", None),
         window_id=pane.window_id,
         session_id=pane.session_id,
-        is_caller=pane.pane_id == caller_pane_id if caller_pane_id else None,
+        is_caller=_compute_is_caller(pane),
     )
 
 

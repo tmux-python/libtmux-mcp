@@ -20,7 +20,6 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
     _apply_filters,
-    _get_caller_pane_id,
     _get_server,
     _invalidate_server,
     _resolve_pane,
@@ -307,23 +306,6 @@ def test_apply_filters(
 
 
 # ---------------------------------------------------------------------------
-# _get_caller_pane_id / _serialize_pane is_caller tests
-# ---------------------------------------------------------------------------
-
-
-def test_get_caller_pane_id_returns_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_get_caller_pane_id returns TMUX_PANE when set."""
-    monkeypatch.setenv("TMUX_PANE", "%42")
-    assert _get_caller_pane_id() == "%42"
-
-
-def test_get_caller_pane_id_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_get_caller_pane_id returns None outside tmux."""
-    monkeypatch.delenv("TMUX_PANE", raising=False)
-    assert _get_caller_pane_id() is None
-
-
-# ---------------------------------------------------------------------------
 # Caller identity parsing tests
 # ---------------------------------------------------------------------------
 
@@ -532,10 +514,16 @@ class SerializePaneCallerFixture(t.NamedTuple):
 
 SERIALIZE_PANE_CALLER_FIXTURES: list[SerializePaneCallerFixture] = [
     SerializePaneCallerFixture(
-        test_id="matching_pane_id",
+        # TMUX_PANE is set to the real pane id but TMUX is unset, so the
+        # caller's socket cannot be verified. The strict comparator
+        # declines to assume same-server: ``False`` not ``True``.
+        # Pre-fixup this returned ``True`` via ``_caller_is_on_server``'s
+        # conservative-True branch — a cross-socket false positive the
+        # informational annotation must not carry.
+        test_id="matching_pane_id_no_tmux_env",
         tmux_pane_env=None,
         use_real_pane_id=True,
-        expected_is_caller=True,
+        expected_is_caller=False,
     ),
     SerializePaneCallerFixture(
         test_id="non_matching_pane_id",
@@ -575,6 +563,80 @@ def test_serialize_pane_is_caller(
 
     data = _serialize_pane(mcp_pane)
     assert data.is_caller is expected_is_caller
+
+
+def test_serialize_pane_is_caller_false_across_sockets(
+    TestServer: type[Server],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """is_caller must not flag a pane on a *different* tmux socket.
+
+    Regression for tmux-python/libtmux-mcp#19. Before the fix,
+    ``_serialize_pane`` compared ``pane.pane_id == TMUX_PANE`` without
+    any socket check — so a caller inside pane ``%0`` on socket A saw
+    ``is_caller=True`` for any pane with id ``%0`` on any other server.
+
+    Two fresh libtmux servers emit matching pane ids (both start at
+    ``%0``), so this reproduces the false-positive exactly. Point the
+    caller at server A, serialize pane ``%0`` on server B, assert the
+    annotation says ``False``.
+    """
+    from libtmux_mcp._utils import _effective_socket_path
+
+    server_a = TestServer()
+    session_a = server_a.new_session(session_name="mcp_issue19_a")
+    pane_a = session_a.active_window.active_pane
+    assert pane_a is not None and pane_a.pane_id is not None
+
+    server_b = TestServer()
+    session_b = server_b.new_session(session_name="mcp_issue19_b")
+    pane_b = session_b.active_window.active_pane
+    assert pane_b is not None and pane_b.pane_id is not None
+
+    # Prerequisite: the two freshly-spawned servers emitted matching
+    # pane ids. If they didn't (a tmux version quirk), the false
+    # positive can't be exercised — skip rather than fail.
+    if pane_a.pane_id != pane_b.pane_id:
+        pytest.skip(
+            f"sibling servers emitted distinct pane ids "
+            f"({pane_a.pane_id} vs {pane_b.pane_id}); cannot reproduce issue #19"
+        )
+
+    socket_a = _effective_socket_path(server_a)
+    assert socket_a is not None
+    monkeypatch.setenv("TMUX", f"{socket_a},1,{session_a.session_id or '$0'}")
+    monkeypatch.setenv("TMUX_PANE", pane_a.pane_id)
+
+    # Pane on the *other* server — must be flagged False even though
+    # its pane_id matches TMUX_PANE.
+    assert _serialize_pane(pane_b).is_caller is False
+    # Sanity: on the caller's own server, same pane_id *is* the caller.
+    assert _serialize_pane(pane_a).is_caller is True
+
+
+def test_serialize_pane_is_caller_requires_tmux_env_not_just_pane(
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``TMUX_PANE`` alone must not declare a caller identity.
+
+    Regression for the subtle cross-socket false positive that
+    :func:`_caller_is_on_server`'s "socket_path unset → conservative
+    True" branch would otherwise introduce. When the MCP process has
+    ``TMUX_PANE`` in its environment but not ``TMUX`` — an unusual but
+    possible state an agent harness can produce — the caller's socket
+    is unknowable. The strict comparator declines to assert
+    ``is_caller=True`` in that case so any pane whose id happens to
+    match ``TMUX_PANE`` across *any* server is annotated ``False``,
+    not a false positive. Exercises the code path that was left
+    un-covered after the direct ``_get_caller_pane_id`` unit tests
+    were removed.
+    """
+    assert mcp_pane.pane_id is not None
+    monkeypatch.setenv("TMUX_PANE", mcp_pane.pane_id)
+    monkeypatch.delenv("TMUX", raising=False)
+
+    assert _serialize_pane(mcp_pane).is_caller is False
 
 
 # ---------------------------------------------------------------------------
