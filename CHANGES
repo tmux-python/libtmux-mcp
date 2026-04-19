@@ -11,7 +11,7 @@ _Notes on upcoming releases will be added here_
 - Added a session-scoped autouse fixture in `tests/conftest.py` that
   reaps leaked `libtmux_test*` tmux daemons and socket files under
   `/tmp/tmux-<uid>/` after every test run. Works around upstream
-  [tmux-python/libtmux#660](https://github.com/tmux-python/libtmux/issues/660),
+  [tmux-python/libtmux#661](https://github.com/tmux-python/libtmux/pull/661),
   whose pytest plugin does not reliably kill servers or unlink socket
   files during teardown. Idempotent and safe under `pytest-xdist`
   (#20).
