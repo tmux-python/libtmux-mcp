@@ -104,6 +104,11 @@ lint = [
   "mypy",
 ]
 
+[tool.uv.sources]
+gp-sphinx = { path = "../gp-sphinx/packages/gp-sphinx", editable = true }
+sphinx-autodoc-fastmcp = { path = "../gp-sphinx/packages/sphinx-autodoc-fastmcp", editable = true }
+sphinx-autodoc-api-style = { path = "../gp-sphinx/packages/sphinx-autodoc-api-style", editable = true }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
