@@ -46,7 +46,7 @@ def run_and_wait(
     return f"""Run this shell command in tmux pane {pane_id} and block
 until it finishes, preserving the command's exit status:
 
-```
+```python
 send_keys(
     pane_id={pane_id!r},
     keys={shell_payload!r},
@@ -56,8 +56,8 @@ capture_pane(pane_id={pane_id!r}, max_lines=100)
 ```
 
 After the channel signals, read the last ~100 lines to verify the
-command's behaviour. Do NOT use a ``capture_pane`` retry loop —
-``wait_for_channel`` is strictly cheaper in agent turns.
+command's behaviour. Do NOT use a `capture_pane` retry loop —
+`wait_for_channel` is strictly cheaper in agent turns.
 """
 
 
@@ -75,9 +75,9 @@ def diagnose_failing_pane(pane_id: str) -> str:
     """
     return f"""Something went wrong in tmux pane {pane_id}. Diagnose it:
 
-1. Call ``snapshot_pane(pane_id="{pane_id}")`` to get content,
+1. Call `snapshot_pane(pane_id="{pane_id}")` to get content,
    cursor position, pane mode, and scroll state in one call.
-2. If the content looks truncated, re-call with ``max_lines=None``.
+2. If the content looks truncated, re-call with `max_lines=None`.
 3. Identify the last command that ran (look at the prompt line and
    the line above it) and the last non-empty output line.
 4. Propose a root cause hypothesis and a minimal command to verify
@@ -108,31 +108,31 @@ def build_dev_workspace(
 {session_name!r} with editor on top, a shell on the bottom-left, and
 a logs tail on the bottom-right:
 
-1. ``create_session(session_name="{session_name}")`` — creates the
+1. `create_session(session_name="{session_name}")` — creates the
    session with a single pane (pane A, the editor). Capture the
-   returned ``active_pane_id`` as ``%A``.
-2. ``split_window(pane_id="%A", direction="below")`` — splits off
+   returned `active_pane_id` as `%A`.
+2. `split_window(pane_id="%A", direction="below")` — splits off
    the bottom half (pane B, the terminal). Capture the returned
-   ``pane_id`` as ``%B``.
-3. ``split_window(pane_id="%B", direction="right")`` — splits pane B
+   `pane_id` as `%B`.
+3. `split_window(pane_id="%B", direction="right")` — splits pane B
    horizontally (pane C, the logs pane). Capture the returned
-   ``pane_id`` as ``%C``.
-4. Launch the editor and the log command via ``send_keys``:
-   ``send_keys(pane_id="%A", keys="vim")`` and
-   ``send_keys(pane_id="%C", keys={log_command!r})``. Leave pane B
+   `pane_id` as `%C`.
+4. Launch the editor and the log command via `send_keys`:
+   `send_keys(pane_id="%A", keys="vim")` and
+   `send_keys(pane_id="%C", keys={log_command!r})`. Leave pane B
    at its fresh shell prompt — nothing needs to be sent there. No
    pre-launch wait is required: tmux buffers keystrokes into the
    pane's PTY whether or not the shell has finished drawing, so
-   ``send_keys`` immediately after ``split_window`` is safe and
+   `send_keys` immediately after `split_window` is safe and
    shell-agnostic.
 5. Optionally confirm each program drew its UI via
-   ``wait_for_content_change(pane_id="%A", timeout=3.0)``
-   (and similarly for ``%C``). This is a "did the screen change?"
+   `wait_for_content_change(pane_id="%A", timeout=3.0)`
+   (and similarly for `%C`). This is a "did the screen change?"
    check — it works whether the pane shows a prompt glyph, a vim
    splash screen, or a log tail, so no shell-specific regex is
    needed.
 
-Use pane IDs (``%N``) for all subsequent targeting — they are stable
+Use pane IDs (`%N`) for all subsequent targeting — they are stable
 across layout changes; window renames are not.
 """
 
@@ -153,12 +153,12 @@ def interrupt_gracefully(pane_id: str) -> str:
     return f"""Interrupt whatever is running in pane {pane_id} and
 verify that control returns to the shell:
 
-1. ``send_keys(pane_id="{pane_id}", keys="C-c", literal=False,
-   enter=False)`` — tmux interprets ``C-c`` as SIGINT.
-2. ``wait_for_text(pane_id="{pane_id}", pattern="\\$ |\\# |\\% ",
-   regex=True, timeout=5.0)`` — waits for a common shell prompt
+1. `send_keys(pane_id="{pane_id}", keys="C-c", literal=False,
+   enter=False)` — tmux interprets `C-c` as SIGINT.
+2. `wait_for_text(pane_id="{pane_id}", pattern="\\$ |\\# |\\% ",
+   regex=True, timeout=5.0)` — waits for a common shell prompt
    glyph. Adjust the pattern to match the user's shell theme.
 3. If the wait times out the process is ignoring SIGINT. Stop and
    ask the caller how to proceed — do NOT escalate automatically
-   to ``C-\\`` (SIGQUIT) or ``kill``.
+   to `C-\\` (SIGQUIT) or `kill`.
 """
