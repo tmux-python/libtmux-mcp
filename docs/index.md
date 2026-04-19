@@ -29,6 +29,20 @@ Install, connect, get a first result. Under 2 minutes.
 Every tool, grouped by intent and safety tier.
 :::
 
+:::{grid-item-card} Prompts
+:link: prompts
+:link-type: doc
+
+Four workflow recipes the client renders for the model.
+:::
+
+:::{grid-item-card} Resources
+:link: resources
+:link-type: doc
+
+Snapshot views of the tmux hierarchy via `tmux://` URIs.
+:::
+
 :::{grid-item-card} Safety tiers
 :link: topics/safety
 :link-type: doc
