@@ -1,0 +1,71 @@
+{#
+  MCP install widget: server-rendered client × method matrix.
+  widget_name, clients, methods, panels, pip_prereq, variant are provided by
+  MCPInstallWidget.context() / the directive's option merge.
+#}
+<div class="lm-mcp-install lm-mcp-install--{{ variant }}">
+  <div class="lm-mcp-install__tabs lm-mcp-install__tabs--clients"
+       role="tablist"
+       aria-label="MCP client">
+    {% for client in clients %}
+    <button type="button"
+            class="lm-mcp-install__tab"
+            role="tab"
+            data-tab-kind="client"
+            data-tab-value="{{ client.id }}"
+            aria-selected="{{ 'true' if loop.first else 'false' }}"
+            tabindex="{{ '0' if loop.first else '-1' }}">
+      {{ client.label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <div class="lm-mcp-install__tabs lm-mcp-install__tabs--methods"
+       role="tablist"
+       aria-label="Install method">
+    {% for method in methods %}
+    <button type="button"
+            class="lm-mcp-install__tab"
+            role="tab"
+            data-tab-kind="method"
+            data-tab-value="{{ method.id }}"
+            aria-selected="{{ 'true' if loop.first else 'false' }}"
+            tabindex="{{ '0' if loop.first else '-1' }}">
+      {{ method.label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <div class="lm-mcp-install__body">
+    {% for panel in panels %}
+    <div class="lm-mcp-install__panel"
+         role="tabpanel"
+         data-client="{{ panel.client.id }}"
+         data-method="{{ panel.method.id }}"
+         tabindex="0"
+         {% if not panel.is_default %}hidden{% endif %}>
+
+      {% if panel.method.doc_url %}
+      <p class="lm-mcp-install__preamble">
+        With <a href="{{ panel.method.doc_url }}" target="_blank" rel="noopener">{{ panel.method.label }}</a> installed:
+      </p>
+      {% elif panel.method.id == 'pip' %}
+      <p class="lm-mcp-install__preamble">Install the packages first:</p>
+      <pre class="lm-mcp-install__code lm-mcp-install__code--prereq"><code>$ {{ pip_prereq }}</code></pre>
+      <p class="lm-mcp-install__preamble">
+        Then {{ 'register' if panel.client.kind == 'cli' else 'use this config' }}:
+      </p>
+      {% endif %}
+
+      <pre class="lm-mcp-install__code"
+           data-language="{{ panel.language }}"><code>{% if panel.language == 'shell' %}$ {% endif %}{{ panel.body }}</code></pre>
+
+      {% if variant != 'compact' %}
+      <p class="lm-mcp-install__config-file">
+        Config file: <code>{{ panel.client.config_file }}</code>
+      </p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>

@@ -10,6 +10,10 @@ This server maps tmux's object hierarchy — sessions, windows, panes — into M
 **Pre-alpha.** APIs may change. [Feedback welcome](https://github.com/tmux-python/libtmux-mcp/issues).
 ```
 
+```{mcp-install}
+:variant: compact
+```
+
 ---
 
 ::::{grid} 1 1 2 2
