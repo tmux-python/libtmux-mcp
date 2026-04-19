@@ -13,6 +13,8 @@ import sys
 
 import pytest
 
+from ._snapshots import snapshot_html_fragment  # noqa: F401 — re-export as fixture
+
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _DOCS_DIR = _REPO_ROOT / "docs"
 _EXT_DIR = _DOCS_DIR / "_ext"

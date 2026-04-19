@@ -1,4 +1,9 @@
-/* MCP install widget — Furo-var driven. Dark mode follows automatically. */
+/* MCP install widget — Furo-var driven. Dark mode follows automatically.
+ *
+ * Code blocks (`.highlight-console`, `.highlight-json`) inherit the theme's
+ * Pygments styling so there's no per-widget code styling here — we only
+ * position/space them and draw the prereq accent.
+ */
 
 .lm-mcp-install {
   border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
@@ -77,28 +82,15 @@
   text-underline-offset: 2px;
 }
 
-.lm-mcp-install__code {
-  background: var(--color-background-secondary);
-  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
-  border-radius: 0.25rem;
-  padding: 0.6rem 0.8rem;
-  margin: 0 0 0.6rem 0;
-  overflow-x: auto;
-  font-family: var(--font-stack--monospace);
-  font-size: 0.88em;
-  line-height: 1.5;
-}
-
-.lm-mcp-install__code code {
-  background: transparent;
-  padding: 0;
-  border: 0;
-  font-size: inherit;
-  color: var(--color-foreground-primary);
-}
-
+/* Prereq accent: blue left-border on the `pip install` prerequisite block. */
 .lm-mcp-install__code--prereq {
   border-left: 3px solid var(--color-brand-primary);
+  margin: 0 0 0.6rem 0;
+}
+
+.lm-mcp-install__code--prereq .highlight {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .lm-mcp-install__config-file {
@@ -119,9 +111,4 @@
 
 .lm-mcp-install--compact .lm-mcp-install__body {
   padding: 0.7rem 0.8rem;
-}
-
-.lm-mcp-install--compact .lm-mcp-install__code {
-  padding: 0.45rem 0.7rem;
-  font-size: 0.85em;
 }

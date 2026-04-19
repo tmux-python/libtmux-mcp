@@ -152,12 +152,17 @@ def build_panels(
     panels: list[Panel] = []
     for client_index, client in enumerate(clients):
         for method_index, method in enumerate(methods):
+            is_json = client.kind == "json"
+            raw = _body_for(client, method)
             panels.append(
                 Panel(
                     client=client,
                     method=method,
-                    language="json" if client.kind == "json" else "shell",
-                    body=_body_for(client, method),
+                    # "console" = ShellSessionLexer — recognises the leading
+                    # ``$ `` as Generic.Prompt and emits ``<span class="gp">``,
+                    # which the gp-sphinx copybutton regex strips on copy.
+                    language="json" if is_json else "console",
+                    body=raw if is_json else f"$ {raw}",
                     is_default=(client_index == 0 and method_index == 0),
                 )
             )

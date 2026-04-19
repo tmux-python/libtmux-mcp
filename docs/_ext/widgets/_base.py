@@ -8,11 +8,18 @@ import pathlib
 import typing as t
 
 import jinja2
+import markupsafe
 from docutils import nodes
 
 if t.TYPE_CHECKING:
     from sphinx.environment import BuildEnvironment
     from sphinx.writers.html5 import HTML5Translator
+
+
+class HighlightFilter(t.Protocol):
+    """Callable signature for the Jinja ``highlight`` filter."""
+
+    def __call__(self, code: str, language: str = "default") -> markupsafe.Markup: ...
 
 
 class widget_container(nodes.container):  # type: ignore[misc]  # docutils nodes are untyped
@@ -90,6 +97,7 @@ class BaseWidget(abc.ABC):
             trim_blocks=True,
             lstrip_blocks=True,
         )
+        jenv.filters["highlight"] = make_highlight_filter(env)
         template = jenv.from_string(source)
         context: dict[str, t.Any] = {
             **cls.default_options,
@@ -98,3 +106,30 @@ class BaseWidget(abc.ABC):
             "widget_name": cls.name,
         }
         return template.render(**context)
+
+
+def make_highlight_filter(env: BuildEnvironment) -> HighlightFilter:
+    r"""Return a Jinja filter that runs Sphinx's Pygments highlighter.
+
+    Output matches ``sphinx.writers.html5.HTML5Translator.visit_literal_block``
+    byte-for-byte (sphinx/writers/html5.py:604-630): the inner ``highlight_block``
+    call already returns ``<div class="highlight"><pre>...</pre></div>\n``; we
+    wrap it with the ``<div class="highlight-{lang} notranslate">...</div>\n``
+    starttag Sphinx produces. This means sphinx-copybutton's default selector
+    (``div.highlight pre``) matches and the prompt-strip regex from gp-sphinx's
+    ``DEFAULT_COPYBUTTON_PROMPT_TEXT`` works automatically.
+    """
+    # ``highlighter`` is declared on StandaloneHTMLBuilder
+    # (sphinx/builders/html/__init__.py:246), not on the Builder base mypy
+    # sees here -- hence the type-ignore. Callers are guaranteed an HTML
+    # builder by the ``builder.format == "html"`` guard in
+    # ``install_widget_assets``.
+    highlighter = env.app.builder.highlighter  # type: ignore[attr-defined]
+
+    def _highlight(code: str, language: str = "default") -> markupsafe.Markup:
+        inner = highlighter.highlight_block(code, language)
+        return markupsafe.Markup(
+            f'<div class="highlight-{language} notranslate">{inner}</div>\n'
+        )
+
+    return _highlight
