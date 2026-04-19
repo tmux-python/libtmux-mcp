@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a3 (2026-04-19)
+
+_Post-0.1.0a2 smoke-test fixes and `libtmux` floor bump_
+
 ### Dependencies
 
 - Minimum `libtmux>=0.55.1` (was `>=0.55.0`). 0.55.1 ships the
