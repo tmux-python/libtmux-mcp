@@ -139,13 +139,6 @@ files = [
   "src",
   "tests",
 ]
-# ``docs/_ext`` is not in ``files`` to avoid double-naming the widgets package
-# (mypy would see it as both ``widgets`` and ``docs._ext.widgets``); the path
-# entry alone lets imports like ``from widgets import ...`` in tests resolve.
-# ``exclude`` is also required so that ``uv run mypy .`` in CI -- which
-# traverses every path under the current dir -- doesn't rediscover the same
-# files under their ``docs._ext.`` prefix and error "Source file found twice".
-mypy_path = ["docs/_ext"]
 exclude = ["^docs/"]
 
 [[tool.mypy.overrides]]
