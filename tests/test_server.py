@@ -161,6 +161,62 @@ def test_base_instructions_prefer_wait_over_poll() -> None:
     assert "wait_for_content_change" in _BASE_INSTRUCTIONS
 
 
+def test_base_instructions_document_hook_boundary() -> None:
+    """_BASE_INSTRUCTIONS explains hooks are read-only by design.
+
+    Without this sentence agents waste a turn asking for ``set_hook`` or
+    trying to write hooks through a nonexistent tool. Naming the
+    boundary heads off the exploratory call.
+    """
+    assert "HOOKS ARE READ-ONLY" in _BASE_INSTRUCTIONS
+    assert "show_hooks" in _BASE_INSTRUCTIONS
+    assert "tmux config file" in _BASE_INSTRUCTIONS
+
+
+def test_base_instructions_document_buffer_lifecycle() -> None:
+    """_BASE_INSTRUCTIONS explains the buffer lifecycle + no list_buffers.
+
+    The load/paste/delete triple is non-obvious, and agents otherwise
+    expect a ``list_buffers`` affordance. The instruction prevents both
+    confusions and surfaces the clipboard-privacy reason so the
+    omission reads as deliberate, not missing.
+    """
+    assert "BUFFERS" in _BASE_INSTRUCTIONS
+    assert "load_buffer" in _BASE_INSTRUCTIONS
+    assert "paste_buffer" in _BASE_INSTRUCTIONS
+    assert "delete_buffer" in _BASE_INSTRUCTIONS
+    assert "BufferRef" in _BASE_INSTRUCTIONS
+    assert "list_buffers" in _BASE_INSTRUCTIONS
+    assert "clipboard history" in _BASE_INSTRUCTIONS
+
+
+def test_build_instructions_documents_is_caller_workflow_inside_tmux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The is_caller workflow sentence appears only when inside tmux.
+
+    The sentence references "your pane is identified above", which is
+    only true when ``TMUX_PANE`` is set and the agent-context line has
+    been emitted. Outside tmux, the sentence would be a lie — so it
+    lives inside the ``if tmux_pane:`` branch of ``_build_instructions``
+    and must NOT appear in ``_BASE_INSTRUCTIONS`` itself.
+    """
+    # Outside tmux: the workflow sentence must NOT appear.
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("TMUX", raising=False)
+    outside = _build_instructions(safety_level=TAG_MUTATING)
+    assert "whoami tool" not in outside
+    assert "is_caller=true" not in outside
+
+    # Inside tmux: the workflow sentence appears.
+    monkeypatch.setenv("TMUX_PANE", "%42")
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+    inside = _build_instructions(safety_level=TAG_MUTATING)
+    assert "is_caller=true" in inside
+    assert "whoami tool" in inside
+    assert "list_panes" in inside
+
+
 def test_build_instructions_always_includes_safety() -> None:
     """_build_instructions always includes the safety level."""
     result = _build_instructions(safety_level=TAG_MUTATING)

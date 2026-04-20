@@ -67,7 +67,16 @@ _BASE_INSTRUCTIONS = (
     "wait_for_content_change (waits for any change). These block "
     "server-side until the condition is met or the timeout expires, "
     "which is dramatically cheaper in agent turns than capture_pane "
-    "in a retry loop."
+    "in a retry loop.\n\n"
+    "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. Write-hook "
+    "tools are intentionally not exposed — tmux hooks survive process "
+    "death, so they belong in your tmux config file, not a transient "
+    "MCP session.\n\n"
+    "BUFFERS: load_buffer stages content, paste_buffer delivers it into "
+    "a pane, delete_buffer removes the staged buffer. Track owned "
+    "buffers via the BufferRef returned from load_buffer — there is no "
+    "list_buffers tool because tmux buffers may include OS clipboard "
+    "history (passwords, private snippets)."
 )
 
 
@@ -118,7 +127,10 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
             context += f" (socket: {socket_name})"
         context += (
             ". Tool results annotate the caller's own pane with "
-            "is_caller=true. Use this to distinguish your own pane from others."
+            "is_caller=true. Use this to distinguish your own pane from "
+            "others. To answer 'which pane/window/session am I in?' call "
+            "list_panes (or snapshot_pane) and filter for is_caller=true — "
+            "your pane is identified above. No dedicated whoami tool exists."
         )
         parts.append(context)
 
