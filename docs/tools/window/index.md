@@ -9,6 +9,10 @@ Window-scoped tools — enumerate panes, split / rename / relayout / resize / mo
 Enumerate panes inside a window.
 :::
 
+:::{grid-item-card} {tooliconl}`get-window-info`
+Read metadata for one window.
+:::
+
 :::{grid-item-card} {tooliconl}`split-window`
 Split a window into a new pane.
 :::
@@ -40,6 +44,7 @@ Terminate a window. Destructive.
 :maxdepth: 1
 
 list-panes
+get-window-info
 split-window
 rename-window
 select-layout

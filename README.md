@@ -17,7 +17,7 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 |--------|-------|
 | **Server** | `list_sessions`, `create_session`, `kill_server`, `get_server_info` |
 | **Session** | `list_windows`, `create_window`, `rename_session`, `select_window`, `kill_session` |
-| **Window** | `list_panes`, `split_window`, `rename_window`, `select_layout`, `resize_window`, `move_window`, `kill_window` |
+| **Window** | `list_panes`, `get_window_info`, `split_window`, `rename_window`, `select_layout`, `resize_window`, `move_window`, `kill_window` |
 | **Pane** | `send_keys`, `paste_text`, `capture_pane`, `snapshot_pane`, `search_panes`, `get_pane_info`, `wait_for_text`, `wait_for_content_change`, `display_message`, `select_pane`, `swap_pane`, `resize_pane`, `set_pane_title`, `clear_pane`, `pipe_pane`, `enter_copy_mode`, `exit_copy_mode`, `kill_pane` |
 | **Options** | `show_option`, `set_option` |
 | **Environment** | `show_environment`, `set_environment` |

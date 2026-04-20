@@ -98,6 +98,56 @@ def list_panes(
     return _apply_filters(panes, filters, _serialize_pane)
 
 
+# get_window_info completes the core-tmux-hierarchy symmetry of get_*_info
+# tools: the four hierarchy levels (server, session, window, pane) now each
+# have a targeted single-object read. This is deliberately NOT a license to
+# add get_buffer_info / get_hook_info / get_option_info — those scopes are
+# not part of the hierarchy and the existing show_*/load_* tools already
+# cover their reads. See the brainstorm-and-refine audit §7.1.
+@handle_tool_errors
+def get_window_info(
+    window_id: str | None = None,
+    window_index: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    socket_name: str | None = None,
+) -> WindowInfo:
+    """Return metadata for a single tmux window (ID, name, layout, dimensions).
+
+    Use this instead of list_windows + filter when you only need one
+    window's info. Resolves the window by window_id first; falls back
+    to window_index within a session if window_id is not given.
+
+    Parameters
+    ----------
+    window_id : str, optional
+        Window ID (e.g. '@1').
+    window_index : str, optional
+        Window index within the session. Requires session_name or
+        session_id to disambiguate.
+    session_name : str, optional
+        Session name for window_index lookup.
+    session_id : str, optional
+        Session ID for window_index lookup.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    WindowInfo
+        Serialized window metadata.
+    """
+    server = _get_server(socket_name=socket_name)
+    window = _resolve_window(
+        server,
+        window_id=window_id,
+        window_index=window_index,
+        session_name=session_name,
+        session_id=session_id,
+    )
+    return _serialize_window(window)
+
+
 @handle_tool_errors
 def split_window(
     pane_id: str | None = None,
@@ -424,6 +474,9 @@ def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(title="List Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         list_panes
+    )
+    mcp.tool(title="Get Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+        get_window_info
     )
     mcp.tool(title="Split Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
         split_window
