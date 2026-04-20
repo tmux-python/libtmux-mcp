@@ -59,6 +59,84 @@ def kill_pane(
 
 
 @handle_tool_errors
+def respawn_pane(
+    pane_id: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    window_id: str | None = None,
+    kill: bool = True,
+    shell_command: str | None = None,
+    start_directory: str | None = None,
+    socket_name: str | None = None,
+) -> PaneInfo:
+    """Restart a pane's process in place, preserving pane_id and layout.
+
+    Use when a shell wedges (hung REPL, runaway process, bad terminal
+    mode). The alternative — kill_pane + split_window — destroys
+    pane_id references the agent may still be holding, and rearranges
+    the layout. respawn-pane preserves both.
+
+    With ``kill=True`` (the default), tmux kills the existing process
+    before respawning. Optional ``shell_command`` replaces the
+    command tmux relaunches; ``start_directory`` sets the working
+    directory for the new process.
+
+    Parameters
+    ----------
+    pane_id : str, optional
+        Pane ID (e.g. '%1').
+    session_name : str, optional
+        Session name for pane resolution.
+    session_id : str, optional
+        Session ID (e.g. '$1') for pane resolution.
+    window_id : str, optional
+        Window ID for pane resolution.
+    kill : bool
+        When True (default), pass ``-k`` to tmux so the current
+        process is killed before respawning. When False, respawn
+        fails if the pane already has a running process.
+    shell_command : str, optional
+        Replacement command for tmux to launch. When omitted, tmux
+        restarts the original shell/command.
+    start_directory : str, optional
+        Working directory for the relaunched command (maps to
+        ``respawn-pane -c``).
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    PaneInfo
+        Serialized pane metadata after respawn. The pane_id is
+        preserved; pane_pid reflects the new process.
+    """
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(
+        server,
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
+    argv: list[str] = ["-t", pane.pane_id or ""]
+    if kill:
+        argv.append("-k")
+    if start_directory is not None:
+        argv.extend(["-c", start_directory])
+    if shell_command is not None:
+        argv.append(shell_command)
+    result = pane.cmd("respawn-pane", *argv)
+    if result.stderr:
+        stderr = " ".join(result.stderr).strip()
+        msg = f"tmux respawn-pane failed: {stderr}"
+        raise ToolError(msg)
+    # Pick up fresh pane_pid and any command/path updates; tmux does
+    # not invalidate the underlying object on respawn.
+    pane.refresh()
+    return _serialize_pane(pane)
+
+
+@handle_tool_errors
 def set_pane_title(
     title: str,
     pane_id: str | None = None,

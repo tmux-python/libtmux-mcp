@@ -36,6 +36,7 @@ from libtmux_mcp.tools.pane_tools.layout import (
 from libtmux_mcp.tools.pane_tools.lifecycle import (
     get_pane_info,
     kill_pane,
+    respawn_pane,
     set_pane_title,
 )
 from libtmux_mcp.tools.pane_tools.meta import display_message, snapshot_pane
@@ -61,6 +62,7 @@ __all__ = [
     "pipe_pane",
     "register",
     "resize_pane",
+    "respawn_pane",
     "search_panes",
     "select_pane",
     "send_keys",
@@ -88,6 +90,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_DESTRUCTIVE},
     )(kill_pane)
+    mcp.tool(
+        title="Respawn Pane",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
+    )(respawn_pane)
     mcp.tool(
         title="Set Pane Title", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(set_pane_title)

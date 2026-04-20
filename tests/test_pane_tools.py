@@ -27,6 +27,7 @@ from libtmux_mcp.tools.pane_tools import (
     paste_text,
     pipe_pane,
     resize_pane,
+    respawn_pane,
     search_panes,
     select_pane,
     send_keys,
@@ -229,6 +230,61 @@ def test_kill_pane(mcp_server: Server, mcp_session: Session) -> None:
         socket_name=mcp_server.socket_name,
     )
     assert "killed" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# respawn_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_respawn_pane_preserves_pane_id_and_refreshes_pid(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """respawn_pane keeps the same pane_id but picks up a new pane_pid.
+
+    Uses a fresh split so the caller-pane self-guard doesn't fire and
+    so the test is independent of what the main mcp_pane is running.
+    """
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+    # Force a read of the original pid before we respawn.
+    new_pane.refresh()
+    original_pid = new_pane.pane_pid
+
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id, "pane_id must be preserved"
+    assert result.pane_pid is not None
+    assert result.pane_pid != original_pid, (
+        "pane_pid should reflect the new process after respawn"
+    )
+
+    # Cleanup
+    new_pane.kill()
+
+
+def test_respawn_pane_replaces_shell_command(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """respawn_pane with shell_command relaunches with the new command."""
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        shell_command="sleep 7200",
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id
+    # pane_current_command reflects the relaunched command.
+    assert result.pane_current_command is not None
+    assert "sleep" in result.pane_current_command
+
+    new_pane.kill()
 
 
 # ---------------------------------------------------------------------------
