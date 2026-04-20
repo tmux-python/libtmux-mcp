@@ -23,10 +23,14 @@ def pipe_pane(
     window_id: str | None = None,
     socket_name: str | None = None,
 ) -> str:
-    """Start or stop piping pane output to a file.
+    """Log a pane's live output to a file (or stop an active log).
 
-    When output_path is given, starts logging all pane output to the file.
-    When output_path is None, stops any active pipe for the pane.
+    Streams everything written to the pane (stdout plus terminal
+    control sequences) into a file on disk — the common use is
+    ``output_path="/tmp/pane.log"`` to capture scrollback continuously
+    while the agent watches for errors. When ``output_path`` is given,
+    starts logging; when ``output_path`` is None, stops any active pipe
+    for the pane.
 
     .. warning::
        This tool writes to arbitrary filesystem paths chosen by the MCP
