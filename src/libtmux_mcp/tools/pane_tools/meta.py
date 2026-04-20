@@ -26,10 +26,11 @@ def display_message(
     window_id: str | None = None,
     socket_name: str | None = None,
 ) -> str:
-    """Query tmux using a format string.
+    """Evaluate a tmux format string against a target and return the expanded value.
 
-    Expands tmux format variables against a target pane. Use this as a
-    generic introspection tool to query any tmux variable, e.g.
+    Read-only introspection tool — expands any tmux format variable
+    against a target pane and returns the substituted text. Use this
+    when no dedicated tool covers the field you want, e.g.
     '#{window_zoomed_flag}', '#{pane_dead}', '#{client_activity}'.
 
     Parameters

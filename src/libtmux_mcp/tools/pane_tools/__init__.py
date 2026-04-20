@@ -120,9 +120,11 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         pipe_pane
     )
-    mcp.tool(title="Display Message", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        display_message
-    )
+    mcp.tool(
+        title="Evaluate tmux Format String",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+    )(display_message)
     mcp.tool(
         title="Enter Copy Mode",
         annotations=ANNOTATIONS_CREATE,
