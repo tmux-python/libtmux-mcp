@@ -8,16 +8,36 @@ ships to its clients. A client renders a prompt by calling
 libtmux-mcp's prompts are short *workflow recipes* — the MCP-shaped
 counterpart to the longer narrative recipes in {doc}`/recipes`.
 
-Four prompts ship today:
+## Available prompts
 
-- {ref}`fastmcp-prompt-run-and-wait` — execute a shell command and block until it
-  finishes, preserving exit status.
-- {ref}`fastmcp-prompt-diagnose-failing-pane` — gather pane context and produce a
-  root-cause hypothesis without taking action.
-- {ref}`fastmcp-prompt-build-dev-workspace` — set up a 3-pane editor / shell / logs
-  layout shell-agnostically.
-- {ref}`fastmcp-prompt-interrupt-gracefully` — send SIGINT and verify the shell
-  prompt returns, refusing to auto-escalate.
+::::{grid} 1 2 2 2
+:gutter: 2 2 3 3
+
+:::{grid-item-card} `run_and_wait`
+:link: fastmcp-prompt-run-and-wait
+:link-type: ref
+Execute a shell command and block until it finishes, preserving exit status.
+:::
+
+:::{grid-item-card} `diagnose_failing_pane`
+:link: fastmcp-prompt-diagnose-failing-pane
+:link-type: ref
+Gather pane context and produce a root-cause hypothesis without taking action.
+:::
+
+:::{grid-item-card} `build_dev_workspace`
+:link: fastmcp-prompt-build-dev-workspace
+:link-type: ref
+Set up a 3-pane editor / shell / logs layout shell-agnostically.
+:::
+
+:::{grid-item-card} `interrupt_gracefully`
+:link: fastmcp-prompt-interrupt-gracefully
+:link-type: ref
+Send SIGINT and verify the shell prompt returns, refusing to auto-escalate.
+:::
+
+::::
 
 ```{tip}
 Most MCP clients render prompts via a slash-command UI
