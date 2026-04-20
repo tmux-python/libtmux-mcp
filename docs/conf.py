@@ -146,6 +146,7 @@ def setup(app: Sphinx) -> None:
     app.connect("autodoc-process-docstring", _convert_md_xrefs)
     app.add_js_file("js/prompt-copy.js", loading_method="defer")
     app.add_css_file("css/project-admonitions.css")
+    app.add_css_file("css/project-cards.css")
 
 
 globals().update(conf)
