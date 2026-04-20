@@ -13,15 +13,11 @@ Until one of those paths is implemented, the surface here is visibility only.
 ::::{grid} 1 2 2 3
 :gutter: 2 2 3 3
 
-:::{grid-item-card} show_hooks
-:link: show-hooks
-:link-type: ref
+:::{grid-item-card} {tooliconl}`show-hooks`
 Enumerate bindings at a scope.
 :::
 
-:::{grid-item-card} show_hook
-:link: show-hook
-:link-type: ref
+:::{grid-item-card} {tooliconl}`show-hook`
 Inspect a single binding.
 :::
 

@@ -7,27 +7,19 @@ There is **no** `list_buffers` tool. The user's OS clipboard often syncs into tm
 ::::{grid} 1 2 2 3
 :gutter: 2 2 3 3
 
-:::{grid-item-card} load_buffer
-:link: load-buffer
-:link-type: ref
+:::{grid-item-card} {tooliconl}`load-buffer`
 Stage content into a new tmux paste buffer.
 :::
 
-:::{grid-item-card} paste_buffer
-:link: paste-buffer
-:link-type: ref
+:::{grid-item-card} {tooliconl}`paste-buffer`
 Push a staged buffer into a pane.
 :::
 
-:::{grid-item-card} show_buffer
-:link: show-buffer
-:link-type: ref
+:::{grid-item-card} {tooliconl}`show-buffer`
 Read a staged buffer's contents back.
 :::
 
-:::{grid-item-card} delete_buffer
-:link: delete-buffer
-:link-type: ref
+:::{grid-item-card} {tooliconl}`delete-buffer`
 Free the server-side state of a staged buffer.
 :::
 

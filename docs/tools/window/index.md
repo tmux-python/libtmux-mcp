@@ -5,45 +5,31 @@ Window-scoped tools — enumerate panes, split / rename / relayout / resize / mo
 ::::{grid} 1 2 2 3
 :gutter: 2 2 3 3
 
-:::{grid-item-card} list_panes
-:link: list-panes
-:link-type: ref
+:::{grid-item-card} {tooliconl}`list-panes`
 Enumerate panes inside a window.
 :::
 
-:::{grid-item-card} split_window
-:link: split-window
-:link-type: ref
+:::{grid-item-card} {tooliconl}`split-window`
 Split a window into a new pane.
 :::
 
-:::{grid-item-card} rename_window
-:link: rename-window
-:link-type: ref
+:::{grid-item-card} {tooliconl}`rename-window`
 Rename an existing window.
 :::
 
-:::{grid-item-card} select_layout
-:link: select-layout
-:link-type: ref
+:::{grid-item-card} {tooliconl}`select-layout`
 Apply one of tmux's named layouts.
 :::
 
-:::{grid-item-card} resize_window
-:link: resize-window
-:link-type: ref
+:::{grid-item-card} {tooliconl}`resize-window`
 Resize a window (client view).
 :::
 
-:::{grid-item-card} move_window
-:link: move-window
-:link-type: ref
+:::{grid-item-card} {tooliconl}`move-window`
 Reorder a window or move it across sessions.
 :::
 
-:::{grid-item-card} kill_window
-:link: kill-window
-:link-type: ref
+:::{grid-item-card} {tooliconl}`kill-window`
 Terminate a window. Destructive.
 :::
 

@@ -5,123 +5,83 @@ Pane-scoped tools — read and drive individual terminals, wait for output, copy
 ::::{grid} 1 2 2 3
 :gutter: 2 2 3 3
 
-:::{grid-item-card} capture_pane
-:link: capture-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`capture-pane`
 Read visible or scrollback text from a pane.
 :::
 
-:::{grid-item-card} search_panes
-:link: search-panes
-:link-type: ref
+:::{grid-item-card} {tooliconl}`search-panes`
 Search text across many panes in one call.
 :::
 
-:::{grid-item-card} snapshot_pane
-:link: snapshot-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`snapshot-pane`
 Capture content plus cursor, mode, and scroll state in one call.
 :::
 
-:::{grid-item-card} get_pane_info
-:link: get-pane-info
-:link-type: ref
+:::{grid-item-card} {tooliconl}`get-pane-info`
 Read pane metadata without content.
 :::
 
-:::{grid-item-card} display_message
-:link: display-message
-:link-type: ref
+:::{grid-item-card} {tooliconl}`display-message`
 Evaluate a tmux format string against a target.
 :::
 
-:::{grid-item-card} send_keys
-:link: send-keys
-:link-type: ref
+:::{grid-item-card} {tooliconl}`send-keys`
 Send keystrokes or commands to a pane.
 :::
 
-:::{grid-item-card} paste_text
-:link: paste-text
-:link-type: ref
+:::{grid-item-card} {tooliconl}`paste-text`
 Paste multi-line text via tmux buffer.
 :::
 
-:::{grid-item-card} pipe_pane
-:link: pipe-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`pipe-pane`
 Fork pane output to a file or program.
 :::
 
-:::{grid-item-card} select_pane
-:link: select-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`select-pane`
 Switch focus to a pane.
 :::
 
-:::{grid-item-card} swap_pane
-:link: swap-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`swap-pane`
 Swap two panes' positions.
 :::
 
-:::{grid-item-card} set_pane_title
-:link: set-pane-title
-:link-type: ref
+:::{grid-item-card} {tooliconl}`set-pane-title`
 Set a pane's human-readable title.
 :::
 
-:::{grid-item-card} clear_pane
-:link: clear-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`clear-pane`
 Clear a pane's scrollback.
 :::
 
-:::{grid-item-card} resize_pane
-:link: resize-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`resize-pane`
 Resize a pane.
 :::
 
-:::{grid-item-card} enter_copy_mode
-:link: enter-copy-mode
-:link-type: ref
+:::{grid-item-card} {tooliconl}`enter-copy-mode`
 Enter tmux copy mode for scrollback navigation.
 :::
 
-:::{grid-item-card} exit_copy_mode
-:link: exit-copy-mode
-:link-type: ref
+:::{grid-item-card} {tooliconl}`exit-copy-mode`
 Exit copy mode.
 :::
 
-:::{grid-item-card} wait_for_text
-:link: wait-for-text
-:link-type: ref
+:::{grid-item-card} {tooliconl}`wait-for-text`
 Block until a pattern appears in a pane.
 :::
 
-:::{grid-item-card} wait_for_content_change
-:link: wait-for-content-change
-:link-type: ref
+:::{grid-item-card} {tooliconl}`wait-for-content-change`
 Block until pane content changes.
 :::
 
-:::{grid-item-card} wait_for_channel
-:link: wait-for-channel
-:link-type: ref
+:::{grid-item-card} {tooliconl}`wait-for-channel`
 Block until a tmux wait-for channel is signalled.
 :::
 
-:::{grid-item-card} signal_channel
-:link: signal-channel
-:link-type: ref
+:::{grid-item-card} {tooliconl}`signal-channel`
 Signal a waiting channel.
 :::
 
-:::{grid-item-card} kill_pane
-:link: kill-pane
-:link-type: ref
+:::{grid-item-card} {tooliconl}`kill-pane`
 Terminate a pane. Destructive.
 :::
 
