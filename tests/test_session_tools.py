@@ -9,6 +9,7 @@ from fastmcp.exceptions import ToolError
 
 from libtmux_mcp.tools.session_tools import (
     create_window,
+    get_session_info,
     kill_session,
     list_windows,
     rename_session,
@@ -38,6 +39,27 @@ def test_list_windows_by_id(mcp_server: Server, mcp_session: Session) -> None:
         socket_name=mcp_server.socket_name,
     )
     assert len(result) >= 1
+
+
+def test_get_session_info(mcp_server: Server, mcp_session: Session) -> None:
+    """get_session_info returns a SessionInfo for a single session."""
+    result = get_session_info(
+        session_id=mcp_session.session_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.session_id == mcp_session.session_id
+    assert result.session_name == mcp_session.session_name
+    assert result.window_count >= 1
+
+
+def test_get_session_info_by_name(mcp_server: Server, mcp_session: Session) -> None:
+    """get_session_info resolves by session_name when no ID is given."""
+    assert mcp_session.session_name is not None
+    result = get_session_info(
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.session_id == mcp_session.session_id
 
 
 def test_create_window(mcp_server: Server, mcp_session: Session) -> None:
