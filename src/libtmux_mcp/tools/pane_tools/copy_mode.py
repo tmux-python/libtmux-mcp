@@ -55,6 +55,8 @@ def enter_copy_mode(
         session_id=session_id,
         window_id=window_id,
     )
+    # libtmux's Pane.cmd injects ``-t pane.pane_id``; passing it again
+    # produced the duplicated ``-t %X -t %X`` shape tmux silently accepted.
     pane.cmd("copy-mode")
     if scroll_up is not None and scroll_up > 0:
         pane.cmd(
@@ -107,6 +109,7 @@ def exit_copy_mode(
         session_id=session_id,
         window_id=window_id,
     )
+    # See enter_copy_mode: Pane.cmd injects ``-t pane.pane_id`` already.
     pane.cmd("send-keys", "-X", "cancel")
     pane.refresh()
     return _serialize_pane(pane)
