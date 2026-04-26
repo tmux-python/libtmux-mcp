@@ -2095,6 +2095,39 @@ def test_pane_tool_open_world_hint_registration(
     assert tool.annotations.openWorldHint is expected_open_world
 
 
+def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
+    """``respawn_pane`` registers as mutating-tier with destructive hints.
+
+    Default ``kill=True`` sends ``SPAWN_KILL`` to the running process
+    (`cmd-respawn-pane.c:78-79`); repeated calls kill repeated processes.
+    The MCP spec defines ``destructiveHint`` as "may perform destructive
+    updates" and ``idempotentHint`` as "calling repeatedly will have no
+    additional effect" (`mcp/types.py:1268-1282`). The default
+    ``ANNOTATIONS_MUTATING`` preset (``destructiveHint=False``,
+    ``idempotentHint=True``) would lie to the agent. The new
+    ``ANNOTATIONS_MUTATING_DESTRUCTIVE`` preset stays in ``TAG_MUTATING``
+    so the recovery use case remains visible to default-profile clients,
+    while honestly advertising destructive non-idempotent semantics.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-respawn-annotations")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool("respawn_pane"))
+    assert tool is not None, "respawn_pane should be registered"
+    assert tool.annotations is not None, (
+        "respawn_pane registration should carry annotations"
+    )
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.idempotentHint is False
+    assert tool.annotations.readOnlyHint is False
+
+
 # ---------------------------------------------------------------------------
 # Typed-output regression guard
 # ---------------------------------------------------------------------------

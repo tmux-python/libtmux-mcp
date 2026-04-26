@@ -6,6 +6,19 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Fixes
+
+- {tooliconl}`respawn-pane` now advertises honest MCP annotations.
+  Previously the tool inherited ``ANNOTATIONS_MUTATING`` defaults
+  (`destructiveHint=False`, `idempotentHint=True`) even though its
+  default `kill=True` sends `SPAWN_KILL` to the running process and
+  repeated calls kill repeated processes. The new
+  `ANNOTATIONS_MUTATING_DESTRUCTIVE` preset keeps the tool in
+  `TAG_MUTATING` (so it stays visible to default-profile agents for
+  shell recovery) while exporting `destructiveHint=True` and
+  `idempotentHint=False`. Agents reading the annotations can no longer
+  conclude that respawn-retries are safe.
+
 ## libtmux-mcp 0.1.0a3 (2026-04-19)
 
 _Post-0.1.0a2 smoke-test fixes and `libtmux` floor bump_

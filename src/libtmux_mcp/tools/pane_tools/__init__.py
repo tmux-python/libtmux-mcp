@@ -15,6 +15,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
+    ANNOTATIONS_MUTATING_DESTRUCTIVE,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
     TAG_DESTRUCTIVE,
@@ -92,7 +93,7 @@ def register(mcp: FastMCP) -> None:
     )(kill_pane)
     mcp.tool(
         title="Respawn Pane",
-        annotations=ANNOTATIONS_MUTATING,
+        annotations=ANNOTATIONS_MUTATING_DESTRUCTIVE,
         tags={TAG_MUTATING},
     )(respawn_pane)
     mcp.tool(
