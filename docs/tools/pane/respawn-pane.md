@@ -7,8 +7,8 @@
 process, bad terminal mode) and you need a clean restart *without*
 destroying the `pane_id` references other tools or callers may still
 be holding. With `kill=True` (the default) tmux kills the current
-process first; optional `shell_command` relaunches with a different
-command; optional `start_directory` sets its cwd.
+process first; optional `shell` relaunches with a different command;
+optional `start_directory` sets its cwd.
 
 **Avoid when** the pane genuinely needs to go away — use
 {tooliconl}`kill-pane` instead. Also avoid when you want to change
@@ -36,7 +36,7 @@ point of the tool. `pane_pid` updates to the new process.
   "tool": "respawn_pane",
   "arguments": {
     "pane_id": "%5",
-    "shell_command": "pytest -x",
+    "shell": "pytest -x",
     "start_directory": "/home/user/project"
   }
 }

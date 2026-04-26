@@ -266,17 +266,15 @@ def test_respawn_pane_preserves_pane_id_and_refreshes_pid(
     new_pane.kill()
 
 
-def test_respawn_pane_replaces_shell_command(
-    mcp_server: Server, mcp_session: Session
-) -> None:
-    """respawn_pane with shell_command relaunches with the new command."""
+def test_respawn_pane_replaces_shell(mcp_server: Server, mcp_session: Session) -> None:
+    """respawn_pane with ``shell`` relaunches with the new command."""
     window = mcp_session.active_window
     new_pane = window.split(shell="sleep 3600")
     assert new_pane.pane_id is not None
 
     result = respawn_pane(
         pane_id=new_pane.pane_id,
-        shell_command="sleep 7200",
+        shell="sleep 7200",
         socket_name=mcp_server.socket_name,
     )
     assert result.pane_id == new_pane.pane_id

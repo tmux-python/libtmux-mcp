@@ -65,7 +65,7 @@ def respawn_pane(
     session_id: str | None = None,
     window_id: str | None = None,
     kill: bool = True,
-    shell_command: str | None = None,
+    shell: str | None = None,
     start_directory: str | None = None,
     socket_name: str | None = None,
 ) -> PaneInfo:
@@ -77,9 +77,9 @@ def respawn_pane(
     the layout. respawn-pane preserves both.
 
     With ``kill=True`` (the default), tmux kills the existing process
-    before respawning. Optional ``shell_command`` replaces the
-    command tmux relaunches; ``start_directory`` sets the working
-    directory for the new process.
+    before respawning. Optional ``shell`` replaces the command tmux
+    relaunches; ``start_directory`` sets the working directory for
+    the new process.
 
     ``pane_id`` is required — no fallback to ``_resolve_pane``'s
     "first pane in session/window" behaviour. Default ``kill=True``
@@ -103,9 +103,12 @@ def respawn_pane(
         When True (default), pass ``-k`` to tmux so the current
         process is killed before respawning. When False, respawn
         fails if the pane already has a running process.
-    shell_command : str, optional
+    shell : str, optional
         Replacement command for tmux to launch. When omitted, tmux
-        restarts the original shell/command.
+        replays the original argv (good default for shells; may differ
+        for processes spawned via custom shell at split time). Matches
+        the ``shell`` parameter on :func:`split_window` and the
+        eventual upstream ``Pane.respawn(shell=)`` API.
     start_directory : str, optional
         Working directory for the relaunched command (maps to
         ``respawn-pane -c``).
@@ -149,8 +152,8 @@ def respawn_pane(
         argv.append("-k")
     if start_directory is not None:
         argv.extend(["-c", start_directory])
-    if shell_command is not None:
-        argv.append(shell_command)
+    if shell is not None:
+        argv.append(shell)
     result = pane.cmd("respawn-pane", *argv)
     if result.stderr:
         stderr = " ".join(result.stderr).strip()
