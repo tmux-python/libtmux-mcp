@@ -100,10 +100,17 @@ class SafetyMiddleware(Middleware):
 
 #: Argument names that carry user-supplied payloads we never want in logs.
 #: ``keys`` (send_keys), ``text`` (paste_text), ``value`` (set_environment),
-#: and ``content`` (load_buffer) can contain commands, secrets, or
-#: arbitrary large strings. Matched by exact name, case-sensitive, to
-#: mirror the tool signatures.
-_SENSITIVE_ARG_NAMES: frozenset[str] = frozenset({"keys", "text", "value", "content"})
+#: ``content`` (load_buffer), and ``shell`` (respawn_pane) can contain
+#: commands, secrets, or arbitrary large strings. Matched by exact name,
+#: case-sensitive, to mirror the tool signatures.
+#:
+#: Note on ``shell`` redaction: this redacts the MCP audit log only.
+#: ``respawn_pane(shell="env SECRET=... bash")`` may briefly expose the
+#: argument via the OS process table and tmux's ``pane_current_command``
+#: metadata until the spawned shell takes over — see ``docs/topics/safety.md``.
+_SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
+    {"keys", "text", "value", "content", "shell"}
+)
 
 #: String arguments longer than this get truncated in the log summary to
 #: keep records bounded. Non-sensitive strings only — sensitive ones are

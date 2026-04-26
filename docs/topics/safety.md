@@ -114,7 +114,7 @@ Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carryi
 - `outcome` — `ok` or `error`, with `error_type` on failure
 - `duration_ms`
 - `client_id` / `request_id` — from the fastmcp context when available
-- `args` — a summary of arguments. Sensitive keys (`keys`, `text`, `value`) are replaced by `{len, sha256_prefix}`; non-sensitive strings over 200 characters are truncated.
+- `args` — a summary of arguments. Sensitive keys (`keys`, `text`, `value`, `content`, `shell`) are replaced by `{len, sha256_prefix}`; non-sensitive strings over 200 characters are truncated.
 
 Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 

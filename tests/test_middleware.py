@@ -149,11 +149,13 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
         "keys": "rm -rf /",
         "text": "hello world",
         "value": "supersecret",
+        "content": "buffer payload",
+        "shell": "psql -U user -W secret123 mydb",
         "pane_id": "%1",
         "bracket": True,
     }
     summary = _summarize_args(args)
-    for sensitive in ("keys", "text", "value"):
+    for sensitive in ("keys", "text", "value", "content", "shell"):
         assert isinstance(summary[sensitive], dict)
         assert "len" in summary[sensitive]
         assert "sha256_prefix" in summary[sensitive]

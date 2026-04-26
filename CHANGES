@@ -28,6 +28,15 @@ _Notes on upcoming releases will be added here_
 
 ### Fixes
 
+- Audit log now redacts the ``shell`` argument on
+  {tooliconl}`respawn-pane` (and ``content`` on {tooliconl}`load-buffer`,
+  which the code already redacted but the docs did not list). The
+  ``shell`` payload may carry credentials passed to a relaunched
+  process; redacting the MCP audit log keeps them out of long-lived
+  log archives. Note: ``shell`` may still appear briefly in the OS
+  process table and tmux's ``pane_current_command`` metadata until the
+  spawned shell takes over — do not pass credentials directly even
+  with redaction.
 - {tooliconl}`respawn-pane` now requires an explicit ``pane_id``. Its
   signature still accepts ``session_name`` / ``session_id`` /
   ``window_id`` for backwards-compatibility with the shared pane-target
