@@ -218,6 +218,67 @@ def test_card_length_budget() -> None:
     )
 
 
+# Phrases the handles section emits when the corresponding tool is in
+# ``visible_tool_names``. Phase 4: ``_build_instructions`` filters the
+# Tools handle by visibility so the card never names a tool the agent
+# cannot call. Keep this aligned with ``_HANDLE_HINTS`` in server.py.
+_VISIBILITY_FILTER_CASES: list[tuple[str, str]] = [
+    ("snapshot_pane", "snapshot_pane over capture_pane"),
+    ("wait_for_text", "wait_for_text over capture_pane"),
+    ("search_panes", "search_panes over list_panes"),
+]
+
+
+@pytest.mark.parametrize(
+    ("omitted_tool", "phrase_that_should_drop"),
+    _VISIBILITY_FILTER_CASES,
+    ids=[t for t, _ in _VISIBILITY_FILTER_CASES],
+)
+def test_card_omits_invisible_tools(
+    omitted_tool: str,
+    phrase_that_should_drop: str,
+) -> None:
+    """The handles section drops hints for tools outside ``visible_tool_names``.
+
+    Each row asserts that removing one tool from the visible set drops
+    its tool-prefer hint from the card. Sanity check: the same phrase IS
+    present when the tool IS visible — guards against the test passing
+    accidentally because the phrase was never there.
+    """
+    full_visibility = {tool for tool, _ in _VISIBILITY_FILTER_CASES}
+    visible = full_visibility - {omitted_tool}
+
+    filtered = _build_instructions(TAG_MUTATING, visible_tool_names=visible)
+    assert phrase_that_should_drop not in filtered, (
+        f"phrase {phrase_that_should_drop!r} stayed when {omitted_tool} "
+        f"was filtered out — visibility filter is broken"
+    )
+
+    full = _build_instructions(TAG_MUTATING, visible_tool_names=full_visibility)
+    assert phrase_that_should_drop in full, (
+        f"phrase {phrase_that_should_drop!r} missing even when "
+        f"{omitted_tool} is visible — sanity check failed"
+    )
+
+
+def test_build_instructions_default_visible_tool_names_emits_full_card() -> None:
+    """``visible_tool_names=None`` is the backward-compat default.
+
+    The module-import-time ``instructions=`` placeholder builds without
+    invoking ``mcp.enable``, so it has no visibility set to consult. In
+    that case ``_build_instructions`` must emit every handle hint as if
+    the agent could call any tool — the alternative would be silently
+    dropping hints during the (brief) window before ``run_server``
+    overwrites the placeholder.
+    """
+    full = _build_instructions(TAG_MUTATING)
+    for _, phrase in _VISIBILITY_FILTER_CASES:
+        assert phrase in full, (
+            f"phrase {phrase!r} missing from default _build_instructions; "
+            f"visible_tool_names=None should emit the full hint set"
+        )
+
+
 def test_registered_tools_accept_socket_name() -> None:
     """All registered tools (except list_servers) accept ``socket_name``.
 

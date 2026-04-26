@@ -69,22 +69,69 @@ _INSTR_CARD = (
     "and is the documented socket_name exception."
 )
 
-_INSTR_HANDLES = (
-    "Three handles cover everything the agent needs:\n"
-    "- Tools — call list_tools; per-tool descriptions tell you which to "
-    "prefer (e.g. snapshot_pane over capture_pane + get_pane_info, "
-    "wait_for_text over capture_pane in a retry loop, search_panes over "
-    'list_panes when the user says "panes that contain X").\n'
-    "- Resources (tmux://) — browseable hierarchy plus reference cards "
-    "(format strings).\n"
-    "- Prompts — packaged workflows: run_and_wait, diagnose_failing_pane, "
-    "build_dev_workspace, interrupt_gracefully."
+#: Tool-prefer hints in the Tools handle, keyed by the tool that
+#: motivates them. ``_format_handles_section`` filters these by
+#: ``visible_tool_names`` so the card never names a tool the agent
+#: cannot call (e.g. ``send_keys``-only hints under
+#: ``LIBTMUX_SAFETY=readonly``).
+_HANDLE_HINTS: tuple[tuple[str, str], ...] = (
+    ("snapshot_pane", "snapshot_pane over capture_pane + get_pane_info"),
+    ("wait_for_text", "wait_for_text over capture_pane in a retry loop"),
+    (
+        "search_panes",
+        'search_panes over list_panes when the user says "panes that contain X"',
+    ),
 )
+
+
+def _format_handles_section(visible_tool_names: set[str] | None) -> str:
+    """Render the three-handles bullet list, optionally visibility-filtered.
+
+    When ``visible_tool_names`` is ``None`` every hint is included
+    (backward-compat for tests that build instructions without first
+    invoking ``mcp.enable``). Otherwise hints whose tool is not in the
+    visible set are dropped — naming a tool the agent cannot call would
+    be misleading.
+    """
+    if visible_tool_names is None:
+        hints = [hint for _, hint in _HANDLE_HINTS]
+    else:
+        hints = [hint for tool, hint in _HANDLE_HINTS if tool in visible_tool_names]
+
+    tools_line = (
+        "- Tools — call list_tools; per-tool descriptions tell you which to prefer"
+    )
+    if hints:
+        tools_line += " (e.g. " + ", ".join(hints) + ")."
+    else:
+        tools_line += "."
+
+    return "\n".join(
+        (
+            "Three handles cover everything the agent needs:",
+            tools_line,
+            (
+                "- Resources (tmux://) — browseable hierarchy plus reference "
+                "cards (format strings)."
+            ),
+            (
+                "- Prompts — packaged workflows: run_and_wait, "
+                "diagnose_failing_pane, build_dev_workspace, "
+                "interrupt_gracefully."
+            ),
+        )
+    )
+
+
+_INSTR_HANDLES = _format_handles_section(visible_tool_names=None)
 
 _BASE_INSTRUCTIONS = "\n\n".join((_INSTR_CARD, _INSTR_HANDLES))
 
 
-def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
+def _build_instructions(
+    safety_level: str = TAG_MUTATING,
+    visible_tool_names: set[str] | None = None,
+) -> str:
     """Build server instructions with agent context and safety level.
 
     When the MCP server process runs inside a tmux pane, ``TMUX_PANE`` and
@@ -95,13 +142,25 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     ----------
     safety_level : str
         Active safety tier (readonly, mutating, or destructive).
+    visible_tool_names : set of str, optional
+        When provided, the handles section drops hints for tools not in
+        the set so the card never names a tool the agent cannot call.
+        ``run_server`` populates this from ``mcp.list_tools()`` after
+        ``mcp.enable(tags=..., only=True)`` has applied the safety-tier
+        filter. Defaults to ``None`` (backward-compat: all hints emitted),
+        which is what the module-import-time placeholder uses before
+        ``run_server`` runs.
 
     Returns
     -------
     str
         Server instructions string, optionally with agent tmux context.
     """
-    parts: list[str] = [_BASE_INSTRUCTIONS]
+    if visible_tool_names is None:
+        base = _BASE_INSTRUCTIONS
+    else:
+        base = "\n\n".join((_INSTR_CARD, _format_handles_section(visible_tool_names)))
+    parts: list[str] = [base]
 
     # Safety tier context
     parts.append(
@@ -273,6 +332,8 @@ def _register_all() -> None:
 
 def run_server() -> None:
     """Run the MCP server."""
+    import asyncio
+
     _register_all()
 
     # Use FastMCP's native visibility system as primary gate,
@@ -283,5 +344,18 @@ def run_server() -> None:
     if _safety_level == TAG_DESTRUCTIVE:
         allowed_tags.add(TAG_DESTRUCTIVE)
     mcp.enable(tags=allowed_tags, only=True)
+
+    # Rebuild instructions now that ``mcp.enable`` has hidden tools
+    # outside the active safety tier. The card mentions specific tools
+    # by name (snapshot_pane, wait_for_text, search_panes); naming a
+    # tool the agent cannot call would be misleading. The
+    # module-import-time ``instructions=`` set on the FastMCP
+    # constructor was a placeholder built without a visibility filter —
+    # this overwrite is the authoritative version.
+    visible_tool_names = {tool.name for tool in asyncio.run(mcp.list_tools())}
+    mcp.instructions = _build_instructions(
+        safety_level=_safety_level,
+        visible_tool_names=visible_tool_names,
+    )
 
     mcp.run()
