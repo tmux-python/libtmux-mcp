@@ -380,3 +380,44 @@ def test_is_local_uv_directory_detection() -> None:
     pypi = mcp_swap.McpServerSpec(command="uvx", args=["libtmux-mcp==0.1.0a2"])
     assert pypi.is_local_uv_directory() is False
     assert pypi.local_repo_path() is None
+
+
+# ---------------------------------------------------------------------------
+# _claude_project_node schema-shape guard
+# ---------------------------------------------------------------------------
+
+
+def test_claude_project_node_rejects_non_mapping_projects(
+    fake_repo: pathlib.Path,
+) -> None:
+    """A non-mapping ``projects`` value is rejected with a clear error.
+
+    Claude's ``~/.claude.json`` layout is undocumented internal state.
+    If a future Claude release reshapes ``projects`` (e.g. to a list),
+    the script should fail before the atomic write begins so the
+    backup defense is not asked to recover from a partially-mutated
+    structure.
+    """
+    config: dict[str, t.Any] = {"projects": "not a dict"}
+    with pytest.raises(RuntimeError, match="layout appears to have changed"):
+        mcp_swap._claude_project_node(config, fake_repo, create=True)
+
+
+def test_claude_project_node_rejects_non_mapping_project_node(
+    fake_repo: pathlib.Path,
+) -> None:
+    """A non-mapping per-project node is rejected with a clear error."""
+    key = str(fake_repo.resolve())
+    config: dict[str, t.Any] = {"projects": {key: "scalar instead of dict"}}
+    with pytest.raises(RuntimeError, match="layout appears to have changed"):
+        mcp_swap._claude_project_node(config, fake_repo, create=True)
+
+
+def test_claude_project_node_accepts_well_shaped_config(
+    fake_repo: pathlib.Path,
+) -> None:
+    """Well-shaped config passes through to creation without error."""
+    config: dict[str, t.Any] = {}
+    node = mcp_swap._claude_project_node(config, fake_repo, create=True)
+    assert isinstance(node, dict)
+    assert "mcpServers" in node

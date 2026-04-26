@@ -215,12 +215,33 @@ def _claude_project_node(
     callers can drop runtime ``assert node is not None`` defensiveness.
     With ``create=False``, the absence of the node is a real return value
     and the type stays ``dict[str, t.Any] | None``.
+
+    Raises ``RuntimeError`` if Claude's config layout is not the
+    expected ``projects.<abs>.mcpServers`` mapping shape — the layout
+    is undocumented Claude Code internal state, so a clear error before
+    the atomic write beats a silent partial mutation that the backup
+    defense would be asked to recover from.
     """
     key = str(repo.resolve())
+    projects_node = config.get("projects")
+    if projects_node is not None and not isinstance(projects_node, dict):
+        msg = (
+            "Claude config layout appears to have changed; expected "
+            f"'projects' to be a mapping but got "
+            f"{type(projects_node).__name__}"
+        )
+        raise RuntimeError(msg)
     projects = (
         config.setdefault("projects", {}) if create else config.get("projects", {})
     )
-    node: dict[str, t.Any] | None = projects.get(key)
+    node = projects.get(key)
+    if node is not None and not isinstance(node, dict):
+        msg = (
+            "Claude config layout appears to have changed; expected "
+            f"'projects[{key!r}]' to be a mapping but got "
+            f"{type(node).__name__}"
+        )
+        raise RuntimeError(msg)
     if node is None and create:
         node = {"allowedTools": [], "mcpContextUris": [], "mcpServers": {}, "env": {}}
         projects[key] = node
