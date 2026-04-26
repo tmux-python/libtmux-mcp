@@ -287,6 +287,33 @@ def test_respawn_pane_replaces_shell_command(
     new_pane.kill()
 
 
+def test_respawn_pane_self_kill_guard(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """respawn_pane refuses when the caller's pane is the target."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    socket_path = _effective_socket_path(mcp_server)
+    monkeypatch.setenv(
+        "TMUX",
+        f"{socket_path},12345,{mcp_session.session_id}",
+    )
+    monkeypatch.setenv("TMUX_PANE", new_pane.pane_id)
+    with pytest.raises(ToolError, match="Refusing to respawn"):
+        respawn_pane(
+            pane_id=new_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+
+    new_pane.kill()
+
+
 # ---------------------------------------------------------------------------
 # search_panes tests
 # ---------------------------------------------------------------------------

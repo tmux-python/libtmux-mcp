@@ -118,6 +118,17 @@ def respawn_pane(
         session_id=session_id,
         window_id=window_id,
     )
+    caller = _get_caller_identity()
+    if (
+        caller is not None
+        and caller.pane_id == pane.pane_id
+        and _caller_is_on_server(server, caller)
+    ):
+        msg = (
+            "Refusing to respawn the pane running this MCP server. "
+            "Use a manual tmux command if intended."
+        )
+        raise ToolError(msg)
     argv: list[str] = ["-t", pane.pane_id or ""]
     if kill:
         argv.append("-k")
