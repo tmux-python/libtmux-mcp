@@ -356,7 +356,7 @@ def save_state(entries: dict[CLIName, SwapEntry]) -> None:
         "version": STATE_VERSION,
         "entries": {k: dataclasses.asdict(v) for k, v in entries.items()},
     }
-    STATE_FILE.write_text(json.dumps(payload, indent=2) + "\n")
+    atomic_write(STATE_FILE, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
 
 
 def clear_state(clis: t.Iterable[CLIName]) -> None:

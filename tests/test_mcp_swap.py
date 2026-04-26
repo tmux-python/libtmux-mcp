@@ -340,6 +340,30 @@ def test_state_file_cleared_after_full_revert(
     assert not mcp_swap.STATE_FILE.exists()
 
 
+def test_save_state_writes_atomically(fake_home: pathlib.Path) -> None:
+    """save_state routes through atomic_write — no leftover temp files."""
+    entry = mcp_swap.SwapEntry(
+        config_path="/tmp/cfg.json",
+        backup_path="/tmp/cfg.json.bak",
+        server="libtmux",
+        action="replaced",
+    )
+    mcp_swap.save_state({"claude": entry})
+
+    assert mcp_swap.STATE_FILE.exists()
+    payload = json.loads(mcp_swap.STATE_FILE.read_text())
+    assert payload["entries"]["claude"]["server"] == "libtmux"
+
+    # tempfile.mkstemp writes siblings prefixed "<name>." — none should
+    # remain after a successful atomic_write.
+    leftovers = [
+        p
+        for p in mcp_swap.STATE_DIR.iterdir()
+        if p.name.startswith("mcp_swap.json.") and p != mcp_swap.STATE_FILE
+    ]
+    assert leftovers == [], f"unexpected tempfile leftovers: {leftovers}"
+
+
 # ---------------------------------------------------------------------------
 # McpServerSpec helpers
 # ---------------------------------------------------------------------------
