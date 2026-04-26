@@ -275,12 +275,15 @@ def _claude_project_node(
     projects = (
         config.setdefault("projects", {}) if create else config.get("projects", {})
     )
-    node = projects.get(key)
-    if node is not None and not isinstance(node, dict):
+    raw_node = projects.get(key)
+    node: dict[str, t.Any] | None = None
+    if isinstance(raw_node, dict):
+        node = raw_node
+    elif raw_node is not None:
         msg = (
             "Claude config layout appears to have changed; expected "
             f"'projects[{key!r}]' to be a mapping but got "
-            f"{type(node).__name__}"
+            f"{type(raw_node).__name__}"
         )
         raise RuntimeError(msg)
     if node is None and create:
