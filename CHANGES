@@ -8,6 +8,12 @@ _Notes on upcoming releases will be added here_
 
 ### Scripts
 
+- ``scripts/mcp_swap.py``: ``_claude_project_node`` now uses
+  ``@t.overload`` so ``create=True`` is statically narrowed to
+  ``dict[str, t.Any]``. ``set_server`` drops the runtime
+  ``assert node is not None`` (which would have been stripped under
+  ``python -O``) — mypy proves the invariant via the overload instead.
+  Strict-typing-priority alignment.
 - ``scripts/mcp_swap.py`` PEP 723 ``requires-python`` lowered from
   ``>=3.11`` to ``>=3.10`` to match the project floor in
   ``pyproject.toml``. The script does not use any 3.11-only features

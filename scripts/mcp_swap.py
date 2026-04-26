@@ -187,10 +187,35 @@ def atomic_write(path: pathlib.Path, data: bytes) -> None:
 # ---------------------------------------------------------------------------
 
 
+@t.overload
+def _claude_project_node(
+    config: dict[str, t.Any],
+    repo: pathlib.Path,
+    *,
+    create: t.Literal[True],
+) -> dict[str, t.Any]: ...
+
+
+@t.overload
+def _claude_project_node(
+    config: dict[str, t.Any],
+    repo: pathlib.Path,
+    *,
+    create: t.Literal[False],
+) -> dict[str, t.Any] | None: ...
+
+
 def _claude_project_node(
     config: dict[str, t.Any], repo: pathlib.Path, *, create: bool
 ) -> dict[str, t.Any] | None:
-    """Return (or create) the ``projects.<abs-repo>`` node Claude keys per-project."""
+    """Return (or create) the ``projects.<abs-repo>`` node Claude keys per-project.
+
+    With ``create=True``, the node is unconditionally created if missing
+    and the return type is statically narrowed to ``dict[str, t.Any]``;
+    callers can drop runtime ``assert node is not None`` defensiveness.
+    With ``create=False``, the absence of the node is a real return value
+    and the type stays ``dict[str, t.Any] | None``.
+    """
     key = str(repo.resolve())
     projects = (
         config.setdefault("projects", {}) if create else config.get("projects", {})
@@ -230,7 +255,6 @@ def set_server(
     """Write ``spec`` under ``name`` in a CLI's config, returning replaced/added."""
     if cli == "claude":
         node = _claude_project_node(config, repo, create=True)
-        assert node is not None
         servers = node.setdefault("mcpServers", {})
         had = name in servers
         servers[name] = spec.to_json_dict(include_stdio_type=True)
