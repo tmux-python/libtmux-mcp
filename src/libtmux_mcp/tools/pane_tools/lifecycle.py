@@ -67,6 +67,7 @@ def respawn_pane(
     kill: bool = True,
     shell: str | None = None,
     start_directory: str | None = None,
+    environment: dict[str, str] | None = None,
     socket_name: str | None = None,
 ) -> PaneInfo:
     """Restart a pane's process in place, preserving pane_id and layout.
@@ -79,7 +80,9 @@ def respawn_pane(
     With ``kill=True`` (the default), tmux kills the existing process
     before respawning. Optional ``shell`` replaces the command tmux
     relaunches; ``start_directory`` sets the working directory for
-    the new process.
+    the new process; ``environment`` sets per-process environment
+    variables for the relaunched command (one ``-e KEY=VALUE`` flag
+    per entry).
 
     ``pane_id`` is required — no fallback to ``_resolve_pane``'s
     "first pane in session/window" behaviour. Default ``kill=True``
@@ -118,6 +121,16 @@ def respawn_pane(
     start_directory : str, optional
         Working directory for the relaunched command (maps to
         ``respawn-pane -c``).
+    environment : dict[str, str], optional
+        Environment variables to set for the relaunched process. Each
+        item becomes one ``-e KEY=VALUE`` flag (tmux's
+        ``cmd-respawn-pane.c`` supports the flag repeatedly). Values
+        are redacted in the audit log on a per-key basis — keys like
+        ``DATABASE_URL`` remain visible but their values are replaced
+        by ``{len, sha256_prefix}`` digests. Note that the values may
+        still appear briefly in the OS process table while tmux spawns
+        the new process; do not pass long-lived secrets here when a
+        host-resident agent or other tenant could observe ``ps``.
     socket_name : str, optional
         tmux socket name.
 
@@ -155,16 +168,21 @@ def respawn_pane(
         raise ToolError(msg)
     # Stopgap: ``libtmux>=0.55.1`` has no ``Pane.respawn()`` yet — the
     # wrapper exists on the upstream ``tmux-parity`` branch (see
-    # ``libtmux/pane.py:respawn``) and mirrors this argv shape (``-k``,
-    # ``-c <dir>``, optional trailing shell). When the release line picks
-    # it up, swap ``pane.cmd("respawn-pane", *argv)`` for ``pane.respawn(
-    # kill=kill, start_directory=start_directory, shell=shell)`` and drop
+    # ``libtmux/pane.py:respawn``) and mirrors this argv shape: ``-k``,
+    # ``-c <dir>``, repeated ``-e<KEY>=<VAL>`` (single-arg form, NOT
+    # split ``-e KEY=VAL`` — tmux's args parser accepts both but
+    # upstream emits the joined form), then optional trailing shell.
+    # When the release line picks it up, swap ``pane.cmd("respawn-pane",
+    # *argv)`` for ``pane.respawn(kill=kill, start_directory=
+    # start_directory, environment=environment, shell=shell)`` and drop
     # the stderr branch — ``Pane.respawn`` raises ``LibTmuxException``.
     argv: list[str] = []
     if kill:
         argv.append("-k")
     if start_directory is not None:
         argv.extend(["-c", start_directory])
+    if environment:
+        argv.extend(f"-e{k}={v}" for k, v in environment.items())
     if shell is not None:
         argv.append(shell)
     result = pane.cmd("respawn-pane", *argv)

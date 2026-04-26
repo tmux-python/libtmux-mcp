@@ -405,6 +405,51 @@ def test_respawn_pane_kill_false_on_live_pane_raises(
     new_pane.kill()
 
 
+def test_respawn_pane_with_environment(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``environment`` propagates through to the relaunched process.
+
+    tmux's ``respawn-pane -e KEY=VALUE`` sets per-process env vars on
+    the spawned command (``cmd-respawn-pane.c`` accepts the flag
+    repeatedly). Verify by relaunching with ``sh -c 'env'`` under
+    ``remain-on-exit`` so we can capture the env output after the
+    process exits without tmux deleting the pane out from under us.
+    """
+    window = mcp_session.active_window
+    window.cmd("set-option", "-w", "remain-on-exit", "on")
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    # Use ``printenv`` over ``env`` so the output fits the visible pane
+    # (default capture-pane reads only the visible screen, not history).
+    # Wrap the values in markers so we don't false-match on similarly
+    # named host env vars that might already be set.
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        shell="sh -c 'printenv LIBTMUX_TEST_FOO LIBTMUX_TEST_BAZ'",
+        environment={"LIBTMUX_TEST_FOO": "bar", "LIBTMUX_TEST_BAZ": "qux"},
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id
+
+    def _pane_dead() -> bool:
+        out = new_pane.cmd("display-message", "-p", "#{pane_dead}").stdout
+        return bool(out) and out[0].strip() == "1"
+
+    retry_until(_pane_dead, seconds=5, raises=True)
+
+    # ``-S -50`` reads the last 50 lines of scrollback so we don't lose
+    # the first ``printenv`` line off the top of the visible screen.
+    captured = new_pane.cmd("capture-pane", "-p", "-S", "-50").stdout
+    rendered = "\n".join(captured)
+    assert "bar" in rendered
+    assert "qux" in rendered
+
+    new_pane.kill()
+    window.cmd("set-option", "-wu", "remain-on-exit")
+
+
 # ---------------------------------------------------------------------------
 # search_panes tests
 # ---------------------------------------------------------------------------

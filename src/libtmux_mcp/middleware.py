@@ -100,16 +100,23 @@ class SafetyMiddleware(Middleware):
 
 #: Argument names that carry user-supplied payloads we never want in logs.
 #: ``keys`` (send_keys), ``text`` (paste_text), ``value`` (set_environment),
-#: ``content`` (load_buffer), and ``shell`` (respawn_pane) can contain
-#: commands, secrets, or arbitrary large strings. Matched by exact name,
-#: case-sensitive, to mirror the tool signatures.
+#: ``content`` (load_buffer), ``shell`` (respawn_pane), and ``environment``
+#: (respawn_pane) can contain commands, secrets, or arbitrary large strings.
+#: Matched by exact name, case-sensitive, to mirror the tool signatures.
 #:
-#: Note on ``shell`` redaction: this redacts the MCP audit log only.
-#: ``respawn_pane(shell="env SECRET=... bash")`` may briefly expose the
-#: argument via the OS process table and tmux's ``pane_current_command``
-#: metadata until the spawned shell takes over — see ``docs/topics/safety.md``.
+#: ``environment`` is dict-shaped (``dict[str, str]``); the redaction logic
+#: in :func:`_summarize_args` recognises this and digests each *value* while
+#: leaving the *keys* (env var names like ``DATABASE_URL``) visible — env
+#: var names are operator-debug-useful, but their values are the secret.
+#: All other entries are scalar strings; mixing the two is intentional.
+#:
+#: Note on ``shell`` and ``environment`` redaction: this redacts the MCP
+#: audit log only. ``respawn_pane(shell="env SECRET=... bash")`` and
+#: ``environment={"AWS_SECRET_KEY": "..."}`` may briefly expose the values
+#: via the OS process table and tmux's ``pane_current_command`` metadata
+#: until the spawned shell takes over — see ``docs/topics/safety.md``.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
-    {"keys", "text", "value", "content", "shell"}
+    {"keys", "text", "value", "content", "shell", "environment"}
 )
 
 #: String arguments longer than this get truncated in the log summary to
@@ -143,6 +150,10 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
 
     Sensitive keys get replaced by a digest; over-long strings get
     truncated with a marker; everything else passes through as-is.
+    Sensitive values that are dict-shaped (e.g. ``environment`` on
+    ``respawn_pane``) have each *value* digested while keys remain
+    visible — env-var-name-like keys are operator-debug-useful and
+    rarely sensitive, while their values usually are.
 
     Examples
     --------
@@ -155,11 +166,21 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
 
     >>> _summarize_args({"keys": "rm -rf /"})["keys"]["len"]
     8
+
+    Sensitive dict-shaped payloads keep their keys but digest values:
+
+    >>> redacted = _summarize_args({"environment": {"FOO": "bar"}})
+    >>> redacted["environment"]["FOO"]["len"]
+    3
+    >>> "bar" in str(redacted)
+    False
     """
     summary: dict[str, t.Any] = {}
     for key, value in args.items():
-        if isinstance(value, str) and key in _SENSITIVE_ARG_NAMES:
+        if key in _SENSITIVE_ARG_NAMES and isinstance(value, str):
             summary[key] = _redact_digest(value)
+        elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
+            summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
         elif isinstance(value, str) and len(value) > _MAX_LOGGED_STR_LEN:
             summary[key] = value[:_MAX_LOGGED_STR_LEN] + "...<truncated>"
         else:

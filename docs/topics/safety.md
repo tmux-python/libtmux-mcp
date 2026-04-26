@@ -104,6 +104,7 @@ Mitigations:
 
 - `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get a `ToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
 - Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
+- The optional `environment` argument (`dict[str, str]`) maps to one tmux `-e KEY=VALUE` flag per item. The audit log redacts each *value* via a `{len, sha256_prefix}` digest while keeping the *keys* visible — env var names like `DATABASE_URL` are usually operator-debug-useful, but their values are the secret. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
 ### `send_keys` / `paste_text`
@@ -118,7 +119,7 @@ Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carryi
 - `outcome` — `ok` or `error`, with `error_type` on failure
 - `duration_ms`
 - `client_id` / `request_id` — from the fastmcp context when available
-- `args` — a summary of arguments. Sensitive keys (`keys`, `text`, `value`, `content`, `shell`) are replaced by `{len, sha256_prefix}`; non-sensitive strings over 200 characters are truncated.
+- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `value`, `content`, `shell`) are replaced by `{len, sha256_prefix}`; the dict-shaped sensitive key `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
 
 Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 

@@ -6,6 +6,22 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Features
+
+- {tooliconl}`respawn-pane` gains an ``environment`` parameter
+  (``dict[str, str]``) that maps to tmux's ``respawn-pane -e
+  KEY=VALUE`` flag (one ``-e`` per entry, single-arg ``-e<KEY>=<VAL>``
+  form to mirror the upstream emitter). Closes the parity gap with
+  ``Pane.respawn(environment=)`` on libtmux's ``tmux-parity`` branch.
+  The audit-log redaction policy is extended to recognise dict-shaped
+  sensitive args: each value is replaced by a ``{len, sha256_prefix}``
+  digest while keys (env var names like ``DATABASE_URL``) remain
+  visible — keys are operator-debug-useful, values are the secret.
+  Note: like ``shell``, env var values may briefly appear in the OS
+  process table before the spawned shell inherits them; do not pass
+  long-lived secrets when other tenants on the host could observe
+  ``ps``.
+
 ### Tests
 
 - New ``test_registered_tools_accept_socket_name`` introspection test

@@ -8,7 +8,8 @@ process, bad terminal mode) and you need a clean restart *without*
 destroying the `pane_id` references other tools or callers may still
 be holding. With `kill=True` (the default) tmux kills the current
 process first; optional `shell` relaunches with a different command;
-optional `start_directory` sets its cwd.
+optional `start_directory` sets its cwd; optional `environment` adds
+per-process env vars (one `-e KEY=VALUE` flag per entry).
 
 **Avoid when** the pane genuinely needs to go away — use
 {tooliconl}`kill-pane` instead. Also avoid when you want to change
@@ -47,6 +48,24 @@ time).
   }
 }
 ```
+
+**Example — relaunch with extra environment variables:**
+
+```json
+{
+  "tool": "respawn_pane",
+  "arguments": {
+    "pane_id": "%5",
+    "shell": "pytest -x",
+    "environment": {
+      "PYTHONPATH": "/home/user/project/src",
+      "DATABASE_URL": "postgres://localhost/test"
+    }
+  }
+}
+```
+
+The audit log redacts each `environment` *value* via `{len, sha256_prefix}` digests but keeps the keys visible (env var names like `DATABASE_URL` are operator-debug-useful, while their values are the secret). Note that values may still appear briefly in the OS process table while tmux spawns the new process — see {ref}`safety` for details.
 
 Response (PaneInfo):
 
