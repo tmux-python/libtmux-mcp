@@ -207,8 +207,7 @@ def test_registered_tools_accept_socket_name() -> None:
     from fastmcp.tools.function_tool import FunctionTool
 
     from libtmux_mcp.tools import register_tools
-
-    socket_name_exempt = {"list_servers"}
+    from libtmux_mcp.tools.server_tools import SOCKET_NAME_EXEMPT
 
     mcp = FastMCP(name="socket-name-contract")
     register_tools(mcp)
@@ -216,7 +215,7 @@ def test_registered_tools_accept_socket_name() -> None:
     tools = asyncio.run(mcp.list_tools())
     assert tools, "register_tools should have registered at least one tool"
     for tool in tools:
-        if tool.name in socket_name_exempt:
+        if tool.name in SOCKET_NAME_EXEMPT:
             continue
         assert isinstance(tool, FunctionTool), (
             f"Tool {tool.name!r} is not a FunctionTool; the registry "
@@ -226,7 +225,8 @@ def test_registered_tools_accept_socket_name() -> None:
         sig = inspect.signature(tool.fn)
         assert "socket_name" in sig.parameters, (
             f"Tool {tool.name!r} omits socket_name; either add it, "
-            f"add to socket_name_exempt, or update _BASE_INSTRUCTIONS"
+            f"add to server_tools.SOCKET_NAME_EXEMPT, or update "
+            f"_BASE_INSTRUCTIONS"
         )
 
 
