@@ -2,13 +2,13 @@
 
 Why read-only only
 ------------------
-The brainstorm-and-refine plan deliberately excludes write-hooks
-(``set-hook`` / ``unset-hook``) from this commit. The reason is
-side-effect leakage: tmux servers outlive the MCP process, so if an
-MCP agent installs a hook that runs arbitrary shell on ``pane-exited``
-or ``command-error`` and then the MCP server is ``kill -9``'d, OOM'd,
-or crashes via a C-extension fault, the hook **stays installed** in
-the user's persistent tmux server and fires forever.
+Write-hooks (``set-hook`` / ``unset-hook``) are deliberately excluded.
+The reason is side-effect leakage: tmux servers outlive the MCP
+process, so if an MCP agent installs a hook that runs arbitrary shell
+on ``pane-exited`` or ``command-error`` and then the MCP server is
+``kill -9``'d, OOM'd, or crashes via a C-extension fault, the hook
+**stays installed** in the user's persistent tmux server and fires
+forever.
 
 FastMCP ``lifespan`` teardown only runs on graceful SIGTERM/SIGINT, so
 a soft "track what we installed and unset on shutdown" registry cannot

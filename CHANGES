@@ -18,6 +18,14 @@ _Notes on upcoming releases will be added here_
 
 ### Docs
 
+- Strip dangling internal-audit citations from production source
+  comments. ``window_tools.py:106`` no longer references "the
+  brainstorm-and-refine audit §7.1" — the architectural fence
+  (the four-hierarchy-level rule) stays, the orphaned citation goes.
+  ``session_tools.py:74-76`` cross-reference still resolves. The
+  ``hook_tools.py`` module docstring drops "The brainstorm-and-refine
+  plan deliberately excludes write-hooks" and keeps the rationale
+  (hook persistence + lifespan teardown gap).
 - {tooliconl}`get-window-info` "Avoid when" guidance now points to
   {tooliconl}`list-windows` (not {tooliconl}`list-panes`) for whole-
   session window enumeration. The previous wording trained agents into

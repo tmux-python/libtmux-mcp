@@ -103,7 +103,7 @@ def list_panes(
 # have a targeted single-object read. This is deliberately NOT a license to
 # add get_buffer_info / get_hook_info / get_option_info — those scopes are
 # not part of the hierarchy and the existing show_*/load_* tools already
-# cover their reads. See the brainstorm-and-refine audit §7.1.
+# cover their reads.
 @handle_tool_errors
 def get_window_info(
     window_id: str | None = None,
