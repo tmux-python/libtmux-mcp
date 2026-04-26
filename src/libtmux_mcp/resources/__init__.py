@@ -10,6 +10,7 @@ if t.TYPE_CHECKING:
 
 def register_resources(mcp: FastMCP) -> None:
     """Register all resource modules with the FastMCP instance."""
-    from libtmux_mcp.resources import hierarchy
+    from libtmux_mcp.resources import hierarchy, reference
 
     hierarchy.register(mcp)
+    reference.register(mcp)
