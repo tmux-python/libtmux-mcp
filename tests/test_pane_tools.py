@@ -314,6 +314,99 @@ def test_respawn_pane_self_kill_guard(
     new_pane.kill()
 
 
+def test_respawn_pane_rejects_implicit_target(mcp_server: Server) -> None:
+    """respawn_pane refuses when no targeting parameter is supplied.
+
+    Without ``pane_id`` (or any other discriminator) ``_resolve_pane``
+    falls back to the first pane of the first window of the first
+    session — combined with default ``kill=True`` that could silently
+    kill an unrelated server. The runtime guard requires explicit
+    ``pane_id``.
+    """
+    with pytest.raises(ToolError, match="explicit pane_id"):
+        respawn_pane(socket_name=mcp_server.socket_name)
+
+
+def test_respawn_pane_rejects_session_only_target(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """respawn_pane refuses ``session_name`` without ``pane_id``.
+
+    ``session_name`` alone resolves to the first pane of the first
+    window, which is not what the caller intends when recovering a
+    wedged shell elsewhere in the session. The guard requires
+    ``pane_id`` regardless of which other targeting parameters are
+    present.
+    """
+    assert mcp_session.session_name is not None
+    with pytest.raises(ToolError, match="explicit pane_id"):
+        respawn_pane(
+            session_name=mcp_session.session_name,
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_respawn_pane_kill_false_on_dead_pane_succeeds(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``kill=False`` respawn on a dead pane returns fresh PaneInfo.
+
+    tmux's ``respawn-pane`` without ``-k`` is the safer default: it
+    only succeeds when the pane has no running process. Existing tests
+    only cover ``kill=True`` paths (see :func:`test_respawn_pane_*`
+    above); this test locks the safer-default behaviour for any future
+    flip of the default.
+    """
+    window = mcp_session.active_window
+    # remain-on-exit=on keeps the pane around after its process exits so
+    # we can drive a kill=False respawn on a confirmed-dead process.
+    # Without it, tmux removes the pane the moment its child exits and
+    # the respawn call fails with PaneNotFound instead of exercising
+    # the kill=False branch. Set the option on the window *before*
+    # splitting so the new pane inherits it.
+    window.cmd("set-option", "-w", "remain-on-exit", "on")
+    new_pane = window.split(shell="true")
+    assert new_pane.pane_id is not None
+
+    def _pane_dead() -> bool:
+        out = new_pane.cmd("display-message", "-p", "#{pane_dead}").stdout
+        return bool(out) and out[0].strip() == "1"
+
+    retry_until(_pane_dead, seconds=5, raises=True)
+
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        kill=False,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id
+    new_pane.kill()
+    window.cmd("set-option", "-wu", "remain-on-exit")
+
+
+def test_respawn_pane_kill_false_on_live_pane_raises(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``kill=False`` respawn on a live pane raises ToolError from tmux.
+
+    tmux refuses to respawn a pane that still has a running process
+    unless ``-k`` is passed. The MCP wrapper surfaces the stderr as a
+    ``ToolError`` rather than swallowing it.
+    """
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    with pytest.raises(ToolError):
+        respawn_pane(
+            pane_id=new_pane.pane_id,
+            kill=False,
+            socket_name=mcp_server.socket_name,
+        )
+
+    new_pane.kill()
+
+
 # ---------------------------------------------------------------------------
 # search_panes tests
 # ---------------------------------------------------------------------------

@@ -81,16 +81,24 @@ def respawn_pane(
     command tmux relaunches; ``start_directory`` sets the working
     directory for the new process.
 
+    ``pane_id`` is required — no fallback to ``_resolve_pane``'s
+    "first pane in session/window" behaviour. Default ``kill=True``
+    will terminate the resolved pane's process, so accidental targeting
+    can silently kill an unrelated server. Resolve via ``list_panes``
+    first.
+
     Parameters
     ----------
-    pane_id : str, optional
-        Pane ID (e.g. '%1').
+    pane_id : str
+        Pane ID (e.g. '%1'). Required — no fallback resolution.
     session_name : str, optional
-        Session name for pane resolution.
+        Accepted for backwards-compatibility with the ``_resolve_pane``
+        signature shared across pane tools, but the explicit ``pane_id``
+        guard above raises before this is consulted.
     session_id : str, optional
-        Session ID (e.g. '$1') for pane resolution.
+        See ``session_name``.
     window_id : str, optional
-        Window ID for pane resolution.
+        See ``session_name``.
     kill : bool
         When True (default), pass ``-k`` to tmux so the current
         process is killed before respawning. When False, respawn
@@ -110,6 +118,13 @@ def respawn_pane(
         Serialized pane metadata after respawn. The pane_id is
         preserved; pane_pid reflects the new process.
     """
+    if pane_id is None:
+        msg = (
+            "respawn_pane requires an explicit pane_id (e.g. '%1') because "
+            "default kill=True will terminate the resolved pane's process. "
+            "Resolve the target via list_panes first."
+        )
+        raise ToolError(msg)
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,

@@ -8,6 +8,16 @@ _Notes on upcoming releases will be added here_
 
 ### Fixes
 
+- {tooliconl}`respawn-pane` now requires an explicit ``pane_id``. Its
+  signature still accepts ``session_name`` / ``session_id`` /
+  ``window_id`` for backwards-compatibility with the shared pane-target
+  resolution surface, but a runtime guard raises before
+  ``_resolve_pane`` is invoked. Without the guard, calling
+  ``respawn_pane(session_name="dev")`` resolved through ``_resolve_pane``
+  to the first pane of the first window — combined with default
+  ``kill=True`` that could silently kill a critical running process
+  (e.g. an `npm run dev` server) instead of the intended wedged shell.
+  Resolve the target via {tooliconl}`list-panes` first.
 - {tooliconl}`respawn-pane` now advertises honest MCP annotations.
   Previously the tool inherited ``ANNOTATIONS_MUTATING`` defaults
   (`destructiveHint=False`, `idempotentHint=True`) even though its
