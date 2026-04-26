@@ -59,7 +59,7 @@ invocation with no reinstall step.
 
 ### Scope
 
-Covers four CLIs and their canonical config paths:
+Covers four CLIs and their canonical **global** config paths:
 
 | CLI    | Config                       | Format |
 |--------|-------------------------------|--------|
@@ -71,6 +71,19 @@ Covers four CLIs and their canonical config paths:
 Claude's config is keyed per-project under the repo's absolute path — the
 script writes only under the current repo's key, leaving other projects'
 entries untouched.
+
+#### Out of scope (use the CLI's native command)
+
+- **Workspace / project-local configs** for Cursor and Gemini
+  (`$PWD/.cursor/mcp.json`, `$PWD/.gemini/settings.json`). When
+  workspace precedence matters, use `cursor mcp add` / `gemini mcp add`
+  directly — workspace files take precedence over the global ones this
+  script writes.
+- **Custom binary install locations.** Detection is `shutil.which` plus
+  the file existing at the configured global path. Homebrew, npm
+  prefixes (`~/.npm-global/bin`), and post-migration paths
+  (`~/.claude/local/claude`, `~/.gemini/local/gemini`) are picked up
+  only when the binary is already on `PATH`.
 
 ### Extending to a new CLI
 

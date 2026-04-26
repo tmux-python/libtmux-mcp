@@ -25,6 +25,29 @@ $ uv run scripts/mcp_swap.py use-local --dry-run
 $ uv run scripts/mcp_swap.py use-local
 $ uv run scripts/mcp_swap.py revert
 ```
+
+Scope
+-----
+This script is best-effort and intentionally narrow:
+
+- **Global configs only.** Writes to ``~/.cursor/mcp.json``,
+  ``~/.claude.json``, ``~/.codex/config.toml``, and
+  ``~/.gemini/settings.json``. Workspace / project-local configs
+  (``$PWD/.cursor/mcp.json``, ``$PWD/.gemini/settings.json``,
+  per-project ``projects.<abs>.mcpServers`` entries inside
+  ``~/.claude.json`` *are* recognised for Claude only) are NOT
+  walked — workspace files for Cursor/Gemini are silently ignored.
+  When workspace precedence matters, run the CLI's own
+  ``cursor mcp add ...`` / ``gemini mcp add ...`` directly.
+- **Simple binary detection.** Probing is ``shutil.which(<binary>)``
+  plus ``<config_path>.exists()``. Custom install locations
+  (Homebrew, npm prefixes, ``~/.npm-global/bin``,
+  ``~/.claude/local/claude``, ``~/.gemini/local/gemini``) are picked
+  up only if the binary is on ``PATH``. FastMCP's installer probes
+  these locations directly; this script does not.
+- **Single config shape per CLI.** No fallback paths, no merge of
+  multiple sources. If your setup deviates from the defaults above,
+  use the CLI's native ``mcp`` subcommand instead.
 """
 
 from __future__ import annotations
