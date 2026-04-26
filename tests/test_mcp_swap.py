@@ -158,6 +158,76 @@ def test_json_swap_and_revert_round_trip(
     assert info.config_path.read_bytes() == original
 
 
+def test_use_local_preserves_existing_env_when_replacing(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Existing ``env`` on a replaced entry survives ``use-local``.
+
+    Regression: ``cmd_use_local`` previously constructed the replacement
+    spec via ``build_local_spec`` (env={}) and wrote it directly,
+    silently dropping client-side settings like ``LIBTMUX_SAFETY`` or
+    ``LIBTMUX_SOCKET`` that the user had set on the prior pinned-PyPI
+    entry. The fix merges ``current.env`` into the new spec; this test
+    locks the behaviour by seeding env on a Cursor entry, running
+    ``use-local``, and asserting both the new local-uv command shape and
+    the original env survived.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {
+                "libtmux": {
+                    "command": "uvx",
+                    "args": ["libtmux-mcp==0.1.0a2"],
+                    "env": {"LIBTMUX_SAFETY": "readonly", "FOO": "bar"},
+                }
+            }
+        },
+    )
+
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    entry = json.loads(info.config_path.read_text())["mcpServers"]["libtmux"]
+    assert entry["command"] == "uv"
+    assert entry["args"] == [
+        "--directory",
+        str(fake_repo.resolve()),
+        "run",
+        "libtmux-mcp",
+    ]
+    assert entry["env"] == {"LIBTMUX_SAFETY": "readonly", "FOO": "bar"}
+
+
+def test_use_local_with_no_prior_entry_writes_empty_env(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """When no prior entry exists, the new spec lands with empty env.
+
+    The env-merge branch only fires for replacements; the "added" path
+    (e.g. Codex with no prior libtmux block) should match
+    ``build_local_spec``'s default empty env. This pins the Codex add
+    case so the merge logic doesn't accidentally synthesise env from
+    nothing.
+    """
+    info = mcp_swap.CLIS["codex"]
+    info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    info.config_path.write_text("# empty config\n")
+
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "codex"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    config = tomlkit.parse(info.config_path.read_text())
+    table = config["mcp_servers"]["libtmux"]  # type: ignore[index]
+    assert isinstance(table, tomlkit.items.Table)
+    assert "env" not in table
+
+
 def test_json_swap_preserves_unrelated_servers(
     fake_home: pathlib.Path, fake_repo: pathlib.Path
 ) -> None:

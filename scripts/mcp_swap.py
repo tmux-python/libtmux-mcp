@@ -556,7 +556,13 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         ):
             print(f"[{cli}] already local (this repo) — no change")
             continue
-        action = set_server(cli, config, server, spec, repo)
+        # Preserve the existing entry's env on replacement. ``build_local_spec``
+        # writes an empty env, so without this merge a swap would silently drop
+        # client-side settings (LIBTMUX_SAFETY, LIBTMUX_SOCKET, custom dev
+        # knobs). Symmetric with ``_spec_from_entry`` which round-trips env on
+        # the read side.
+        cli_spec = dataclasses.replace(spec, env={**current.env}) if current else spec
+        action = set_server(cli, config, server, cli_spec, repo)
         new_bytes = dump_config_bytes(info, config)
 
         if args.dry_run:

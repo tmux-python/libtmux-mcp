@@ -40,6 +40,19 @@ _Notes on upcoming releases will be added here_
 
 ### Scripts
 
+- ``scripts/mcp_swap.py``: ``use-local`` now preserves an existing
+  entry's ``env`` dict on replacement. Previously a swap silently
+  dropped client-side environment settings (``LIBTMUX_SAFETY``,
+  ``LIBTMUX_SOCKET``, custom dev knobs) because ``build_local_spec``
+  returned a spec with empty env and ``set_server`` wrote it unchanged.
+  The timestamped backup at ``.bak.mcp-swap-<ts>`` still captures the
+  full original config for full recovery via ``revert``, but day-to-day
+  swaps no longer require manual env restoration. The merge mirrors
+  ``_spec_from_entry`` (which round-trips env on the read side).
+  Regression test:
+  ``tests/test_mcp_swap.py:test_use_local_preserves_existing_env_when_replacing``
+  plus a paired ``test_use_local_with_no_prior_entry_writes_empty_env``
+  to lock the Codex "added" path against accidental env synthesis.
 - ``scripts/mcp_swap.py``: ``_claude_project_node`` validates that
   Claude's undocumented ``projects.<abs>.mcpServers`` layout is still
   mapping-shaped before mutating it. If a future Claude release
