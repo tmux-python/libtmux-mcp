@@ -55,7 +55,7 @@ def enter_copy_mode(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.cmd("copy-mode", "-t", pane.pane_id)
+    pane.cmd("copy-mode")
     if scroll_up is not None and scroll_up > 0:
         pane.cmd(
             "send-keys",
@@ -107,6 +107,6 @@ def exit_copy_mode(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.cmd("send-keys", "-t", pane.pane_id, "-X", "cancel")
+    pane.cmd("send-keys", "-X", "cancel")
     pane.refresh()
     return _serialize_pane(pane)

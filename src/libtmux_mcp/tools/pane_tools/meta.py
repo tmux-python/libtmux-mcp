@@ -61,7 +61,7 @@ def display_message(
         session_id=session_id,
         window_id=window_id,
     )
-    result = pane.cmd("display-message", "-p", "-t", pane.pane_id, format_string)
+    result = pane.cmd("display-message", "-p", format_string)
     return "\n".join(result.stdout) if result.stdout else ""
 
 
@@ -147,7 +147,7 @@ def snapshot_pane(
             "#{pane_current_path}",
         ]
     )
-    result = pane.cmd("display-message", "-p", "-t", pane.pane_id, fmt)
+    result = pane.cmd("display-message", "-p", fmt)
     raw = result.stdout[0] if result.stdout else ""
     # Pad defensively to guarantee 11 fields even if tmux drops an
     # unknown format variable on older versions.

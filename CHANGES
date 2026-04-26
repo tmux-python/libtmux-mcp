@@ -31,6 +31,18 @@ _Notes on upcoming releases will be added here_
   caching is an MCP protocol break. No compatibility alias — this is
   a pre-release library.
 
+### Refactor
+
+- Drop redundant ``["-t", pane.pane_id]`` argument prefixes at five
+  ``pane.cmd(...)`` sites (`pane_tools/lifecycle.py:132`,
+  `copy_mode.py:58, 110`, `meta.py:64, 150`). libtmux's ``Pane.cmd``
+  already injects ``-t self.pane_id`` via ``Server.cmd``, so the
+  resulting wire form was ``tmux <verb> -t %X -t %X ...``; tmux's args
+  parser kept the last ``-t`` so behaviour was identical, but the
+  redundancy was confusing slop. The convention exemplar at
+  `copy_mode.py:60-66` (``pane.cmd("send-keys", "-X", ...)``) shows the
+  intended call shape.
+
 ### Fixes
 
 - Audit log now redacts the ``shell`` argument on

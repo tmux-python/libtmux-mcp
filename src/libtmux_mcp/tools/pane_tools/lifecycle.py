@@ -153,7 +153,7 @@ def respawn_pane(
             "Use a manual tmux command if intended."
         )
         raise ToolError(msg)
-    argv: list[str] = ["-t", pane.pane_id or ""]
+    argv: list[str] = []
     if kill:
         argv.append("-k")
     if start_directory is not None:
