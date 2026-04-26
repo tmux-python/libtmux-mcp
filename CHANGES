@@ -6,6 +6,16 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Scripts
+
+- ``scripts/mcp_swap.py`` PEP 723 ``requires-python`` lowered from
+  ``>=3.11`` to ``>=3.10`` to match the project floor in
+  ``pyproject.toml``. The script does not use any 3.11-only features
+  (verified: no ``tomllib``, ``ExceptionGroup``, ``except*``, or
+  structural ``match``); the previous bound made ``uv run scripts/
+  mcp_swap.py`` provision a fresh 3.11 toolchain on contributor
+  machines that otherwise share the project's 3.10 venv.
+
 ### Docs
 
 - {tooliconl}`get-window-info` "Avoid when" guidance now points to

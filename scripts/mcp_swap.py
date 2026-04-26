@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.10"
 # dependencies = ["tomlkit>=0.13"]
 # ///
 """Swap MCP server configs across Claude / Codex / Cursor / Gemini CLIs.
