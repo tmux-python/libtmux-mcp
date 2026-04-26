@@ -176,6 +176,11 @@ def load_buffer(
 ) -> BufferRef:
     """Load text into a new agent-namespaced tmux paste buffer.
 
+    Track the returned BufferRef on subsequent paste_buffer / show_buffer
+    / delete_buffer calls — there is no list_buffers tool, because tmux
+    buffers may include OS clipboard history (passwords, private
+    snippets) and a blanket enumeration would leak that to the agent.
+
     Each call allocates a fresh buffer name — two concurrent calls will
     land in distinct buffers even if they pass the same ``logical_name``.
     Agents MUST use the returned :attr:`BufferRef.buffer_name` on

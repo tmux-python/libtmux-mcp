@@ -39,8 +39,9 @@ def list_windows(
 ) -> list[WindowInfo]:
     """List windows in a tmux session, or all windows across sessions.
 
-    Only searches window metadata (name, index, layout). To search
-    the actual text visible in terminal panes, use search_panes instead.
+    Searches window metadata only (name, index, layout). For text
+    visible IN terminals — when users say "panes that contain/mention/show X"
+    — use search_panes instead.
 
     Parameters
     ----------

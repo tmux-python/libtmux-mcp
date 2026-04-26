@@ -247,6 +247,64 @@ def test_base_instructions_document_buffer_lifecycle() -> None:
     assert "clipboard history" in _BASE_INSTRUCTIONS
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "must_include"),
+    [
+        ("capture_pane", "snapshot_pane"),
+        ("capture_pane", "wait_for_text"),
+        ("capture_pane", "search_panes"),
+        ("show_hooks", "tmux config file"),
+        ("load_buffer", "list_buffers"),
+        ("load_buffer", "clipboard history"),
+        ("send_keys", "wait_for_text"),
+        ("list_panes", "search_panes"),
+        ("list_windows", "search_panes"),
+    ],
+)
+def test_tool_description_includes(tool_name: str, must_include: str) -> None:
+    """Tool descriptions carry cross-references the agent needs at the call site.
+
+    Phase 1 of the BASE_INSTRUCTIONS slim-down: rules that are tool-specific
+    live in tool descriptions (surfaced by FastMCP at every ``list_tools``
+    call), not in the global card or in module docstrings (which FastMCP
+    does not surface). The asserted phrases are the ones an agent would
+    look for when deciding which tool to call:
+
+    * ``capture_pane`` cross-references richer alternatives
+      (``snapshot_pane``, ``wait_for_text``) and the parallel-search tool
+      (``search_panes``).
+    * ``show_hooks`` carries the no-set_hook rationale ("tmux config
+      file") that previously lived only in ``hook_tools``' module
+      docstring.
+    * ``load_buffer`` carries the no-list_buffers / clipboard-privacy
+      rationale that previously lived only in ``buffer_tools``' module
+      docstring.
+    * ``send_keys`` points at ``wait_for_text`` instead of a poll loop.
+    * ``list_panes`` / ``list_windows`` point at ``search_panes`` for
+      content (vs. metadata-only) queries.
+
+    The "tool exists" assertion is a strict upgrade over substring tests
+    on ``_BASE_INSTRUCTIONS``: a future rename that drops the rule fails
+    here instead of silently losing agent-relevant guidance.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="tool-description-contract")
+    register_tools(mcp)
+
+    tools = asyncio.run(mcp.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+    assert tool_name in by_name, f"{tool_name!r} is not registered"
+    description = by_name[tool_name].description or ""
+    assert must_include in description, (
+        f"{tool_name!r} description missing {must_include!r}; got {description!r}"
+    )
+
+
 def test_build_instructions_documents_is_caller_workflow_inside_tmux(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
