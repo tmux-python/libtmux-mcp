@@ -83,14 +83,14 @@ _Notes on upcoming releases will be added here_
   table picks up a `respawn-pane` row showing the unusual mutating-tier
   + `destructiveHint=true` + `idempotentHint=false` combination.
 
-### Breaking changes
+### API decisions (pre-release)
 
 - {tooliconl}`respawn-pane` parameter ``shell_command`` is renamed to
-  ``shell`` to align with {tooliconl}`split-window` and the eventual
-  upstream ``Pane.respawn(shell=)`` API on libtmux's ``tmux-parity``
-  branch. Renamed before agents cache the schema; renaming after
-  caching is an MCP protocol break. No compatibility alias — this is
-  a pre-release library.
+  ``shell`` to align with {tooliconl}`split-window` and the upstream
+  ``Pane.respawn(shell=)`` signature on libtmux's ``tmux-parity``
+  branch. Settled before the tool reached ``origin/main`` so no
+  compatibility alias is shipped — alignment is the load-bearing
+  reason, not a fix to a previously released name.
 
 ### Refactor
 
