@@ -1,4 +1,4 @@
-"""Pane lifecycle tools: kill, title, info."""
+"""Pane lifecycle tools: kill, respawn, title, info."""
 
 from __future__ import annotations
 
