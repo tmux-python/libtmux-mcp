@@ -6,174 +6,29 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
-### Features
+### What's new
 
-- {tooliconl}`respawn-pane` gains an ``environment`` parameter
-  (``dict[str, str]``) that maps to tmux's ``respawn-pane -e
-  KEY=VALUE`` flag (one ``-e`` per entry, single-arg ``-e<KEY>=<VAL>``
-  form to mirror the upstream emitter). Closes the parity gap with
-  ``Pane.respawn(environment=)`` on libtmux's ``tmux-parity`` branch.
-  The audit-log redaction policy is extended to recognise dict-shaped
-  sensitive args: each value is replaced by a ``{len, sha256_prefix}``
-  digest while keys (env var names like ``DATABASE_URL``) remain
-  visible — keys are operator-debug-useful, values are the secret.
-  Note: like ``shell``, env var values may briefly appear in the OS
-  process table before the spawned shell inherits them; do not pass
-  long-lived secrets when other tenants on the host could observe
-  ``ps``.
+#### New tool: `respawn_pane`
 
-### Tests
+Restart a wedged pane in place — preserves `pane_id` and the window layout (the alternative `kill_pane` + `split_window` invalidates pane references and rearranges the window). Required `pane_id`; optional `kill` (default true), `shell`, `start_directory`, `environment`. Refuses to respawn the MCP server's own pane, mirroring the existing `kill_*` self-guards. Annotations honestly mark it `destructiveHint=true` / `idempotentHint=false` while staying in the `mutating` tier so default-profile agents can use it for shell recovery. Audit log redacts the `shell` argument and digests `environment` values (keys stay visible). (#27)
 
-- New ``test_registered_tools_accept_socket_name`` introspection test
-  in ``tests/test_server.py`` enumerates every registered tool via
-  ``FastMCP.list_tools()`` and asserts each accepts a ``socket_name``
-  parameter, with ``list_servers`` as the documented exception (it
-  takes ``extra_socket_paths`` instead). Catches future tool drift
-  before it silently makes ``_BASE_INSTRUCTIONS`` lie to agents. The
-  ``_BASE_INSTRUCTIONS`` text itself is tightened from "All tools
-  accept an optional socket_name parameter" to "Targeted tmux tools
-  accept an optional socket_name parameter (defaults to LIBTMUX_SOCKET
-  env var); list_servers discovers sockets via TMUX_TMPDIR plus
-  optional extra_socket_paths instead." A companion content test
-  (``test_base_instructions_document_socket_name_contract``) locks the
-  wording.
+#### New tools: `get_session_info`, `get_window_info`
 
-### Scripts
+Targeted single-object metadata reads — no more `list_*` + filter when you have an ID. Completes the four-level `get_*_info` hierarchy (server / session / window / pane); buffers, hooks, and options have existing read paths and are deliberately excluded. (#27)
 
-- ``scripts/mcp_swap.py``: ``use-local`` now preserves an existing
-  entry's ``env`` dict on replacement. Previously a swap silently
-  dropped client-side environment settings (``LIBTMUX_SAFETY``,
-  ``LIBTMUX_SOCKET``, custom dev knobs) because ``build_local_spec``
-  returned a spec with empty env and ``set_server`` wrote it unchanged.
-  The timestamped backup at ``.bak.mcp-swap-<ts>`` still captures the
-  full original config for full recovery via ``revert``, but day-to-day
-  swaps no longer require manual env restoration. The merge mirrors
-  ``_spec_from_entry`` (which round-trips env on the read side).
-  Regression test:
-  ``tests/test_mcp_swap.py:test_use_local_preserves_existing_env_when_replacing``
-  plus a paired ``test_use_local_with_no_prior_entry_writes_empty_env``
-  to lock the Codex "added" path against accidental env synthesis.
-- ``scripts/mcp_swap.py``: ``_claude_project_node`` validates that
-  Claude's undocumented ``projects.<abs>.mcpServers`` layout is still
-  mapping-shaped before mutating it. If a future Claude release
-  reshapes the structure, the script raises ``RuntimeError("Claude
-  config layout appears to have changed...")`` *before* the atomic
-  write — so the timestamped backup defense isn't asked to recover
-  from a partial mutation. Three new tests in ``tests/test_mcp_swap.py``
-  cover the rejection paths and the well-shaped happy path.
-- ``scripts/mcp_swap.py``: ``_claude_project_node`` now uses
-  ``@t.overload`` so ``create=True`` is statically narrowed to
-  ``dict[str, t.Any]``. ``set_server`` drops the runtime
-  ``assert node is not None`` (which would have been stripped under
-  ``python -O``) — mypy proves the invariant via the overload instead.
-  Strict-typing-priority alignment.
-- ``scripts/mcp_swap.py`` PEP 723 ``requires-python`` lowered from
-  ``>=3.11`` to ``>=3.10`` to match the project floor in
-  ``pyproject.toml``. The script does not use any 3.11-only features
-  (verified: no ``tomllib``, ``ExceptionGroup``, ``except*``, or
-  structural ``match``); the previous bound made ``uv run scripts/
-  mcp_swap.py`` provision a fresh 3.11 toolchain on contributor
-  machines that otherwise share the project's 3.10 venv.
+#### New dev script: `scripts/mcp_swap.py`
 
-### Docs
+Point Claude / Codex / Cursor / Gemini at a local checkout in one command. `just mcp-use-local` rewrites each CLI's global config to run the local repo via `uv`; `just mcp-revert` restores from a timestamped backup. `just mcp-detect` and `just mcp-status` report install state. Atomic writes, `--dry-run` mode, per-CLI state file, env preservation on replacement, layout-shape guard before mutating Claude's per-project config. Scope is global configs only — see `scripts/README.md`. (#27)
 
-- {ref}`safety` macOS ``TMUX_TMPDIR`` caveat now reflects shipped
-  behaviour. ``_effective_socket_path`` already queries tmux's
-  ``display-message -p '#{socket_path}'`` first and only falls back to
-  ``$TMUX_TMPDIR`` reconstruction when the server is unreachable, but
-  the doc still framed the structural fix as future work and told
-  operators to set ``TMUX_TMPDIR`` explicitly. Replace with the actual
-  three-step resolution order so doc readers don't write code or
-  service files chasing a problem that's already solved.
-- Strip dangling internal-audit citations from production source
-  comments. ``window_tools.py:106`` no longer references "the
-  brainstorm-and-refine audit §7.1" — the architectural fence
-  (the four-hierarchy-level rule) stays, the orphaned citation goes.
-  ``session_tools.py:74-76`` cross-reference still resolves. The
-  ``hook_tools.py`` module docstring drops "The brainstorm-and-refine
-  plan deliberately excludes write-hooks" and keeps the rationale
-  (hook persistence + lifespan teardown gap).
-- {tooliconl}`get-window-info` "Avoid when" guidance now points to
-  {tooliconl}`list-windows` (not {tooliconl}`list-panes`) for whole-
-  session window enumeration. The previous wording trained agents into
-  the wrong tool: ``list_panes`` returns ``PaneInfo`` objects, while
-  ``list_windows`` is the window enumerator and accepts ``session_id``.
-- {tooliconl}`respawn-pane` docstring and topic page now include a tip
-  to call {tooliconl}`get-pane-info` first if the agent needs to
-  preserve ``pane_current_command`` across the respawn — tmux's default
-  behaviour is to replay the original argv, but a custom split-time
-  shell may differ.
-- {ref}`safety` adds a {tooliconl}`respawn-pane` subsection under
-  "Footguns inside the `mutating` tier" alongside {tooliconl}`pipe-pane`
-  and {tooliconl}`set-environment`. Documents the `kill=True` default,
-  the non-idempotent retry semantics, the explicit-`pane_id`
-  requirement, and the `pane_current_command` / OS-process-table
-  visibility window for any `shell` argument. The per-tool annotation
-  table picks up a `respawn-pane` row showing the unusual mutating-tier
-  + `destructiveHint=true` + `idempotentHint=false` combination.
+### Documentation
+
+- {ref}`safety` adds a {tooliconl}`respawn-pane` "Footgun" subsection alongside {tooliconl}`pipe-pane` and {tooliconl}`set-environment`: `kill=true` default, non-idempotent retries, explicit-`pane_id` requirement, OS-process-table visibility for `shell` / `environment`. The macOS `TMUX_TMPDIR` caveat is rewritten to reflect shipped behaviour — tmux's three-step socket-path resolution is documented, so operators no longer need to set `TMUX_TMPDIR` explicitly to chase a problem that's already solved. (#27)
+- LLM-facing discoverability tightened: {tooliconl}`display-message` retitled "Evaluate tmux Format String" with a docstring that leads with read-only format expansion (the tool wraps `display-message -p` but `-p` expands rather than displays), {tooliconl}`pipe-pane` leads with the `/tmp/pane.log` logging use case, and the server instructions explain why hooks are read-only and why there is no `list_buffers` tool. The `socket_name` contract is tightened to acknowledge {tooliconl}`list-servers` as the documented exception. (#27)
+- Topic pages added for {tooliconl}`respawn-pane`, {tooliconl}`get-session-info`, and {tooliconl}`get-window-info`. (#27)
 
 ### API decisions (pre-release)
 
-- {tooliconl}`respawn-pane` parameter ``shell_command`` is renamed to
-  ``shell`` to align with {tooliconl}`split-window` and the upstream
-  ``Pane.respawn(shell=)`` signature on libtmux's ``tmux-parity``
-  branch. Settled before the tool reached ``origin/main`` so no
-  compatibility alias is shipped — alignment is the load-bearing
-  reason, not a fix to a previously released name.
-- {tooliconl}`respawn-pane` signature drops the optional
-  ``session_name`` / ``session_id`` / ``window_id`` resolver fallbacks
-  that sibling pane tools accept. The runtime guard would have raised
-  on any combination missing ``pane_id`` anyway (the tool requires
-  explicit ``pane_id`` to prevent silent-kill-via-resolver), so the
-  parameters were dead surface area broadcasting targeting flexibility
-  to LLMs that did not exist. Validation now lives at the FastMCP
-  schema boundary via ``pane_id: str`` rather than an in-tool
-  ``ToolError`` raise. Settled before the tool reached ``origin/main``
-  so no compat alias ships.
-
-### Refactor
-
-- Drop redundant ``["-t", pane.pane_id]`` argument prefixes at five
-  ``pane.cmd(...)`` sites (`pane_tools/lifecycle.py:132`,
-  `copy_mode.py:58, 110`, `meta.py:64, 150`). libtmux's ``Pane.cmd``
-  already injects ``-t self.pane_id`` via ``Server.cmd``, so the
-  resulting wire form was ``tmux <verb> -t %X -t %X ...``; tmux's args
-  parser kept the last ``-t`` so behaviour was identical, but the
-  redundancy was confusing slop. The convention exemplar at
-  `copy_mode.py:60-66` (``pane.cmd("send-keys", "-X", ...)``) shows the
-  intended call shape.
-
-### Fixes
-
-- Audit log now redacts the ``shell`` argument on
-  {tooliconl}`respawn-pane` (and ``content`` on {tooliconl}`load-buffer`,
-  which the code already redacted but the docs did not list). The
-  ``shell`` payload may carry credentials passed to a relaunched
-  process; redacting the MCP audit log keeps them out of long-lived
-  log archives. Note: ``shell`` may still appear briefly in the OS
-  process table and tmux's ``pane_current_command`` metadata until the
-  spawned shell takes over — do not pass credentials directly even
-  with redaction.
-- {tooliconl}`respawn-pane` now requires an explicit ``pane_id``. Its
-  signature still accepts ``session_name`` / ``session_id`` /
-  ``window_id`` for backwards-compatibility with the shared pane-target
-  resolution surface, but a runtime guard raises before
-  ``_resolve_pane`` is invoked. Without the guard, calling
-  ``respawn_pane(session_name="dev")`` resolved through ``_resolve_pane``
-  to the first pane of the first window — combined with default
-  ``kill=True`` that could silently kill a critical running process
-  (e.g. an `npm run dev` server) instead of the intended wedged shell.
-  Resolve the target via {tooliconl}`list-panes` first.
-- {tooliconl}`respawn-pane` now advertises honest MCP annotations.
-  Previously the tool inherited ``ANNOTATIONS_MUTATING`` defaults
-  (`destructiveHint=False`, `idempotentHint=True`) even though its
-  default `kill=True` sends `SPAWN_KILL` to the running process and
-  repeated calls kill repeated processes. The new
-  `ANNOTATIONS_MUTATING_DESTRUCTIVE` preset keeps the tool in
-  `TAG_MUTATING` (so it stays visible to default-profile agents for
-  shell recovery) while exporting `destructiveHint=True` and
-  `idempotentHint=False`. Agents reading the annotations can no longer
-  conclude that respawn-retries are safe.
+- {tooliconl}`respawn-pane` settles on `shell` (renamed from `shell_command`) to align with {tooliconl}`split-window` and upstream `Pane.respawn(shell=)`, and drops the `session_name` / `session_id` / `window_id` resolver fallbacks — the runtime guard rejected any call missing `pane_id` anyway. Validation now lives at the FastMCP schema boundary. (#27)
 
 ## libtmux-mcp 0.1.0a3 (2026-04-19)
 
