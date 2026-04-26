@@ -6,6 +6,22 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Tests
+
+- New ``test_registered_tools_accept_socket_name`` introspection test
+  in ``tests/test_server.py`` enumerates every registered tool via
+  ``FastMCP.list_tools()`` and asserts each accepts a ``socket_name``
+  parameter, with ``list_servers`` as the documented exception (it
+  takes ``extra_socket_paths`` instead). Catches future tool drift
+  before it silently makes ``_BASE_INSTRUCTIONS`` lie to agents. The
+  ``_BASE_INSTRUCTIONS`` text itself is tightened from "All tools
+  accept an optional socket_name parameter" to "Targeted tmux tools
+  accept an optional socket_name parameter (defaults to LIBTMUX_SOCKET
+  env var); list_servers discovers sockets via TMUX_TMPDIR plus
+  optional extra_socket_paths instead." A companion content test
+  (``test_base_instructions_document_socket_name_contract``) locks the
+  wording.
+
 ### Scripts
 
 - ``scripts/mcp_swap.py``: ``_claude_project_node`` validates that

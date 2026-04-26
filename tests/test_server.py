@@ -173,6 +173,63 @@ def test_base_instructions_document_hook_boundary() -> None:
     assert "tmux config file" in _BASE_INSTRUCTIONS
 
 
+def test_base_instructions_document_socket_name_contract() -> None:
+    """_BASE_INSTRUCTIONS frames the socket_name promise precisely.
+
+    list_servers does NOT accept socket_name (it's the discovery tool —
+    see server_tools.py:263-264 where the signature is
+    ``list_servers(extra_socket_paths=...)``), so the previous "All
+    tools accept socket_name" wording was a lie. The instruction now
+    qualifies "Targeted tmux tools" and explicitly names list_servers
+    as the documented exception, matching what
+    test_registered_tools_accept_socket_name asserts at the schema
+    level.
+    """
+    assert "Targeted tmux tools accept" in _BASE_INSTRUCTIONS
+    assert "list_servers" in _BASE_INSTRUCTIONS
+    assert "extra_socket_paths" in _BASE_INSTRUCTIONS
+
+
+def test_registered_tools_accept_socket_name() -> None:
+    """All registered tools (except list_servers) accept ``socket_name``.
+
+    ``_BASE_INSTRUCTIONS`` promises this with ``list_servers`` as the
+    documented exception (it discovers sockets via
+    ``extra_socket_paths`` instead, see ``server_tools.py:263-264``).
+    If a future tool registration drops ``socket_name``, this test
+    catches the regression instead of silently making the agent-facing
+    instructions a lie.
+    """
+    import asyncio
+    import inspect
+
+    from fastmcp import FastMCP
+    from fastmcp.tools.function_tool import FunctionTool
+
+    from libtmux_mcp.tools import register_tools
+
+    socket_name_exempt = {"list_servers"}
+
+    mcp = FastMCP(name="socket-name-contract")
+    register_tools(mcp)
+
+    tools = asyncio.run(mcp.list_tools())
+    assert tools, "register_tools should have registered at least one tool"
+    for tool in tools:
+        if tool.name in socket_name_exempt:
+            continue
+        assert isinstance(tool, FunctionTool), (
+            f"Tool {tool.name!r} is not a FunctionTool; the registry "
+            f"introspection assumes FastMCP wraps each registered "
+            f"function with FunctionTool"
+        )
+        sig = inspect.signature(tool.fn)
+        assert "socket_name" in sig.parameters, (
+            f"Tool {tool.name!r} omits socket_name; either add it, "
+            f"add to socket_name_exempt, or update _BASE_INSTRUCTIONS"
+        )
+
+
 def test_base_instructions_document_buffer_lifecycle() -> None:
     """_BASE_INSTRUCTIONS explains the buffer lifecycle + no list_buffers.
 
