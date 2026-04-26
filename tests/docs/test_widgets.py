@@ -9,10 +9,11 @@ import textwrap
 import typing as t
 
 import pytest
-from widgets import BaseWidget
-from widgets._base import make_highlight_filter
-from widgets._discovery import discover
-from widgets.mcp_install import (
+
+from docs._ext.widgets import BaseWidget
+from docs._ext.widgets._base import make_highlight_filter
+from docs._ext.widgets._discovery import discover
+from docs._ext.widgets.mcp_install import (
     CLIENTS,
     METHODS,
     MCPInstallWidget,
@@ -73,7 +74,7 @@ def test_body_for_json_client_returns_config_snippet() -> None:
 
 def test_body_for_unknown_kind_raises() -> None:
     """An unrecognised ``client.kind`` surfaces as a ``ValueError``."""
-    from widgets.mcp_install import Client
+    from docs._ext.widgets.mcp_install import Client
 
     fake = Client(id="x", label="X", kind="bogus", config_file="")
     with pytest.raises(ValueError, match="unknown client kind"):

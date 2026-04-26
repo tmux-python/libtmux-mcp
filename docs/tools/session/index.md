@@ -9,6 +9,10 @@ Session-scoped tools — enumerate windows, rename or kill a session, switch win
 Enumerate windows inside a session.
 :::
 
+:::{grid-item-card} {tooliconl}`get-session-info`
+Read metadata for one session.
+:::
+
 :::{grid-item-card} {tooliconl}`select-window`
 Switch to a window by id, index, or direction.
 :::
@@ -32,6 +36,7 @@ Terminate a session. Destructive.
 :maxdepth: 1
 
 list-windows
+get-session-info
 select-window
 create-window
 rename-session

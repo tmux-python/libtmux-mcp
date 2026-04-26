@@ -8,6 +8,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp.tools.window_tools import (
+    get_window_info,
     kill_window,
     list_panes,
     move_window,
@@ -32,6 +33,31 @@ def test_list_panes(mcp_server: Server, mcp_session: Session) -> None:
     assert isinstance(result, list)
     assert len(result) >= 1
     assert result[0].pane_id is not None
+
+
+def test_get_window_info(mcp_server: Server, mcp_session: Session) -> None:
+    """get_window_info returns a WindowInfo for a single window."""
+    window = mcp_session.active_window
+    result = get_window_info(
+        window_id=window.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == window.window_id
+    assert result.window_name is not None
+    assert result.pane_count >= 1
+    assert result.session_id == mcp_session.session_id
+
+
+def test_get_window_info_by_index(mcp_server: Server, mcp_session: Session) -> None:
+    """get_window_info resolves by window_index when session is named."""
+    window = mcp_session.active_window
+    assert window.window_index is not None
+    result = get_window_info(
+        window_index=window.window_index,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.window_id == window.window_id
 
 
 def test_split_window(mcp_server: Server, mcp_session: Session) -> None:

@@ -42,32 +42,93 @@ logger = logging.getLogger(__name__)
 #: :func:`libtmux_mcp._utils._get_server`.
 _ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 
-_BASE_INSTRUCTIONS = (
+# ---------------------------------------------------------------------------
+# _BASE_INSTRUCTIONS — composed from named segments.
+#
+# The string handed to FastMCP grew organically from "what does this server
+# do?" toward a hybrid of positive guidance (HIERARCHY, READ_TOOLS,
+# WAIT_NOT_POLL) and *gap-explainers* (HOOKS_GAP, BUFFERS_GAP) that document
+# why a tool the agent might expect is absent. Splitting into named
+# constants keeps additions deliberate: when a new ``_GAP`` segment feels
+# tempting, prefer first to push the explanation into the relevant tool's
+# docstring/description (where the agent encounters it at call time) and
+# only fall back to a server-level segment when the gap is *server-shaped*
+# (e.g. an entire tool family is intentionally missing).
+#
+# Output text is byte-identical to the previous monolith; tests assert on
+# substrings of ``_BASE_INSTRUCTIONS``, so keeping the join shape stable
+# matters.
+# ---------------------------------------------------------------------------
+
+_INSTR_HIERARCHY = (
     "libtmux MCP server for programmatic tmux control. "
     "tmux hierarchy: Server > Session > Window > Pane. "
     "Use pane_id (e.g. '%1') as the preferred targeting method - "
     "it is globally unique within a tmux server. "
     "Use send_keys to execute commands and capture_pane to read output. "
-    "All tools accept an optional socket_name parameter for multi-server "
-    "support (defaults to LIBTMUX_SOCKET env var).\n\n"
+    "Targeted tmux tools accept an optional socket_name parameter "
+    "(defaults to LIBTMUX_SOCKET env var); list_servers discovers "
+    "sockets via TMUX_TMPDIR plus optional extra_socket_paths instead."
+)
+
+_INSTR_METADATA_VS_CONTENT = (
     "IMPORTANT — metadata vs content: list_windows, list_panes, and "
     "list_sessions only search metadata (names, IDs, current command). "
     "To find text that is actually visible in terminals — when users ask "
     "what panes 'contain', 'mention', 'show', or 'have' — use "
     "search_panes to search across all pane contents, or list_panes + "
-    "capture_pane on each pane for manual inspection.\n\n"
+    "capture_pane on each pane for manual inspection."
+)
+
+_INSTR_READ_TOOLS = (
     "READ TOOLS TO PREFER: snapshot_pane returns pane content plus "
     "cursor position, mode, and scroll state in one call — use it "
     "instead of capture_pane + get_pane_info when you need context. "
-    "display_message evaluates any tmux format string (e.g. "
-    "'#{pane_current_command}', '#{session_name}') against a target, "
-    "which is often cheaper than parsing captured output.\n\n"
+    "display_message evaluates a tmux format string (e.g. "
+    "'#{pane_current_command}', '#{session_name}') against a target "
+    "and returns the expanded value — cheaper than parsing captured "
+    "output. (The tool is named after the tmux 'display-message -p' "
+    "verb it wraps; its MCP title is 'Evaluate tmux Format String'.)"
+)
+
+_INSTR_WAIT_NOT_POLL = (
     "WAIT, DON'T POLL: for 'run command, wait for output' workflows "
     "use wait_for_text (matches text/regex on a pane) or "
     "wait_for_content_change (waits for any change). These block "
     "server-side until the condition is met or the timeout expires, "
     "which is dramatically cheaper in agent turns than capture_pane "
     "in a retry loop."
+)
+
+#: Gap-explainer: write-hook tools are intentionally absent. See module
+#: comment above for when to add another ``_GAP`` segment vs. push the
+#: explanation into a tool description.
+_INSTR_HOOKS_GAP = (
+    "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. Write-hook "
+    "tools are intentionally not exposed — tmux hooks survive process "
+    "death, so they belong in your tmux config file, not a transient "
+    "MCP session."
+)
+
+#: Gap-explainer: ``list_buffers`` is intentionally absent because tmux
+#: buffers can include OS clipboard history. See module comment above.
+_INSTR_BUFFERS_GAP = (
+    "BUFFERS: load_buffer stages content, paste_buffer delivers it into "
+    "a pane, delete_buffer removes the staged buffer. Track owned "
+    "buffers via the BufferRef returned from load_buffer — there is no "
+    "list_buffers tool because tmux buffers may include OS clipboard "
+    "history (passwords, private snippets)."
+)
+
+_BASE_INSTRUCTIONS = "\n\n".join(
+    (
+        _INSTR_HIERARCHY,
+        _INSTR_METADATA_VS_CONTENT,
+        _INSTR_READ_TOOLS,
+        _INSTR_WAIT_NOT_POLL,
+        _INSTR_HOOKS_GAP,
+        _INSTR_BUFFERS_GAP,
+    )
 )
 
 
@@ -118,7 +179,10 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
             context += f" (socket: {socket_name})"
         context += (
             ". Tool results annotate the caller's own pane with "
-            "is_caller=true. Use this to distinguish your own pane from others."
+            "is_caller=true. Use this to distinguish your own pane from "
+            "others. To answer 'which pane/window/session am I in?' call "
+            "list_panes (or snapshot_pane) and filter for is_caller=true — "
+            "your pane is identified above. No dedicated whoami tool exists."
         )
         parts.append(context)
 

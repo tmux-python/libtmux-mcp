@@ -328,6 +328,28 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+#: Annotations for tools that stay in the ``mutating`` tier (so they remain
+#: visible to default-profile agents) but whose default behaviour can
+#: terminate processes or otherwise lose state.
+#:
+#: ``respawn_pane`` is the canonical user: tier=mutating because shell
+#: recovery is part of the normal agent workflow; ``destructiveHint=True``
+#: because ``kill=True`` (the default) sends ``SPAWN_KILL`` to the existing
+#: process (`cmd-respawn-pane.c:78-79`); ``idempotentHint=False`` because
+#: repeated calls kill repeated processes — the MCP spec defines idempotent
+#: as "calling repeatedly with the same arguments will have no additional
+#: effect" (`mcp/types.py:1276-1282`).
+#:
+#: Distinct from :data:`ANNOTATIONS_DESTRUCTIVE` (same hint values) because
+#: the tier tag differs: ``ANNOTATIONS_DESTRUCTIVE`` is paired with
+#: ``TAG_DESTRUCTIVE`` everywhere it is used; this preset is paired with
+#: ``TAG_MUTATING``. The distinct name documents intent at the call site.
+ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
 
 
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:

@@ -81,6 +81,10 @@ Block until a tmux wait-for channel is signalled.
 Signal a waiting channel.
 :::
 
+:::{grid-item-card} {tooliconl}`respawn-pane`
+Restart a pane's process in place, preserving pane_id.
+:::
+
 :::{grid-item-card} {tooliconl}`kill-pane`
 Terminate a pane. Destructive.
 :::
@@ -110,5 +114,6 @@ wait-for-text
 wait-for-content-change
 wait-for-channel
 signal-channel
+respawn-pane
 kill-pane
 ```

@@ -119,6 +119,26 @@ watch-mypy:
 format-markdown:
     prettier --parser=markdown -w *.md docs/*.md docs/**/*.md CHANGES
 
+# Detect which CLI agents (claude/codex/cursor/gemini) exist on this machine
+[group: 'mcp']
+mcp-detect:
+    uv run scripts/mcp_swap.py detect
+
+# Show how each detected CLI resolves this MCP server today
+[group: 'mcp']
+mcp-status *args:
+    uv run scripts/mcp_swap.py status {{ args }}
+
+# Rewrite each detected CLI's config to run this checkout (editable)
+[group: 'mcp']
+mcp-use-local *args:
+    uv run scripts/mcp_swap.py use-local {{ args }}
+
+# Restore each CLI's config from the backup written by mcp-use-local
+[group: 'mcp']
+mcp-revert *args:
+    uv run scripts/mcp_swap.py revert {{ args }}
+
 [private]
 _entr-warn:
     @echo "----------------------------------------------------------"

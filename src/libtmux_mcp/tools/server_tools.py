@@ -259,6 +259,16 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     )
 
 
+#: Tools that intentionally do NOT accept ``socket_name`` because they
+#: discover or enumerate sockets themselves rather than connecting to a
+#: known one. Read by ``test_registered_tools_accept_socket_name`` to
+#: enforce the agent-facing contract advertised in
+#: :data:`libtmux_mcp.server._BASE_INSTRUCTIONS`. When you add a new
+#: discovery-style tool, append it here AND update the prose in
+#: ``_BASE_INSTRUCTIONS`` so the two stay in lockstep.
+SOCKET_NAME_EXEMPT: frozenset[str] = frozenset({"list_servers"})
+
+
 @handle_tool_errors
 def list_servers(
     extra_socket_paths: list[str] | None = None,

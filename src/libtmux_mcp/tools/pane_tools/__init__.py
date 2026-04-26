@@ -15,6 +15,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
+    ANNOTATIONS_MUTATING_DESTRUCTIVE,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
     TAG_DESTRUCTIVE,
@@ -36,6 +37,7 @@ from libtmux_mcp.tools.pane_tools.layout import (
 from libtmux_mcp.tools.pane_tools.lifecycle import (
     get_pane_info,
     kill_pane,
+    respawn_pane,
     set_pane_title,
 )
 from libtmux_mcp.tools.pane_tools.meta import display_message, snapshot_pane
@@ -61,6 +63,7 @@ __all__ = [
     "pipe_pane",
     "register",
     "resize_pane",
+    "respawn_pane",
     "search_panes",
     "select_pane",
     "send_keys",
@@ -88,6 +91,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_DESTRUCTIVE},
     )(kill_pane)
+    mcp.tool(
+        title="Respawn Pane",
+        annotations=ANNOTATIONS_MUTATING_DESTRUCTIVE,
+        tags={TAG_MUTATING},
+    )(respawn_pane)
     mcp.tool(
         title="Set Pane Title", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(set_pane_title)
@@ -120,9 +128,11 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         pipe_pane
     )
-    mcp.tool(title="Display Message", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        display_message
-    )
+    mcp.tool(
+        title="Evaluate tmux Format String",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+    )(display_message)
     mcp.tool(
         title="Enter Copy Mode",
         annotations=ANNOTATIONS_CREATE,

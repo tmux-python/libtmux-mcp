@@ -1,9 +1,9 @@
 """pytest config for widget tests: wire Sphinx's test fixtures + path.
 
 ``sphinx.testing.fixtures`` provides ``make_app``, ``app``, etc. that build a
-throw-away Sphinx project in a tmp dir. We also add ``docs/_ext`` to
-``sys.path`` so tests can import the ``widgets`` extension the same way
-``conf.py`` does in production.
+throw-away Sphinx project in a tmp dir. We also add the repo root to
+``sys.path`` so tests can import the docs extension via
+``docs._ext.widgets``, matching ``conf.py`` in production.
 """
 
 from __future__ import annotations
@@ -17,9 +17,8 @@ from ._snapshots import snapshot_html_fragment  # noqa: F401 — re-export as fi
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _DOCS_DIR = _REPO_ROOT / "docs"
-_EXT_DIR = _DOCS_DIR / "_ext"
-if str(_EXT_DIR) not in sys.path:
-    sys.path.insert(0, str(_EXT_DIR))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 @pytest.fixture
@@ -44,8 +43,8 @@ def real_widget_srcdir(tmp_path: pathlib.Path, docs_dir: pathlib.Path) -> pathli
     (srcdir / "conf.py").write_text(
         f"""
 import sys
-sys.path.insert(0, {str(_EXT_DIR)!r})
-extensions = ["myst_parser", "widgets"]
+sys.path.insert(0, {str(_REPO_ROOT)!r})
+extensions = ["myst_parser", "docs._ext.widgets"]
 exclude_patterns = ["_build"]
 master_doc = "index"
 source_suffix = {{".md": "markdown"}}

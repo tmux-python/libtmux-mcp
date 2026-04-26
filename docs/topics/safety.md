@@ -63,9 +63,13 @@ These protections read both the `TMUX` and `TMUX_PANE` environment variables tha
 
 ### macOS `TMUX_TMPDIR` caveat
 
-The self-kill guard reconstructs the target server's socket path by combining {envvar}`TMUX_TMPDIR` (or `/tmp` if unset) with the configured socket name. On macOS, `TMUX_TMPDIR` commonly differs between interactive shells and background service environments — if the MCP process and the tmux server were launched under different values, the reconstructed target path won't match the caller's `TMUX` socket path and the guard may decline to fire. The target-side comparison still protects the common case (same shell, same launchd context), but a mismatched {envvar}`TMUX_TMPDIR` can degrade the protection into a no-op.
+The self-kill guard resolves the target server's socket path in three steps (`_effective_socket_path` in `src/libtmux_mcp/_utils.py`):
 
-Mitigation today: set {envvar}`TMUX_TMPDIR` explicitly in both the MCP server's environment and the shell that starts tmux, so both reconstructions resolve to the same path. The proper structural fix — querying tmux for its own socket via `display-message '#{socket_path}'` rather than reconstructing — is tracked outside this documentation.
+1. Use `Server.socket_path` if libtmux already has it.
+2. Otherwise query the running server via `display-message -p '#{socket_path}'` — authoritative because tmux itself reports the path it is actually using, regardless of the MCP process environment. This closes the launchd-vs-interactive-shell gap on macOS where {envvar}`TMUX_TMPDIR` commonly differs between contexts.
+3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and `_caller_is_on_server`'s None-socket branch blocks conservatively.
+
+The structural fix shipped in 0.1.x; setting {envvar}`TMUX_TMPDIR` explicitly is no longer required for the guard to work, though it remains a useful diagnostic when investigating mismatched-path bug reports.
 
 ## Footguns inside the `mutating` tier
 
@@ -90,6 +94,19 @@ Mitigations:
 - The audit log redacts the `value` argument to a `{len, sha256_prefix}` digest so log files don't leak the secrets agents set, but operators should still treat the tool as high-privilege.
 - If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via `send_keys` instead — the blast radius is one command, not every future child.
 
+### `respawn_pane`
+
+{tool}`respawn-pane` restarts a pane's process while preserving the pane id and layout — exactly what an agent wants when a shell wedges. Default `kill=True` terminates the running process before relaunch. The `pane_id` and layout are preserved (the point of the tool), but any unsaved REPL state, ssh session, or in-flight job in that pane is lost. Repeated calls are *not* idempotent — each call kills a new process.
+
+Unlike other `mutating` tools, the registration carries `destructiveHint=True` and `idempotentHint=False` (via the `ANNOTATIONS_MUTATING_DESTRUCTIVE` preset) so MCP clients see honest annotations even though the tier tag stays at `mutating` for default-profile recovery.
+
+Mitigations:
+
+- `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get a `ToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
+- Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
+- The optional `environment` argument (`dict[str, str]`) maps to one tmux `-e KEY=VALUE` flag per item. The audit log redacts each *value* via a `{len, sha256_prefix}` digest while keeping the *keys* visible — env var names like `DATABASE_URL` are usually operator-debug-useful, but their values are the secret. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
+- The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
+
 ### `send_keys` / `paste_text`
 
 These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via `send_keys` does not land in logs.
@@ -102,7 +119,7 @@ Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carryi
 - `outcome` — `ok` or `error`, with `error_type` on failure
 - `duration_ms`
 - `client_id` / `request_id` — from the fastmcp context when available
-- `args` — a summary of arguments. Sensitive keys (`keys`, `text`, `value`) are replaced by `{len, sha256_prefix}`; non-sensitive strings over 200 characters are truncated.
+- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `value`, `content`, `shell`) are replaced by `{len, sha256_prefix}`; the dict-shaped sensitive key `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
 
 Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 
@@ -135,6 +152,7 @@ Each tool carries MCP tool annotations that hint at its behavior:
 | {ref}`select-layout` | {badge}`mutating` | false | false | true |
 | {ref}`set-option` | {badge}`mutating` | false | false | true |
 | {ref}`set-environment` | {badge}`mutating` | false | false | true |
+| {ref}`respawn-pane` | {badge}`mutating` | false | true | false |
 | {ref}`kill-server` | {badge}`destructive` | false | true | false |
 | {ref}`kill-session` | {badge}`destructive` | false | true | false |
 | {ref}`kill-window` | {badge}`destructive` | false | true | false |
