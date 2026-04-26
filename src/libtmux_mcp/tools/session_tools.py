@@ -71,6 +71,40 @@ def list_windows(
     return _apply_filters(windows, filters, _serialize_window)
 
 
+# get_session_info completes the core-tmux-hierarchy symmetry alongside
+# get_window_info / get_pane_info / get_server_info. Bounded to the four
+# hierarchy levels — see the same note in window_tools.get_window_info.
+@handle_tool_errors
+def get_session_info(
+    session_id: str | None = None,
+    session_name: str | None = None,
+    socket_name: str | None = None,
+) -> SessionInfo:
+    """Return metadata for a single tmux session (ID, name, window count, activity).
+
+    Use this instead of list_sessions + filter when you only need one
+    session's info. Resolves by session_id first; falls back to
+    session_name.
+
+    Parameters
+    ----------
+    session_id : str, optional
+        Session ID (e.g. '$0').
+    session_name : str, optional
+        Session name.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    SessionInfo
+        Serialized session metadata.
+    """
+    server = _get_server(socket_name=socket_name)
+    session = _resolve_session(server, session_name=session_name, session_id=session_id)
+    return _serialize_session(session)
+
+
 @handle_tool_errors
 def create_window(
     session_name: str | None = None,
@@ -297,6 +331,9 @@ def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
     mcp.tool(title="List Windows", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         list_windows
+    )
+    mcp.tool(title="Get Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+        get_session_info
     )
     mcp.tool(
         title="Create Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}

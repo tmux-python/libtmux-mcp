@@ -6,6 +6,30 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+#### New tool: `respawn_pane`
+
+Restart a wedged pane in place — preserves `pane_id` and the window layout (the alternative `kill_pane` + `split_window` invalidates pane references and rearranges the window). Required `pane_id`; optional `kill` (default true), `shell`, `start_directory`, `environment`. Refuses to respawn the MCP server's own pane, mirroring the existing `kill_*` self-guards. Annotations honestly mark it `destructiveHint=true` / `idempotentHint=false` while staying in the `mutating` tier so default-profile agents can use it for shell recovery. Audit log redacts the `shell` argument and digests `environment` values (keys stay visible). (#27)
+
+#### New tools: `get_session_info`, `get_window_info`
+
+Targeted single-object metadata reads — no more `list_*` + filter when you have an ID. Completes the four-level `get_*_info` hierarchy (server / session / window / pane); buffers, hooks, and options have existing read paths and are deliberately excluded. (#27)
+
+#### New dev script: `scripts/mcp_swap.py`
+
+Point Claude / Codex / Cursor / Gemini at a local checkout in one command. `just mcp-use-local` rewrites each CLI's global config to run the local repo via `uv`; `just mcp-revert` restores from a timestamped backup. `just mcp-detect` and `just mcp-status` report install state. Atomic writes, `--dry-run` mode, per-CLI state file, env preservation on replacement, layout-shape guard before mutating Claude's per-project config. Scope is global configs only — see `scripts/README.md`. (#27)
+
+### Documentation
+
+- {ref}`safety` adds a {tooliconl}`respawn-pane` "Footgun" subsection alongside {tooliconl}`pipe-pane` and {tooliconl}`set-environment`: `kill=true` default, non-idempotent retries, explicit-`pane_id` requirement, OS-process-table visibility for `shell` / `environment`. The macOS `TMUX_TMPDIR` caveat is rewritten to reflect shipped behaviour — tmux's three-step socket-path resolution is documented, so operators no longer need to set `TMUX_TMPDIR` explicitly to chase a problem that's already solved. (#27)
+- LLM-facing discoverability tightened: {tooliconl}`display-message` retitled "Evaluate tmux Format String" with a docstring that leads with read-only format expansion (the tool wraps `display-message -p` but `-p` expands rather than displays), {tooliconl}`pipe-pane` leads with the `/tmp/pane.log` logging use case, and the server instructions explain why hooks are read-only and why there is no `list_buffers` tool. The `socket_name` contract is tightened to acknowledge {tooliconl}`list-servers` as the documented exception. (#27)
+- Topic pages added for {tooliconl}`respawn-pane`, {tooliconl}`get-session-info`, and {tooliconl}`get-window-info`. (#27)
+
+### API decisions (pre-release)
+
+- {tooliconl}`respawn-pane` settles on `shell` (renamed from `shell_command`) to align with {tooliconl}`split-window` and upstream `Pane.respawn(shell=)`, and drops the `session_name` / `session_id` / `window_id` resolver fallbacks — the runtime guard rejected any call missing `pane_id` anyway. Validation now lives at the FastMCP schema boundary. (#27)
+
 ## libtmux-mcp 0.1.0a3 (2026-04-19)
 
 _Post-0.1.0a2 smoke-test fixes and `libtmux` floor bump_

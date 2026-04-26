@@ -27,6 +27,7 @@ from libtmux_mcp.tools.pane_tools import (
     paste_text,
     pipe_pane,
     resize_pane,
+    respawn_pane,
     search_panes,
     select_pane,
     send_keys,
@@ -229,6 +230,192 @@ def test_kill_pane(mcp_server: Server, mcp_session: Session) -> None:
         socket_name=mcp_server.socket_name,
     )
     assert "killed" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# respawn_pane tests
+# ---------------------------------------------------------------------------
+
+
+def test_respawn_pane_preserves_pane_id_and_refreshes_pid(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """respawn_pane keeps the same pane_id but picks up a new pane_pid.
+
+    Uses a fresh split so the caller-pane self-guard doesn't fire and
+    so the test is independent of what the main mcp_pane is running.
+    """
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+    # Force a read of the original pid before we respawn.
+    new_pane.refresh()
+    original_pid = new_pane.pane_pid
+
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id, "pane_id must be preserved"
+    assert result.pane_pid is not None
+    assert result.pane_pid != original_pid, (
+        "pane_pid should reflect the new process after respawn"
+    )
+
+    # Cleanup
+    new_pane.kill()
+
+
+def test_respawn_pane_replaces_shell(mcp_server: Server, mcp_session: Session) -> None:
+    """respawn_pane with ``shell`` relaunches with the new command."""
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        shell="sleep 7200",
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id
+    # pane_current_command reflects the relaunched command.
+    assert result.pane_current_command is not None
+    assert "sleep" in result.pane_current_command
+
+    new_pane.kill()
+
+
+def test_respawn_pane_self_kill_guard(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """respawn_pane refuses when the caller's pane is the target."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    socket_path = _effective_socket_path(mcp_server)
+    monkeypatch.setenv(
+        "TMUX",
+        f"{socket_path},12345,{mcp_session.session_id}",
+    )
+    monkeypatch.setenv("TMUX_PANE", new_pane.pane_id)
+    with pytest.raises(ToolError, match="Refusing to respawn"):
+        respawn_pane(
+            pane_id=new_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+
+    new_pane.kill()
+
+
+def test_respawn_pane_kill_false_on_dead_pane_succeeds(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``kill=False`` respawn on a dead pane returns fresh PaneInfo.
+
+    tmux's ``respawn-pane`` without ``-k`` is the safer default: it
+    only succeeds when the pane has no running process. Existing tests
+    only cover ``kill=True`` paths (see :func:`test_respawn_pane_*`
+    above); this test locks the safer-default behaviour for any future
+    flip of the default.
+    """
+    window = mcp_session.active_window
+    # remain-on-exit=on keeps the pane around after its process exits so
+    # we can drive a kill=False respawn on a confirmed-dead process.
+    # Without it, tmux removes the pane the moment its child exits and
+    # the respawn call fails with PaneNotFound instead of exercising
+    # the kill=False branch. Set the option on the window *before*
+    # splitting so the new pane inherits it.
+    window.cmd("set-option", "-w", "remain-on-exit", "on")
+    new_pane = window.split(shell="true")
+    assert new_pane.pane_id is not None
+
+    def _pane_dead() -> bool:
+        out = new_pane.cmd("display-message", "-p", "#{pane_dead}").stdout
+        return bool(out) and out[0].strip() == "1"
+
+    retry_until(_pane_dead, seconds=5, raises=True)
+
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        kill=False,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id
+    new_pane.kill()
+    window.cmd("set-option", "-wu", "remain-on-exit")
+
+
+def test_respawn_pane_kill_false_on_live_pane_raises(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``kill=False`` respawn on a live pane raises ToolError from tmux.
+
+    tmux refuses to respawn a pane that still has a running process
+    unless ``-k`` is passed. The MCP wrapper surfaces the stderr as a
+    ``ToolError`` rather than swallowing it.
+    """
+    window = mcp_session.active_window
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    with pytest.raises(ToolError):
+        respawn_pane(
+            pane_id=new_pane.pane_id,
+            kill=False,
+            socket_name=mcp_server.socket_name,
+        )
+
+    new_pane.kill()
+
+
+def test_respawn_pane_with_environment(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``environment`` propagates through to the relaunched process.
+
+    tmux's ``respawn-pane -e KEY=VALUE`` sets per-process env vars on
+    the spawned command (``cmd-respawn-pane.c`` accepts the flag
+    repeatedly). Verify by relaunching with ``sh -c 'env'`` under
+    ``remain-on-exit`` so we can capture the env output after the
+    process exits without tmux deleting the pane out from under us.
+    """
+    window = mcp_session.active_window
+    window.cmd("set-option", "-w", "remain-on-exit", "on")
+    new_pane = window.split(shell="sleep 3600")
+    assert new_pane.pane_id is not None
+
+    # Use ``printenv`` over ``env`` so the output fits the visible pane
+    # (default capture-pane reads only the visible screen, not history).
+    # Wrap the values in markers so we don't false-match on similarly
+    # named host env vars that might already be set.
+    result = respawn_pane(
+        pane_id=new_pane.pane_id,
+        shell="sh -c 'printenv LIBTMUX_TEST_FOO LIBTMUX_TEST_BAZ'",
+        environment={"LIBTMUX_TEST_FOO": "bar", "LIBTMUX_TEST_BAZ": "qux"},
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.pane_id == new_pane.pane_id
+
+    def _pane_dead() -> bool:
+        out = new_pane.cmd("display-message", "-p", "#{pane_dead}").stdout
+        return bool(out) and out[0].strip() == "1"
+
+    retry_until(_pane_dead, seconds=5, raises=True)
+
+    # ``-S -50`` reads the last 50 lines of scrollback so we don't lose
+    # the first ``printenv`` line off the top of the visible screen.
+    captured = new_pane.cmd("capture-pane", "-p", "-S", "-50").stdout
+    rendered = "\n".join(captured)
+    assert "bar" in rendered
+    assert "qux" in rendered
+
+    new_pane.kill()
+    window.cmd("set-option", "-wu", "remain-on-exit")
 
 
 # ---------------------------------------------------------------------------
@@ -2010,6 +2197,39 @@ def test_pane_tool_open_world_hint_registration(
         f"{tool_name} registration should carry annotations"
     )
     assert tool.annotations.openWorldHint is expected_open_world
+
+
+def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
+    """``respawn_pane`` registers as mutating-tier with destructive hints.
+
+    Default ``kill=True`` sends ``SPAWN_KILL`` to the running process
+    (`cmd-respawn-pane.c:78-79`); repeated calls kill repeated processes.
+    The MCP spec defines ``destructiveHint`` as "may perform destructive
+    updates" and ``idempotentHint`` as "calling repeatedly will have no
+    additional effect" (`mcp/types.py:1268-1282`). The default
+    ``ANNOTATIONS_MUTATING`` preset (``destructiveHint=False``,
+    ``idempotentHint=True``) would lie to the agent. The new
+    ``ANNOTATIONS_MUTATING_DESTRUCTIVE`` preset stays in ``TAG_MUTATING``
+    so the recovery use case remains visible to default-profile clients,
+    while honestly advertising destructive non-idempotent semantics.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-respawn-annotations")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool("respawn_pane"))
+    assert tool is not None, "respawn_pane should be registered"
+    assert tool.annotations is not None, (
+        "respawn_pane registration should carry annotations"
+    )
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.idempotentHint is False
+    assert tool.annotations.readOnlyHint is False
 
 
 # ---------------------------------------------------------------------------

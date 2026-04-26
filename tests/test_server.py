@@ -161,6 +161,119 @@ def test_base_instructions_prefer_wait_over_poll() -> None:
     assert "wait_for_content_change" in _BASE_INSTRUCTIONS
 
 
+def test_base_instructions_document_hook_boundary() -> None:
+    """_BASE_INSTRUCTIONS explains hooks are read-only by design.
+
+    Without this sentence agents waste a turn asking for ``set_hook`` or
+    trying to write hooks through a nonexistent tool. Naming the
+    boundary heads off the exploratory call.
+    """
+    assert "HOOKS ARE READ-ONLY" in _BASE_INSTRUCTIONS
+    assert "show_hooks" in _BASE_INSTRUCTIONS
+    assert "tmux config file" in _BASE_INSTRUCTIONS
+
+
+def test_base_instructions_document_socket_name_contract() -> None:
+    """_BASE_INSTRUCTIONS frames the socket_name promise precisely.
+
+    list_servers does NOT accept socket_name (it's the discovery tool —
+    see server_tools.py:263-264 where the signature is
+    ``list_servers(extra_socket_paths=...)``), so the previous "All
+    tools accept socket_name" wording was a lie. The instruction now
+    qualifies "Targeted tmux tools" and explicitly names list_servers
+    as the documented exception, matching what
+    test_registered_tools_accept_socket_name asserts at the schema
+    level.
+    """
+    assert "Targeted tmux tools accept" in _BASE_INSTRUCTIONS
+    assert "list_servers" in _BASE_INSTRUCTIONS
+    assert "extra_socket_paths" in _BASE_INSTRUCTIONS
+
+
+def test_registered_tools_accept_socket_name() -> None:
+    """All registered tools (except list_servers) accept ``socket_name``.
+
+    ``_BASE_INSTRUCTIONS`` promises this with ``list_servers`` as the
+    documented exception (it discovers sockets via
+    ``extra_socket_paths`` instead, see ``server_tools.py:263-264``).
+    If a future tool registration drops ``socket_name``, this test
+    catches the regression instead of silently making the agent-facing
+    instructions a lie.
+    """
+    import asyncio
+    import inspect
+
+    from fastmcp import FastMCP
+    from fastmcp.tools.function_tool import FunctionTool
+
+    from libtmux_mcp.tools import register_tools
+    from libtmux_mcp.tools.server_tools import SOCKET_NAME_EXEMPT
+
+    mcp = FastMCP(name="socket-name-contract")
+    register_tools(mcp)
+
+    tools = asyncio.run(mcp.list_tools())
+    assert tools, "register_tools should have registered at least one tool"
+    for tool in tools:
+        if tool.name in SOCKET_NAME_EXEMPT:
+            continue
+        assert isinstance(tool, FunctionTool), (
+            f"Tool {tool.name!r} is not a FunctionTool; the registry "
+            f"introspection assumes FastMCP wraps each registered "
+            f"function with FunctionTool"
+        )
+        sig = inspect.signature(tool.fn)
+        assert "socket_name" in sig.parameters, (
+            f"Tool {tool.name!r} omits socket_name; either add it, "
+            f"add to server_tools.SOCKET_NAME_EXEMPT, or update "
+            f"_BASE_INSTRUCTIONS"
+        )
+
+
+def test_base_instructions_document_buffer_lifecycle() -> None:
+    """_BASE_INSTRUCTIONS explains the buffer lifecycle + no list_buffers.
+
+    The load/paste/delete triple is non-obvious, and agents otherwise
+    expect a ``list_buffers`` affordance. The instruction prevents both
+    confusions and surfaces the clipboard-privacy reason so the
+    omission reads as deliberate, not missing.
+    """
+    assert "BUFFERS" in _BASE_INSTRUCTIONS
+    assert "load_buffer" in _BASE_INSTRUCTIONS
+    assert "paste_buffer" in _BASE_INSTRUCTIONS
+    assert "delete_buffer" in _BASE_INSTRUCTIONS
+    assert "BufferRef" in _BASE_INSTRUCTIONS
+    assert "list_buffers" in _BASE_INSTRUCTIONS
+    assert "clipboard history" in _BASE_INSTRUCTIONS
+
+
+def test_build_instructions_documents_is_caller_workflow_inside_tmux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The is_caller workflow sentence appears only when inside tmux.
+
+    The sentence references "your pane is identified above", which is
+    only true when ``TMUX_PANE`` is set and the agent-context line has
+    been emitted. Outside tmux, the sentence would be a lie — so it
+    lives inside the ``if tmux_pane:`` branch of ``_build_instructions``
+    and must NOT appear in ``_BASE_INSTRUCTIONS`` itself.
+    """
+    # Outside tmux: the workflow sentence must NOT appear.
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("TMUX", raising=False)
+    outside = _build_instructions(safety_level=TAG_MUTATING)
+    assert "whoami tool" not in outside
+    assert "is_caller=true" not in outside
+
+    # Inside tmux: the workflow sentence appears.
+    monkeypatch.setenv("TMUX_PANE", "%42")
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+    inside = _build_instructions(safety_level=TAG_MUTATING)
+    assert "is_caller=true" in inside
+    assert "whoami tool" in inside
+    assert "list_panes" in inside
+
+
 def test_build_instructions_always_includes_safety() -> None:
     """_build_instructions always includes the safety level."""
     result = _build_instructions(safety_level=TAG_MUTATING)

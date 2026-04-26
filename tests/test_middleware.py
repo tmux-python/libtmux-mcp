@@ -149,11 +149,13 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
         "keys": "rm -rf /",
         "text": "hello world",
         "value": "supersecret",
+        "content": "buffer payload",
+        "shell": "psql -U user -W secret123 mydb",
         "pane_id": "%1",
         "bracket": True,
     }
     summary = _summarize_args(args)
-    for sensitive in ("keys", "text", "value"):
+    for sensitive in ("keys", "text", "value", "content", "shell"):
         assert isinstance(summary[sensitive], dict)
         assert "len" in summary[sensitive]
         assert "sha256_prefix" in summary[sensitive]
@@ -163,6 +165,38 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
     # Non-sensitive args pass through unchanged.
     assert summary["pane_id"] == "%1"
     assert summary["bracket"] is True
+
+
+def test_summarize_args_redacts_sensitive_dict_values() -> None:
+    """Dict-shaped sensitive args keep keys but digest values per-entry.
+
+    ``environment`` on ``respawn_pane`` is a ``dict[str, str]``. The
+    values typically carry secrets (DB passwords, API keys), but the
+    keys (``DATABASE_URL``, ``AWS_SECRET_KEY``) are operator-useful for
+    debugging which env var was set. The redaction policy preserves
+    keys and digests values.
+    """
+    args: dict[str, t.Any] = {
+        "environment": {
+            "DATABASE_URL": "postgres://user:hunter2@db/app",
+            "AWS_SECRET_KEY": "AKIAIOSFODNN7EXAMPLE",
+        },
+        "pane_id": "%1",
+    }
+    summary = _summarize_args(args)
+    assert isinstance(summary["environment"], dict)
+    assert set(summary["environment"].keys()) == {"DATABASE_URL", "AWS_SECRET_KEY"}
+    for key in ("DATABASE_URL", "AWS_SECRET_KEY"):
+        digest = summary["environment"][key]
+        assert isinstance(digest, dict)
+        assert "len" in digest
+        assert "sha256_prefix" in digest
+    # No value bytes leak into the rendered summary.
+    rendered = str(summary)
+    assert "hunter2" not in rendered
+    assert "AKIAIOSFODNN7EXAMPLE" not in rendered
+    # Non-sensitive args still pass through.
+    assert summary["pane_id"] == "%1"
 
 
 def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
