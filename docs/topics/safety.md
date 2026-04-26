@@ -63,9 +63,13 @@ These protections read both the `TMUX` and `TMUX_PANE` environment variables tha
 
 ### macOS `TMUX_TMPDIR` caveat
 
-The self-kill guard reconstructs the target server's socket path by combining {envvar}`TMUX_TMPDIR` (or `/tmp` if unset) with the configured socket name. On macOS, `TMUX_TMPDIR` commonly differs between interactive shells and background service environments — if the MCP process and the tmux server were launched under different values, the reconstructed target path won't match the caller's `TMUX` socket path and the guard may decline to fire. The target-side comparison still protects the common case (same shell, same launchd context), but a mismatched {envvar}`TMUX_TMPDIR` can degrade the protection into a no-op.
+The self-kill guard resolves the target server's socket path in three steps (`_effective_socket_path` in `src/libtmux_mcp/_utils.py`):
 
-Mitigation today: set {envvar}`TMUX_TMPDIR` explicitly in both the MCP server's environment and the shell that starts tmux, so both reconstructions resolve to the same path. The proper structural fix — querying tmux for its own socket via `display-message '#{socket_path}'` rather than reconstructing — is tracked outside this documentation.
+1. Use `Server.socket_path` if libtmux already has it.
+2. Otherwise query the running server via `display-message -p '#{socket_path}'` — authoritative because tmux itself reports the path it is actually using, regardless of the MCP process environment. This closes the launchd-vs-interactive-shell gap on macOS where {envvar}`TMUX_TMPDIR` commonly differs between contexts.
+3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and `_caller_is_on_server`'s None-socket branch blocks conservatively.
+
+The structural fix shipped in 0.1.x; setting {envvar}`TMUX_TMPDIR` explicitly is no longer required for the guard to work, though it remains a useful diagnostic when investigating mismatched-path bug reports.
 
 ## Footguns inside the `mutating` tier
 

@@ -18,6 +18,14 @@ _Notes on upcoming releases will be added here_
 
 ### Docs
 
+- {ref}`safety` macOS ``TMUX_TMPDIR`` caveat now reflects shipped
+  behaviour. ``_effective_socket_path`` already queries tmux's
+  ``display-message -p '#{socket_path}'`` first and only falls back to
+  ``$TMUX_TMPDIR`` reconstruction when the server is unreachable, but
+  the doc still framed the structural fix as future work and told
+  operators to set ``TMUX_TMPDIR`` explicitly. Replace with the actual
+  three-step resolution order so doc readers don't write code or
+  service files chasing a problem that's already solved.
 - Strip dangling internal-audit citations from production source
   comments. ``window_tools.py:106`` no longer references "the
   brainstorm-and-refine audit §7.1" — the architectural fence
