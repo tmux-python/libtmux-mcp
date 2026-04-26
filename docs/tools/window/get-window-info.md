@@ -7,9 +7,8 @@
 dimensions, pane count) and you already know the `window_id` or
 `window_index`. Avoids the `list_windows` + filter dance.
 
-**Avoid when** you need every window in a session — call `list_panes` with
-`session_id` or iterate through the session's windows via the
-`tmux://sessions/{name}/windows` resource.
+**Avoid when** you need every window in a session — call `list_windows` with
+`session_id` or iterate via the `tmux://sessions/{name}/windows` resource.
 
 **Side effects:** None. Readonly.
 

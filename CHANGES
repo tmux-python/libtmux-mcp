@@ -8,6 +8,11 @@ _Notes on upcoming releases will be added here_
 
 ### Docs
 
+- {tooliconl}`get-window-info` "Avoid when" guidance now points to
+  {tooliconl}`list-windows` (not {tooliconl}`list-panes`) for whole-
+  session window enumeration. The previous wording trained agents into
+  the wrong tool: ``list_panes`` returns ``PaneInfo`` objects, while
+  ``list_windows`` is the window enumerator and accepts ``session_id``.
 - {tooliconl}`respawn-pane` docstring and topic page now include a tip
   to call {tooliconl}`get-pane-info` first if the agent needs to
   preserve ``pane_current_command`` across the respawn — tmux's default
