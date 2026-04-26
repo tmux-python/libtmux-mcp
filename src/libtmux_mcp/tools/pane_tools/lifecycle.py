@@ -87,6 +87,12 @@ def respawn_pane(
     can silently kill an unrelated server. Resolve via ``list_panes``
     first.
 
+    Tip: call ``get_pane_info`` first if you need to capture
+    ``pane_current_command`` before respawn — the new process loses its
+    argv. Omitting ``shell`` makes tmux replay the original argv (good
+    default for shells; may differ for processes spawned via custom
+    shell at split time).
+
     Parameters
     ----------
     pane_id : str

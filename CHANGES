@@ -8,6 +8,11 @@ _Notes on upcoming releases will be added here_
 
 ### Docs
 
+- {tooliconl}`respawn-pane` docstring and topic page now include a tip
+  to call {tooliconl}`get-pane-info` first if the agent needs to
+  preserve ``pane_current_command`` across the respawn — tmux's default
+  behaviour is to replay the original argv, but a custom split-time
+  shell may differ.
 - {ref}`safety` adds a {tooliconl}`respawn-pane` subsection under
   "Footguns inside the `mutating` tier" alongside {tooliconl}`pipe-pane`
   and {tooliconl}`set-environment`. Documents the `kill=True` default,

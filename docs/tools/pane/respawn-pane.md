@@ -18,6 +18,12 @@ the layout: `respawn-pane` preserves the pane in place.
 starts a new one. **The `pane_id` is preserved** — that's the whole
 point of the tool. `pane_pid` updates to the new process.
 
+**Tip:** Call {tooliconl}`get-pane-info` first if you need to capture
+`pane_current_command` before respawn — the new process loses its argv.
+Omitting `shell` makes tmux replay the original argv (good default for
+shells; may differ for processes spawned via custom shell at split
+time).
+
 **Example — recover a wedged pane, relaunching the default shell:**
 
 ```json
