@@ -153,6 +153,13 @@ def respawn_pane(
             "Use a manual tmux command if intended."
         )
         raise ToolError(msg)
+    # Stopgap: ``libtmux>=0.55.1`` has no ``Pane.respawn()`` yet — the
+    # wrapper exists on the upstream ``tmux-parity`` branch (see
+    # ``libtmux/pane.py:respawn``) and mirrors this argv shape (``-k``,
+    # ``-c <dir>``, optional trailing shell). When the release line picks
+    # it up, swap ``pane.cmd("respawn-pane", *argv)`` for ``pane.respawn(
+    # kill=kill, start_directory=start_directory, shell=shell)`` and drop
+    # the stderr branch — ``Pane.respawn`` raises ``LibTmuxException``.
     argv: list[str] = []
     if kill:
         argv.append("-k")
