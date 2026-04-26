@@ -312,38 +312,6 @@ def test_respawn_pane_self_kill_guard(
     new_pane.kill()
 
 
-def test_respawn_pane_rejects_implicit_target(mcp_server: Server) -> None:
-    """respawn_pane refuses when no targeting parameter is supplied.
-
-    Without ``pane_id`` (or any other discriminator) ``_resolve_pane``
-    falls back to the first pane of the first window of the first
-    session — combined with default ``kill=True`` that could silently
-    kill an unrelated server. The runtime guard requires explicit
-    ``pane_id``.
-    """
-    with pytest.raises(ToolError, match="explicit pane_id"):
-        respawn_pane(socket_name=mcp_server.socket_name)
-
-
-def test_respawn_pane_rejects_session_only_target(
-    mcp_server: Server, mcp_session: Session
-) -> None:
-    """respawn_pane refuses ``session_name`` without ``pane_id``.
-
-    ``session_name`` alone resolves to the first pane of the first
-    window, which is not what the caller intends when recovering a
-    wedged shell elsewhere in the session. The guard requires
-    ``pane_id`` regardless of which other targeting parameters are
-    present.
-    """
-    assert mcp_session.session_name is not None
-    with pytest.raises(ToolError, match="explicit pane_id"):
-        respawn_pane(
-            session_name=mcp_session.session_name,
-            socket_name=mcp_server.socket_name,
-        )
-
-
 def test_respawn_pane_kill_false_on_dead_pane_succeeds(
     mcp_server: Server, mcp_session: Session
 ) -> None:

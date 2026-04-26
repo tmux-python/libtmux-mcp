@@ -60,10 +60,7 @@ def kill_pane(
 
 @handle_tool_errors
 def respawn_pane(
-    pane_id: str | None = None,
-    session_name: str | None = None,
-    session_id: str | None = None,
-    window_id: str | None = None,
+    pane_id: str,
     kill: bool = True,
     shell: str | None = None,
     start_directory: str | None = None,
@@ -84,11 +81,13 @@ def respawn_pane(
     variables for the relaunched command (one ``-e KEY=VALUE`` flag
     per entry).
 
-    ``pane_id`` is required — no fallback to ``_resolve_pane``'s
-    "first pane in session/window" behaviour. Default ``kill=True``
-    will terminate the resolved pane's process, so accidental targeting
-    can silently kill an unrelated server. Resolve via ``list_panes``
-    first.
+    ``pane_id`` is required — sibling pane tools accept a hierarchical
+    fallback (``session_name`` / ``window_id`` / ``pane_index``) that
+    resolves to "first pane in session/window", but combined with
+    default ``kill=True`` that fallback could silently kill an
+    unrelated process. The signature deliberately omits the resolver
+    fields so the FastMCP schema rejects them at the framework
+    boundary. Resolve via ``list_panes`` first.
 
     Tip: call ``get_pane_info`` first if you need to capture
     ``pane_current_command`` before respawn — the new process loses its
@@ -99,15 +98,7 @@ def respawn_pane(
     Parameters
     ----------
     pane_id : str
-        Pane ID (e.g. '%1'). Required — no fallback resolution.
-    session_name : str, optional
-        Accepted for backwards-compatibility with the ``_resolve_pane``
-        signature shared across pane tools, but the explicit ``pane_id``
-        guard above raises before this is consulted.
-    session_id : str, optional
-        See ``session_name``.
-    window_id : str, optional
-        See ``session_name``.
+        Pane ID (e.g. '%1'). Required.
     kill : bool
         When True (default), pass ``-k`` to tmux so the current
         process is killed before respawning. When False, respawn
@@ -140,21 +131,8 @@ def respawn_pane(
         Serialized pane metadata after respawn. The pane_id is
         preserved; pane_pid reflects the new process.
     """
-    if pane_id is None:
-        msg = (
-            "respawn_pane requires an explicit pane_id (e.g. '%1') because "
-            "default kill=True will terminate the resolved pane's process. "
-            "Resolve the target via list_panes first."
-        )
-        raise ToolError(msg)
     server = _get_server(socket_name=socket_name)
-    pane = _resolve_pane(
-        server,
-        pane_id=pane_id,
-        session_name=session_name,
-        session_id=session_id,
-        window_id=window_id,
-    )
+    pane = _resolve_pane(server, pane_id=pane_id)
     caller = _get_caller_identity()
     if (
         caller is not None

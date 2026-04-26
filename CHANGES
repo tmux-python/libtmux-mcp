@@ -107,6 +107,16 @@ _Notes on upcoming releases will be added here_
   branch. Settled before the tool reached ``origin/main`` so no
   compatibility alias is shipped — alignment is the load-bearing
   reason, not a fix to a previously released name.
+- {tooliconl}`respawn-pane` signature drops the optional
+  ``session_name`` / ``session_id`` / ``window_id`` resolver fallbacks
+  that sibling pane tools accept. The runtime guard would have raised
+  on any combination missing ``pane_id`` anyway (the tool requires
+  explicit ``pane_id`` to prevent silent-kill-via-resolver), so the
+  parameters were dead surface area broadcasting targeting flexibility
+  to LLMs that did not exist. Validation now lives at the FastMCP
+  schema boundary via ``pane_id: str`` rather than an in-tool
+  ``ToolError`` raise. Settled before the tool reached ``origin/main``
+  so no compat alias ships.
 
 ### Refactor
 
