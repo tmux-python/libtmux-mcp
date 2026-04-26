@@ -90,6 +90,18 @@ Mitigations:
 - The audit log redacts the `value` argument to a `{len, sha256_prefix}` digest so log files don't leak the secrets agents set, but operators should still treat the tool as high-privilege.
 - If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via `send_keys` instead — the blast radius is one command, not every future child.
 
+### `respawn_pane`
+
+{tool}`respawn-pane` restarts a pane's process while preserving the pane id and layout — exactly what an agent wants when a shell wedges. Default `kill=True` terminates the running process before relaunch. The `pane_id` and layout are preserved (the point of the tool), but any unsaved REPL state, ssh session, or in-flight job in that pane is lost. Repeated calls are *not* idempotent — each call kills a new process.
+
+Unlike other `mutating` tools, the registration carries `destructiveHint=True` and `idempotentHint=False` (via the `ANNOTATIONS_MUTATING_DESTRUCTIVE` preset) so MCP clients see honest annotations even though the tier tag stays at `mutating` for default-profile recovery.
+
+Mitigations:
+
+- `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get a `ToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
+- Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
+- The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
+
 ### `send_keys` / `paste_text`
 
 These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via `send_keys` does not land in logs.
@@ -135,6 +147,7 @@ Each tool carries MCP tool annotations that hint at its behavior:
 | {ref}`select-layout` | {badge}`mutating` | false | false | true |
 | {ref}`set-option` | {badge}`mutating` | false | false | true |
 | {ref}`set-environment` | {badge}`mutating` | false | false | true |
+| {ref}`respawn-pane` | {badge}`mutating` | false | true | false |
 | {ref}`kill-server` | {badge}`destructive` | false | true | false |
 | {ref}`kill-session` | {badge}`destructive` | false | true | false |
 | {ref}`kill-window` | {badge}`destructive` | false | true | false |

@@ -6,6 +6,17 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Docs
+
+- {ref}`safety` adds a {tooliconl}`respawn-pane` subsection under
+  "Footguns inside the `mutating` tier" alongside {tooliconl}`pipe-pane`
+  and {tooliconl}`set-environment`. Documents the `kill=True` default,
+  the non-idempotent retry semantics, the explicit-`pane_id`
+  requirement, and the `pane_current_command` / OS-process-table
+  visibility window for any `shell` argument. The per-tool annotation
+  table picks up a `respawn-pane` row showing the unusual mutating-tier
+  + `destructiveHint=true` + `idempotentHint=false` combination.
+
 ### Fixes
 
 - {tooliconl}`respawn-pane` now requires an explicit ``pane_id``. Its
