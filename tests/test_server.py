@@ -129,65 +129,93 @@ def test_build_instructions(
         assert f"Safety level: {expect_safety_in_text}" in result
 
 
-def test_base_instructions_content() -> None:
-    """_BASE_INSTRUCTIONS contains key guidance for the LLM."""
-    assert "tmux hierarchy" in _BASE_INSTRUCTIONS
-    assert "pane_id" in _BASE_INSTRUCTIONS
-    assert "search_panes" in _BASE_INSTRUCTIONS
-    assert "metadata vs content" in _BASE_INSTRUCTIONS
+class CardContract(t.NamedTuple):
+    """Contract about what ``_BASE_INSTRUCTIONS`` must / must not contain.
 
-
-def test_base_instructions_surface_flagship_read_tools() -> None:
-    """_BASE_INSTRUCTIONS mentions the richer read tools by name.
-
-    ``display_message`` (tmux format queries) and ``snapshot_pane``
-    (content + metadata in one call) are strictly more expressive than
-    ``capture_pane`` for most contexts, but agents that never see them
-    named in the instructions default to ``capture_pane`` + a follow-up
-    ``get_pane_info``. Naming both explicitly changes that default.
+    The slim card is the public-facing server prompt — every MCP client
+    that connects gets it. ``must_include`` pins the substrings agents
+    rely on to orient (server identity, socket_name exception, three
+    handles); ``must_exclude`` pins the deleted-pre-refactor phrasing so
+    a future drift back to the lie ("All tools accept socket_name") fails
+    loudly here instead of silently shipping.
     """
-    assert "display_message" in _BASE_INSTRUCTIONS
-    assert "snapshot_pane" in _BASE_INSTRUCTIONS
+
+    test_id: str
+    must_include: tuple[str, ...]
+    must_exclude: tuple[str, ...] = ()
 
 
-def test_base_instructions_prefer_wait_over_poll() -> None:
-    """_BASE_INSTRUCTIONS names wait_for_text and wait_for_content_change.
+CARD_CONTRACTS: list[CardContract] = [
+    CardContract(
+        test_id="server_identity",
+        must_include=(
+            "tmux hierarchy",
+            "Server > Session > Window > Pane",
+            "pane_id",
+        ),
+    ),
+    CardContract(
+        test_id="socket_name_exception",
+        # ``list_servers`` does NOT accept socket_name (it's the discovery
+        # tool — see ``server_tools.py`` SOCKET_NAME_EXEMPT). The pre-refactor
+        # wording "All tools accept socket_name" was a lie; the new card
+        # qualifies "Targeted tools" and names list_servers explicitly.
+        must_include=("Targeted tools", "list_servers", "extra_socket_paths"),
+        must_exclude=("All tools accept",),
+    ),
+    CardContract(
+        test_id="three_handles",
+        # The card's job is to point at where the rest of the answer lives
+        # (tools / resources / prompts), not to inline tool-specific rules.
+        must_include=("Tools", "Resources (tmux://)", "Prompts"),
+    ),
+]
 
-    The wait tools block server-side, which is dramatically cheaper in
-    agent turns than ``capture_pane`` in a retry loop. Making them
-    discoverable from the instructions is a no-cost UX win.
+
+@pytest.mark.parametrize(
+    CardContract._fields,
+    CARD_CONTRACTS,
+    ids=[c.test_id for c in CARD_CONTRACTS],
+)
+def test_card_contracts(
+    test_id: str,
+    must_include: tuple[str, ...],
+    must_exclude: tuple[str, ...],
+) -> None:
+    """``_BASE_INSTRUCTIONS`` is the slim "three handles" server card.
+
+    Tool-specific rules live in tool descriptions — Phase 1 of the
+    instructions slim-down moved them there. The card carries only
+    cross-cutting orientation: server identity, the socket_name
+    exception, and pointers to the Tools / Resources / Prompts handles.
+    Anything naming a specific tool's preference rule belongs at the
+    call site, not here.
     """
-    assert "wait_for_text" in _BASE_INSTRUCTIONS
-    assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+    for needle in must_include:
+        assert needle in _BASE_INSTRUCTIONS, (
+            f"[{test_id}] missing required substring {needle!r}"
+        )
+    for needle in must_exclude:
+        assert needle not in _BASE_INSTRUCTIONS, (
+            f"[{test_id}] forbidden substring {needle!r} crept back in"
+        )
 
 
-def test_base_instructions_document_hook_boundary() -> None:
-    """_BASE_INSTRUCTIONS explains hooks are read-only by design.
+def test_card_length_budget() -> None:
+    """``_BASE_INSTRUCTIONS`` stays under the ~200-word budget.
 
-    Without this sentence agents waste a turn asking for ``set_hook`` or
-    trying to write hooks through a nonexistent tool. Naming the
-    boundary heads off the exploratory call.
+    Per-tool rules belong in tool descriptions (visible at every
+    ``list_tools`` call), not in this card. This guard fails loudly if a
+    future contributor reaches for the card to add a tool-specific rule,
+    pointing them at the right home before the card grows back into the
+    305-word monolith it just shrank from.
     """
-    assert "HOOKS ARE READ-ONLY" in _BASE_INSTRUCTIONS
-    assert "show_hooks" in _BASE_INSTRUCTIONS
-    assert "tmux config file" in _BASE_INSTRUCTIONS
-
-
-def test_base_instructions_document_socket_name_contract() -> None:
-    """_BASE_INSTRUCTIONS frames the socket_name promise precisely.
-
-    list_servers does NOT accept socket_name (it's the discovery tool —
-    see server_tools.py:263-264 where the signature is
-    ``list_servers(extra_socket_paths=...)``), so the previous "All
-    tools accept socket_name" wording was a lie. The instruction now
-    qualifies "Targeted tmux tools" and explicitly names list_servers
-    as the documented exception, matching what
-    test_registered_tools_accept_socket_name asserts at the schema
-    level.
-    """
-    assert "Targeted tmux tools accept" in _BASE_INSTRUCTIONS
-    assert "list_servers" in _BASE_INSTRUCTIONS
-    assert "extra_socket_paths" in _BASE_INSTRUCTIONS
+    word_count = len(_BASE_INSTRUCTIONS.split())
+    assert word_count <= 200, (
+        f"_BASE_INSTRUCTIONS grew to {word_count} words; per-tool rules "
+        f"belong in tool descriptions, not the card. See the module-level "
+        f"comment in server.py for the boundary."
+    )
 
 
 def test_registered_tools_accept_socket_name() -> None:
@@ -228,23 +256,6 @@ def test_registered_tools_accept_socket_name() -> None:
             f"add to server_tools.SOCKET_NAME_EXEMPT, or update "
             f"_BASE_INSTRUCTIONS"
         )
-
-
-def test_base_instructions_document_buffer_lifecycle() -> None:
-    """_BASE_INSTRUCTIONS explains the buffer lifecycle + no list_buffers.
-
-    The load/paste/delete triple is non-obvious, and agents otherwise
-    expect a ``list_buffers`` affordance. The instruction prevents both
-    confusions and surfaces the clipboard-privacy reason so the
-    omission reads as deliberate, not missing.
-    """
-    assert "BUFFERS" in _BASE_INSTRUCTIONS
-    assert "load_buffer" in _BASE_INSTRUCTIONS
-    assert "paste_buffer" in _BASE_INSTRUCTIONS
-    assert "delete_buffer" in _BASE_INSTRUCTIONS
-    assert "BufferRef" in _BASE_INSTRUCTIONS
-    assert "list_buffers" in _BASE_INSTRUCTIONS
-    assert "clipboard history" in _BASE_INSTRUCTIONS
 
 
 @pytest.mark.parametrize(
