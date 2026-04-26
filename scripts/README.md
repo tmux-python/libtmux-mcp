@@ -50,9 +50,10 @@ invocation with no reinstall step.
 
 - Every rewrite writes a timestamped backup (`<config>.bak.mcp-swap-<ts>`)
   before touching the file.
-- State is tracked in `~/.local/state/libtmux-mcp/mcp_swap.json` so
-  `revert` knows which backup to restore per CLI, including the "added"
-  case where Codex had no libtmux block before.
+- State is tracked in `~/.local/state/libtmux-mcp-dev/swap/state.json`
+  (honours `XDG_STATE_HOME`) so `revert` knows which backup to restore
+  per CLI, including the "added" case where Codex had no libtmux block
+  before.
 - Writes are atomic (tempfile + `os.replace`) and re-validated by
   re-parsing; a bad write is rolled back immediately.
 - `--dry-run` prints a unified diff and writes nothing.

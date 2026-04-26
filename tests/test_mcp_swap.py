@@ -66,7 +66,7 @@ def fake_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
     )
     state_dir = tmp_path / "state"
     monkeypatch.setattr(mcp_swap, "STATE_DIR", state_dir)
-    monkeypatch.setattr(mcp_swap, "STATE_FILE", state_dir / "mcp_swap.json")
+    monkeypatch.setattr(mcp_swap, "STATE_FILE", state_dir / "state.json")
     return tmp_path
 
 

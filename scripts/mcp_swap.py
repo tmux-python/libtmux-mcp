@@ -70,8 +70,26 @@ import tomlkit.items
 CLIName = t.Literal["claude", "codex", "cursor", "gemini"]
 ALL_CLIS: tuple[CLIName, ...] = ("claude", "codex", "cursor", "gemini")
 
-STATE_DIR = pathlib.Path.home() / ".local" / "state" / "libtmux-mcp"
-STATE_FILE = STATE_DIR / "mcp_swap.json"
+
+def _xdg_state_home() -> pathlib.Path:
+    """Resolve ``$XDG_STATE_HOME`` per the XDG Base Directory spec.
+
+    Defaults to ``~/.local/state`` when the env var is unset or empty.
+    State is the right XDG bucket here (vs. cache / config / data): the
+    file is machine-written, must persist across runs so ``revert`` can
+    locate the right backup, but is not safely deletable like cache nor
+    user-edited like config.
+    """
+    env = os.environ.get("XDG_STATE_HOME")
+    if env:
+        return pathlib.Path(env)
+    return pathlib.Path.home() / ".local" / "state"
+
+
+# ``-dev`` suffix in the namespace makes it loud that this is dev-only
+# tooling state, distinct from the runtime ``libtmux-mcp`` package.
+STATE_DIR = _xdg_state_home() / "libtmux-mcp-dev" / "swap"
+STATE_FILE = STATE_DIR / "state.json"
 STATE_VERSION = 1
 
 BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
