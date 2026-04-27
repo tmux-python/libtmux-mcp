@@ -27,6 +27,12 @@ _MARKDOWN_MIME = "text/markdown"
 _FORMAT_STRING_REFERENCE = textwrap.dedent("""\
     # tmux format strings
 
+    > **Note:** This is a curated cheat sheet, not the complete catalog.
+    > tmux supports ~200 format variables; this lists the ones agents
+    > most commonly need. Omission here does NOT mean a string is
+    > unsupported — fall back to ``man tmux`` (FORMATS section) for
+    > anything not listed.
+
     Pass via ``display_message(format_string="#{...}")`` or any other
     tool that accepts a tmux format expression.
 
@@ -90,12 +96,15 @@ def register(mcp: FastMCP) -> None:
         mime_type=_MARKDOWN_MIME,
     )
     def get_format_string_reference() -> str:
-        """Return the tmux format-string cheat sheet as Markdown.
+        """Return a curated subset of the tmux format-string catalog as Markdown.
 
-        Static reference content. Use this when an agent encounters
-        an unfamiliar ``#{...}`` field — pulling the resource is
-        cheaper than a ``display_message`` round-trip and avoids
-        hallucinated format names.
+        Covers the format variables agents most commonly encounter; for
+        less-common ones, the body itself directs the agent at
+        ``man tmux`` (FORMATS section). The resource is intentionally
+        a subset rather than a mirror — it stays small enough to be
+        cheap to pull, and the disclaimer at the top prevents the
+        false-negative trap where an agent assumes an omitted string
+        is unsupported.
         """
         return _FORMAT_STRING_REFERENCE
 

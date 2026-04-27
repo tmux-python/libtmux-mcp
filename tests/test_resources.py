@@ -237,6 +237,43 @@ def test_format_string_reference_returns_markdown(
     assert "#{?cond,then,else}" in body
 
 
+def test_format_string_reference_leads_with_subset_disclaimer(
+    reference_resource_functions: dict[str, t.Any],
+) -> None:
+    """The body declares itself a curated subset BEFORE the substantive content.
+
+    Without a leading disclaimer, an agent that reads the resource and
+    doesn't find a format string it knows is valid (e.g.
+    ``#{history_size}``, one of the ~175 omitted strings) may
+    erroneously conclude the string is unsupported and skip a
+    ``display_message`` call that would have worked. The disclaimer
+    must precede the catalog content so an agent skim-reading the top
+    of the body cannot miss it.
+    """
+    fn = reference_resource_functions["tmux://reference/format-strings"]
+    body = fn()
+
+    # Disclaimer keywords must appear in the body...
+    assert "curated" in body.lower(), (
+        "format-string reference must declare itself a curated subset"
+    )
+    assert "man tmux" in body, (
+        "format-string reference must point readers at man tmux for the "
+        "complete catalog"
+    )
+
+    # ...AND must appear *before* the first format-variable example.
+    # Otherwise a top-down skim hits the catalog before the caveat.
+    first_example = body.find("#{pane_id}")
+    disclaimer = body.lower().find("curated")
+    assert disclaimer != -1, "disclaimer absent"
+    assert disclaimer < first_example, (
+        f"disclaimer at offset {disclaimer} comes after first format-variable "
+        f"example at offset {first_example}; readers will see the catalog "
+        f"before the 'this is a subset' caveat"
+    )
+
+
 def test_format_string_reference_advertises_markdown_mime() -> None:
     """tmux://reference/format-strings is registered with text/markdown.
 
