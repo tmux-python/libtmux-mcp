@@ -311,6 +311,42 @@ def test_handle_hints_keys_are_registered_tools() -> None:
         )
 
 
+def test_format_handles_section_empty_visible_set_emits_no_examples() -> None:
+    """``_format_handles_section`` renders a bare Tools handle when no hint matches.
+
+    With every current hint tool tagged ``TAG_READONLY`` this branch is
+    unreachable by the existing tool set — even ``LIBTMUX_SAFETY=readonly``
+    keeps ``snapshot_pane`` / ``wait_for_text`` / ``search_panes`` visible.
+    But a future hint tagged mutating/destructive-only would land here under
+    a readonly safety tier, and so would a future ``LIBTMUX_TOOLSETS`` filter
+    that hides every pane tool. Pin the branch behavior now so a regression
+    that emits broken syntax (e.g. trailing ", )." from a half-formatted
+    hint list, or duplicate periods) fails loudly.
+    """
+    from libtmux_mcp.server import _format_handles_section
+
+    result = _format_handles_section(set())
+
+    # No hint phrases emitted — no "e.g." preamble, no individual hint
+    # tool names mentioned in the Tools-line.
+    assert "e.g." not in result
+    for tool_name, _ in _VISIBILITY_FILTER_CASES:
+        assert tool_name not in result, (
+            f"hint tool name {tool_name!r} leaked into card with empty visible set"
+        )
+
+    # Tools-line still present and well-formed (ends with a single period,
+    # no dangling comma or open paren).
+    expected_tools_line = (
+        "- Tools — call list_tools; per-tool descriptions tell you which to prefer."
+    )
+    assert expected_tools_line in result
+
+    # The other two handles are unaffected — they don't depend on visibility.
+    assert "- Resources (tmux://)" in result
+    assert "- Prompts — packaged workflows" in result
+
+
 def test_registered_tools_accept_socket_name() -> None:
     """All registered tools (except list_servers) accept ``socket_name``.
 
