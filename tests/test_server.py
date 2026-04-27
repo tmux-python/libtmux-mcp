@@ -402,6 +402,11 @@ def test_registered_tools_accept_socket_name() -> None:
         ("capture_pane", "snapshot_pane"),
         ("capture_pane", "wait_for_text"),
         ("capture_pane", "search_panes"),
+        # Truncation marker — agents need to know the first line of a
+        # truncated capture is a literal '[... truncated K lines ...]'
+        # header, not terminal content. Without this in the description,
+        # an agent might treat the marker as the most recent output.
+        ("capture_pane", "truncated"),
         ("show_hooks", "tmux config file"),
         ("load_buffer", "list_buffers"),
         ("load_buffer", "clipboard history"),
