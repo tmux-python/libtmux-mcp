@@ -279,6 +279,38 @@ def test_build_instructions_default_visible_tool_names_emits_full_card() -> None
         )
 
 
+def test_handle_hints_keys_are_registered_tools() -> None:
+    """Every key in ``_HANDLE_HINTS`` must be an actual registered tool name.
+
+    ``_format_handles_section`` filters hints by ``tool in visible_tool_names``,
+    so a stale key (e.g. left behind after a tool rename) silently disappears
+    from the filtered card while still being emitted in the unfiltered
+    placeholder — the worst of both worlds: agents would see a phantom tool
+    name during the brief import-time window, then lose the guidance entirely
+    once ``run_server`` filters by real visibility.
+
+    Phase 1's ``test_tool_description_includes`` catches drift in tool
+    *descriptions*; this test catches drift in the parallel ``_HANDLE_HINTS``
+    table. The two together close the rename-without-update loophole.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.server import _HANDLE_HINTS
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="hint-key-contract")
+    register_tools(mcp)
+
+    registered = {tool.name for tool in asyncio.run(mcp.list_tools())}
+    for tool_name, _hint in _HANDLE_HINTS:
+        assert tool_name in registered, (
+            f"_HANDLE_HINTS key {tool_name!r} is not a registered tool name; "
+            f"update _HANDLE_HINTS in server.py when renaming or removing tools"
+        )
+
+
 def test_registered_tools_accept_socket_name() -> None:
     """All registered tools (except list_servers) accept ``socket_name``.
 
