@@ -347,6 +347,51 @@ def test_format_handles_section_empty_visible_set_emits_no_examples() -> None:
     assert "- Prompts — packaged workflows" in result
 
 
+def test_card_emits_hints_against_real_registered_tools() -> None:
+    """End-to-end: register_tools → mcp.enable → list_tools → _build_instructions.
+
+    ``test_card_omits_invisible_tools`` proves the filter *logic* using a
+    3-element synthetic ``visible_tool_names``. This test proves the
+    production *wiring*: it registers the real tool surface, applies the
+    same ``mcp.enable(tags=..., only=True)`` call ``run_server`` makes,
+    collects the visible names from ``mcp.list_tools()``, and confirms
+    every hint phrase still appears in the produced card.
+
+    All three current hint tools (``snapshot_pane``, ``wait_for_text``,
+    ``search_panes``) carry ``TAG_READONLY``, so even the most
+    restrictive safety tier keeps them visible — the test pins this
+    invariant. If a future change moves a hint tool out of the readonly
+    tier, this test will fail and force a deliberate decision about
+    whether to retain or drop the corresponding card hint.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="card-wiring-integration")
+    register_tools(mcp)
+    # Mirror run_server's gating call exactly — readonly is the most
+    # restrictive tier, so a hint phrase surviving here implies it
+    # survives every higher tier too.
+    mcp.enable(tags={TAG_READONLY}, only=True)
+
+    visible = {tool.name for tool in asyncio.run(mcp.list_tools())}
+    card = _build_instructions(TAG_READONLY, visible_tool_names=visible)
+
+    for hint_tool, phrase in _VISIBILITY_FILTER_CASES:
+        assert hint_tool in visible, (
+            f"hint tool {hint_tool!r} unexpectedly hidden under readonly "
+            f"tier; either retag the tool or drop the hint from "
+            f"_HANDLE_HINTS"
+        )
+        assert phrase in card, (
+            f"hint phrase {phrase!r} missing from card built against the "
+            f"real registered tool set; production wiring is broken"
+        )
+
+
 def test_registered_tools_accept_socket_name() -> None:
     """All registered tools (except list_servers) accept ``socket_name``.
 
