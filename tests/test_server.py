@@ -356,6 +356,15 @@ def test_registered_tools_accept_socket_name() -> None:
     If a future tool registration drops ``socket_name``, this test
     catches the regression instead of silently making the agent-facing
     instructions a lie.
+
+    **Scope**: this test runs against an unfiltered fresh ``FastMCP`` —
+    it does NOT exercise the production singleton at ``server.py``
+    (which has middleware + ``mcp.enable(tags=..., only=True)`` applied
+    by ``run_server``). The unfiltered set is a strict superset of any
+    tier-filtered visible set, so a positive result here implies the
+    same property on every filtered subset. A future maintainer
+    adding tier-specific socket_name behavior should add a parallel
+    test against the singleton.
     """
     import asyncio
     import inspect
