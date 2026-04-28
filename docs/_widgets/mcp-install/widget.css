@@ -37,7 +37,6 @@
   padding: 0.45rem 0.9rem;
   margin: 0;
   white-space: nowrap;
-  transition: color 120ms, border-color 120ms, background 120ms;
 }
 
 .lm-mcp-install__tab:hover {
