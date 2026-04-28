@@ -69,13 +69,13 @@ The audit log redacts each `environment` *value* via `{len, sha256_prefix}` dige
 
 Response (PaneInfo):
 
-```json
+```json5
 {
   "pane_id": "%5",
   "pane_pid": "98765",
   "pane_current_command": "pytest",
   "pane_current_path": "/home/user/project",
-  ...
+  // ...
 }
 ```
 
