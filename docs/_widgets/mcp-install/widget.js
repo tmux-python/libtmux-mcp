@@ -78,7 +78,12 @@
 
     updatePanels(widget);
 
-    if (opts.persist) localStorage.setItem(STORAGE[kind], value);
+    if (opts.persist) {
+      localStorage.setItem(STORAGE[kind], value);
+      // Keep <html> attr in sync so the prehydrate CSS in _prehydrate.py
+      // continues to drive active state across SPA navigations after a click.
+      document.documentElement.setAttribute("data-mcp-install-" + kind, value);
+    }
     if (opts.broadcast) {
       window.dispatchEvent(
         new CustomEvent(SYNC_EVENT, {
