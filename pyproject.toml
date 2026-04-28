@@ -134,6 +134,14 @@ sphinx-gp-theme = false
 sphinx-ux-autodoc-layout = false
 sphinx-ux-badges = false
 
+[tool.uv.sources]
+# Temporarily pin gp-sphinx workspace packages at an unreleased commit
+# that fixes the iOS Safari sidebar-logo blank after SPA navigation
+# (gp-sphinx commit 652ce02, branch fix/spa-nav-ios-relative-urls).
+# Revert to PyPI wheels once 0.0.1a12 ships.
+gp-sphinx = { git = "https://github.com/git-pull/gp-sphinx.git", rev = "652ce020b8003a496732df805fbb072d91b559dc", subdirectory = "packages/gp-sphinx" }
+sphinx-gp-theme = { git = "https://github.com/git-pull/gp-sphinx.git", rev = "652ce020b8003a496732df805fbb072d91b559dc", subdirectory = "packages/sphinx-gp-theme" }
+
 [tool.mypy]
 strict = true
 python_version = "3.10"
