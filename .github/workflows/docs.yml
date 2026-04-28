@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - try/spa-nav-ios-fix
 
 permissions:
   contents: read
