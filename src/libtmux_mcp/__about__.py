@@ -4,7 +4,7 @@ from __future__ import annotations
 
 __title__ = "libtmux-mcp"
 __package_name__ = "libtmux_mcp"
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 __description__ = "MCP server for tmux, powered by libtmux"
 __author__ = "Tony Narlock"
 __email__ = "tony@git-pull.com"
