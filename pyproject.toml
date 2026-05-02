@@ -56,9 +56,9 @@ libtmux-mcp = "libtmux_mcp:main"
 [dependency-groups]
 dev = [
   # Docs
-  "gp-sphinx==0.0.1a13",
-  "sphinx-autodoc-api-style==0.0.1a13",
-  "sphinx-autodoc-fastmcp==0.0.1a13",
+  "gp-sphinx==0.0.1a14",
+  "sphinx-autodoc-api-style==0.0.1a14",
+  "sphinx-autodoc-fastmcp==0.0.1a14",
   "gp-libs",
   "sphinx-autobuild",
   # Testing
@@ -82,9 +82,9 @@ dev = [
 ]
 
 docs = [
-  "gp-sphinx==0.0.1a13",
-  "sphinx-autodoc-api-style==0.0.1a13",
-  "sphinx-autodoc-fastmcp==0.0.1a13",
+  "gp-sphinx==0.0.1a14",
+  "sphinx-autodoc-api-style==0.0.1a14",
+  "sphinx-autodoc-fastmcp==0.0.1a14",
   "gp-libs",
   "sphinx-autobuild",
 ]
