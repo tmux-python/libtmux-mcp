@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Documentation
+
+- Bump gp-sphinx docs stack to v0.0.1a16 — docs site now renders
+  via `gp-furo-theme`, a Tailwind v4 respin of Furo, with
+  `sphinx-vite-builder` handling theme-asset builds (#33)
+
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
 _`respawn_pane`, single-object info reads, and the cross-CLI `mcp_swap` dev script._
