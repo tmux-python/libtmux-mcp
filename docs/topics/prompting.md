@@ -11,19 +11,22 @@ Every MCP client receives these instructions when connecting to the libtmux-mcp 
 ```{code-block} text
 :class: server-prompt
 
-libtmux MCP server for programmatic tmux control. tmux hierarchy:
-Server > Session > Window > Pane. Use pane_id (e.g. '%1') as the
-preferred targeting method - it is globally unique within a tmux server.
-Use send_keys to execute commands and capture_pane to read output. All
-tools accept an optional socket_name parameter for multi-server support
-(defaults to LIBTMUX_SOCKET env var).
+libtmux MCP server: programmatic tmux control. tmux hierarchy is
+Server > Session > Window > Pane; every pane has a globally unique
+pane_id like %1 — prefer it over name/index for targeting. Targeted
+tools accept an optional socket_name (defaults to LIBTMUX_SOCKET);
+list_servers discovers sockets via TMUX_TMPDIR / extra_socket_paths
+and is the documented socket_name exception.
 
-IMPORTANT — metadata vs content: list_windows, list_panes, and
-list_sessions only search metadata (names, IDs, current command). To
-find text that is actually visible in terminals — when users ask what
-panes 'contain', 'mention', 'show', or 'have' — use search_panes to
-search across all pane contents, or list_panes + capture_pane on each
-pane for manual inspection.
+Three handles cover everything the agent needs:
+- Tools — call list_tools; per-tool descriptions tell you which to
+  prefer (e.g. snapshot_pane over capture_pane + get_pane_info,
+  wait_for_text over capture_pane in a retry loop, search_panes over
+  list_panes when the user says "panes that contain X").
+- Resources (tmux://) — browseable hierarchy plus reference cards
+  (format strings).
+- Prompts — packaged workflows: run_and_wait, diagnose_failing_pane,
+  build_dev_workspace, interrupt_gracefully.
 ```
 
 The server also dynamically adds:

@@ -166,6 +166,11 @@ def show_hooks(
 ) -> HookListResult:
     """List configured tmux hooks at the given scope.
 
+    Hooks are read-only by design: tmux hooks survive process death
+    (kill -9, OOM, etc.), so write-hooks belong in your tmux config file,
+    not a transient MCP session. No set_hook / unset_hook tool is exposed
+    for that reason. Use this to inspect what is configured.
+
     ``scope="server"`` enumerates hooks installed via
     ``tmux set-hook -g ...``. tmux splits those globals across two
     options trees by hook category: session-level hooks

@@ -80,9 +80,24 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Send Keys", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         send_keys
     )
-    mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        capture_pane
-    )
+    mcp.tool(
+        title="Capture Pane",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+        description=(
+            "Capture the visible contents of a tmux pane. Output is "
+            "tail-preserving truncated at max_lines (default 500); when "
+            "truncation occurs, the first line of the returned string is a "
+            "literal '[... truncated K lines ...]' marker — skip it when "
+            "parsing terminal content. Pass max_lines=None to disable "
+            "truncation. For pane content + cursor + mode + scroll state in "
+            "one call, use snapshot_pane. For 'send_keys then wait for "
+            "output' flows, use wait_for_text or wait_for_content_change "
+            "instead of a capture_pane retry loop — server-side blocking "
+            "is dramatically cheaper in agent turns. To find text across "
+            "many panes, use search_panes."
+        ),
+    )(capture_pane)
     mcp.tool(
         title="Resize Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(resize_pane)

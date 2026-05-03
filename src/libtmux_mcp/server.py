@@ -43,96 +43,95 @@ logger = logging.getLogger(__name__)
 _ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 
 # ---------------------------------------------------------------------------
-# _BASE_INSTRUCTIONS — composed from named segments.
+# _BASE_INSTRUCTIONS — slim "three handles" card.
 #
-# The string handed to FastMCP grew organically from "what does this server
-# do?" toward a hybrid of positive guidance (HIERARCHY, READ_TOOLS,
-# WAIT_NOT_POLL) and *gap-explainers* (HOOKS_GAP, BUFFERS_GAP) that document
-# why a tool the agent might expect is absent. Splitting into named
-# constants keeps additions deliberate: when a new ``_GAP`` segment feels
-# tempting, prefer first to push the explanation into the relevant tool's
-# docstring/description (where the agent encounters it at call time) and
-# only fall back to a server-level segment when the gap is *server-shaped*
-# (e.g. an entire tool family is intentionally missing).
+# The card answers two questions the agent has at session start:
+# (1) what is this server, and (2) where do I look for the rest? It points
+# at tools, resources, and prompts — and that's it. Tool-specific rules
+# (which tool to prefer, what's intentionally not exposed and why) live in
+# the relevant tool's docstring or ``description=`` override, where the
+# agent reads them on every ``list_tools`` call instead of parsing them
+# out of a one-shot prompt that has long since rolled out of context.
 #
-# Output text is byte-identical to the previous monolith; tests assert on
-# substrings of ``_BASE_INSTRUCTIONS``, so keeping the join shape stable
-# matters.
+# When in doubt about adding text here, ask: is this rule cross-cutting
+# (about the server as a whole) or tool-specific (about when to call X
+# vs Y)? Cross-cutting belongs in the card; tool-specific belongs in the
+# tool description. ``test_card_length_budget`` enforces a soft 200-word
+# ceiling against creeping re-bloat.
 # ---------------------------------------------------------------------------
 
-_INSTR_HIERARCHY = (
-    "libtmux MCP server for programmatic tmux control. "
-    "tmux hierarchy: Server > Session > Window > Pane. "
-    "Use pane_id (e.g. '%1') as the preferred targeting method - "
-    "it is globally unique within a tmux server. "
-    "Use send_keys to execute commands and capture_pane to read output. "
-    "Targeted tmux tools accept an optional socket_name parameter "
-    "(defaults to LIBTMUX_SOCKET env var); list_servers discovers "
-    "sockets via TMUX_TMPDIR plus optional extra_socket_paths instead."
+_INSTR_CARD = (
+    "libtmux MCP server: programmatic tmux control. tmux hierarchy is "
+    "Server > Session > Window > Pane; every pane has a globally unique "
+    "pane_id like %1 — prefer it over name/index for targeting. Targeted "
+    "tools accept an optional socket_name (defaults to LIBTMUX_SOCKET); "
+    "list_servers discovers sockets via TMUX_TMPDIR / extra_socket_paths "
+    "and is the documented socket_name exception."
 )
 
-_INSTR_METADATA_VS_CONTENT = (
-    "IMPORTANT — metadata vs content: list_windows, list_panes, and "
-    "list_sessions only search metadata (names, IDs, current command). "
-    "To find text that is actually visible in terminals — when users ask "
-    "what panes 'contain', 'mention', 'show', or 'have' — use "
-    "search_panes to search across all pane contents, or list_panes + "
-    "capture_pane on each pane for manual inspection."
-)
-
-_INSTR_READ_TOOLS = (
-    "READ TOOLS TO PREFER: snapshot_pane returns pane content plus "
-    "cursor position, mode, and scroll state in one call — use it "
-    "instead of capture_pane + get_pane_info when you need context. "
-    "display_message evaluates a tmux format string (e.g. "
-    "'#{pane_current_command}', '#{session_name}') against a target "
-    "and returns the expanded value — cheaper than parsing captured "
-    "output. (The tool is named after the tmux 'display-message -p' "
-    "verb it wraps; its MCP title is 'Evaluate tmux Format String'.)"
-)
-
-_INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: for 'run command, wait for output' workflows "
-    "use wait_for_text (matches text/regex on a pane) or "
-    "wait_for_content_change (waits for any change). These block "
-    "server-side until the condition is met or the timeout expires, "
-    "which is dramatically cheaper in agent turns than capture_pane "
-    "in a retry loop."
-)
-
-#: Gap-explainer: write-hook tools are intentionally absent. See module
-#: comment above for when to add another ``_GAP`` segment vs. push the
-#: explanation into a tool description.
-_INSTR_HOOKS_GAP = (
-    "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. Write-hook "
-    "tools are intentionally not exposed — tmux hooks survive process "
-    "death, so they belong in your tmux config file, not a transient "
-    "MCP session."
-)
-
-#: Gap-explainer: ``list_buffers`` is intentionally absent because tmux
-#: buffers can include OS clipboard history. See module comment above.
-_INSTR_BUFFERS_GAP = (
-    "BUFFERS: load_buffer stages content, paste_buffer delivers it into "
-    "a pane, delete_buffer removes the staged buffer. Track owned "
-    "buffers via the BufferRef returned from load_buffer — there is no "
-    "list_buffers tool because tmux buffers may include OS clipboard "
-    "history (passwords, private snippets)."
-)
-
-_BASE_INSTRUCTIONS = "\n\n".join(
+#: Tool-prefer hints in the Tools handle, keyed by the tool that
+#: motivates them. ``_format_handles_section`` filters these by
+#: ``visible_tool_names`` so the card never names a tool the agent
+#: cannot call (e.g. ``send_keys``-only hints under
+#: ``LIBTMUX_SAFETY=readonly``).
+_HANDLE_HINTS: tuple[tuple[str, str], ...] = (
+    ("snapshot_pane", "snapshot_pane over capture_pane + get_pane_info"),
+    ("wait_for_text", "wait_for_text over capture_pane in a retry loop"),
     (
-        _INSTR_HIERARCHY,
-        _INSTR_METADATA_VS_CONTENT,
-        _INSTR_READ_TOOLS,
-        _INSTR_WAIT_NOT_POLL,
-        _INSTR_HOOKS_GAP,
-        _INSTR_BUFFERS_GAP,
-    )
+        "search_panes",
+        'search_panes over list_panes when the user says "panes that contain X"',
+    ),
 )
 
 
-def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
+def _format_handles_section(visible_tool_names: set[str] | None) -> str:
+    """Render the three-handles bullet list, optionally visibility-filtered.
+
+    When ``visible_tool_names`` is ``None`` every hint is included
+    (backward-compat for tests that build instructions without first
+    invoking ``mcp.enable``). Otherwise hints whose tool is not in the
+    visible set are dropped — naming a tool the agent cannot call would
+    be misleading.
+    """
+    if visible_tool_names is None:
+        hints = [hint for _, hint in _HANDLE_HINTS]
+    else:
+        hints = [hint for tool, hint in _HANDLE_HINTS if tool in visible_tool_names]
+
+    tools_line = (
+        "- Tools — call list_tools; per-tool descriptions tell you which to prefer"
+    )
+    if hints:
+        tools_line += " (e.g. " + ", ".join(hints) + ")."
+    else:
+        tools_line += "."
+
+    return "\n".join(
+        (
+            "Three handles cover everything the agent needs:",
+            tools_line,
+            (
+                "- Resources (tmux://) — browseable hierarchy plus reference "
+                "cards (format strings)."
+            ),
+            (
+                "- Prompts — packaged workflows: run_and_wait, "
+                "diagnose_failing_pane, build_dev_workspace, "
+                "interrupt_gracefully."
+            ),
+        )
+    )
+
+
+_INSTR_HANDLES = _format_handles_section(visible_tool_names=None)
+
+_BASE_INSTRUCTIONS = "\n\n".join((_INSTR_CARD, _INSTR_HANDLES))
+
+
+def _build_instructions(
+    safety_level: str = TAG_MUTATING,
+    visible_tool_names: set[str] | None = None,
+) -> str:
     """Build server instructions with agent context and safety level.
 
     When the MCP server process runs inside a tmux pane, ``TMUX_PANE`` and
@@ -143,13 +142,25 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     ----------
     safety_level : str
         Active safety tier (readonly, mutating, or destructive).
+    visible_tool_names : set of str, optional
+        When provided, the handles section drops hints for tools not in
+        the set so the card never names a tool the agent cannot call.
+        ``run_server`` populates this from ``mcp.list_tools()`` after
+        ``mcp.enable(tags=..., only=True)`` has applied the safety-tier
+        filter. Defaults to ``None`` (backward-compat: all hints emitted),
+        which is what the module-import-time placeholder uses before
+        ``run_server`` runs.
 
     Returns
     -------
     str
         Server instructions string, optionally with agent tmux context.
     """
-    parts: list[str] = [_BASE_INSTRUCTIONS]
+    if visible_tool_names is None:
+        base = _BASE_INSTRUCTIONS
+    else:
+        base = "\n\n".join((_INSTR_CARD, _format_handles_section(visible_tool_names)))
+    parts: list[str] = [base]
 
     # Safety tier context
     parts.append(
@@ -321,6 +332,8 @@ def _register_all() -> None:
 
 def run_server() -> None:
     """Run the MCP server."""
+    import asyncio
+
     _register_all()
 
     # Use FastMCP's native visibility system as primary gate,
@@ -331,5 +344,18 @@ def run_server() -> None:
     if _safety_level == TAG_DESTRUCTIVE:
         allowed_tags.add(TAG_DESTRUCTIVE)
     mcp.enable(tags=allowed_tags, only=True)
+
+    # Rebuild instructions now that ``mcp.enable`` has hidden tools
+    # outside the active safety tier. The card mentions specific tools
+    # by name (snapshot_pane, wait_for_text, search_panes); naming a
+    # tool the agent cannot call would be misleading. The
+    # module-import-time ``instructions=`` set on the FastMCP
+    # constructor was a placeholder built without a visibility filter —
+    # this overwrite is the authoritative version.
+    visible_tool_names = {tool.name for tool in asyncio.run(mcp.list_tools())}
+    mcp.instructions = _build_instructions(
+        safety_level=_safety_level,
+        visible_tool_names=visible_tool_names,
+    )
 
     mcp.run()

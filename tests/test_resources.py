@@ -8,6 +8,7 @@ import typing as t
 import pytest
 
 from libtmux_mcp.resources.hierarchy import register
+from libtmux_mcp.resources.reference import register as register_reference
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -184,3 +185,111 @@ def test_hierarchy_resources_advertise_mime_type(uri: str, expected_mime: str) -
     candidate = by_uri.get(uri)
     assert candidate is not None, f"resource {uri!r} not registered"
     assert candidate.mime_type == expected_mime
+
+
+# ---------------------------------------------------------------------------
+# Reference resources (static catalogs, no tmux server interaction)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def reference_resource_functions() -> dict[str, t.Any]:
+    """Capture reference-module resource closures by URI.
+
+    Mirrors ``resource_functions`` but registers
+    :mod:`libtmux_mcp.resources.reference` instead of ``hierarchy``.
+    Reference resources are static and need no tmux fixtures.
+    """
+    functions: dict[str, t.Any] = {}
+
+    class MockMCP:
+        def resource(self, uri: str, **kwargs: t.Any) -> t.Any:
+            def decorator(fn: t.Any) -> t.Any:
+                functions[uri] = fn
+                return fn
+
+            return decorator
+
+    register_reference(MockMCP())  # type: ignore[arg-type]
+    return functions
+
+
+def test_format_string_reference_returns_markdown(
+    reference_resource_functions: dict[str, t.Any],
+) -> None:
+    """tmux://reference/format-strings returns non-empty Markdown.
+
+    The agent's reason for pulling this resource is to recover from an
+    unfamiliar ``#{...}`` token without burning a ``display_message``
+    round-trip. The body must therefore (a) be present and (b) name
+    the format strings most likely to confuse — pane / window /
+    session ID forms and the ``#{?cond,then,else}`` conditional.
+    """
+    fn = reference_resource_functions["tmux://reference/format-strings"]
+    body = fn()
+    assert isinstance(body, str)
+    assert body.strip(), "format-string reference body is empty"
+    # Spot-check the highest-traffic catalog entries — if any of these
+    # vanish, the reference is failing at its job.
+    assert "#{pane_id}" in body
+    assert "#{window_id}" in body
+    assert "#{session_id}" in body
+    assert "#{?cond,then,else}" in body
+
+
+def test_format_string_reference_leads_with_subset_disclaimer(
+    reference_resource_functions: dict[str, t.Any],
+) -> None:
+    """The body declares itself a curated subset BEFORE the substantive content.
+
+    Without a leading disclaimer, an agent that reads the resource and
+    doesn't find a format string it knows is valid (e.g.
+    ``#{history_size}``, one of the ~175 omitted strings) may
+    erroneously conclude the string is unsupported and skip a
+    ``display_message`` call that would have worked. The disclaimer
+    must precede the catalog content so an agent skim-reading the top
+    of the body cannot miss it.
+    """
+    fn = reference_resource_functions["tmux://reference/format-strings"]
+    body = fn()
+
+    # Disclaimer keywords must appear in the body...
+    assert "curated" in body.lower(), (
+        "format-string reference must declare itself a curated subset"
+    )
+    assert "man tmux" in body, (
+        "format-string reference must point readers at man tmux for the "
+        "complete catalog"
+    )
+
+    # ...AND must appear *before* the first format-variable example.
+    # Otherwise a top-down skim hits the catalog before the caveat.
+    first_example = body.find("#{pane_id}")
+    disclaimer = body.lower().find("curated")
+    assert disclaimer != -1, "disclaimer absent"
+    assert disclaimer < first_example, (
+        f"disclaimer at offset {disclaimer} comes after first format-variable "
+        f"example at offset {first_example}; readers will see the catalog "
+        f"before the 'this is a subset' caveat"
+    )
+
+
+def test_format_string_reference_advertises_markdown_mime() -> None:
+    """tmux://reference/format-strings is registered with text/markdown.
+
+    Concrete URIs (no ``{...}`` template params) register as resources,
+    not resource templates — they show up under ``mcp.list_resources()``
+    rather than ``mcp.list_resource_templates()``.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    mcp = FastMCP(name="test-reference-mime")
+    register_reference(mcp)
+
+    resources = asyncio.run(mcp.list_resources())
+    by_uri = {str(getattr(r, "uri", "")): r for r in resources}
+    target = by_uri.get("tmux://reference/format-strings")
+    assert target is not None, "format-strings reference not registered"
+    assert target.mime_type == "text/markdown"

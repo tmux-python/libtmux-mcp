@@ -129,65 +129,267 @@ def test_build_instructions(
         assert f"Safety level: {expect_safety_in_text}" in result
 
 
-def test_base_instructions_content() -> None:
-    """_BASE_INSTRUCTIONS contains key guidance for the LLM."""
-    assert "tmux hierarchy" in _BASE_INSTRUCTIONS
-    assert "pane_id" in _BASE_INSTRUCTIONS
-    assert "search_panes" in _BASE_INSTRUCTIONS
-    assert "metadata vs content" in _BASE_INSTRUCTIONS
+class CardContract(t.NamedTuple):
+    """Contract about what ``_BASE_INSTRUCTIONS`` must / must not contain.
 
-
-def test_base_instructions_surface_flagship_read_tools() -> None:
-    """_BASE_INSTRUCTIONS mentions the richer read tools by name.
-
-    ``display_message`` (tmux format queries) and ``snapshot_pane``
-    (content + metadata in one call) are strictly more expressive than
-    ``capture_pane`` for most contexts, but agents that never see them
-    named in the instructions default to ``capture_pane`` + a follow-up
-    ``get_pane_info``. Naming both explicitly changes that default.
+    The slim card is the public-facing server prompt — every MCP client
+    that connects gets it. ``must_include`` pins the substrings agents
+    rely on to orient (server identity, socket_name exception, three
+    handles); ``must_exclude`` pins the deleted-pre-refactor phrasing so
+    a future drift back to the lie ("All tools accept socket_name") fails
+    loudly here instead of silently shipping.
     """
-    assert "display_message" in _BASE_INSTRUCTIONS
-    assert "snapshot_pane" in _BASE_INSTRUCTIONS
+
+    test_id: str
+    must_include: tuple[str, ...]
+    must_exclude: tuple[str, ...] = ()
 
 
-def test_base_instructions_prefer_wait_over_poll() -> None:
-    """_BASE_INSTRUCTIONS names wait_for_text and wait_for_content_change.
+CARD_CONTRACTS: list[CardContract] = [
+    CardContract(
+        test_id="server_identity",
+        must_include=(
+            "tmux hierarchy",
+            "Server > Session > Window > Pane",
+            "pane_id",
+        ),
+    ),
+    CardContract(
+        test_id="socket_name_exception",
+        # ``list_servers`` does NOT accept socket_name (it's the discovery
+        # tool — see ``server_tools.py`` SOCKET_NAME_EXEMPT). The pre-refactor
+        # wording "All tools accept socket_name" was a lie; the new card
+        # qualifies "Targeted tools" and names list_servers explicitly.
+        must_include=("Targeted tools", "list_servers", "extra_socket_paths"),
+        must_exclude=("All tools accept",),
+    ),
+    CardContract(
+        test_id="three_handles",
+        # The card's job is to point at where the rest of the answer lives
+        # (tools / resources / prompts), not to inline tool-specific rules.
+        must_include=("Tools", "Resources (tmux://)", "Prompts"),
+    ),
+]
 
-    The wait tools block server-side, which is dramatically cheaper in
-    agent turns than ``capture_pane`` in a retry loop. Making them
-    discoverable from the instructions is a no-cost UX win.
+
+@pytest.mark.parametrize(
+    CardContract._fields,
+    CARD_CONTRACTS,
+    ids=[c.test_id for c in CARD_CONTRACTS],
+)
+def test_card_contracts(
+    test_id: str,
+    must_include: tuple[str, ...],
+    must_exclude: tuple[str, ...],
+) -> None:
+    """``_BASE_INSTRUCTIONS`` is the slim "three handles" server card.
+
+    Tool-specific rules live in tool descriptions — Phase 1 of the
+    instructions slim-down moved them there. The card carries only
+    cross-cutting orientation: server identity, the socket_name
+    exception, and pointers to the Tools / Resources / Prompts handles.
+    Anything naming a specific tool's preference rule belongs at the
+    call site, not here.
     """
-    assert "wait_for_text" in _BASE_INSTRUCTIONS
-    assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+    for needle in must_include:
+        assert needle in _BASE_INSTRUCTIONS, (
+            f"[{test_id}] missing required substring {needle!r}"
+        )
+    for needle in must_exclude:
+        assert needle not in _BASE_INSTRUCTIONS, (
+            f"[{test_id}] forbidden substring {needle!r} crept back in"
+        )
 
 
-def test_base_instructions_document_hook_boundary() -> None:
-    """_BASE_INSTRUCTIONS explains hooks are read-only by design.
+def test_card_length_budget() -> None:
+    """``_BASE_INSTRUCTIONS`` stays under the ~200-word budget.
 
-    Without this sentence agents waste a turn asking for ``set_hook`` or
-    trying to write hooks through a nonexistent tool. Naming the
-    boundary heads off the exploratory call.
+    Per-tool rules belong in tool descriptions (visible at every
+    ``list_tools`` call), not in this card. This guard fails loudly if a
+    future contributor reaches for the card to add a tool-specific rule,
+    pointing them at the right home before the card grows back into the
+    305-word monolith it just shrank from.
     """
-    assert "HOOKS ARE READ-ONLY" in _BASE_INSTRUCTIONS
-    assert "show_hooks" in _BASE_INSTRUCTIONS
-    assert "tmux config file" in _BASE_INSTRUCTIONS
+    word_count = len(_BASE_INSTRUCTIONS.split())
+    assert word_count <= 200, (
+        f"_BASE_INSTRUCTIONS grew to {word_count} words; per-tool rules "
+        f"belong in tool descriptions, not the card. See the module-level "
+        f"comment in server.py for the boundary."
+    )
 
 
-def test_base_instructions_document_socket_name_contract() -> None:
-    """_BASE_INSTRUCTIONS frames the socket_name promise precisely.
+# Phrases the handles section emits when the corresponding tool is in
+# ``visible_tool_names``. Phase 4: ``_build_instructions`` filters the
+# Tools handle by visibility so the card never names a tool the agent
+# cannot call. Keep this aligned with ``_HANDLE_HINTS`` in server.py.
+_VISIBILITY_FILTER_CASES: list[tuple[str, str]] = [
+    ("snapshot_pane", "snapshot_pane over capture_pane"),
+    ("wait_for_text", "wait_for_text over capture_pane"),
+    ("search_panes", "search_panes over list_panes"),
+]
 
-    list_servers does NOT accept socket_name (it's the discovery tool —
-    see server_tools.py:263-264 where the signature is
-    ``list_servers(extra_socket_paths=...)``), so the previous "All
-    tools accept socket_name" wording was a lie. The instruction now
-    qualifies "Targeted tmux tools" and explicitly names list_servers
-    as the documented exception, matching what
-    test_registered_tools_accept_socket_name asserts at the schema
-    level.
+
+@pytest.mark.parametrize(
+    ("omitted_tool", "phrase_that_should_drop"),
+    _VISIBILITY_FILTER_CASES,
+    ids=[t for t, _ in _VISIBILITY_FILTER_CASES],
+)
+def test_card_omits_invisible_tools(
+    omitted_tool: str,
+    phrase_that_should_drop: str,
+) -> None:
+    """The handles section drops hints for tools outside ``visible_tool_names``.
+
+    Each row asserts that removing one tool from the visible set drops
+    its tool-prefer hint from the card. Sanity check: the same phrase IS
+    present when the tool IS visible — guards against the test passing
+    accidentally because the phrase was never there.
     """
-    assert "Targeted tmux tools accept" in _BASE_INSTRUCTIONS
-    assert "list_servers" in _BASE_INSTRUCTIONS
-    assert "extra_socket_paths" in _BASE_INSTRUCTIONS
+    full_visibility = {tool for tool, _ in _VISIBILITY_FILTER_CASES}
+    visible = full_visibility - {omitted_tool}
+
+    filtered = _build_instructions(TAG_MUTATING, visible_tool_names=visible)
+    assert phrase_that_should_drop not in filtered, (
+        f"phrase {phrase_that_should_drop!r} stayed when {omitted_tool} "
+        f"was filtered out — visibility filter is broken"
+    )
+
+    full = _build_instructions(TAG_MUTATING, visible_tool_names=full_visibility)
+    assert phrase_that_should_drop in full, (
+        f"phrase {phrase_that_should_drop!r} missing even when "
+        f"{omitted_tool} is visible — sanity check failed"
+    )
+
+
+def test_build_instructions_default_visible_tool_names_emits_full_card() -> None:
+    """``visible_tool_names=None`` is the backward-compat default.
+
+    The module-import-time ``instructions=`` placeholder builds without
+    invoking ``mcp.enable``, so it has no visibility set to consult. In
+    that case ``_build_instructions`` must emit every handle hint as if
+    the agent could call any tool — the alternative would be silently
+    dropping hints during the (brief) window before ``run_server``
+    overwrites the placeholder.
+    """
+    full = _build_instructions(TAG_MUTATING)
+    for _, phrase in _VISIBILITY_FILTER_CASES:
+        assert phrase in full, (
+            f"phrase {phrase!r} missing from default _build_instructions; "
+            f"visible_tool_names=None should emit the full hint set"
+        )
+
+
+def test_handle_hints_keys_are_registered_tools() -> None:
+    """Every key in ``_HANDLE_HINTS`` must be an actual registered tool name.
+
+    ``_format_handles_section`` filters hints by ``tool in visible_tool_names``,
+    so a stale key (e.g. left behind after a tool rename) silently disappears
+    from the filtered card while still being emitted in the unfiltered
+    placeholder — the worst of both worlds: agents would see a phantom tool
+    name during the brief import-time window, then lose the guidance entirely
+    once ``run_server`` filters by real visibility.
+
+    Phase 1's ``test_tool_description_includes`` catches drift in tool
+    *descriptions*; this test catches drift in the parallel ``_HANDLE_HINTS``
+    table. The two together close the rename-without-update loophole.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.server import _HANDLE_HINTS
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="hint-key-contract")
+    register_tools(mcp)
+
+    registered = {tool.name for tool in asyncio.run(mcp.list_tools())}
+    for tool_name, _hint in _HANDLE_HINTS:
+        assert tool_name in registered, (
+            f"_HANDLE_HINTS key {tool_name!r} is not a registered tool name; "
+            f"update _HANDLE_HINTS in server.py when renaming or removing tools"
+        )
+
+
+def test_format_handles_section_empty_visible_set_emits_no_examples() -> None:
+    """``_format_handles_section`` renders a bare Tools handle when no hint matches.
+
+    With every current hint tool tagged ``TAG_READONLY`` this branch is
+    unreachable by the existing tool set — even ``LIBTMUX_SAFETY=readonly``
+    keeps ``snapshot_pane`` / ``wait_for_text`` / ``search_panes`` visible.
+    But a future hint tagged mutating/destructive-only would land here under
+    a readonly safety tier, and so would a future ``LIBTMUX_TOOLSETS`` filter
+    that hides every pane tool. Pin the branch behavior now so a regression
+    that emits broken syntax (e.g. trailing ", )." from a half-formatted
+    hint list, or duplicate periods) fails loudly.
+    """
+    from libtmux_mcp.server import _format_handles_section
+
+    result = _format_handles_section(set())
+
+    # No hint phrases emitted — no "e.g." preamble, no individual hint
+    # tool names mentioned in the Tools-line.
+    assert "e.g." not in result
+    for tool_name, _ in _VISIBILITY_FILTER_CASES:
+        assert tool_name not in result, (
+            f"hint tool name {tool_name!r} leaked into card with empty visible set"
+        )
+
+    # Tools-line still present and well-formed (ends with a single period,
+    # no dangling comma or open paren).
+    expected_tools_line = (
+        "- Tools — call list_tools; per-tool descriptions tell you which to prefer."
+    )
+    assert expected_tools_line in result
+
+    # The other two handles are unaffected — they don't depend on visibility.
+    assert "- Resources (tmux://)" in result
+    assert "- Prompts — packaged workflows" in result
+
+
+def test_card_emits_hints_against_real_registered_tools() -> None:
+    """End-to-end: register_tools → mcp.enable → list_tools → _build_instructions.
+
+    ``test_card_omits_invisible_tools`` proves the filter *logic* using a
+    3-element synthetic ``visible_tool_names``. This test proves the
+    production *wiring*: it registers the real tool surface, applies the
+    same ``mcp.enable(tags=..., only=True)`` call ``run_server`` makes,
+    collects the visible names from ``mcp.list_tools()``, and confirms
+    every hint phrase still appears in the produced card.
+
+    All three current hint tools (``snapshot_pane``, ``wait_for_text``,
+    ``search_panes``) carry ``TAG_READONLY``, so even the most
+    restrictive safety tier keeps them visible — the test pins this
+    invariant. If a future change moves a hint tool out of the readonly
+    tier, this test will fail and force a deliberate decision about
+    whether to retain or drop the corresponding card hint.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="card-wiring-integration")
+    register_tools(mcp)
+    # Mirror run_server's gating call exactly — readonly is the most
+    # restrictive tier, so a hint phrase surviving here implies it
+    # survives every higher tier too.
+    mcp.enable(tags={TAG_READONLY}, only=True)
+
+    visible = {tool.name for tool in asyncio.run(mcp.list_tools())}
+    card = _build_instructions(TAG_READONLY, visible_tool_names=visible)
+
+    for hint_tool, phrase in _VISIBILITY_FILTER_CASES:
+        assert hint_tool in visible, (
+            f"hint tool {hint_tool!r} unexpectedly hidden under readonly "
+            f"tier; either retag the tool or drop the hint from "
+            f"_HANDLE_HINTS"
+        )
+        assert phrase in card, (
+            f"hint phrase {phrase!r} missing from card built against the "
+            f"real registered tool set; production wiring is broken"
+        )
 
 
 def test_registered_tools_accept_socket_name() -> None:
@@ -199,6 +401,15 @@ def test_registered_tools_accept_socket_name() -> None:
     If a future tool registration drops ``socket_name``, this test
     catches the regression instead of silently making the agent-facing
     instructions a lie.
+
+    **Scope**: this test runs against an unfiltered fresh ``FastMCP`` —
+    it does NOT exercise the production singleton at ``server.py``
+    (which has middleware + ``mcp.enable(tags=..., only=True)`` applied
+    by ``run_server``). The unfiltered set is a strict superset of any
+    tier-filtered visible set, so a positive result here implies the
+    same property on every filtered subset. A future maintainer
+    adding tier-specific socket_name behavior should add a parallel
+    test against the singleton.
     """
     import asyncio
     import inspect
@@ -230,21 +441,67 @@ def test_registered_tools_accept_socket_name() -> None:
         )
 
 
-def test_base_instructions_document_buffer_lifecycle() -> None:
-    """_BASE_INSTRUCTIONS explains the buffer lifecycle + no list_buffers.
+@pytest.mark.parametrize(
+    ("tool_name", "must_include"),
+    [
+        ("capture_pane", "snapshot_pane"),
+        ("capture_pane", "wait_for_text"),
+        ("capture_pane", "search_panes"),
+        # Truncation marker — agents need to know the first line of a
+        # truncated capture is a literal '[... truncated K lines ...]'
+        # header, not terminal content. Without this in the description,
+        # an agent might treat the marker as the most recent output.
+        ("capture_pane", "truncated"),
+        ("show_hooks", "tmux config file"),
+        ("load_buffer", "list_buffers"),
+        ("load_buffer", "clipboard history"),
+        ("send_keys", "wait_for_text"),
+        ("list_panes", "search_panes"),
+        ("list_windows", "search_panes"),
+    ],
+)
+def test_tool_description_includes(tool_name: str, must_include: str) -> None:
+    """Tool descriptions carry cross-references the agent needs at the call site.
 
-    The load/paste/delete triple is non-obvious, and agents otherwise
-    expect a ``list_buffers`` affordance. The instruction prevents both
-    confusions and surfaces the clipboard-privacy reason so the
-    omission reads as deliberate, not missing.
+    Phase 1 of the BASE_INSTRUCTIONS slim-down: rules that are tool-specific
+    live in tool descriptions (surfaced by FastMCP at every ``list_tools``
+    call), not in the global card or in module docstrings (which FastMCP
+    does not surface). The asserted phrases are the ones an agent would
+    look for when deciding which tool to call:
+
+    * ``capture_pane`` cross-references richer alternatives
+      (``snapshot_pane``, ``wait_for_text``) and the parallel-search tool
+      (``search_panes``).
+    * ``show_hooks`` carries the no-set_hook rationale ("tmux config
+      file") that previously lived only in ``hook_tools``' module
+      docstring.
+    * ``load_buffer`` carries the no-list_buffers / clipboard-privacy
+      rationale that previously lived only in ``buffer_tools``' module
+      docstring.
+    * ``send_keys`` points at ``wait_for_text`` instead of a poll loop.
+    * ``list_panes`` / ``list_windows`` point at ``search_panes`` for
+      content (vs. metadata-only) queries.
+
+    The "tool exists" assertion is a strict upgrade over substring tests
+    on ``_BASE_INSTRUCTIONS``: a future rename that drops the rule fails
+    here instead of silently losing agent-relevant guidance.
     """
-    assert "BUFFERS" in _BASE_INSTRUCTIONS
-    assert "load_buffer" in _BASE_INSTRUCTIONS
-    assert "paste_buffer" in _BASE_INSTRUCTIONS
-    assert "delete_buffer" in _BASE_INSTRUCTIONS
-    assert "BufferRef" in _BASE_INSTRUCTIONS
-    assert "list_buffers" in _BASE_INSTRUCTIONS
-    assert "clipboard history" in _BASE_INSTRUCTIONS
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="tool-description-contract")
+    register_tools(mcp)
+
+    tools = asyncio.run(mcp.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+    assert tool_name in by_name, f"{tool_name!r} is not registered"
+    description = by_name[tool_name].description or ""
+    assert must_include in description, (
+        f"{tool_name!r} description missing {must_include!r}; got {description!r}"
+    )
 
 
 def test_build_instructions_documents_is_caller_workflow_inside_tmux(

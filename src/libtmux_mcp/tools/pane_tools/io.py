@@ -32,9 +32,11 @@ def send_keys(
 ) -> str:
     """Send keys (commands or text) to a tmux pane.
 
-    After sending, use wait_for_text to block until the command completes,
-    or capture_pane to read the result. Do not capture_pane immediately —
-    there is a race condition.
+    After sending, use wait_for_text to block until the command completes
+    (server-side, turn-cheap) or capture_pane once you know it has
+    finished. Do not capture_pane in a tight loop — that races with
+    command execution and burns agent turns; wait_for_text is the
+    server-side blocking primitive built for this flow.
 
     Parameters
     ----------
