@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Documentation
+
+- Troubleshooting: new section on `uv` `--exclude-newer` cooldowns — cache clearing, index pinning, and `UV_INDEX_URL` diagnostics. Cross-referenced from {ref}`installation`. (#31)
+
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
 _`respawn_pane`, single-object info reads, and the cross-CLI `mcp_swap` dev script._

@@ -85,3 +85,7 @@ $ pip install --upgrade libtmux-mcp
 `````
 
 With `uvx` or `pipx run`, you always get the latest version automatically.
+
+:::{tip}
+If `uvx` fails to resolve dependencies or installs an unexpectedly old version, you may be hitting a cached index. See {ref}`troubleshooting` for `uv` cache and `--exclude-newer` workarounds.
+:::
