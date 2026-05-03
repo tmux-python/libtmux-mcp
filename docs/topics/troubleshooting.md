@@ -101,6 +101,45 @@ Symptom-based guide. Find your problem, follow the steps.
    $ python --version
    ```
 
+## uv exclude-newer cooldowns
+
+**Symptoms**: `uvx libtmux-mcp` fails with resolution errors, or installs an unexpectedly old version of libtmux-mcp or its dependencies.
+
+**Cause**: `uv` caches package metadata and may use stale index data. When a new version is published to PyPI, `uv`'s local cache may not see it immediately. Conversely, if a dependency publishes a broken release, `uv` may resolve to it before the index stabilizes.
+
+**Check**:
+
+1. Clear the `uv` cache and retry:
+
+   ```console
+   $ uv cache clean
+   $ uvx libtmux-mcp
+   ```
+
+2. If a specific dependency version is causing issues, pin to a known-good version with `--exclude-newer`:
+
+   ```console
+   $ uvx --exclude-newer 2026-05-01 libtmux-mcp
+   ```
+
+   This tells `uv` to only consider package versions released before the given date, avoiding recently published (potentially broken) releases.
+
+3. Check if the issue is upstream by testing the bare executor:
+
+   ```console
+   $ uvx --exclude-newer 2026-05-01 libtmux-mcp --help
+   ```
+
+4. If you're behind a corporate proxy or mirror, ensure `UV_INDEX_URL` points to a valid index:
+
+   ```console
+   $ echo $UV_INDEX_URL
+   ```
+
+**Workaround**: Until the index stabilizes, pin `--exclude-newer` to a date when libtmux-mcp was known to work. Remove the pin once the upstream issue is resolved.
+
+**See also**: [uv docs on `--exclude-newer`](https://docs.astral.sh/uv/reference/cli/#uv-pip-install--exclude-newer).
+
 ## Safety tier blocking tools
 
 **Symptoms**: Some tools are missing from the tool list, or return "blocked by safety tier" errors.
