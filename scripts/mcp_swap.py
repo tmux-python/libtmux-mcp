@@ -70,6 +70,54 @@ import tomlkit.items
 CLIName = t.Literal["claude", "codex", "cursor", "gemini"]
 ALL_CLIS: tuple[CLIName, ...] = ("claude", "codex", "cursor", "gemini")
 
+#: Two-layer Claude config: ``"user"`` writes the top-level ``mcpServers``
+#: fallback that applies to every project without its own override; ``"project"``
+#: writes the per-project ``projects.<abs>.mcpServers`` node. Codex / Cursor /
+#: Gemini have no per-project layer in their config files, so for those CLIs
+#: the scope is always normalised to ``"user"`` regardless of what was passed.
+Scope = t.Literal["user", "project"]
+ALL_SCOPES: tuple[Scope, ...] = ("user", "project")
+
+
+def _normalize_scope(cli: CLIName, scope: Scope | None) -> Scope:
+    """Coerce ``scope`` to the value that actually applies to ``cli``.
+
+    Non-Claude CLIs have no per-project config layer — every write to
+    them is necessarily user-level — so the flag is silently coerced to
+    ``"user"`` for those. For Claude, ``None`` defaults to ``"project"``
+    to preserve pre-flag behaviour where the script always wrote the
+    per-project entry.
+    """
+    if cli != "claude":
+        return "user"
+    return scope if scope is not None else "project"
+
+
+def _state_key(cli: CLIName, scope: Scope) -> str:
+    """Compose the ``cli:scope`` key used inside the state file."""
+    return f"{cli}:{scope}"
+
+
+def _parse_state_key(key: str) -> tuple[CLIName, Scope] | None:
+    """Decode a state key, accepting both v2 (``cli:scope``) and v1 (``cli``).
+
+    Legacy v1 keys are migrated in-place: bare ``"claude"`` was the only
+    mode that existed (per-project), so it maps to ``("claude", "project")``;
+    the other CLIs had no scope concept then and are user-level today, so
+    they map to ``("<cli>", "user")``. Returns ``None`` for keys that don't
+    look like either shape so a hand-edited or future-version state file
+    cannot crash ``load_state``.
+    """
+    if ":" in key:
+        cli_str, _, scope_str = key.partition(":")
+        if cli_str in ALL_CLIS and scope_str in ALL_SCOPES:
+            return cli_str, scope_str
+        return None
+    if key in ALL_CLIS:
+        legacy_scope: Scope = "project" if key == "claude" else "user"
+        return key, legacy_scope
+    return None
+
 
 def _xdg_state_home() -> pathlib.Path:
     """Resolve ``$XDG_STATE_HOME`` per the XDG Base Directory spec.
@@ -90,7 +138,11 @@ def _xdg_state_home() -> pathlib.Path:
 # tooling state, distinct from the runtime ``libtmux-mcp`` package.
 STATE_DIR = _xdg_state_home() / "libtmux-mcp-dev" / "swap"
 STATE_FILE = STATE_DIR / "state.json"
-STATE_VERSION = 1
+#: v1 keyed entries by bare ``cli`` name; v2 keys are ``f"{cli}:{scope}"``
+#: so a single Claude install can hold simultaneous user-scope and
+#: project-scope swaps without one clobbering the other's backup. ``load_state``
+#: migrates v1 keys transparently.
+STATE_VERSION = 2
 
 BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
 
@@ -293,14 +345,27 @@ def _claude_project_node(
 
 
 def get_server(
-    cli: CLIName, config: t.Any, name: str, repo: pathlib.Path
+    cli: CLIName,
+    config: t.Any,
+    name: str,
+    repo: pathlib.Path,
+    *,
+    scope: Scope = "project",
 ) -> McpServerSpec | None:
-    """Fetch the MCP server entry for ``name`` from a CLI's config, if present."""
+    """Fetch the MCP server entry for ``name`` from a CLI's config, if present.
+
+    ``scope`` only affects Claude (see :data:`Scope` for the layered shape
+    of ``~/.claude.json``); for Codex / Cursor / Gemini the parameter is
+    accepted-but-ignored because their config has no per-project layer.
+    """
     if cli == "claude":
-        node = _claude_project_node(config, repo, create=False)
-        if not node:
-            return None
-        entry = node.get("mcpServers", {}).get(name)
+        if scope == "user":
+            entry = config.get("mcpServers", {}).get(name)
+        else:
+            node = _claude_project_node(config, repo, create=False)
+            if not node:
+                return None
+            entry = node.get("mcpServers", {}).get(name)
     elif cli in ("cursor", "gemini"):
         entry = config.get("mcpServers", {}).get(name)
     else:  # cli == "codex"
@@ -316,9 +381,23 @@ def set_server(
     name: str,
     spec: McpServerSpec,
     repo: pathlib.Path,
+    *,
+    scope: Scope = "project",
 ) -> t.Literal["replaced", "added"]:
-    """Write ``spec`` under ``name`` in a CLI's config, returning replaced/added."""
+    """Write ``spec`` under ``name`` in a CLI's config, returning replaced/added.
+
+    ``scope == "user"`` for Claude writes the top-level ``mcpServers``
+    fallback used by every project that has no per-project override;
+    ``"project"`` (the default, preserving pre-flag behaviour) writes
+    under ``projects[abs(repo)].mcpServers``. The parameter is silently
+    ignored for non-Claude CLIs.
+    """
     if cli == "claude":
+        if scope == "user":
+            servers = config.setdefault("mcpServers", {})
+            had = name in servers
+            servers[name] = spec.to_json_dict(include_stdio_type=True)
+            return "replaced" if had else "added"
         node = _claude_project_node(config, repo, create=True)
         servers = node.setdefault("mcpServers", {})
         had = name in servers
@@ -350,9 +429,26 @@ def set_server(
     raise AssertionError(msg)
 
 
-def delete_server(cli: CLIName, config: t.Any, name: str, repo: pathlib.Path) -> bool:
-    """Remove the entry for ``name`` from a CLI's config; return whether it existed."""
+def delete_server(
+    cli: CLIName,
+    config: t.Any,
+    name: str,
+    repo: pathlib.Path,
+    *,
+    scope: Scope = "project",
+) -> bool:
+    """Remove the entry for ``name`` from a CLI's config; return whether it existed.
+
+    See :func:`set_server` for the meaning of ``scope`` — the parameter
+    is honoured for Claude and ignored for the other CLIs.
+    """
     if cli == "claude":
+        if scope == "user":
+            servers = config.get("mcpServers", {})
+            if name in servers:
+                del servers[name]
+                return True
+            return False
         node = _claude_project_node(config, repo, create=False)
         if not node:
             return False
@@ -425,34 +521,44 @@ def build_local_spec(repo: pathlib.Path, entry: str) -> McpServerSpec:
 # ---------------------------------------------------------------------------
 
 
-def load_state() -> dict[CLIName, SwapEntry]:
-    """Read the swap-state file, returning an empty mapping when absent."""
+def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
+    """Read the swap-state file, returning an empty mapping when absent.
+
+    Transparently migrates v1 state files (bare ``cli`` keys) to the v2
+    ``(cli, scope)`` shape via :func:`_parse_state_key`. Unknown or
+    malformed keys are dropped silently so a hand-edited file or a
+    forward-version file cannot crash the script.
+    """
     if not STATE_FILE.exists():
         return {}
     raw = json.loads(STATE_FILE.read_text())
     entries = raw.get("entries", {})
-    out: dict[CLIName, SwapEntry] = {}
+    out: dict[tuple[CLIName, Scope], SwapEntry] = {}
     for k, v in entries.items():
-        if k in ALL_CLIS:
-            out[t.cast(CLIName, k)] = SwapEntry(**v)
+        parsed = _parse_state_key(k)
+        if parsed is not None:
+            out[parsed] = SwapEntry(**v)
     return out
 
 
-def save_state(entries: dict[CLIName, SwapEntry]) -> None:
+def save_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
     """Write the swap-state file atomically (versioned payload)."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": STATE_VERSION,
-        "entries": {k: dataclasses.asdict(v) for k, v in entries.items()},
+        "entries": {
+            _state_key(cli, scope): dataclasses.asdict(v)
+            for (cli, scope), v in entries.items()
+        },
     }
     atomic_write(STATE_FILE, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
 
 
-def clear_state(clis: t.Iterable[CLIName]) -> None:
-    """Remove the given CLIs from the state file; delete the file if empty."""
+def clear_state(keys: t.Iterable[tuple[CLIName, Scope]]) -> None:
+    """Remove the given ``(cli, scope)`` keys; delete the file if empty."""
     current = load_state()
-    for cli in clis:
-        current.pop(cli, None)
+    for key in keys:
+        current.pop(key, None)
     if current:
         save_state(current)
     elif STATE_FILE.exists():
@@ -515,7 +621,14 @@ def cmd_detect(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    """Print the current MCP server entry per detected CLI."""
+    """Print the current MCP server entry per detected CLI.
+
+    For Claude, prints separate lines for the user-level fallback
+    (``[claude:user]``) and the per-project override
+    (``[claude:project]``) when both exist; if only one exists, only
+    that line shows. Other CLIs print a single line as ``[<cli>]``
+    since their config has no scope concept.
+    """
     repo = pathlib.Path(args.repo).resolve()
     server = args.server or resolve_repo_meta(repo)[0]
     for cli in args.cli or present_clis():
@@ -524,12 +637,33 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"[{cli}] (no config at {info.config_path})")
             continue
         config = load_config(info)
-        spec = get_server(cli, config, server, repo)
-        if spec is None:
-            print(f"[{cli}] no entry for {server!r}")
-            continue
-        tag = _describe_spec(spec, repo)
-        print(f"[{cli}] {server} = {spec.command} {' '.join(spec.args)}  ({tag})")
+        if cli == "claude":
+            user_spec = get_server(cli, config, server, repo, scope="user")
+            project_spec = get_server(cli, config, server, repo, scope="project")
+            shown = False
+            if user_spec is not None:
+                tag = _describe_spec(user_spec, repo)
+                print(
+                    f"[claude:user] {server} = {user_spec.command} "
+                    f"{' '.join(user_spec.args)}  ({tag})"
+                )
+                shown = True
+            if project_spec is not None:
+                tag = _describe_spec(project_spec, repo)
+                print(
+                    f"[claude:project] {server} = {project_spec.command} "
+                    f"{' '.join(project_spec.args)}  ({tag})"
+                )
+                shown = True
+            if not shown:
+                print(f"[claude] no entry for {server!r}")
+        else:
+            spec = get_server(cli, config, server, repo)
+            if spec is None:
+                print(f"[{cli}] no entry for {server!r}")
+                continue
+            tag = _describe_spec(spec, repo)
+            print(f"[{cli}] {server} = {spec.command} {' '.join(spec.args)}  ({tag})")
     return 0
 
 
@@ -547,7 +681,12 @@ def _describe_spec(spec: McpServerSpec, repo: pathlib.Path) -> str:
 
 
 def cmd_use_local(args: argparse.Namespace) -> int:
-    """Rewrite each target CLI's config to run the repo's checkout via ``uv``."""
+    """Rewrite each target CLI's config to run the repo's checkout via ``uv``.
+
+    The optional ``--scope`` flag selects Claude's user-level fallback
+    vs. per-project override; see :data:`Scope`. The flag is silently
+    coerced to ``"user"`` for non-Claude CLIs by :func:`_normalize_scope`.
+    """
     repo = pathlib.Path(args.repo).resolve()
     server, default_entry = resolve_repo_meta(repo)
     server = args.server or server
@@ -563,19 +702,21 @@ def cmd_use_local(args: argparse.Namespace) -> int:
     state = load_state()
     had_error = 0
     for cli in targets:
+        scope = _normalize_scope(cli, args.scope)
+        label = f"{cli}:{scope}" if cli == "claude" else cli
         info = CLIS[cli]
         if not info.config_path.exists():
-            print(f"[{cli}] skip — config not found at {info.config_path}")
+            print(f"[{label}] skip — config not found at {info.config_path}")
             continue
         original_bytes = info.config_path.read_bytes()
         config = load_config(info)
-        current = get_server(cli, config, server, repo)
+        current = get_server(cli, config, server, repo, scope=scope)
         if (
             current
             and current.is_local_uv_directory()
             and current.local_repo_path() == repo
         ):
-            print(f"[{cli}] already local (this repo) — no change")
+            print(f"[{label}] already local (this repo) — no change")
             continue
         # Preserve the existing entry's env on replacement. ``build_local_spec``
         # writes an empty env, so without this merge a swap would silently drop
@@ -583,7 +724,7 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         # knobs). Symmetric with ``_spec_from_entry`` which round-trips env on
         # the read side.
         cli_spec = dataclasses.replace(spec, env={**current.env}) if current else spec
-        action = set_server(cli, config, server, cli_spec, repo)
+        action = set_server(cli, config, server, cli_spec, repo, scope=scope)
         new_bytes = dump_config_bytes(info, config)
 
         if args.dry_run:
@@ -607,18 +748,18 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         except Exception as exc:
             atomic_write(info.config_path, original_bytes)
             print(
-                f"[{cli}] write failed ({exc}); backup at {backup_path}",
+                f"[{label}] write failed ({exc}); backup at {backup_path}",
                 file=sys.stderr,
             )
             had_error = 1
             continue
-        state[cli] = SwapEntry(
+        state[(cli, scope)] = SwapEntry(
             config_path=str(info.config_path),
             backup_path=str(backup_path),
             server=server,
             action=action,
         )
-        print(f"[{cli}] {action}; backup: {backup_path}")
+        print(f"[{label}] {action}; backup: {backup_path}")
 
     if not args.dry_run:
         save_state(state)
@@ -631,30 +772,51 @@ def _revalidate(info: CLIInfo) -> None:
 
 
 def cmd_revert(args: argparse.Namespace) -> int:
-    """Restore each target CLI's config from the backup recorded in the state file."""
+    """Restore each target CLI's config from the backup recorded in the state file.
+
+    Without ``--scope``, every recorded entry for the targeted CLIs is
+    reverted (so a Claude install that has both user-scope and
+    project-scope swaps gets both restored). With ``--scope``, only
+    the matching scope is reverted; the parameter is silently coerced
+    to ``"user"`` for non-Claude CLIs.
+    """
     state = load_state()
-    targets = args.cli or list(state.keys())
+    # No --cli filter: revert every CLI that has any recorded swap.
+    targets = list(args.cli) if args.cli else list({cli for cli, _scope in state})
     if not targets:
         print("no recorded swaps — nothing to revert", file=sys.stderr)
         return 1
 
-    reverted: list[CLIName] = []
+    reverted: list[tuple[CLIName, Scope]] = []
     for cli in targets:
-        entry = state.get(cli)
-        if entry is None:
-            print(f"[{cli}] no state entry — skip")
+        if args.scope is not None:
+            wanted_scopes: tuple[Scope, ...] = (_normalize_scope(cli, args.scope),)
+        else:
+            wanted_scopes = ALL_SCOPES
+        cli_keys = [
+            (sc_cli, sc_scope)
+            for (sc_cli, sc_scope) in state
+            if sc_cli == cli and sc_scope in wanted_scopes
+        ]
+        if not cli_keys:
+            label = f"{cli}:{args.scope}" if args.scope and cli == "claude" else cli
+            print(f"[{label}] no state entry — skip")
             continue
-        backup = pathlib.Path(entry.backup_path)
-        dest = pathlib.Path(entry.config_path)
-        if not backup.exists():
-            print(f"[{cli}] backup missing: {backup}", file=sys.stderr)
-            continue
-        if args.dry_run:
-            print(f"[{cli}] would restore {dest} from {backup}")
-            continue
-        atomic_write(dest, backup.read_bytes())
-        print(f"[{cli}] restored from {backup}")
-        reverted.append(cli)
+        for key in cli_keys:
+            sc_cli, sc_scope = key
+            entry = state[key]
+            label = f"{sc_cli}:{sc_scope}" if sc_cli == "claude" else sc_cli
+            backup = pathlib.Path(entry.backup_path)
+            dest = pathlib.Path(entry.config_path)
+            if not backup.exists():
+                print(f"[{label}] backup missing: {backup}", file=sys.stderr)
+                continue
+            if args.dry_run:
+                print(f"[{label}] would restore {dest} from {backup}")
+                continue
+            atomic_write(dest, backup.read_bytes())
+            print(f"[{label}] restored from {backup}")
+            reverted.append(key)
 
     if not args.dry_run and reverted:
         clear_state(reverted)
@@ -694,11 +856,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--entry", help="uv run entry command (default: [project.scripts] first key)"
     )
     pu.add_argument("--cli", action="append", choices=ALL_CLIS)
+    pu.add_argument(
+        "--scope",
+        choices=ALL_SCOPES,
+        default=None,
+        help=(
+            "Claude config scope: 'user' rewrites the top-level mcpServers "
+            "fallback (every project without an override picks it up), "
+            "'project' rewrites projects.<abs>.mcpServers under this repo. "
+            "Default 'project'. Silently coerced to 'user' for non-Claude CLIs."
+        ),
+    )
     pu.add_argument("--dry-run", action="store_true")
     pu.set_defaults(func=cmd_use_local)
 
     pr = sub.add_parser("revert", help="restore each CLI's config from its swap backup")
     pr.add_argument("--cli", action="append", choices=ALL_CLIS)
+    pr.add_argument(
+        "--scope",
+        choices=ALL_SCOPES,
+        default=None,
+        help=(
+            "Limit revert to one Claude scope. Without this flag, every "
+            "recorded scope for the targeted CLIs is reverted."
+        ),
+    )
     pr.add_argument("--dry-run", action="store_true")
     pr.set_defaults(func=cmd_revert)
 

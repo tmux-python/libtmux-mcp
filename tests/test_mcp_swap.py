@@ -337,7 +337,8 @@ def test_codex_adds_block_when_absent_and_revert_removes_it(
     )
     assert mcp_swap.cmd_use_local(args) == 0
     state = mcp_swap.load_state()
-    assert state["codex"].action == "added"
+    # Codex has no per-project layer, so its scope is always "user".
+    assert state[("codex", "user")].action == "added"
 
     revert_args = mcp_swap.build_parser().parse_args(["revert", "--cli", "codex"])
     assert mcp_swap.cmd_revert(revert_args) == 0
@@ -418,11 +419,11 @@ def test_save_state_writes_atomically(fake_home: pathlib.Path) -> None:
         server="libtmux",
         action="replaced",
     )
-    mcp_swap.save_state({"claude": entry})
+    mcp_swap.save_state({("claude", "project"): entry})
 
     assert mcp_swap.STATE_FILE.exists()
     payload = json.loads(mcp_swap.STATE_FILE.read_text())
-    assert payload["entries"]["claude"]["server"] == "libtmux"
+    assert payload["entries"]["claude:project"]["server"] == "libtmux"
 
     # tempfile.mkstemp writes siblings prefixed "<name>." — none should
     # remain after a successful atomic_write.
