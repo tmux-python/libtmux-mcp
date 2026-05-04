@@ -6,9 +6,7 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
-### What's new
-
-**Dev scripts**
+### Development
 
 - `scripts/mcp_swap.py` — `use-local` and `revert` accept
   `--scope {user,project}` so a Claude install can target either the
