@@ -85,6 +85,75 @@ what URL it chose.
 
 ---
 
+## Target the bottom-right pane for an ad-hoc command
+
+**Situation.** The developer keeps a four-pane tiled layout for the
+project: editor top-left, watcher top-right, logs bottom-left, scratch
+bottom-right. They want the agent to spin up a one-off dev server in the
+scratch pane without naming it explicitly.
+
+```{admonition} Prompt
+:class: prompt
+
+Spin up the dev server in the bottom-right pane.
+```
+
+### Discover
+
+```{admonition} Agent reasoning
+:class: agent-thought
+
+I do not need to list every pane and compute geometry. tmux already
+tracks each pane's edge predicates -- there is a tool that resolves a
+corner directly to a `PaneInfo`.
+```
+
+The agent calls {tooliconl}`find-pane-by-position` with
+`corner: "bottom-right"`. The response is a
+{class}`~libtmux_mcp.models.PaneInfo` carrying the pane's `pane_id` plus
+the new geometry block: `pane_at_bottom: true`, `pane_at_right: true`,
+`pane_left`, `pane_top`, etc.
+
+### Decide
+
+```{admonition} Agent reasoning
+:class: agent-thought
+
+I have the `pane_id`. From here on I target by ID, never by corner --
+once the user resizes the layout, "bottom-right" might mean a different
+pane, but the `pane_id` of the pane I just identified stays stable.
+```
+
+### Act
+
+The agent calls {tooliconl}`send-keys` in that pane: `pnpm start`. Then
+{tooliconl}`wait-for-text` with `pattern: "Local:"` and a generous
+`timeout` so Vite has room to start.
+
+```{tip}
+"The bottom-right pane" is a *role* -- a layout-relative target the
+human reasons about. The `pane_id` returned by
+{toolref}`find-pane-by-position` is the *handle* the agent should use
+for every subsequent call. Do not call the corner-finder again on each
+follow-up; reuse the ID.
+```
+
+### The non-obvious part
+
+Before {toolref}`find-pane-by-position`, the only way to resolve a
+corner was {toolref}`display-message` with `#{pane_at_bottom}` and
+`#{pane_at_right}` per pane, then parsing the string output. The
+structured `PaneInfo` response now carries `pane_left`, `pane_top`,
+`pane_right`, `pane_bottom` and the four `pane_at_*` predicates as
+typed fields, so agents reasoning about layout no longer need a
+parsing detour through {toolref}`display-message`.
+
+For single-pane windows, every corner resolves to the same pane (it
+touches every edge). For genuinely ambiguous layouts, the visually
+innermost pane wins via a `pane_left + pane_top` tie-break.
+
+---
+
 ## Start a service and wait for it before running dependent work
 
 **Situation.** The developer is starting fresh in their `backend` session --
