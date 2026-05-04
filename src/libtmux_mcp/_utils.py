@@ -830,6 +830,33 @@ def _serialize_window(window: Window) -> WindowInfo:
     )
 
 
+def _coerce_int(value: str | None) -> int | None:
+    """Parse a tmux format-string number into ``int`` or ``None``.
+
+    tmux format variables come back as strings; an empty string means
+    "tmux returned nothing" (e.g. older tmux that doesn't know the var).
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bool(value: str | None) -> bool | None:
+    """Parse a tmux ``"1"``/``"0"`` flag into ``bool`` or ``None``.
+
+    Mirrors libtmux's own ``Pane.at_top`` / ``at_bottom`` typing, which
+    folds ``"1"`` to True and everything else to False — except we keep
+    ``None`` distinct so callers can tell "tmux didn't tell us" from
+    "tmux said no".
+    """
+    if value is None or value == "":
+        return None
+    return value == "1"
+
+
 def _serialize_pane(pane: Pane) -> PaneInfo:
     """Serialize a Pane to a Pydantic model.
 
@@ -841,7 +868,7 @@ def _serialize_pane(pane: Pane) -> PaneInfo:
     Returns
     -------
     PaneInfo
-        Pane data including id, dimensions, current command, title.
+        Pane data including id, dimensions, geometry, current command, title.
     """
     from libtmux_mcp.models import PaneInfo
 
@@ -851,6 +878,15 @@ def _serialize_pane(pane: Pane) -> PaneInfo:
         pane_index=getattr(pane, "pane_index", None),
         pane_width=getattr(pane, "pane_width", None),
         pane_height=getattr(pane, "pane_height", None),
+        pane_left=_coerce_int(getattr(pane, "pane_left", None)),
+        pane_top=_coerce_int(getattr(pane, "pane_top", None)),
+        pane_right=_coerce_int(getattr(pane, "pane_right", None)),
+        pane_bottom=_coerce_int(getattr(pane, "pane_bottom", None)),
+        pane_at_left=_coerce_bool(getattr(pane, "pane_at_left", None)),
+        pane_at_right=_coerce_bool(getattr(pane, "pane_at_right", None)),
+        pane_at_top=_coerce_bool(getattr(pane, "pane_at_top", None)),
+        pane_at_bottom=_coerce_bool(getattr(pane, "pane_at_bottom", None)),
+        pane_tty=getattr(pane, "pane_tty", None),
         pane_current_command=getattr(pane, "pane_current_command", None),
         pane_current_path=getattr(pane, "pane_current_path", None),
         pane_pid=getattr(pane, "pane_pid", None),

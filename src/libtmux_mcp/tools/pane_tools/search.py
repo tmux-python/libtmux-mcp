@@ -7,6 +7,8 @@ import re
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._utils import (
+    _coerce_bool,
+    _coerce_int,
     _compute_is_caller,
     _get_server,
     _resolve_session,
@@ -243,6 +245,15 @@ def search_panes(
         all_matches.append(
             PaneContentMatch(
                 pane_id=pane_id_str,
+                pane_left=_coerce_int(getattr(pane, "pane_left", None)),
+                pane_top=_coerce_int(getattr(pane, "pane_top", None)),
+                pane_right=_coerce_int(getattr(pane, "pane_right", None)),
+                pane_bottom=_coerce_int(getattr(pane, "pane_bottom", None)),
+                pane_at_left=_coerce_bool(getattr(pane, "pane_at_left", None)),
+                pane_at_right=_coerce_bool(getattr(pane, "pane_at_right", None)),
+                pane_at_top=_coerce_bool(getattr(pane, "pane_at_top", None)),
+                pane_at_bottom=_coerce_bool(getattr(pane, "pane_at_bottom", None)),
+                pane_tty=getattr(pane, "pane_tty", None),
                 pane_current_command=getattr(pane, "pane_current_command", None),
                 pane_current_path=getattr(pane, "pane_current_path", None),
                 window_id=pane.window_id,
