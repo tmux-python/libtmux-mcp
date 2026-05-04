@@ -738,8 +738,15 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             sys.stdout.writelines(diff)
             continue
 
+        # Claude is the only CLI where two swaps (different scopes) can
+        # touch the same config file in one second; embed the scope so
+        # the second backup doesn't overwrite the first. Non-Claude
+        # filenames stay byte-compatible with v1 backups.
+        backup_suffix = f"{BACKUP_SUFFIX_PREFIX}{ts}"
+        if cli == "claude":
+            backup_suffix += f"-{scope}"
         backup_path = info.config_path.with_suffix(
-            info.config_path.suffix + f"{BACKUP_SUFFIX_PREFIX}{ts}"
+            info.config_path.suffix + backup_suffix
         )
         backup_path.write_bytes(original_bytes)
         try:

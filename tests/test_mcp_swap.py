@@ -293,6 +293,218 @@ def test_claude_swap_writes_under_repo_abspath_only(
 
 
 # ---------------------------------------------------------------------------
+# Claude --scope {user,project}
+# ---------------------------------------------------------------------------
+
+
+def test_claude_user_scope_writes_top_level_mcpServers(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """``--scope user`` rewrites the top-level fallback, not a per-project node."""
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {"mcpServers": {"libtmux": _pinned_claude_entry()}},
+    )
+    args = mcp_swap.build_parser().parse_args(
+        [
+            "use-local",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--scope",
+            "user",
+        ]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    after = json.loads(info.config_path.read_text())
+    new_entry = after["mcpServers"]["libtmux"]
+    assert new_entry["command"] == "uv"
+    assert new_entry["args"][0:2] == ["--directory", str(fake_repo.resolve())]
+    # No projects.<abs> node should have been created — user scope must
+    # not bleed into the per-project layer.
+    assert "projects" not in after or str(fake_repo.resolve()) not in after.get(
+        "projects", {}
+    )
+
+
+def test_claude_user_scope_round_trip_restores_byte_identical(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """``--scope user`` swap then revert yields byte-identical bytes."""
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {"mcpServers": {"libtmux": _pinned_claude_entry()}},
+    )
+    original = info.config_path.read_bytes()
+
+    swap_args = mcp_swap.build_parser().parse_args(
+        [
+            "use-local",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--scope",
+            "user",
+        ]
+    )
+    assert mcp_swap.cmd_use_local(swap_args) == 0
+    assert info.config_path.read_bytes() != original  # sanity
+
+    revert_args = mcp_swap.build_parser().parse_args(
+        ["revert", "--cli", "claude", "--scope", "user"]
+    )
+    assert mcp_swap.cmd_revert(revert_args) == 0
+    assert info.config_path.read_bytes() == original
+
+
+def test_claude_user_and_project_swaps_coexist_independently(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Running both scopes leaves two distinct state entries with separate backups."""
+    info = mcp_swap.CLIS["claude"]
+    # Seed both layers with PyPI-style entries so the swap has something
+    # to replace in each scope.
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    parser = mcp_swap.build_parser()
+
+    # First swap: project scope (the legacy default).
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "claude"]
+            )
+        )
+        == 0
+    )
+    # Second swap: user scope.
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                [
+                    "use-local",
+                    "--repo",
+                    str(fake_repo),
+                    "--cli",
+                    "claude",
+                    "--scope",
+                    "user",
+                ]
+            )
+        )
+        == 0
+    )
+
+    state = mcp_swap.load_state()
+    assert ("claude", "project") in state
+    assert ("claude", "user") in state
+    assert (
+        state[("claude", "project")].backup_path
+        != state[("claude", "user")].backup_path
+    )
+
+    # Revert just user-scope; project entry must remain intact.
+    assert (
+        mcp_swap.cmd_revert(
+            parser.parse_args(["revert", "--cli", "claude", "--scope", "user"])
+        )
+        == 0
+    )
+    state_after = mcp_swap.load_state()
+    assert ("claude", "user") not in state_after
+    assert ("claude", "project") in state_after
+
+    after = json.loads(info.config_path.read_text())
+    # User-level back to PyPI shape.
+    assert after["mcpServers"]["libtmux"]["command"] == "uvx"
+    # Project-level still local.
+    proj_entry = after["projects"][str(fake_repo.resolve())]["mcpServers"]["libtmux"]
+    assert proj_entry["command"] == "uv"
+
+
+def test_legacy_v1_state_migrates_to_v2_keys(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """A v1 state file with bare ``cli`` keys is migrated on load.
+
+    ``claude`` (legacy default was per-project) → ``("claude", "project")``.
+    Bare ``codex`` / ``cursor`` / ``gemini`` (no per-project layer) →
+    ``("<cli>", "user")``.
+    """
+    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "version": 1,
+        "entries": {
+            "claude": {
+                "config_path": "/tmp/.claude.json",
+                "backup_path": "/tmp/.claude.json.bak",
+                "server": "libtmux",
+                "action": "replaced",
+            },
+            "codex": {
+                "config_path": "/tmp/codex.toml",
+                "backup_path": "/tmp/codex.toml.bak",
+                "server": "libtmux",
+                "action": "added",
+            },
+        },
+    }
+    mcp_swap.STATE_FILE.write_text(json.dumps(legacy))
+
+    state = mcp_swap.load_state()
+    assert set(state.keys()) == {("claude", "project"), ("codex", "user")}
+    assert state[("claude", "project")].backup_path == "/tmp/.claude.json.bak"
+    assert state[("codex", "user")].action == "added"
+
+
+def test_non_claude_scope_user_passes_through_to_global_config(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """``--scope`` is a no-op for non-Claude CLIs (their config has no scope layer)."""
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+
+    # Pass --scope user explicitly: should write the same global entry as
+    # if the flag were absent (cursor has no per-project layer).
+    args = mcp_swap.build_parser().parse_args(
+        [
+            "use-local",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "cursor",
+            "--scope",
+            "user",
+        ]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    after = json.loads(info.config_path.read_text())
+    assert after["mcpServers"]["libtmux"]["command"] == "uv"
+
+    # State key reflects the normalised scope, not the raw flag value.
+    state = mcp_swap.load_state()
+    assert ("cursor", "user") in state
+    # And the bizarre case "--scope project" against a non-Claude CLI is
+    # silently coerced to user, not stored as a phantom (cursor, project).
+    assert ("cursor", "project") not in state
+
+
+# ---------------------------------------------------------------------------
 # Codex TOML — format preservation + add-when-missing
 # ---------------------------------------------------------------------------
 
