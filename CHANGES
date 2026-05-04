@@ -8,32 +8,31 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
-**Pane geometry on every pane response**
-
-`PaneInfo`, `PaneContentMatch`, and `PaneSnapshot` now carry
-window-relative geometry: `pane_left` / `pane_top` / `pane_right` /
-`pane_bottom` (typed `int | None`) and the four `pane_at_left` /
-`pane_at_right` / `pane_at_top` / `pane_at_bottom` edge predicates
-(typed `bool | None`), plus `pane_tty`. Agents can reason about
-layout — "is this the bottom-right pane?" — directly off the
-returned model instead of running {tooliconl}`display-message` and
-parsing the raw format-string output. {tooliconl}`snapshot-pane`
-fetches the new vars in the same `display-message` round-trip it
-already makes, so there is no extra tmux call.
-
-Note: the older `pane_width` and `pane_height` fields on `PaneInfo`
-and `PaneContentMatch` remain typed `str | None` — switching them
-to `int | None` is a breaking schema change orthogonal to this work
-and is left as a follow-up.
-
 **New tools**
 
-- {tooliconl}`find-pane-by-position` — return the `PaneInfo` for the
-  pane occupying a given window corner (`'top-left'`, `'top-right'`,
-  `'bottom-left'`, `'bottom-right'`). Composes the four `pane_at_*`
-  predicates, with a `pane_left + pane_top` tie-break for layouts
-  that have multiple corner candidates (e.g. single-pane windows
-  touch every edge).
+- {tooliconl}`find-pane-by-position` — resolve a layout-relative pane
+  ("the bottom-right pane", any corner) to a `PaneInfo` in one
+  read-only call. Composes the four `pane_at_*` predicates with a
+  `pane_left + pane_top` tie-break for ambiguous layouts (e.g.
+  single-pane windows that touch every edge). Replaces the
+  {tooliconl}`display-message`-and-parse workaround. (#34)
+
+**Pane geometry on response models**
+
+- {class}`~libtmux_mcp.models.PaneInfo`,
+  {class}`~libtmux_mcp.models.PaneContentMatch`, and
+  {class}`~libtmux_mcp.models.PaneSnapshot` now carry window-relative
+  `pane_left` / `pane_top` / `pane_right` / `pane_bottom` (typed
+  `int | None`), the four `pane_at_left` / `pane_at_right` /
+  `pane_at_top` / `pane_at_bottom` edge predicates (typed
+  `bool | None`), and `pane_tty`. Agents reason about layout off the
+  returned model instead of expanding `#{pane_at_*}` format strings
+  by hand. {tooliconl}`snapshot-pane` fetches the new variables in
+  the same `display-message` round-trip it already makes, so there
+  is no extra tmux call. The older `pane_width` / `pane_height`
+  fields stay `str | None` for now — switching them to `int | None`
+  is a breaking schema change deferred as a separate follow-up.
+  (#34)
 
 ### Development
 
@@ -65,9 +64,17 @@ and is left as a follow-up.
   `localStorage` (CLS drops to 0), and the sidebar logo plus all
   bold and italic text no longer pop in late as fonts arrive.
   (#36)
-- Topic page added for {tooliconl}`find-pane-by-position`;
-  {tooliconl}`get-pane-info` example response refreshed to show the
-  new geometry fields.
+- Discoverability sweep for {tooliconl}`find-pane-by-position`:
+  dedicated topic page, homepage `Inspect (readonly)` chain entry,
+  `### Inspect` grid card and "Targeting a pane by layout?"
+  decision-tree cluster on the tools index, {ref}`concepts`
+  Discovery enumeration, a "Spin up the dev server in the
+  bottom-right pane" row in the prompting-patterns table, a new
+  corner-targeting recipe in {ref}`recipes`, and refreshed example
+  responses on {tooliconl}`get-pane-info` and
+  {tooliconl}`snapshot-pane` showing the new geometry block.
+  {tooliconl}`display-message` "Avoid when" guidance now redirects
+  layout-relative use cases to the corner-finder. (#34)
 
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
