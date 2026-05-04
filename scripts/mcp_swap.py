@@ -808,7 +808,7 @@ def cmd_revert(args: argparse.Namespace) -> int:
     to ``"user"`` for non-Claude CLIs.
     """
     state = load_state()
-    # No --cli filter: revert every CLI that has any recorded swap.
+    # Without --cli, revert every CLI that has any recorded swap.
     targets = list(args.cli) if args.cli else list({cli for cli, _scope in state})
     if not targets:
         print("no recorded swaps — nothing to revert", file=sys.stderr)
