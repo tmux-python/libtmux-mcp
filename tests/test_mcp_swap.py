@@ -785,3 +785,33 @@ def test_claude_user_scope_rejects_non_mapping_mcpServers(
     spec = mcp_swap.McpServerSpec(command="uv", args=["run", "libtmux-mcp"])
     with pytest.raises(RuntimeError, match="layout appears to have changed"):
         mcp_swap.set_server("claude", config, "libtmux", spec, fake_repo, scope="user")
+
+
+def test_claude_user_scope_get_server_rejects_non_mapping_mcpServers(
+    fake_repo: pathlib.Path,
+) -> None:
+    """User-scope ``get_server`` rejects a non-mapping top-level ``mcpServers``.
+
+    Mirrors the write-side guard so reads fail loudly with an actionable
+    ``RuntimeError`` instead of an opaque ``AttributeError`` from a
+    chained ``.get()``. Symmetric coverage matches the project-scope
+    path, which routes all three of read/write/delete through
+    ``_claude_project_node``.
+    """
+    config: dict[str, t.Any] = {"mcpServers": "not a dict"}
+    with pytest.raises(RuntimeError, match="layout appears to have changed"):
+        mcp_swap.get_server("claude", config, "libtmux", fake_repo, scope="user")
+
+
+def test_claude_user_scope_delete_server_rejects_non_mapping_mcpServers(
+    fake_repo: pathlib.Path,
+) -> None:
+    """User-scope ``delete_server`` rejects a non-mapping top-level ``mcpServers``.
+
+    Mirrors the write- and read-side guards so deletes fail loudly with
+    an actionable ``RuntimeError`` instead of a silent no-op or a
+    ``TypeError`` from ``name in servers`` against a non-mapping.
+    """
+    config: dict[str, t.Any] = {"mcpServers": "not a dict"}
+    with pytest.raises(RuntimeError, match="layout appears to have changed"):
+        mcp_swap.delete_server("claude", config, "libtmux", fake_repo, scope="user")

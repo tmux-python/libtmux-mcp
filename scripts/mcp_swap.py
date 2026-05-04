@@ -356,6 +356,53 @@ def _claude_project_node(
     return node
 
 
+@t.overload
+def _claude_user_servers(
+    config: dict[str, t.Any], *, create: t.Literal[True]
+) -> dict[str, t.Any]: ...
+
+
+@t.overload
+def _claude_user_servers(
+    config: dict[str, t.Any], *, create: t.Literal[False]
+) -> dict[str, t.Any] | None: ...
+
+
+def _claude_user_servers(
+    config: dict[str, t.Any], *, create: bool
+) -> dict[str, t.Any] | None:
+    """Return (or create) the top-level ``mcpServers`` dict — Claude user scope.
+
+    Mirrors :func:`_claude_project_node` for the user-scope path so the
+    shape guard is centralised once and reused across read / write /
+    delete instead of duplicated at each call site (or worse, missing
+    on read and delete the way the inline write-side guard left them).
+    Same reasoning applies as for the project-scope helper: Claude's
+    config shape is undocumented internal state, so a clear
+    ``RuntimeError`` before the atomic write beats an opaque
+    ``AttributeError`` from ``.setdefault()`` on a non-dict.
+
+    With ``create=True`` the dict is initialised when missing and the
+    return type narrows to ``dict[str, t.Any]``. With ``create=False``
+    a missing key returns ``None``.
+    """
+    raw = config.get("mcpServers")
+    existing: dict[str, t.Any] | None = None
+    if isinstance(raw, dict):
+        existing = raw
+    elif raw is not None:
+        msg = (
+            "Claude config layout appears to have changed; expected "
+            f"'mcpServers' to be a mapping but got "
+            f"{type(raw).__name__}"
+        )
+        raise RuntimeError(msg)
+    if existing is None and create:
+        existing = {}
+        config["mcpServers"] = existing
+    return existing
+
+
 def get_server(
     cli: CLIName,
     config: t.Any,
@@ -372,7 +419,8 @@ def get_server(
     """
     if cli == "claude":
         if scope == "user":
-            entry = config.get("mcpServers", {}).get(name)
+            servers = _claude_user_servers(config, create=False)
+            entry = servers.get(name) if servers else None
         else:
             node = _claude_project_node(config, repo, create=False)
             if not node:
@@ -406,15 +454,7 @@ def set_server(
     """
     if cli == "claude":
         if scope == "user":
-            existing = config.get("mcpServers")
-            if existing is not None and not isinstance(existing, dict):
-                msg = (
-                    "Claude config layout appears to have changed; expected "
-                    f"'mcpServers' to be a mapping but got "
-                    f"{type(existing).__name__}"
-                )
-                raise RuntimeError(msg)
-            servers = config.setdefault("mcpServers", {})
+            servers = _claude_user_servers(config, create=True)
             had = name in servers
             servers[name] = spec.to_json_dict(include_stdio_type=True)
             return "replaced" if had else "added"
@@ -464,8 +504,8 @@ def delete_server(
     """
     if cli == "claude":
         if scope == "user":
-            servers = config.get("mcpServers", {})
-            if name in servers:
+            servers = _claude_user_servers(config, create=False)
+            if servers is not None and name in servers:
                 del servers[name]
                 return True
             return False
