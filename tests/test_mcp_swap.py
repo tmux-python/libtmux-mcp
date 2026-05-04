@@ -767,3 +767,21 @@ def test_claude_project_node_accepts_well_shaped_config(
     node = mcp_swap._claude_project_node(config, fake_repo, create=True)
     assert isinstance(node, dict)
     assert "mcpServers" in node
+
+
+def test_claude_user_scope_rejects_non_mapping_mcpServers(
+    fake_repo: pathlib.Path,
+) -> None:
+    """User-scope ``set_server`` rejects a non-mapping top-level ``mcpServers``.
+
+    Symmetric with the existing ``_claude_project_node`` shape guard for
+    the per-project path. Without this guard, a malformed Claude config
+    would surface as an opaque ``AttributeError`` from ``.setdefault()``;
+    with it, the user gets the same actionable RuntimeError that the
+    project-scope path raises. Pattern follows hatchling's pre-mutation
+    config validation in ``builders/config.py``.
+    """
+    config: dict[str, t.Any] = {"mcpServers": "not a dict"}
+    spec = mcp_swap.McpServerSpec(command="uv", args=["run", "libtmux-mcp"])
+    with pytest.raises(RuntimeError, match="layout appears to have changed"):
+        mcp_swap.set_server("claude", config, "libtmux", spec, fake_repo, scope="user")

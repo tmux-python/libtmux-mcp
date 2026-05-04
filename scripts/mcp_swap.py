@@ -394,6 +394,14 @@ def set_server(
     """
     if cli == "claude":
         if scope == "user":
+            existing = config.get("mcpServers")
+            if existing is not None and not isinstance(existing, dict):
+                msg = (
+                    "Claude config layout appears to have changed; expected "
+                    f"'mcpServers' to be a mapping but got "
+                    f"{type(existing).__name__}"
+                )
+                raise RuntimeError(msg)
             servers = config.setdefault("mcpServers", {})
             had = name in servers
             servers[name] = spec.to_json_dict(include_stdio_type=True)
