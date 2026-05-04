@@ -22,6 +22,7 @@ from libtmux_mcp.tools.pane_tools import (
     display_message,
     enter_copy_mode,
     exit_copy_mode,
+    find_pane_by_position,
     get_pane_info,
     kill_pane,
     paste_text,
@@ -139,6 +140,92 @@ def test_get_pane_info(mcp_server: Server, mcp_pane: Pane) -> None:
     assert result.pane_id == mcp_pane.pane_id
     assert result.pane_width is not None
     assert result.pane_height is not None
+
+
+def test_get_pane_info_returns_geometry(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """PaneInfo carries window-relative geometry as int/bool, not raw strings."""
+    from libtmux.constants import PaneDirection
+
+    window = mcp_session.active_window
+    window.split(direction=PaneDirection.Right)
+
+    panes = window.panes
+    assert len(panes) == 2
+
+    infos = [
+        get_pane_info(pane_id=p.pane_id, socket_name=mcp_server.socket_name)
+        for p in panes
+    ]
+
+    for info in infos:
+        assert isinstance(info.pane_left, int)
+        assert isinstance(info.pane_top, int)
+        assert isinstance(info.pane_right, int)
+        assert isinstance(info.pane_bottom, int)
+        assert isinstance(info.pane_at_left, bool)
+        assert isinstance(info.pane_at_right, bool)
+        assert isinstance(info.pane_at_top, bool)
+        assert isinstance(info.pane_at_bottom, bool)
+        assert info.pane_tty is not None and info.pane_tty.startswith("/dev/")
+        # Both panes span the full window vertically in a horizontal split.
+        assert info.pane_at_top is True
+        assert info.pane_at_bottom is True
+
+    left, right = sorted(infos, key=lambda i: i.pane_left or 0)
+    assert left.pane_at_left is True and left.pane_at_right is False
+    assert right.pane_at_left is False and right.pane_at_right is True
+    assert (left.pane_left or 0) < (right.pane_left or 0)
+
+
+def test_find_pane_by_position_each_corner(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """find_pane_by_position returns the right pane for each corner of a 2x2."""
+    from libtmux.constants import PaneDirection
+
+    window = mcp_session.active_window
+    # Three splits → four panes; ``tiled`` arranges them as a 2x2 grid.
+    window.split(direction=PaneDirection.Right)
+    window.split(direction=PaneDirection.Below)
+    window.split(direction=PaneDirection.Below)
+    window.select_layout("tiled")
+    assert len(window.panes) == 4
+
+    corners = ("top-left", "top-right", "bottom-left", "bottom-right")
+    found = {
+        corner: find_pane_by_position(
+            corner=corner,  # type: ignore[arg-type]
+            window_id=window.window_id,
+            socket_name=mcp_server.socket_name,
+        )
+        for corner in corners
+    }
+
+    pane_ids = {corner: info.pane_id for corner, info in found.items()}
+    assert len(set(pane_ids.values())) == 4, (
+        f"Expected 4 distinct panes for 4 corners, got {pane_ids}"
+    )
+
+    assert found["top-left"].pane_at_top is True
+    assert found["top-left"].pane_at_left is True
+    assert found["bottom-right"].pane_at_bottom is True
+    assert found["bottom-right"].pane_at_right is True
+
+
+def test_find_pane_by_position_single_pane_window_returns_only_pane(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Single-pane window touches every edge — returns it for any corner."""
+    window = mcp_pane.window
+    for corner in ("top-left", "top-right", "bottom-left", "bottom-right"):
+        info = find_pane_by_position(
+            corner=corner,
+            window_id=window.window_id,
+            socket_name=mcp_server.socket_name,
+        )
+        assert info.pane_id == mcp_pane.pane_id
 
 
 def test_set_pane_title(mcp_server: Server, mcp_pane: Pane) -> None:

@@ -35,6 +35,7 @@ from libtmux_mcp.tools.pane_tools.layout import (
     swap_pane,
 )
 from libtmux_mcp.tools.pane_tools.lifecycle import (
+    find_pane_by_position,
     get_pane_info,
     kill_pane,
     respawn_pane,
@@ -57,6 +58,7 @@ __all__ = [
     "display_message",
     "enter_copy_mode",
     "exit_copy_mode",
+    "find_pane_by_position",
     "get_pane_info",
     "kill_pane",
     "paste_text",
@@ -102,6 +104,11 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Get Pane Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         get_pane_info
     )
+    mcp.tool(
+        title="Find Pane By Position",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+    )(find_pane_by_position)
     mcp.tool(title="Clear Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING})(
         clear_pane
     )
