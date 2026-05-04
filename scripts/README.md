@@ -115,9 +115,9 @@ entries untouched.
   script writes.
 - **Custom binary install locations.** Detection is `shutil.which` plus
   the file existing at the configured global path. Homebrew, npm
-  prefixes (`~/.npm-global/bin`), and post-migration paths
-  (`~/.claude/local/claude`, `~/.gemini/local/gemini`) are picked up
-  only when the binary is already on `PATH`.
+  prefixes (`~/.npm-global/bin`), and the canonical local-install
+  layouts (`~/.claude/local/claude`, `~/.gemini/local/gemini`) are
+  picked up only when the binary is already on `PATH`.
 
 ### Extending to a new CLI
 
