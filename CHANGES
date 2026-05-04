@@ -16,9 +16,15 @@ _Notes on upcoming releases will be added here_
   Gemini have no per-project layer; the flag is silently coerced to
   `user` for them. A single install can hold both scopes
   simultaneously with independent backups, and `revert --scope user`
-  restores just one layer. State-file schema bumps to v2 (keys are
-  `cli:scope`) with transparent migration of v1 entries on load.
-  (#???)
+  restores just one layer. Full `revert` unwinds in LIFO order via an
+  explicit `seq_no` counter on each state entry — no reliance on dict
+  iteration through the JSON round-trip. Shape validation is
+  centralised in `_claude_user_servers` / `_claude_project_node`
+  helpers so read / write / delete fail symmetrically with
+  `RuntimeError` on a malformed Claude config. The state-file schema
+  is internal — no compatibility contract; running an older `mcp_swap`
+  against a newer `state.json` is undefined behaviour and not
+  supported. (#???)
 
 ### Documentation
 

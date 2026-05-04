@@ -81,9 +81,12 @@ the user-level fallback; the project entry stays. `revert` without
   same second don't collide.
 - State is tracked in `~/.local/state/libtmux-mcp-dev/swap/state.json`
   (honours `XDG_STATE_HOME`) so `revert` knows which backup to restore
-  per CLI, including the "added" case where Codex had no libtmux block
-  before. Schema is v2 (keys are `cli:scope`); v1 state files migrate
-  on load.
+  per `(cli, scope)` pair, including the "added" case where Codex had
+  no libtmux block before. Each entry records `swapped_at` (wall-clock
+  timestamp, human-readable for debug) and `seq_no` (monotonic counter,
+  the primary LIFO sort key). Schema is internal — no compatibility
+  contract; running an older `mcp_swap` against a newer `state.json` is
+  undefined.
 - Writes are atomic (tempfile + `os.replace`) and re-validated by
   re-parsing; a bad write is rolled back immediately.
 - `--dry-run` prints a unified diff and writes nothing.
