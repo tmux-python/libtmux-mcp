@@ -39,6 +39,18 @@ This script is best-effort and intentionally narrow:
   walked — workspace files for Cursor/Gemini are silently ignored.
   When workspace precedence matters, run the CLI's own
   ``cursor mcp add ...`` / ``gemini mcp add ...`` directly.
+
+- **Claude scope.** ``use-local`` and ``revert`` accept
+  ``--scope {user,project}``. The default ``project`` writes the
+  per-project entry under ``projects[<abs-repo>].mcpServers`` —
+  only the current repo's directory sees the swap, matching
+  pre-flag behaviour. ``--scope user`` writes Claude's top-level
+  ``mcpServers`` fallback so every project that has no per-project
+  override picks up the swap; useful when QA-ing a branch across
+  many directories. Codex, Cursor, and Gemini have no per-project
+  layer in their config files; the flag is silently coerced to
+  ``user`` for them. Both Claude scopes can coexist with
+  independent backups; full ``revert`` unwinds in LIFO order.
 - **Simple binary detection.** Probing is ``shutil.which(<binary>)``
   plus ``<config_path>.exists()``. Custom install locations
   (Homebrew, npm prefixes, ``~/.npm-global/bin``,
