@@ -6,6 +6,22 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Dev scripts**
+
+- `scripts/mcp_swap.py` — `use-local` and `revert` accept
+  `--scope {user,project}` so a Claude install can target either the
+  top-level `mcpServers` fallback (every project without an override
+  picks it up) or the per-project `projects.<abs>.mcpServers` entry.
+  Default `project` preserves the previous behaviour. Codex / Cursor /
+  Gemini have no per-project layer; the flag is silently coerced to
+  `user` for them. A single install can hold both scopes
+  simultaneously with independent backups, and `revert --scope user`
+  restores just one layer. State-file schema bumps to v2 (keys are
+  `cli:scope`) with transparent migration of v1 entries on load.
+  (#???)
+
 ### Documentation
 
 - Bump gp-sphinx docs stack to v0.0.1a16 — docs site now renders

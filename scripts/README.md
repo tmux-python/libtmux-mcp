@@ -46,14 +46,44 @@ This matches Claude's conventional dev form and takes advantage of `uv
 run`'s automatic editable install — source edits flow through on the next
 invocation with no reinstall step.
 
+### `--scope {user,project}` (Claude only)
+
+Claude's `~/.claude.json` has two layers: a top-level `mcpServers`
+fallback that any project without an override picks up, and per-project
+`projects.<abs>.mcpServers` overrides. The flag selects which layer the
+swap writes:
+
+```console
+$ uv run scripts/mcp_swap.py use-local --cli claude --scope project   # default
+$ uv run scripts/mcp_swap.py use-local --cli claude --scope user      # global fallback
+```
+
+`--scope project` (the default) preserves pre-flag behaviour: writes
+under `projects[<repo-abs-path>].mcpServers` and only that one project
+sees the change. `--scope user` flips the top-level fallback so every
+unrelated project directory picks up the local checkout too — useful
+when you're branch-testing across many repos at once.
+
+Codex, Cursor, and Gemini have no per-project layer in their config
+files. The flag is silently coerced to `user` for them, so passing
+`--scope` with a non-Claude `--cli` is harmless.
+
+A single Claude install can hold both scopes simultaneously — separate
+state entries, separate backups. `revert --scope user` restores only
+the user-level fallback; the project entry stays. `revert` without
+`--scope` rolls back every recorded scope for the targeted CLIs.
+
 ### Safety
 
 - Every rewrite writes a timestamped backup (`<config>.bak.mcp-swap-<ts>`)
-  before touching the file.
+  before touching the file. Claude backups also embed the scope
+  (`<config>.bak.mcp-swap-<ts>-{user,project}`) so two scope swaps in the
+  same second don't collide.
 - State is tracked in `~/.local/state/libtmux-mcp-dev/swap/state.json`
   (honours `XDG_STATE_HOME`) so `revert` knows which backup to restore
   per CLI, including the "added" case where Codex had no libtmux block
-  before.
+  before. Schema is v2 (keys are `cli:scope`); v1 state files migrate
+  on load.
 - Writes are atomic (tempfile + `os.replace`) and re-validated by
   re-parsing; a bad write is rolled back immediately.
 - `--dry-run` prints a unified diff and writes nothing.
