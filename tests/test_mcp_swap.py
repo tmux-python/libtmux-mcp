@@ -499,10 +499,10 @@ def test_claude_full_revert_unwinds_both_scopes_in_lifo_order(
     assert not mcp_swap.STATE_FILE.exists()
 
 
-def test_use_local_populates_swapped_at(
+def test_use_local_populates_swapped_at_and_seq_no(
     fake_home: pathlib.Path, fake_repo: pathlib.Path
 ) -> None:
-    """``cmd_use_local`` records the registration timestamp on each entry."""
+    """``cmd_use_local`` records both human-readable timestamp and monotonic seq_no."""
     info = mcp_swap.CLIS["cursor"]
     _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
 
@@ -516,24 +516,62 @@ def test_use_local_populates_swapped_at(
     # ``swapped_at`` is the same ``time.strftime("%Y%m%d%H%M%S")`` value
     # that goes into the backup filename, so checking format suffices.
     assert len(entry.swapped_at) == 14 and entry.swapped_at.isdigit()
-    # And the backup filename embeds the same timestamp.
     assert entry.swapped_at in entry.backup_path
+    # First swap on a clean state starts at zero; subsequent swaps
+    # increment.
+    assert entry.seq_no == 0
 
 
-def test_lifo_revert_orders_by_swapped_at_not_dict_iteration(
+def test_seq_no_increments_across_swaps(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Each new swap gets ``seq_no = max(existing, default=-1) + 1``."""
+    info_cursor = mcp_swap.CLIS["cursor"]
+    info_gemini = mcp_swap.CLIS["gemini"]
+    _write_json(
+        info_cursor.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}}
+    )
+    _write_json(
+        info_gemini.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}}
+    )
+    parser = mcp_swap.build_parser()
+
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+            )
+        )
+        == 0
+    )
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "gemini"]
+            )
+        )
+        == 0
+    )
+
+    state = mcp_swap.load_state()
+    assert state[("cursor", "user")].seq_no == 0
+    assert state[("gemini", "user")].seq_no == 1
+
+
+def test_lifo_revert_orders_by_seq_no_not_dict_iteration(
     fake_home: pathlib.Path,
 ) -> None:
-    """LIFO revert sorts by ``swapped_at`` regardless of state-file dict order.
+    """LIFO revert sorts by ``seq_no`` regardless of state-file dict order.
 
-    Regression test for the pre-explicit-timestamp implementation:
-    ``reversed(cli_keys)`` worked only because dict insertion order
-    happened to match registration order. This test seeds a state file
-    with entries in a *deliberately wrong* dict order — newest first,
-    oldest second — and asserts the revert still applies the newest
-    backup first (true LIFO). With the old `reversed()` approach this
-    would apply the older backup first and leave the file partially
-    rolled back; with the explicit ``swapped_at`` sort it restores
-    correctly regardless of dict order.
+    Regression test for the pre-seq_no implementation: the previous
+    ``(swapped_at, original_index)`` sort fell back to dict iteration
+    order on same-second collisions, and the original ``reversed()``
+    approach was dict-order-dependent throughout. This test seeds a
+    state file with entries in a *deliberately wrong* dict order —
+    higher seq_no first — and asserts the revert still applies the
+    higher-seq_no backup first (true LIFO). The explicit ``seq_no``
+    field makes the sort independent of dict order, JSON round-trip,
+    and wall-clock collisions.
     """
     info = mcp_swap.CLIS["claude"]
     info.config_path.write_text("AFTER_BOTH_SWAPS\n")
@@ -544,26 +582,27 @@ def test_lifo_revert_orders_by_swapped_at_not_dict_iteration(
     backup_old.write_text("ORIGINAL\n")
     backup_new.write_text("AFTER_FIRST_SWAP\n")
 
-    # Wrong dict order: newer entry comes FIRST in the JSON, older comes
-    # second. Without the explicit-timestamp fix, ``reversed(cli_keys)``
-    # would unwind in the wrong order.
+    # Wrong dict order: newer entry (higher seq_no) FIRST in JSON,
+    # older entry (lower seq_no) SECOND. Without the explicit-seq_no
+    # sort, dict iteration would unwind in the wrong direction.
     mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
     state_payload = {
-        "version": 3,
         "entries": {
             "claude:user": {
                 "config_path": str(info.config_path),
                 "backup_path": str(backup_new),
                 "server": "libtmux",
                 "action": "replaced",
-                "swapped_at": "20240202020202",  # newer
+                "swapped_at": "20240202020202",
+                "seq_no": 1,  # newer
             },
             "claude:project": {
                 "config_path": str(info.config_path),
                 "backup_path": str(backup_old),
                 "server": "libtmux",
                 "action": "replaced",
-                "swapped_at": "20240101010101",  # older
+                "swapped_at": "20240101010101",
+                "seq_no": 0,  # older
             },
         },
     }
@@ -572,8 +611,8 @@ def test_lifo_revert_orders_by_swapped_at_not_dict_iteration(
     args = mcp_swap.build_parser().parse_args(["revert", "--cli", "claude"])
     assert mcp_swap.cmd_revert(args) == 0
 
-    # LIFO order: newer (claude:user) restored first, then older
-    # (claude:project). Final file contents = older backup = "ORIGINAL".
+    # LIFO: seq_no=1 (claude:user) restored first, seq_no=0 (claude:project)
+    # restored second. Final file contents = older backup = "ORIGINAL".
     assert info.config_path.read_text() == "ORIGINAL\n"
 
 
@@ -737,6 +776,7 @@ def test_save_state_writes_atomically(fake_home: pathlib.Path) -> None:
         server="libtmux",
         action="replaced",
         swapped_at="20260101000000",
+        seq_no=0,
     )
     mcp_swap.save_state({("claude", "project"): entry})
 

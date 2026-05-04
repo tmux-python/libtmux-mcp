@@ -246,6 +246,14 @@ class SwapEntry:
     #: separately via :attr:`seq_no` so this field stays purely
     #: descriptive.
     swapped_at: str
+    #: Monotonic registration counter — the primary LIFO sort key for
+    #: ``cmd_revert``. ``cmd_use_local`` computes the next value as
+    #: ``max(existing seq_nos, default=-1) + 1`` so it strictly
+    #: increases per swap regardless of wall-clock collisions or dict
+    #: iteration order. Same explicit-counter pattern CPython's
+    #: ``Lib/sched.py`` uses to break ties on ``Event(time, priority,
+    #: sequence, …)``.
+    seq_no: int
 
 
 # ---------------------------------------------------------------------------
@@ -815,12 +823,14 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             )
             had_error = 1
             continue
+        next_seq = max((e.seq_no for e in state.values()), default=-1) + 1
         state[(cli, scope)] = SwapEntry(
             config_path=str(info.config_path),
             backup_path=str(backup_path),
             server=server,
             action=action,
             swapped_at=ts,
+            seq_no=next_seq,
         )
         print(f"[{label}] {action}; backup: {backup_path}")
 
@@ -865,26 +875,16 @@ def cmd_revert(args: argparse.Namespace) -> int:
             label = f"{cli}:{args.scope}" if args.scope and cli == "claude" else cli
             print(f"[{label}] no state entry — skip")
             continue
-        # Unwind in reverse-registration order (LIFO) — explicit sort by
-        # ``SwapEntry.swapped_at`` rather than dict iteration order so
-        # the order is independent of JSON parse order or hand-edited
-        # state files. When two scopes back the same physical file
-        # (Claude user + project), the later swap's backup contains the
-        # earlier swap's modifications, so each backup must restore its
-        # own layer *before* the prior one is restored. Same discipline
-        # as ``contextlib.ExitStack``, applied via an explicit timestamp
-        # the way uv's lockfile uses ``.sort_by(id)`` for deterministic
-        # ordering. The original index breaks the tie when two scopes
-        # share the same second so the original-registration LIFO order
-        # is preserved.
-        cli_keys = [
-            k
-            for _, k in sorted(
-                enumerate(cli_keys),
-                key=lambda item: (state[item[1]].swapped_at, item[0]),
-                reverse=True,
-            )
-        ]
+        # Unwind in reverse-registration order (LIFO) — sort by the
+        # explicit ``SwapEntry.seq_no`` counter so order is independent
+        # of JSON parse order, dict iteration, hand-edited state, or
+        # wall-clock collisions. When two scopes back the same physical
+        # file (Claude user + project), the later swap's backup contains
+        # the earlier swap's modifications, so each backup must restore
+        # its own layer before the prior one is restored. Same explicit
+        # counter pattern CPython's ``Lib/sched.py`` uses to break ties
+        # on ``Event(time, priority, sequence, …)``.
+        cli_keys.sort(key=lambda k: state[k].seq_no, reverse=True)
         for key in cli_keys:
             sc_cli, sc_scope = key
             entry = state[key]
