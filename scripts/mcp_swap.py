@@ -70,7 +70,6 @@ import difflib
 import json
 import os
 import pathlib
-import re
 import shutil
 import sys
 import tempfile
@@ -112,23 +111,18 @@ def _state_key(cli: CLIName, scope: Scope) -> str:
 
 
 def _parse_state_key(key: str) -> tuple[CLIName, Scope] | None:
-    """Decode a state key, accepting both v2 (``cli:scope``) and v1 (``cli``).
+    """Decode a ``cli:scope`` state key, returning ``None`` for malformed input.
 
-    Legacy v1 keys are migrated in-place: bare ``"claude"`` was the only
-    mode that existed (per-project), so it maps to ``("claude", "project")``;
-    the other CLIs had no scope concept then and are user-level today, so
-    they map to ``("<cli>", "user")``. Returns ``None`` for keys that don't
-    look like either shape so a hand-edited or future-version state file
-    cannot crash ``load_state``.
+    The script declares no compatibility contract for its state file —
+    schema is internal — so this only accepts the canonical
+    ``f"{cli}:{scope}"`` form. Hand-edited or unrecognised keys return
+    ``None`` so ``load_state`` can drop them without crashing.
     """
-    if ":" in key:
-        cli_str, _, scope_str = key.partition(":")
-        if cli_str in ALL_CLIS and scope_str in ALL_SCOPES:
-            return cli_str, scope_str
+    if ":" not in key:
         return None
-    if key in ALL_CLIS:
-        legacy_scope: Scope = "project" if key == "claude" else "user"
-        return key, legacy_scope
+    cli_str, _, scope_str = key.partition(":")
+    if cli_str in ALL_CLIS and scope_str in ALL_SCOPES:
+        return cli_str, scope_str
     return None
 
 
@@ -151,41 +145,8 @@ def _xdg_state_home() -> pathlib.Path:
 # tooling state, distinct from the runtime ``libtmux-mcp`` package.
 STATE_DIR = _xdg_state_home() / "libtmux-mcp-dev" / "swap"
 STATE_FILE = STATE_DIR / "state.json"
-#: v1 keyed entries by bare ``cli`` name; v2 added scope-suffixed keys
-#: ``f"{cli}:{scope}"`` so a single Claude install could hold simultaneous
-#: user-scope and project-scope swaps; v3 added the explicit ``swapped_at``
-#: timestamp on :class:`SwapEntry` so ``cmd_revert`` can sort by registration
-#: order instead of relying on dict iteration order through the JSON
-#: round-trip. ``load_state`` migrates v1 → v3 transparently (v2 entries
-#: synthesise ``swapped_at`` from the timestamp embedded in
-#: ``backup_path``; v1 entries do the same after the bare-key migration).
-STATE_VERSION = 3
 
 BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
-
-#: Match the ``YYYYMMDDHHMMSS`` timestamp embedded in a backup filename
-#: produced by ``cmd_use_local``. Used to synthesise
-#: :attr:`SwapEntry.swapped_at` when migrating legacy state files that
-#: predate the explicit field.
-_BACKUP_TS_RE = re.compile(re.escape(BACKUP_SUFFIX_PREFIX) + r"(\d{14})")
-
-
-def _swapped_at_from_backup(backup_path: str) -> str:
-    """Extract the ``YYYYMMDDHHMMSS`` timestamp from a backup filename.
-
-    Backup files are named ``<config>.bak.mcp-swap-<ts>`` (and Claude
-    backups since v2 also append ``-{user,project}`` for collision
-    avoidance). The timestamp is the registration moment of the swap, so
-    it doubles as the value of :attr:`SwapEntry.swapped_at` when
-    migrating legacy state files that lack the explicit field.
-
-    Returns ``""`` when the filename doesn't match the expected pattern
-    (e.g. someone hand-edited the state file to point at an unrelated
-    backup) so the caller can fall back gracefully without crashing on
-    revert.
-    """
-    match = _BACKUP_TS_RE.search(backup_path)
-    return match.group(1) if match else ""
 
 
 # ---------------------------------------------------------------------------
@@ -280,15 +241,11 @@ class SwapEntry:
     backup_path: str
     server: str
     action: t.Literal["replaced", "added"]
-    #: ``YYYYMMDDHHMMSS`` registration timestamp, sortable lexically. Empty
-    #: string for v2 legacy entries that didn't track this; ``load_state``
-    #: synthesises a value from ``backup_path`` (which already encodes the
-    #: timestamp) so revert can sort by registration order without relying
-    #: on dict-iteration order through the JSON round-trip. Adding this
-    #: field follows the precedent set by CPython's ``contextlib.ExitStack``
-    #: (explicit deque ordering) and uv's lockfile (explicit ``.sort_by``)
-    #: rather than the implicit-iteration approach.
-    swapped_at: str = ""
+    #: ``YYYYMMDDHHMMSS`` registration timestamp, human-readable for
+    #: anyone inspecting ``state.json`` directly. Sort order is enforced
+    #: separately via :attr:`seq_no` so this field stays purely
+    #: descriptive.
+    swapped_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -622,12 +579,10 @@ def build_local_spec(repo: pathlib.Path, entry: str) -> McpServerSpec:
 def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
     """Read the swap-state file, returning an empty mapping when absent.
 
-    Transparently migrates v1 state files (bare ``cli`` keys) to the v2
-    ``(cli, scope)`` shape via :func:`_parse_state_key`, and v2 entries
-    that lack ``swapped_at`` to v3 by parsing the timestamp from
-    :attr:`SwapEntry.backup_path`. Unknown or malformed keys are dropped
-    silently so a hand-edited file or a forward-version file cannot
-    crash the script.
+    The state file's schema is internal — no compatibility contract —
+    so this loader assumes a single canonical shape. Malformed keys
+    (those that don't parse as ``cli:scope``) are dropped silently so
+    a hand-edited file cannot crash the script.
     """
     if not STATE_FILE.exists():
         return {}
@@ -638,28 +593,14 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
         parsed = _parse_state_key(k)
         if parsed is None:
             continue
-        # Only the fields SwapEntry knows about — drop unknown keys
-        # so a forward-version state file with extra metadata still
-        # loads. v2 entries lack ``swapped_at``; the dataclass default
-        # fills in ``""`` and the migration below populates it from
-        # ``backup_path``.
-        kwargs = {
-            f.name: v[f.name] for f in dataclasses.fields(SwapEntry) if f.name in v
-        }
-        entry = SwapEntry(**kwargs)
-        if not entry.swapped_at:
-            entry = dataclasses.replace(
-                entry, swapped_at=_swapped_at_from_backup(entry.backup_path)
-            )
-        out[parsed] = entry
+        out[parsed] = SwapEntry(**v)
     return out
 
 
 def save_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
-    """Write the swap-state file atomically (versioned payload)."""
+    """Write the swap-state file atomically."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
-        "version": STATE_VERSION,
         "entries": {
             _state_key(cli, scope): dataclasses.asdict(v)
             for (cli, scope), v in entries.items()

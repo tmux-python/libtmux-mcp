@@ -520,35 +520,6 @@ def test_use_local_populates_swapped_at(
     assert entry.swapped_at in entry.backup_path
 
 
-def test_legacy_v2_state_migrates_swapped_at_from_backup_path(
-    fake_home: pathlib.Path,
-) -> None:
-    """A v2 state entry without ``swapped_at`` gets one synthesised from backup_path.
-
-    The backup filename always encodes the registration timestamp as
-    ``mcp-swap-<YYYYMMDDHHMMSS>[-scope]``, so legacy v2 entries (which
-    didn't carry an explicit ``swapped_at`` field) recover their
-    timestamp on load and participate in LIFO ordering normally.
-    """
-    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
-    legacy = {
-        "version": 2,
-        "entries": {
-            "claude:user": {
-                "config_path": "/tmp/.claude.json",
-                "backup_path": "/tmp/.claude.json.bak.mcp-swap-20240115093030-user",
-                "server": "libtmux",
-                "action": "replaced",
-                # NB: no swapped_at field — this is the legacy shape.
-            },
-        },
-    }
-    mcp_swap.STATE_FILE.write_text(json.dumps(legacy))
-
-    state = mcp_swap.load_state()
-    assert state[("claude", "user")].swapped_at == "20240115093030"
-
-
 def test_lifo_revert_orders_by_swapped_at_not_dict_iteration(
     fake_home: pathlib.Path,
 ) -> None:
@@ -604,41 +575,6 @@ def test_lifo_revert_orders_by_swapped_at_not_dict_iteration(
     # LIFO order: newer (claude:user) restored first, then older
     # (claude:project). Final file contents = older backup = "ORIGINAL".
     assert info.config_path.read_text() == "ORIGINAL\n"
-
-
-def test_legacy_v1_state_migrates_to_v2_keys(
-    fake_home: pathlib.Path, fake_repo: pathlib.Path
-) -> None:
-    """A v1 state file with bare ``cli`` keys is migrated on load.
-
-    ``claude`` (legacy default was per-project) → ``("claude", "project")``.
-    Bare ``codex`` / ``cursor`` / ``gemini`` (no per-project layer) →
-    ``("<cli>", "user")``.
-    """
-    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
-    legacy = {
-        "version": 1,
-        "entries": {
-            "claude": {
-                "config_path": "/tmp/.claude.json",
-                "backup_path": "/tmp/.claude.json.bak",
-                "server": "libtmux",
-                "action": "replaced",
-            },
-            "codex": {
-                "config_path": "/tmp/codex.toml",
-                "backup_path": "/tmp/codex.toml.bak",
-                "server": "libtmux",
-                "action": "added",
-            },
-        },
-    }
-    mcp_swap.STATE_FILE.write_text(json.dumps(legacy))
-
-    state = mcp_swap.load_state()
-    assert set(state.keys()) == {("claude", "project"), ("codex", "user")}
-    assert state[("claude", "project")].backup_path == "/tmp/.claude.json.bak"
-    assert state[("codex", "user")].action == "added"
 
 
 def test_non_claude_scope_user_passes_through_to_global_config(
@@ -800,6 +736,7 @@ def test_save_state_writes_atomically(fake_home: pathlib.Path) -> None:
         backup_path="/tmp/cfg.json.bak",
         server="libtmux",
         action="replaced",
+        swapped_at="20260101000000",
     )
     mcp_swap.save_state({("claude", "project"): entry})
 
