@@ -499,6 +499,113 @@ def test_claude_full_revert_unwinds_both_scopes_in_lifo_order(
     assert not mcp_swap.STATE_FILE.exists()
 
 
+def test_use_local_populates_swapped_at(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """``cmd_use_local`` records the registration timestamp on each entry."""
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    state = mcp_swap.load_state()
+    entry = state[("cursor", "user")]
+    # ``swapped_at`` is the same ``time.strftime("%Y%m%d%H%M%S")`` value
+    # that goes into the backup filename, so checking format suffices.
+    assert len(entry.swapped_at) == 14 and entry.swapped_at.isdigit()
+    # And the backup filename embeds the same timestamp.
+    assert entry.swapped_at in entry.backup_path
+
+
+def test_legacy_v2_state_migrates_swapped_at_from_backup_path(
+    fake_home: pathlib.Path,
+) -> None:
+    """A v2 state entry without ``swapped_at`` gets one synthesised from backup_path.
+
+    The backup filename always encodes the registration timestamp as
+    ``mcp-swap-<YYYYMMDDHHMMSS>[-scope]``, so legacy v2 entries (which
+    didn't carry an explicit ``swapped_at`` field) recover their
+    timestamp on load and participate in LIFO ordering normally.
+    """
+    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "version": 2,
+        "entries": {
+            "claude:user": {
+                "config_path": "/tmp/.claude.json",
+                "backup_path": "/tmp/.claude.json.bak.mcp-swap-20240115093030-user",
+                "server": "libtmux",
+                "action": "replaced",
+                # NB: no swapped_at field — this is the legacy shape.
+            },
+        },
+    }
+    mcp_swap.STATE_FILE.write_text(json.dumps(legacy))
+
+    state = mcp_swap.load_state()
+    assert state[("claude", "user")].swapped_at == "20240115093030"
+
+
+def test_lifo_revert_orders_by_swapped_at_not_dict_iteration(
+    fake_home: pathlib.Path,
+) -> None:
+    """LIFO revert sorts by ``swapped_at`` regardless of state-file dict order.
+
+    Regression test for the pre-explicit-timestamp implementation:
+    ``reversed(cli_keys)`` worked only because dict insertion order
+    happened to match registration order. This test seeds a state file
+    with entries in a *deliberately wrong* dict order — newest first,
+    oldest second — and asserts the revert still applies the newest
+    backup first (true LIFO). With the old `reversed()` approach this
+    would apply the older backup first and leave the file partially
+    rolled back; with the explicit ``swapped_at`` sort it restores
+    correctly regardless of dict order.
+    """
+    info = mcp_swap.CLIS["claude"]
+    info.config_path.write_text("AFTER_BOTH_SWAPS\n")
+
+    backup_old = mcp_swap.STATE_DIR.parent / "old-backup"
+    backup_new = mcp_swap.STATE_DIR.parent / "new-backup"
+    backup_old.parent.mkdir(parents=True, exist_ok=True)
+    backup_old.write_text("ORIGINAL\n")
+    backup_new.write_text("AFTER_FIRST_SWAP\n")
+
+    # Wrong dict order: newer entry comes FIRST in the JSON, older comes
+    # second. Without the explicit-timestamp fix, ``reversed(cli_keys)``
+    # would unwind in the wrong order.
+    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state_payload = {
+        "version": 3,
+        "entries": {
+            "claude:user": {
+                "config_path": str(info.config_path),
+                "backup_path": str(backup_new),
+                "server": "libtmux",
+                "action": "replaced",
+                "swapped_at": "20240202020202",  # newer
+            },
+            "claude:project": {
+                "config_path": str(info.config_path),
+                "backup_path": str(backup_old),
+                "server": "libtmux",
+                "action": "replaced",
+                "swapped_at": "20240101010101",  # older
+            },
+        },
+    }
+    mcp_swap.STATE_FILE.write_text(json.dumps(state_payload))
+
+    args = mcp_swap.build_parser().parse_args(["revert", "--cli", "claude"])
+    assert mcp_swap.cmd_revert(args) == 0
+
+    # LIFO order: newer (claude:user) restored first, then older
+    # (claude:project). Final file contents = older backup = "ORIGINAL".
+    assert info.config_path.read_text() == "ORIGINAL\n"
+
+
 def test_legacy_v1_state_migrates_to_v2_keys(
     fake_home: pathlib.Path, fake_repo: pathlib.Path
 ) -> None:

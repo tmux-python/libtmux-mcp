@@ -70,6 +70,7 @@ import difflib
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -150,13 +151,41 @@ def _xdg_state_home() -> pathlib.Path:
 # tooling state, distinct from the runtime ``libtmux-mcp`` package.
 STATE_DIR = _xdg_state_home() / "libtmux-mcp-dev" / "swap"
 STATE_FILE = STATE_DIR / "state.json"
-#: v1 keyed entries by bare ``cli`` name; v2 keys are ``f"{cli}:{scope}"``
-#: so a single Claude install can hold simultaneous user-scope and
-#: project-scope swaps without one clobbering the other's backup. ``load_state``
-#: migrates v1 keys transparently.
-STATE_VERSION = 2
+#: v1 keyed entries by bare ``cli`` name; v2 added scope-suffixed keys
+#: ``f"{cli}:{scope}"`` so a single Claude install could hold simultaneous
+#: user-scope and project-scope swaps; v3 added the explicit ``swapped_at``
+#: timestamp on :class:`SwapEntry` so ``cmd_revert`` can sort by registration
+#: order instead of relying on dict iteration order through the JSON
+#: round-trip. ``load_state`` migrates v1 → v3 transparently (v2 entries
+#: synthesise ``swapped_at`` from the timestamp embedded in
+#: ``backup_path``; v1 entries do the same after the bare-key migration).
+STATE_VERSION = 3
 
 BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
+
+#: Match the ``YYYYMMDDHHMMSS`` timestamp embedded in a backup filename
+#: produced by ``cmd_use_local``. Used to synthesise
+#: :attr:`SwapEntry.swapped_at` when migrating legacy state files that
+#: predate the explicit field.
+_BACKUP_TS_RE = re.compile(re.escape(BACKUP_SUFFIX_PREFIX) + r"(\d{14})")
+
+
+def _swapped_at_from_backup(backup_path: str) -> str:
+    """Extract the ``YYYYMMDDHHMMSS`` timestamp from a backup filename.
+
+    Backup files are named ``<config>.bak.mcp-swap-<ts>`` (and Claude
+    backups since v2 also append ``-{user,project}`` for collision
+    avoidance). The timestamp is the registration moment of the swap, so
+    it doubles as the value of :attr:`SwapEntry.swapped_at` when
+    migrating legacy state files that lack the explicit field.
+
+    Returns ``""`` when the filename doesn't match the expected pattern
+    (e.g. someone hand-edited the state file to point at an unrelated
+    backup) so the caller can fall back gracefully without crashing on
+    revert.
+    """
+    match = _BACKUP_TS_RE.search(backup_path)
+    return match.group(1) if match else ""
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +280,15 @@ class SwapEntry:
     backup_path: str
     server: str
     action: t.Literal["replaced", "added"]
+    #: ``YYYYMMDDHHMMSS`` registration timestamp, sortable lexically. Empty
+    #: string for v2 legacy entries that didn't track this; ``load_state``
+    #: synthesises a value from ``backup_path`` (which already encodes the
+    #: timestamp) so revert can sort by registration order without relying
+    #: on dict-iteration order through the JSON round-trip. Adding this
+    #: field follows the precedent set by CPython's ``contextlib.ExitStack``
+    #: (explicit deque ordering) and uv's lockfile (explicit ``.sort_by``)
+    #: rather than the implicit-iteration approach.
+    swapped_at: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -585,9 +623,11 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
     """Read the swap-state file, returning an empty mapping when absent.
 
     Transparently migrates v1 state files (bare ``cli`` keys) to the v2
-    ``(cli, scope)`` shape via :func:`_parse_state_key`. Unknown or
-    malformed keys are dropped silently so a hand-edited file or a
-    forward-version file cannot crash the script.
+    ``(cli, scope)`` shape via :func:`_parse_state_key`, and v2 entries
+    that lack ``swapped_at`` to v3 by parsing the timestamp from
+    :attr:`SwapEntry.backup_path`. Unknown or malformed keys are dropped
+    silently so a hand-edited file or a forward-version file cannot
+    crash the script.
     """
     if not STATE_FILE.exists():
         return {}
@@ -596,8 +636,22 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
     out: dict[tuple[CLIName, Scope], SwapEntry] = {}
     for k, v in entries.items():
         parsed = _parse_state_key(k)
-        if parsed is not None:
-            out[parsed] = SwapEntry(**v)
+        if parsed is None:
+            continue
+        # Only the fields SwapEntry knows about — drop unknown keys
+        # so a forward-version state file with extra metadata still
+        # loads. v2 entries lack ``swapped_at``; the dataclass default
+        # fills in ``""`` and the migration below populates it from
+        # ``backup_path``.
+        kwargs = {
+            f.name: v[f.name] for f in dataclasses.fields(SwapEntry) if f.name in v
+        }
+        entry = SwapEntry(**kwargs)
+        if not entry.swapped_at:
+            entry = dataclasses.replace(
+                entry, swapped_at=_swapped_at_from_backup(entry.backup_path)
+            )
+        out[parsed] = entry
     return out
 
 
@@ -825,6 +879,7 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             backup_path=str(backup_path),
             server=server,
             action=action,
+            swapped_at=ts,
         )
         print(f"[{label}] {action}; backup: {backup_path}")
 
@@ -869,12 +924,27 @@ def cmd_revert(args: argparse.Namespace) -> int:
             label = f"{cli}:{args.scope}" if args.scope and cli == "claude" else cli
             print(f"[{label}] no state entry — skip")
             continue
-        # Unwind in reverse-registration order (LIFO). When two scopes
-        # back the same physical file (Claude user + project), the
-        # later swap's backup contains the earlier swap's modifications,
-        # so each backup must restore its own layer *before* the prior
-        # one is reapplied. Same discipline as ``contextlib.ExitStack``.
-        for key in reversed(cli_keys):
+        # Unwind in reverse-registration order (LIFO) — explicit sort by
+        # ``SwapEntry.swapped_at`` rather than dict iteration order so
+        # the order is independent of JSON parse order or hand-edited
+        # state files. When two scopes back the same physical file
+        # (Claude user + project), the later swap's backup contains the
+        # earlier swap's modifications, so each backup must restore its
+        # own layer *before* the prior one is restored. Same discipline
+        # as ``contextlib.ExitStack``, applied via an explicit timestamp
+        # the way uv's lockfile uses ``.sort_by(id)`` for deterministic
+        # ordering. The original index breaks the tie when two scopes
+        # share the same second so the original-registration LIFO order
+        # is preserved.
+        cli_keys = [
+            k
+            for _, k in sorted(
+                enumerate(cli_keys),
+                key=lambda item: (state[item[1]].swapped_at, item[0]),
+                reverse=True,
+            )
+        ]
+        for key in cli_keys:
             sc_cli, sc_scope = key
             entry = state[key]
             label = f"{sc_cli}:{sc_scope}" if sc_cli == "claude" else sc_cli
