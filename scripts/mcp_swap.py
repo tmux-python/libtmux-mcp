@@ -809,7 +809,12 @@ def cmd_revert(args: argparse.Namespace) -> int:
             label = f"{cli}:{args.scope}" if args.scope and cli == "claude" else cli
             print(f"[{label}] no state entry — skip")
             continue
-        for key in cli_keys:
+        # Unwind in reverse-registration order (LIFO). When two scopes
+        # back the same physical file (Claude user + project), the
+        # later swap's backup contains the earlier swap's modifications,
+        # so each backup must restore its own layer *before* the prior
+        # one is reapplied. Same discipline as ``contextlib.ExitStack``.
+        for key in reversed(cli_keys):
             sc_cli, sc_scope = key
             entry = state[key]
             label = f"{sc_cli}:{sc_scope}" if sc_cli == "claude" else sc_cli

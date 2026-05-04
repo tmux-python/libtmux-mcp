@@ -436,6 +436,69 @@ def test_claude_user_and_project_swaps_coexist_independently(
     assert proj_entry["command"] == "uv"
 
 
+def test_claude_full_revert_unwinds_both_scopes_in_lifo_order(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Reverting both Claude scopes (no ``--scope`` filter) restores the original.
+
+    Regression: forward iteration over the swap-chronological state dict
+    leaves the file in the post-first-swap state because the second
+    backup contains the first swap's modifications. The two backups
+    form a layered stack — they must be unwound in reverse-registration
+    order (LIFO) so each backup peels off its own layer before the
+    prior one is restored. CPython's ``contextlib.ExitStack`` uses the
+    same LIFO discipline for the same reason.
+    """
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    original = info.config_path.read_bytes()
+    parser = mcp_swap.build_parser()
+
+    # Two swaps in registration order: project first, then user.
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "claude"]
+            )
+        )
+        == 0
+    )
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                [
+                    "use-local",
+                    "--repo",
+                    str(fake_repo),
+                    "--cli",
+                    "claude",
+                    "--scope",
+                    "user",
+                ]
+            )
+        )
+        == 0
+    )
+
+    # Full revert: no --scope filter — must unwind BOTH layers.
+    assert mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "claude"])) == 0
+
+    # Forward iteration would leave the file in the post-first-swap state
+    # (project-scope still local). LIFO restores the true original.
+    assert info.config_path.read_bytes() == original
+    assert not mcp_swap.STATE_FILE.exists()
+
+
 def test_legacy_v1_state_migrates_to_v2_keys(
     fake_home: pathlib.Path, fake_repo: pathlib.Path
 ) -> None:
