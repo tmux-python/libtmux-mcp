@@ -877,13 +877,16 @@ def cmd_revert(args: argparse.Namespace) -> int:
             continue
         # Unwind in reverse-registration order (LIFO) — sort by the
         # explicit ``SwapEntry.seq_no`` counter so order is independent
-        # of JSON parse order, dict iteration, hand-edited state, or
-        # wall-clock collisions. When two scopes back the same physical
-        # file (Claude user + project), the later swap's backup contains
-        # the earlier swap's modifications, so each backup must restore
-        # its own layer before the prior one is restored. Same explicit
-        # counter pattern CPython's ``Lib/sched.py`` uses to break ties
-        # on ``Event(time, priority, sequence, …)``.
+        # of JSON parse order, dict iteration, and wall-clock
+        # collisions. ``seq_no`` itself is not validated on load, so a
+        # hand-edited ``state.json`` with corrupted counter values is
+        # outside the guarantees here. When two scopes back the same
+        # physical file (Claude user + project), the later swap's
+        # backup contains the earlier swap's modifications, so each
+        # backup must restore its own layer before the prior one is
+        # restored. Same explicit counter pattern CPython's
+        # ``Lib/sched.py`` uses to break ties on ``Event(time,
+        # priority, sequence, …)``.
         cli_keys.sort(key=lambda k: state[k].seq_no, reverse=True)
         for key in cli_keys:
             sc_cli, sc_scope = key
