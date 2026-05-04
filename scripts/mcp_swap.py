@@ -804,7 +804,7 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         # Claude is the only CLI where two swaps (different scopes) can
         # touch the same config file in one second; embed the scope so
         # the second backup doesn't overwrite the first. Non-Claude
-        # filenames stay byte-compatible with v1 backups.
+        # backup filenames carry no scope suffix.
         backup_suffix = f"{BACKUP_SUFFIX_PREFIX}{ts}"
         if cli == "claude":
             backup_suffix += f"-{scope}"
