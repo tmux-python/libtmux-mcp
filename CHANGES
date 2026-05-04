@@ -6,6 +6,35 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Pane geometry on every pane response**
+
+`PaneInfo`, `PaneContentMatch`, and `PaneSnapshot` now carry
+window-relative geometry: `pane_left` / `pane_top` / `pane_right` /
+`pane_bottom` (typed `int | None`) and the four `pane_at_left` /
+`pane_at_right` / `pane_at_top` / `pane_at_bottom` edge predicates
+(typed `bool | None`), plus `pane_tty`. Agents can reason about
+layout — "is this the bottom-right pane?" — directly off the
+returned model instead of running {tooliconl}`display-message` and
+parsing the raw format-string output. {tooliconl}`snapshot-pane`
+fetches the new vars in the same `display-message` round-trip it
+already makes, so there is no extra tmux call.
+
+Note: the older `pane_width` and `pane_height` fields on `PaneInfo`
+and `PaneContentMatch` remain typed `str | None` — switching them
+to `int | None` is a breaking schema change orthogonal to this work
+and is left as a follow-up.
+
+**New tools**
+
+- {tooliconl}`find-pane-by-position` — return the `PaneInfo` for the
+  pane occupying a given window corner (`'top-left'`, `'top-right'`,
+  `'bottom-left'`, `'bottom-right'`). Composes the four `pane_at_*`
+  predicates, with a `pane_left + pane_top` tie-break for layouts
+  that have multiple corner candidates (e.g. single-pane windows
+  touch every edge).
+
 ### Development
 
 - `scripts/mcp_swap.py` — `use-local` and `revert` accept
@@ -36,6 +65,9 @@ _Notes on upcoming releases will be added here_
   `localStorage` (CLS drops to 0), and the sidebar logo plus all
   bold and italic text no longer pop in late as fonts arrive.
   (#36)
+- Topic page added for {tooliconl}`find-pane-by-position`;
+  {tooliconl}`get-pane-info` example response refreshed to show the
+  new geometry fields.
 
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
