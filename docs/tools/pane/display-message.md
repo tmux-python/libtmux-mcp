@@ -10,8 +10,12 @@ it wraps), this tool does **not** display anything to the user; it expands
 the format string with `display-message -p` and returns the value.
 
 **Avoid when** a dedicated tool already provides the information — e.g. use
-{tooliconl}`snapshot-pane` for cursor position and mode, or
-{tooliconl}`get-pane-info` for standard metadata.
+{tooliconl}`snapshot-pane` for cursor position and mode,
+{tooliconl}`get-pane-info` for standard metadata (including the new
+`pane_left` / `pane_top` / `pane_at_*` geometry block), or
+{tooliconl}`find-pane-by-position` to resolve a window corner to a
+`PaneInfo` without parsing `#{pane_at_bottom}` / `#{pane_at_right}`
+yourself.
 
 **Side effects:** None. Readonly.
 
