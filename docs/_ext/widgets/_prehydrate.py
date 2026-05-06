@@ -88,6 +88,19 @@ def _build_style() -> str:
     Selectors are enumerated from :data:`CLIENTS` / :data:`METHODS` so adding
     a client or method auto-extends the prehydrate rules — no second source of
     truth to drift from.
+
+    Rules are wrapped in ``@layer mcp-install-prehydrate``. ``gp-furo-theme``
+    ships Tailwind v4's preflight inside ``@layer base``, including
+    ``[hidden]:where(:not([hidden="until-found"])){display:none!important}``.
+    Per CSS Cascade Level 5, important-rule layer ordering is reversed:
+    rules in *any* cascade layer outrank ``!important`` unlayered rules
+    regardless of specificity. An unlayered prehydrate ``<style>`` therefore
+    loses to the preflight on the saved panel, so the saved panel paints as
+    ``display:none`` until ``widget.js`` mutates ``[hidden]`` and the
+    install widget visibly grows. Declaring our rules in their own layer
+    makes them the *first* layer the browser encounters (the prehydrate
+    ``<style>`` lives in ``metatags``, before any ``<link>``), which is
+    the highest-priority layer for ``!important``.
     """
     client_ids = tuple(c.id for c in CLIENTS)
     method_ids = tuple(m.id for m in METHODS)
@@ -98,7 +111,7 @@ def _build_style() -> str:
         _PANEL_HIDE_RULE,
         _panel_active_selectors(client_ids, method_ids) + _PANEL_ACTIVE_DECL,
     ]
-    return "<style>" + "".join(rules) + "</style>"
+    return "<style>@layer mcp-install-prehydrate{" + "".join(rules) + "}</style>"
 
 
 def _snippet() -> str:

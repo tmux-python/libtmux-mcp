@@ -11,6 +11,18 @@ _Notes on upcoming releases will be added here_
 - Bump gp-sphinx docs stack to v0.0.1a16 — docs site now renders
   via `gp-furo-theme`, a Tailwind v4 respin of Furo, with
   `sphinx-vite-builder` handling theme-asset builds (#33)
+- {mcp-install} no longer flashes on initial paint when a non-default
+  `(client, method)` is saved in `localStorage`. The prehydrate
+  `<style>` was unlayered while `gp-furo-theme` ships Tailwind
+  preflight's `[hidden]:where(...){display:none!important}` inside
+  `@layer base`; per CSS Cascade Level 5, `!important` rules in any
+  layer outrank `!important` unlayered rules regardless of selector
+  specificity, so the saved panel painted as `display:none` until
+  `widget.js` ran. Wrapping the prehydrate rules in
+  `@layer mcp-install-prehydrate` (declared first in `<head>` so it
+  becomes the highest-priority layer for `!important`) makes the
+  saved panel paint correctly on the first frame. Cumulative Layout
+  Shift on `/` drops from 0.0299 to 0.
 
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
