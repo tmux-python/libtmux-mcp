@@ -13,9 +13,9 @@ _Notes on upcoming releases will be added here_
   `sphinx-vite-builder` handling theme-asset builds (#33)
 - Eliminate first-paint jank on the docs site: `{mcp-install}` no
   longer flashes when restoring a saved client/method from
-  `localStorage` (CLS drops to 0), and the sidebar logo plus
-  bold/italic text in headings and the announcement bar no longer
-  pop in late as fonts arrive. (#36)
+  `localStorage` (CLS drops to 0), and the sidebar logo plus all
+  bold and italic text no longer pop in late as fonts arrive.
+  (#36)
 
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 

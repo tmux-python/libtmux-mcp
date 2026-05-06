@@ -80,6 +80,11 @@ conf = merge_sphinx_config(
         # after the preloaded normal weights and the announcement
         # italic pops in late on first paint.
         ("IBM Plex Sans", 400, "italic"),
+        # Bold inline code (<strong><code>, ~14 hits on the index)
+        # uses Mono 700. Without preload, it loads ~30 ms after the
+        # other critical fonts and bold inline code transiently
+        # renders at fallback weight before swap.
+        ("IBM Plex Mono", 700, "normal"),
     ],
 )
 
