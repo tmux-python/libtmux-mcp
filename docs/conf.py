@@ -8,6 +8,7 @@ import sys
 import typing as t
 
 from gp_sphinx.config import make_linkcode_resolve, merge_sphinx_config
+from gp_sphinx.defaults import DEFAULT_SPHINX_FONT_PRELOAD
 
 import libtmux_mcp
 
@@ -64,6 +65,17 @@ conf = merge_sphinx_config(
     rediraffe_redirects="redirects.txt",
     copybutton_selector="div.highlight pre, div.admonition.prompt > p:last-child",
     copybutton_exclude=".linenos, .admonition-title",
+    # gp-sphinx's default preloads only Sans 400/700 + Mono 400. furo-tw.css
+    # uses Sans 500 (h1-h6, sidebar labels, definition list terms) and 600
+    # (blockquote.epigraph). Without preload, those weights download lazily
+    # after first paint and the heading text visibly re-flows when the
+    # font finally lands (font-display: block hides the text for ~3s
+    # then swaps, so it reads as a flicker rather than fallback-then-real).
+    sphinx_font_preload=[
+        *DEFAULT_SPHINX_FONT_PRELOAD,
+        ("IBM Plex Sans", 500, "normal"),
+        ("IBM Plex Sans", 600, "normal"),
+    ],
 )
 
 conf["myst_enable_extensions"] = [*conf["myst_enable_extensions"], "attrs_inline"]
