@@ -75,6 +75,11 @@ conf = merge_sphinx_config(
         *DEFAULT_SPHINX_FONT_PRELOAD,
         ("IBM Plex Sans", 500, "normal"),
         ("IBM Plex Sans", 600, "normal"),
+        # The announcement bar contains <em>Pre-alpha.</em>, which
+        # resolves to 400 italic. Without preload, it loads ~54 ms
+        # after the preloaded normal weights and the announcement
+        # italic pops in late on first paint.
+        ("IBM Plex Sans", 400, "italic"),
     ],
 )
 
