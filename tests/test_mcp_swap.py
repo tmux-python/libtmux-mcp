@@ -982,3 +982,170 @@ def test_status_continues_to_other_clis_on_malformed_claude(
     assert "[claude]" in captured.err
     assert "layout appears to have changed" in captured.err
     assert "Traceback" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# State-file resilience — hand-edited corruption must not crash the script.
+# Schema is internal (no compat contract) so the policy is "drop on parse
+# failure", consistent with how malformed state-file keys already behave.
+# ---------------------------------------------------------------------------
+
+
+def test_load_state_drops_entries_with_non_int_seq_no(
+    fake_home: pathlib.Path,
+) -> None:
+    """A non-coercible ``seq_no`` is dropped at load time.
+
+    Same drop-on-malformed posture as :func:`mcp_swap._parse_state_key`:
+    schema is internal, so a hand-edited file with corrupt counter
+    values is silently skipped rather than crashing.
+    """
+    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "entries": {
+            "claude:user": {
+                "config_path": "/tmp/cfg.json",
+                "backup_path": "/tmp/cfg.json.bak",
+                "server": "libtmux",
+                "action": "replaced",
+                "swapped_at": "20260101000000",
+                "seq_no": "not-an-int",  # corrupted
+            },
+            "claude:project": {
+                "config_path": "/tmp/cfg.json",
+                "backup_path": "/tmp/cfg.json.bak2",
+                "server": "libtmux",
+                "action": "replaced",
+                "swapped_at": "20260101000001",
+                "seq_no": 1,  # well-formed
+            },
+        },
+    }
+    mcp_swap.STATE_FILE.write_text(json.dumps(payload))
+
+    state = mcp_swap.load_state()
+    assert ("claude", "user") not in state
+    assert ("claude", "project") in state
+    assert state[("claude", "project")].seq_no == 1
+
+
+def test_load_state_coerces_numeric_string_seq_no(
+    fake_home: pathlib.Path,
+) -> None:
+    """A numeric-string ``seq_no`` is coerced via ``int()``, not dropped.
+
+    Distinguishes "user typed quotes around the number" from "user
+    typed something non-numeric": the former should still load
+    cleanly, the latter should drop.
+    """
+    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "entries": {
+            "cursor:user": {
+                "config_path": "/tmp/cfg.json",
+                "backup_path": "/tmp/cfg.json.bak",
+                "server": "libtmux",
+                "action": "replaced",
+                "swapped_at": "20260101000000",
+                "seq_no": "3",  # numeric string — coerce
+            },
+        },
+    }
+    mcp_swap.STATE_FILE.write_text(json.dumps(payload))
+
+    state = mcp_swap.load_state()
+    assert ("cursor", "user") in state
+    assert state[("cursor", "user")].seq_no == 3
+
+
+def test_load_state_drops_entries_with_missing_required_fields(
+    fake_home: pathlib.Path,
+) -> None:
+    """Entries missing required SwapEntry fields are dropped, not raised.
+
+    Pre-fix, ``SwapEntry(**v)`` raised ``TypeError: missing 1 required
+    positional argument: 'seq_no'`` and aborted the load. Post-fix,
+    :func:`mcp_swap._parse_state_entry` catches ``TypeError`` and
+    returns ``None``, dropping the entry.
+    """
+    mcp_swap.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "entries": {
+            "cursor:user": {
+                # Missing seq_no entirely.
+                "config_path": "/tmp/cfg.json",
+                "backup_path": "/tmp/cfg.json.bak",
+                "server": "libtmux",
+                "action": "replaced",
+                "swapped_at": "20260101000000",
+            },
+        },
+    }
+    mcp_swap.STATE_FILE.write_text(json.dumps(payload))
+
+    state = mcp_swap.load_state()
+    assert state == {}
+
+
+def test_revert_with_corrupt_seq_no_does_not_crash(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+) -> None:
+    """Same-CLI two-scope state with one corrupt ``seq_no`` does not raise TypeError.
+
+    Regression: the LIFO sort at ``cmd_revert`` would compare ``int`` vs
+    ``str`` (``int < str`` raises in Python 3) when two same-CLI
+    entries existed and one had a hand-edited corrupt counter.
+    Cross-CLI buckets are length-1 and never invoke comparison —
+    making the failure mode asymmetric, only triggering on Claude
+    project + user. Validating at load time eliminates the
+    asymmetry: the corrupt entry is dropped before it reaches the
+    sort, so the well-formed entry's revert applies normally.
+    """
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    parser = mcp_swap.build_parser()
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "claude"]
+            )
+        )
+        == 0
+    )
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                [
+                    "use-local",
+                    "--repo",
+                    str(fake_repo),
+                    "--cli",
+                    "claude",
+                    "--scope",
+                    "user",
+                ]
+            )
+        )
+        == 0
+    )
+
+    # Hand-edit one of the two entries to corrupt seq_no.
+    raw = json.loads(mcp_swap.STATE_FILE.read_text())
+    raw["entries"]["claude:user"]["seq_no"] = "not-an-int"
+    mcp_swap.STATE_FILE.write_text(json.dumps(raw))
+
+    # Revert must NOT raise TypeError. The corrupt entry is silently
+    # dropped at load time; the well-formed entry's revert applies.
+    rc = mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "claude"]))
+    assert rc == 0

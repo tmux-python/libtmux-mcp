@@ -126,6 +126,30 @@ def _parse_state_key(key: str) -> tuple[CLIName, Scope] | None:
     return None
 
 
+def _parse_state_entry(v: dict[str, t.Any]) -> SwapEntry | None:
+    """Build a :class:`SwapEntry` from a raw state-file dict, or ``None``.
+
+    Validates at the trust boundary so a hand-edited ``state.json`` can't
+    crash later code paths — particularly :func:`cmd_revert`'s LIFO sort,
+    which compares ``SwapEntry.seq_no`` and would raise ``TypeError`` on a
+    mixed ``int``/``str`` ordering. ``seq_no`` is coerced via ``int()``;
+    any ``KeyError`` (missing required field), ``ValueError`` (non-numeric
+    string), or ``TypeError`` (wrong shape, extra keys for the dataclass)
+    drops the entry silently. Same drop-on-malformed posture as
+    :func:`_parse_state_key`.
+
+    Mirrors CPython's ``Lib/sched.py`` discipline: validate at the
+    counter's *origin* (``enterabs`` for sched, ``load_state`` here), not
+    at sort time. State-file schema is internal — no compatibility
+    contract — so silent drop is the right failure mode.
+    """
+    try:
+        v = {**v, "seq_no": int(v["seq_no"])}
+        return SwapEntry(**v)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _xdg_state_home() -> pathlib.Path:
     """Resolve ``$XDG_STATE_HOME`` per the XDG Base Directory spec.
 
@@ -589,8 +613,9 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
 
     The state file's schema is internal — no compatibility contract —
     so this loader assumes a single canonical shape. Malformed keys
-    (those that don't parse as ``cli:scope``) are dropped silently so
-    a hand-edited file cannot crash the script.
+    (those that don't parse as ``cli:scope``) and entries with a
+    non-coercible ``seq_no`` or missing required fields are dropped
+    silently so a hand-edited file cannot crash the script.
     """
     if not STATE_FILE.exists():
         return {}
@@ -601,7 +626,10 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
         parsed = _parse_state_key(k)
         if parsed is None:
             continue
-        out[parsed] = SwapEntry(**v)
+        entry = _parse_state_entry(v)
+        if entry is None:
+            continue
+        out[parsed] = entry
     return out
 
 
@@ -899,15 +927,15 @@ def cmd_revert(args: argparse.Namespace) -> int:
         # Unwind in reverse-registration order (LIFO) — sort by the
         # explicit ``SwapEntry.seq_no`` counter so order is independent
         # of JSON parse order, dict iteration, and wall-clock
-        # collisions. ``seq_no`` itself is not validated on load, so a
-        # hand-edited ``state.json`` with corrupted counter values is
-        # outside the guarantees here. When two scopes back the same
-        # physical file (Claude user + project), the later swap's
-        # backup contains the earlier swap's modifications, so each
-        # backup must restore its own layer before the prior one is
-        # restored. Same explicit counter pattern CPython's
-        # ``Lib/sched.py`` uses to break ties on ``Event(time,
-        # priority, sequence, …)``.
+        # collisions. ``seq_no`` is coerced to ``int`` at load time by
+        # ``_parse_state_entry``; entries with a non-coercible value
+        # are dropped before they reach this sort, so the comparison
+        # is always int vs int. When two scopes back the same physical
+        # file (Claude user + project), the later swap's backup
+        # contains the earlier swap's modifications, so each backup
+        # must restore its own layer before the prior one is restored.
+        # Same explicit counter pattern CPython's ``Lib/sched.py`` uses
+        # to break ties on ``Event(time, priority, sequence, …)``.
         cli_keys.sort(key=lambda k: state[k].seq_no, reverse=True)
         for key in cli_keys:
             sc_cli, sc_scope = key
