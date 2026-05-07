@@ -48,9 +48,10 @@ invocation with no reinstall step.
 
 ### `--scope {user,project}` (Claude only)
 
-Claude's `~/.claude.json` has two layers: a top-level `mcpServers`
-fallback that any project without an override picks up, and per-project
-`projects.<abs>.mcpServers` overrides. The flag selects which layer the
+Claude's `~/.claude.json` supports two config scopes for MCP servers:
+a user/system-level top-level `mcpServers` fallback that any project
+without an override picks up, and a project-level
+`projects.<abs>.mcpServers` override. The flag selects which scope the
 swap writes:
 
 ```console

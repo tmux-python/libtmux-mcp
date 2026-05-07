@@ -82,11 +82,12 @@ import tomlkit.items
 CLIName = t.Literal["claude", "codex", "cursor", "gemini"]
 ALL_CLIS: tuple[CLIName, ...] = ("claude", "codex", "cursor", "gemini")
 
-#: Two-layer Claude config: ``"user"`` writes the top-level ``mcpServers``
-#: fallback that applies to every project without its own override; ``"project"``
-#: writes the per-project ``projects.<abs>.mcpServers`` node. Codex / Cursor /
-#: Gemini have no per-project layer in their config files, so for those CLIs
-#: the scope is always normalised to ``"user"`` regardless of what was passed.
+#: Claude config scope: ``"user"`` targets the user/system-level top-level
+#: ``mcpServers`` fallback that applies to every project without its own
+#: override; ``"project"`` targets the project-level per-project
+#: ``projects.<abs>.mcpServers`` node. Codex / Cursor / Gemini have no
+#: per-project scope in their config files, so for those CLIs the scope
+#: is always normalised to ``"user"`` regardless of what was passed.
 Scope = t.Literal["user", "project"]
 ALL_SCOPES: tuple[Scope, ...] = ("user", "project")
 
