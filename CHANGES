@@ -6,6 +6,26 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Development
+
+- `scripts/mcp_swap.py` — `use-local` and `revert` accept
+  `--scope {user,project}` so a Claude install can target either the
+  top-level `mcpServers` fallback (every project without an override
+  picks it up) or the per-project `projects.<abs>.mcpServers` entry.
+  Default `project` preserves the previous behaviour. Codex / Cursor /
+  Gemini have no per-project layer; the flag is silently coerced to
+  `user` for them. A single install can hold both scopes
+  simultaneously with independent backups, and `revert --scope user`
+  restores just one layer. Full `revert` unwinds in LIFO order via an
+  explicit `seq_no` counter on each state entry — no reliance on dict
+  iteration through the JSON round-trip. Shape validation is
+  centralised in `_claude_user_servers` / `_claude_project_node`
+  helpers so read / write / delete fail symmetrically with
+  `RuntimeError` on a malformed Claude config. The state-file schema
+  is internal — no compatibility contract; running an older `mcp_swap`
+  against a newer `state.json` is undefined behaviour and not
+  supported. (#35)
+
 ### Documentation
 
 - Bump gp-sphinx docs stack to v0.0.1a16 — docs site now renders
