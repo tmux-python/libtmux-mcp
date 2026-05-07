@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a5 (2026-05-06)
+
+_Pane geometry on response models, the `find_pane_by_position`
+corner-finder, and `mcp_swap --scope` targeting project or
+user/system config scope._
+
 ### What's new
 
 **New tools**
