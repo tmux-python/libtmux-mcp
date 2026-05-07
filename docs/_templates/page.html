@@ -1,0 +1,23 @@
+{# Project-local override of gp-furo/base.html's logo prefetch hints.
+   gp-furo's default emits <link rel="prefetch"> for logos, which Chrome
+   treats as Lowest priority for a future navigation — so the sidebar
+   <img> first encounter triggers a fresh network request and the logo
+   pops in late. We use this logo on the current page, not a future one,
+   so rel="preload" is the correct hint. Also: light_logo and dark_logo
+   are the same file in this project, so emit a single tag (the browser
+   would dedupe URL-identical requests anyway, but two tags is noise).
+#}
+{% extends "!page.html" %}
+
+{% block logo_prefetch_links %}
+{%- if logo_url -%}
+<link rel="preload" href="{{ logo_url }}" as="image">
+{%- elif theme_light_logo and theme_dark_logo -%}
+{%- set light_path = pathto('_static/' + theme_light_logo, 1) -%}
+{%- set dark_path = pathto('_static/' + theme_dark_logo, 1) -%}
+<link rel="preload" href="{{ light_path }}" as="image">
+{%- if dark_path != light_path %}
+<link rel="preload" href="{{ dark_path }}" as="image">
+{%- endif -%}
+{%- endif -%}
+{% endblock %}

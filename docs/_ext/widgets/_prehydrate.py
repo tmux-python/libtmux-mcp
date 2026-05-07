@@ -26,20 +26,29 @@ if t.TYPE_CHECKING:
     from sphinx.application import Sphinx
 
 
+# Every prehydrate declaration is ``!important``. The whole block lives in
+# ``@layer mcp-install-prehydrate`` (see :func:`_build_style`) and per CSS
+# Cascade Level 5 only ``!important`` declarations get the layer-priority
+# *reversal* that makes a layered rule outrank an unlayered one. Normal
+# (non-``!important``) rules in a layer LOSE to unlayered rules of the same
+# specificity — which is what bit the original tab rules: they were
+# specific enough to beat ``widget.css``'s ``.tab[aria-selected="true"]``
+# unlayered, but became powerless once we wrapped the prehydrate in a layer
+# to fix the panel cascade against ``furo-tw``'s ``[hidden]`` preflight.
 _TAB_DEACTIVATE_RULE = (
     "html[data-mcp-install-client] .lm-mcp-install__tab"
     '[data-tab-kind="client"][aria-selected="true"],'
     "html[data-mcp-install-method] .lm-mcp-install__tab"
     '[data-tab-kind="method"][aria-selected="true"]'
-    "{color:var(--color-foreground-muted);"
-    "border-bottom-color:transparent;"
-    "background:transparent}"
+    "{color:var(--color-foreground-muted) !important;"
+    "border-bottom-color:transparent !important;"
+    "background:transparent !important}"
 )
 
 _TAB_ACTIVE_DECL = (
-    "{color:var(--color-brand-primary);"
-    "border-bottom-color:var(--color-brand-primary);"
-    "background:var(--color-background-primary)}"
+    "{color:var(--color-brand-primary) !important;"
+    "border-bottom-color:var(--color-brand-primary) !important;"
+    "background:var(--color-background-primary) !important}"
 )
 
 _PANEL_HIDE_RULE = (
@@ -88,6 +97,27 @@ def _build_style() -> str:
     Selectors are enumerated from :data:`CLIENTS` / :data:`METHODS` so adding
     a client or method auto-extends the prehydrate rules — no second source of
     truth to drift from.
+
+    Rules are wrapped in ``@layer mcp-install-prehydrate``. ``gp-furo-theme``
+    ships Tailwind v4's preflight inside ``@layer base``, including
+    ``[hidden]:where(:not([hidden="until-found"])){display:none!important}``.
+    Per CSS Cascade Level 5, important-rule layer ordering is reversed:
+    rules in *any* cascade layer outrank ``!important`` unlayered rules
+    regardless of specificity. An unlayered prehydrate ``<style>`` therefore
+    loses to the preflight on the saved panel, so the saved panel paints as
+    ``display:none`` until ``widget.js`` mutates ``[hidden]`` and the
+    install widget visibly grows. Declaring our rules in their own layer
+    makes them the *first* layer the browser encounters (the prehydrate
+    ``<style>`` lives in ``metatags``, before any ``<link>``), which is
+    the highest-priority layer for ``!important``.
+
+    The reversal only applies to ``!important`` declarations. *Normal*
+    layered rules LOSE to *normal* unlayered rules — so every declaration
+    here is ``!important``, including the tab active/inactive colours
+    that competed (and won, unlayered) against ``widget.css``'s
+    ``.lm-mcp-install__tab[aria-selected="true"]`` purely on specificity.
+    Drop the ``!important`` on a tab declaration and the active-tab
+    indicator will flash from server default to saved state on first paint.
     """
     client_ids = tuple(c.id for c in CLIENTS)
     method_ids = tuple(m.id for m in METHODS)
@@ -98,7 +128,7 @@ def _build_style() -> str:
         _PANEL_HIDE_RULE,
         _panel_active_selectors(client_ids, method_ids) + _PANEL_ACTIVE_DECL,
     ]
-    return "<style>" + "".join(rules) + "</style>"
+    return "<style>@layer mcp-install-prehydrate{" + "".join(rules) + "}</style>"
 
 
 def _snippet() -> str:

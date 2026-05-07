@@ -5,6 +5,12 @@
  * localStorage state is re-applied on DOMContentLoaded and on every
  * gp-sphinx:navigated event (see sphinx-gp-theme's README for the contract).
  *
+ * Visibility is fully CSS-driven by <html data-mcp-install-*> attrs and the
+ * @layer mcp-install-prehydrate rules in docs/_ext/widgets/_prehydrate.py.
+ * This script never mutates the panels' [hidden] attributes — it only
+ * keeps tab aria-selected and the <html> data-attrs in sync with the
+ * current selection. The CSS handles the rest.
+ *
  * Vanilla JS, no deps.
  */
 (function () {
@@ -76,13 +82,20 @@
     });
     if (!found) return; // value not available in this widget — ignore.
 
-    updatePanels(widget);
+    // Mirror current widget state onto <html> so _prehydrate.py's
+    // @layer mcp-install-prehydrate selectors drive panel visibility.
+    // Both attrs must be present for _panel_active to match, so set them
+    // unconditionally on every selection — including the click-before-saved
+    // case where the user picks a method without ever choosing a client
+    // (the other kind still has its server-default aria-selected to read).
+    var html = document.documentElement;
+    var clientValue = selectedValue(widget, "client");
+    var methodValue = selectedValue(widget, "method");
+    if (clientValue) html.setAttribute("data-mcp-install-client", clientValue);
+    if (methodValue) html.setAttribute("data-mcp-install-method", methodValue);
 
     if (opts.persist) {
       localStorage.setItem(STORAGE[kind], value);
-      // Keep <html> attr in sync so the prehydrate CSS in _prehydrate.py
-      // continues to drive active state across SPA navigations after a click.
-      document.documentElement.setAttribute("data-mcp-install-" + kind, value);
     }
     if (opts.broadcast) {
       window.dispatchEvent(
@@ -91,16 +104,6 @@
         })
       );
     }
-  }
-
-  function updatePanels(widget) {
-    var client = selectedValue(widget, "client");
-    var method = selectedValue(widget, "method");
-    widget.querySelectorAll(".lm-mcp-install__panel").forEach(function (panel) {
-      var match = panel.dataset.client === client && panel.dataset.method === method;
-      if (match) panel.removeAttribute("hidden");
-      else panel.setAttribute("hidden", "");
-    });
   }
 
   function selectedValue(widget, kind) {
