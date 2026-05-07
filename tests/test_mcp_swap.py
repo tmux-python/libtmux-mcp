@@ -899,3 +899,86 @@ def test_claude_user_scope_delete_server_rejects_non_mapping_mcpServers(
     config: dict[str, t.Any] = {"mcpServers": "not a dict"}
     with pytest.raises(RuntimeError, match="layout appears to have changed"):
         mcp_swap.delete_server("claude", config, "libtmux", fake_repo, scope="user")
+
+
+# ---------------------------------------------------------------------------
+# Graceful CLI error UX — RuntimeError from shape guards must not surface
+# as a Python traceback at the CLI boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_use_local_returns_clean_error_on_malformed_claude_user_mcpServers(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A malformed Claude config produces a clean error + exit 1, no traceback.
+
+    Regression: ``set_server``'s shape guard raises ``RuntimeError`` from
+    ``_claude_user_servers``, which previously propagated past
+    ``cmd_use_local``'s inner ``try/except`` (that one wraps only
+    ``atomic_write`` + ``_revalidate``). Per-CLI ``try/except RuntimeError``
+    around the config-prep region now catches it. Pattern follows pytest's
+    main-level ``UsageError`` formatter in ``_pytest/config/__init__.py``.
+    """
+    info = mcp_swap.CLIS["claude"]
+    info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    info.config_path.write_text(json.dumps({"mcpServers": "not a dict"}))
+
+    rc = mcp_swap.main(
+        [
+            "use-local",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--scope",
+            "user",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "[claude:user]" in captured.err
+    assert "layout appears to have changed" in captured.err
+    # No Python traceback should reach the user — only the formatted error.
+    assert "Traceback" not in captured.err
+
+
+def test_status_continues_to_other_clis_on_malformed_claude(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A malformed Claude config does not abort the rest of the status batch.
+
+    Per-CLI continuation: cursor's status line still prints even when
+    Claude's config is corrupt. Same per-CLI continuation pattern
+    ``cmd_use_local`` and ``cmd_revert`` already use.
+    """
+    cursor_info = mcp_swap.CLIS["cursor"]
+    _write_json(
+        cursor_info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}}
+    )
+    claude_info = mcp_swap.CLIS["claude"]
+    claude_info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    claude_info.config_path.write_text(json.dumps({"mcpServers": "not a dict"}))
+
+    rc = mcp_swap.main(
+        [
+            "status",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--cli",
+            "cursor",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    # Cursor line still printed despite Claude being malformed.
+    assert "[cursor]" in captured.out
+    # Claude error printed to stderr, not stdout — and no traceback.
+    assert "[claude]" in captured.err
+    assert "layout appears to have changed" in captured.err
+    assert "Traceback" not in captured.err

@@ -699,34 +699,43 @@ def cmd_status(args: argparse.Namespace) -> int:
         if not info.config_path.exists():
             print(f"[{cli}] (no config at {info.config_path})")
             continue
-        config = load_config(info)
-        if cli == "claude":
-            user_spec = get_server(cli, config, server, repo, scope="user")
-            project_spec = get_server(cli, config, server, repo, scope="project")
-            shown = False
-            if user_spec is not None:
-                tag = _describe_spec(user_spec, repo)
+        # Wrap the read + shape-guarded queries in try/except RuntimeError
+        # so a malformed Claude config surfaces as a clean per-CLI error
+        # instead of aborting status output for the rest of the CLIs.
+        try:
+            config = load_config(info)
+            if cli == "claude":
+                user_spec = get_server(cli, config, server, repo, scope="user")
+                project_spec = get_server(cli, config, server, repo, scope="project")
+                shown = False
+                if user_spec is not None:
+                    tag = _describe_spec(user_spec, repo)
+                    print(
+                        f"[claude:user] {server} = {user_spec.command} "
+                        f"{' '.join(user_spec.args)}  ({tag})"
+                    )
+                    shown = True
+                if project_spec is not None:
+                    tag = _describe_spec(project_spec, repo)
+                    print(
+                        f"[claude:project] {server} = {project_spec.command} "
+                        f"{' '.join(project_spec.args)}  ({tag})"
+                    )
+                    shown = True
+                if not shown:
+                    print(f"[claude] no entry for {server!r}")
+            else:
+                spec = get_server(cli, config, server, repo)
+                if spec is None:
+                    print(f"[{cli}] no entry for {server!r}")
+                    continue
+                tag = _describe_spec(spec, repo)
                 print(
-                    f"[claude:user] {server} = {user_spec.command} "
-                    f"{' '.join(user_spec.args)}  ({tag})"
+                    f"[{cli}] {server} = {spec.command} {' '.join(spec.args)}  ({tag})"
                 )
-                shown = True
-            if project_spec is not None:
-                tag = _describe_spec(project_spec, repo)
-                print(
-                    f"[claude:project] {server} = {project_spec.command} "
-                    f"{' '.join(project_spec.args)}  ({tag})"
-                )
-                shown = True
-            if not shown:
-                print(f"[claude] no entry for {server!r}")
-        else:
-            spec = get_server(cli, config, server, repo)
-            if spec is None:
-                print(f"[{cli}] no entry for {server!r}")
-                continue
-            tag = _describe_spec(spec, repo)
-            print(f"[{cli}] {server} = {spec.command} {' '.join(spec.args)}  ({tag})")
+        except RuntimeError as exc:
+            print(f"[{cli}] {exc}", file=sys.stderr)
+            continue
     return 0
 
 
@@ -771,24 +780,36 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         if not info.config_path.exists():
             print(f"[{label}] skip — config not found at {info.config_path}")
             continue
-        original_bytes = info.config_path.read_bytes()
-        config = load_config(info)
-        current = get_server(cli, config, server, repo, scope=scope)
-        if (
-            current
-            and current.is_local_uv_directory()
-            and current.local_repo_path() == repo
-        ):
-            print(f"[{label}] already local (this repo) — no change")
+        # Wrap the read + shape-guarded mutation in try/except RuntimeError
+        # so a malformed Claude config (top-level mcpServers / projects not a
+        # mapping) surfaces as a clean per-CLI error instead of an uncaught
+        # traceback. Same per-CLI continuation pattern the inner write-failure
+        # handler below uses.
+        try:
+            original_bytes = info.config_path.read_bytes()
+            config = load_config(info)
+            current = get_server(cli, config, server, repo, scope=scope)
+            if (
+                current
+                and current.is_local_uv_directory()
+                and current.local_repo_path() == repo
+            ):
+                print(f"[{label}] already local (this repo) — no change")
+                continue
+            # Preserve the existing entry's env on replacement. ``build_local_spec``
+            # writes an empty env, so without this merge a swap would silently drop
+            # client-side settings (LIBTMUX_SAFETY, LIBTMUX_SOCKET, custom dev
+            # knobs). Symmetric with ``_spec_from_entry`` which round-trips env on
+            # the read side.
+            cli_spec = (
+                dataclasses.replace(spec, env={**current.env}) if current else spec
+            )
+            action = set_server(cli, config, server, cli_spec, repo, scope=scope)
+            new_bytes = dump_config_bytes(info, config)
+        except RuntimeError as exc:
+            print(f"[{label}] {exc}", file=sys.stderr)
+            had_error = 1
             continue
-        # Preserve the existing entry's env on replacement. ``build_local_spec``
-        # writes an empty env, so without this merge a swap would silently drop
-        # client-side settings (LIBTMUX_SAFETY, LIBTMUX_SOCKET, custom dev
-        # knobs). Symmetric with ``_spec_from_entry`` which round-trips env on
-        # the read side.
-        cli_spec = dataclasses.replace(spec, env={**current.env}) if current else spec
-        action = set_server(cli, config, server, cli_spec, repo, scope=scope)
-        new_bytes = dump_config_bytes(info, config)
 
         if args.dry_run:
             print(f"--- {info.config_path} (current)")
