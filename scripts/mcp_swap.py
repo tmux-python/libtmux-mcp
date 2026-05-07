@@ -950,6 +950,14 @@ def cmd_revert(args: argparse.Namespace) -> int:
                 print(f"[{label}] would restore {dest} from {backup}")
                 continue
             atomic_write(dest, backup.read_bytes())
+            # Backup served its purpose; LIFO unwind for this layer is
+            # complete. Delete on success, keep on error — same idiom
+            # CPython's ``tempfile.NamedTemporaryFile`` uses
+            # (Lib/tempfile.py:614-618). If ``atomic_write`` had raised,
+            # this line wouldn't run and the backup would survive for
+            # post-mortem; on success the backup is redundant and would
+            # otherwise accumulate forever across swap/revert cycles.
+            backup.unlink()
             print(f"[{label}] restored from {backup}")
             reverted.append(key)
 

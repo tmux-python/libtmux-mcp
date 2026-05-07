@@ -1149,3 +1149,70 @@ def test_revert_with_corrupt_seq_no_does_not_crash(
     # dropped at load time; the well-formed entry's revert applies.
     rc = mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "claude"]))
     assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Backup file lifecycle — delete-on-success, keep-on-error.
+# ---------------------------------------------------------------------------
+
+
+def test_revert_deletes_backup_after_successful_restore(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """A successful revert deletes the backup file it just consumed.
+
+    Pre-fix, ``cmd_revert`` restored from ``.bak.mcp-swap-<ts>`` and left
+    the file on disk. Repeated swap/revert cycles let backups accumulate
+    indefinitely. Post-fix matches CPython's
+    ``tempfile.NamedTemporaryFile`` cleanup discipline
+    (``Lib/tempfile.py:614-618``): delete on success, keep on error.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+    parser = mcp_swap.build_parser()
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+            )
+        )
+        == 0
+    )
+    state = mcp_swap.load_state()
+    backup = pathlib.Path(state[("cursor", "user")].backup_path)
+    assert backup.exists()
+
+    assert mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "cursor"])) == 0
+    assert not backup.exists()
+
+
+def test_revert_dry_run_keeps_backup(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """``revert --dry-run`` must not delete the backup file.
+
+    The dry-run path ``continue``s before reaching the unlink, so this
+    locks the behaviour against a future refactor that restructures
+    the loop body.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+    parser = mcp_swap.build_parser()
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+            )
+        )
+        == 0
+    )
+    state = mcp_swap.load_state()
+    backup = pathlib.Path(state[("cursor", "user")].backup_path)
+
+    assert (
+        mcp_swap.cmd_revert(
+            parser.parse_args(["revert", "--cli", "cursor", "--dry-run"])
+        )
+        == 0
+    )
+    assert backup.exists()
