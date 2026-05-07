@@ -1216,3 +1216,194 @@ def test_revert_dry_run_keeps_backup(
         == 0
     )
     assert backup.exists()
+
+
+# ---------------------------------------------------------------------------
+# `status --scope` filter — completes symmetry with use-local / revert.
+# ---------------------------------------------------------------------------
+
+
+def test_status_scope_user_filters_to_user_only(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``status --scope user`` shows only the user-scope claude line."""
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    args = mcp_swap.build_parser().parse_args(
+        [
+            "status",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--scope",
+            "user",
+        ]
+    )
+    assert mcp_swap.cmd_status(args) == 0
+    out = capsys.readouterr().out
+    assert "[claude:user]" in out
+    assert "[claude:project]" not in out
+
+
+def test_status_scope_project_filters_to_project_only(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``status --scope project`` shows only the project-scope claude line."""
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    args = mcp_swap.build_parser().parse_args(
+        [
+            "status",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--scope",
+            "project",
+        ]
+    )
+    assert mcp_swap.cmd_status(args) == 0
+    out = capsys.readouterr().out
+    assert "[claude:project]" in out
+    assert "[claude:user]" not in out
+
+
+def test_status_no_scope_shows_both_layers(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without ``--scope``, both Claude layers print when both have entries.
+
+    Locks the existing default behaviour so a future refactor can't
+    silently change it.
+    """
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    args = mcp_swap.build_parser().parse_args(
+        ["status", "--repo", str(fake_repo), "--cli", "claude"]
+    )
+    assert mcp_swap.cmd_status(args) == 0
+    out = capsys.readouterr().out
+    assert "[claude:user]" in out
+    assert "[claude:project]" in out
+
+
+def test_status_scope_no_op_for_non_claude_cli(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--scope`` is a no-op for non-Claude CLIs (their config has no scope layer).
+
+    Asserts that ``--cli cursor --scope project`` produces the same
+    single ``[cursor]`` line as ``--cli cursor`` alone.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+    parser = mcp_swap.build_parser()
+
+    # Without --scope.
+    assert (
+        mcp_swap.cmd_status(
+            parser.parse_args(["status", "--repo", str(fake_repo), "--cli", "cursor"])
+        )
+        == 0
+    )
+    out_no_scope = capsys.readouterr().out
+
+    # With --scope project (silently no-op for cursor).
+    assert (
+        mcp_swap.cmd_status(
+            parser.parse_args(
+                [
+                    "status",
+                    "--repo",
+                    str(fake_repo),
+                    "--cli",
+                    "cursor",
+                    "--scope",
+                    "project",
+                ]
+            )
+        )
+        == 0
+    )
+    out_with_scope = capsys.readouterr().out
+
+    assert out_no_scope == out_with_scope
+    assert "[cursor]" in out_with_scope
+
+
+def test_status_scope_user_with_only_project_entry_shows_no_entry(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Filtering to a scope with no entry prints a scope-tagged "no entry" line.
+
+    Locks the symmetry with ``use-local`` / ``revert`` output, which
+    label scope-filtered actions as ``[claude:<scope>]`` rather than
+    falling back to the unscoped ``[claude]`` form.
+    """
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    args = mcp_swap.build_parser().parse_args(
+        [
+            "status",
+            "--repo",
+            str(fake_repo),
+            "--cli",
+            "claude",
+            "--scope",
+            "user",
+        ]
+    )
+    assert mcp_swap.cmd_status(args) == 0
+    out = capsys.readouterr().out
+    assert "[claude:user] no entry for" in out
+    assert "[claude:project]" not in out

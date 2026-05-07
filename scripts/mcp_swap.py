@@ -717,11 +717,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     For Claude, prints separate lines for the user-level fallback
     (``[claude:user]``) and the per-project override
     (``[claude:project]``) when both exist; if only one exists, only
-    that line shows. Other CLIs print a single line as ``[<cli>]``
-    since their config has no scope concept.
+    that line shows. ``args.scope`` (when set) restricts Claude output
+    to the matching layer only. Other CLIs print a single line as
+    ``[<cli>]`` since their config has no scope concept and ignore
+    ``args.scope``.
     """
     repo = pathlib.Path(args.repo).resolve()
     server = args.server or resolve_repo_meta(repo)[0]
+    scope_filter: Scope | None = args.scope
     for cli in args.cli or present_clis():
         info = CLIS[cli]
         if not info.config_path.exists():
@@ -733,8 +736,19 @@ def cmd_status(args: argparse.Namespace) -> int:
         try:
             config = load_config(info)
             if cli == "claude":
-                user_spec = get_server(cli, config, server, repo, scope="user")
-                project_spec = get_server(cli, config, server, repo, scope="project")
+                # Lazy reads: skip the get_server call entirely for the
+                # filtered-out scope so a malformed projects node doesn't
+                # raise when the user only asked about user scope.
+                user_spec = (
+                    get_server(cli, config, server, repo, scope="user")
+                    if scope_filter in (None, "user")
+                    else None
+                )
+                project_spec = (
+                    get_server(cli, config, server, repo, scope="project")
+                    if scope_filter in (None, "project")
+                    else None
+                )
                 shown = False
                 if user_spec is not None:
                     tag = _describe_spec(user_spec, repo)
@@ -751,7 +765,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                     )
                     shown = True
                 if not shown:
-                    print(f"[claude] no entry for {server!r}")
+                    label = f"claude:{scope_filter}" if scope_filter else "claude"
+                    print(f"[{label}] no entry for {server!r}")
             else:
                 spec = get_server(cli, config, server, repo)
                 if spec is None:
@@ -987,6 +1002,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ps.add_argument(
         "--cli", action="append", choices=ALL_CLIS, help="limit to one or more CLIs"
+    )
+    ps.add_argument(
+        "--scope",
+        choices=ALL_SCOPES,
+        default=None,
+        help=(
+            "Limit Claude output to one scope: 'user' shows only the "
+            "top-level mcpServers fallback, 'project' shows only the "
+            "projects.<abs>.mcpServers entry. Without this flag, both "
+            "Claude scopes print when both have an entry. No-op for "
+            "non-Claude CLIs (their config has no per-project layer)."
+        ),
     )
     ps.set_defaults(func=cmd_status)
 
