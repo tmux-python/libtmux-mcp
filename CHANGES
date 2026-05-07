@@ -24,7 +24,7 @@ _Notes on upcoming releases will be added here_
   `RuntimeError` on a malformed Claude config. The state-file schema
   is internal — no compatibility contract; running an older `mcp_swap`
   against a newer `state.json` is undefined behaviour and not
-  supported. (#???)
+  supported. (#35)
 
 ### Documentation
 
