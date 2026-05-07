@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from libtmux_mcp._utils import (
+    _coerce_bool,
+    _coerce_int,
     _compute_is_caller,
     _get_server,
     _resolve_pane,
@@ -132,26 +134,34 @@ def snapshot_pane(
     # tabs are legal (if rare) in Linux paths and could realistically
     # appear in pane_current_path.
     _SEP = "␞"
-    fmt = _SEP.join(
-        [
-            "#{cursor_x}",
-            "#{cursor_y}",
-            "#{pane_width}",
-            "#{pane_height}",
-            "#{pane_in_mode}",
-            "#{pane_mode}",
-            "#{scroll_position}",
-            "#{history_size}",
-            "#{pane_title}",
-            "#{pane_current_command}",
-            "#{pane_current_path}",
-        ]
-    )
+    _FMT_VARS = [
+        "#{cursor_x}",
+        "#{cursor_y}",
+        "#{pane_width}",
+        "#{pane_height}",
+        "#{pane_in_mode}",
+        "#{pane_mode}",
+        "#{scroll_position}",
+        "#{history_size}",
+        "#{pane_title}",
+        "#{pane_current_command}",
+        "#{pane_current_path}",
+        "#{pane_left}",
+        "#{pane_top}",
+        "#{pane_right}",
+        "#{pane_bottom}",
+        "#{pane_at_left}",
+        "#{pane_at_right}",
+        "#{pane_at_top}",
+        "#{pane_at_bottom}",
+        "#{pane_tty}",
+    ]
+    fmt = _SEP.join(_FMT_VARS)
     result = pane.cmd("display-message", "-p", fmt)
     raw = result.stdout[0] if result.stdout else ""
-    # Pad defensively to guarantee 11 fields even if tmux drops an
-    # unknown format variable on older versions.
-    parts = (raw.split(_SEP) + [""] * 11)[:11]
+    # Pad defensively to guarantee one slot per format var even if tmux
+    # drops an unknown variable on older versions.
+    parts = (raw.split(_SEP) + [""] * len(_FMT_VARS))[: len(_FMT_VARS)]
 
     raw_lines = pane.capture_pane()
     kept_lines, truncated, dropped = _truncate_lines_tail(raw_lines, max_lines)
@@ -175,6 +185,15 @@ def snapshot_pane(
         title=parts[8] if parts[8] else None,
         pane_current_command=parts[9] if parts[9] else None,
         pane_current_path=parts[10] if parts[10] else None,
+        pane_left=_coerce_int(parts[11]),
+        pane_top=_coerce_int(parts[12]),
+        pane_right=_coerce_int(parts[13]),
+        pane_bottom=_coerce_int(parts[14]),
+        pane_at_left=_coerce_bool(parts[15]),
+        pane_at_right=_coerce_bool(parts[16]),
+        pane_at_top=_coerce_bool(parts[17]),
+        pane_at_bottom=_coerce_bool(parts[18]),
+        pane_tty=parts[19] if parts[19] else None,
         is_caller=_compute_is_caller(pane),
         content_truncated=truncated,
         content_truncated_lines=dropped,

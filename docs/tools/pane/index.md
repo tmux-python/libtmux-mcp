@@ -21,6 +21,10 @@ Capture content plus cursor, mode, and scroll state in one call.
 Read pane metadata without content.
 :::
 
+:::{grid-item-card} {tooliconl}`find-pane-by-position`
+Find the pane at a given corner of a window.
+:::
+
 :::{grid-item-card} {tooliconl}`display-message`
 Evaluate a tmux format string against a target.
 :::
@@ -99,6 +103,7 @@ capture-pane
 search-panes
 snapshot-pane
 get-pane-info
+find-pane-by-position
 display-message
 send-keys
 paste-text

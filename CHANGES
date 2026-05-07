@@ -6,6 +6,34 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**New tools**
+
+- {tooliconl}`find-pane-by-position` — resolve a layout-relative pane
+  ("the bottom-right pane", any corner) to a `PaneInfo` in one
+  read-only call. Composes the four `pane_at_*` predicates with a
+  `pane_left + pane_top` tie-break for ambiguous layouts (e.g.
+  single-pane windows that touch every edge). Replaces the
+  {tooliconl}`display-message`-and-parse workaround. (#34)
+
+**Pane geometry on response models**
+
+- {class}`~libtmux_mcp.models.PaneInfo`,
+  {class}`~libtmux_mcp.models.PaneContentMatch`, and
+  {class}`~libtmux_mcp.models.PaneSnapshot` now carry window-relative
+  `pane_left` / `pane_top` / `pane_right` / `pane_bottom` (typed
+  `int | None`), the four `pane_at_left` / `pane_at_right` /
+  `pane_at_top` / `pane_at_bottom` edge predicates (typed
+  `bool | None`), and `pane_tty`. Agents reason about layout off the
+  returned model instead of expanding `#{pane_at_*}` format strings
+  by hand. {tooliconl}`snapshot-pane` fetches the new variables in
+  the same `display-message` round-trip it already makes, so there
+  is no extra tmux call. The older `pane_width` / `pane_height`
+  fields stay `str | None` for now — switching them to `int | None`
+  is a breaking schema change deferred as a separate follow-up.
+  (#34)
+
 ### Development
 
 - `scripts/mcp_swap.py` — `use-local` and `revert` accept
@@ -36,6 +64,17 @@ _Notes on upcoming releases will be added here_
   `localStorage` (CLS drops to 0), and the sidebar logo plus all
   bold and italic text no longer pop in late as fonts arrive.
   (#36)
+- Discoverability sweep for {tooliconl}`find-pane-by-position`:
+  dedicated topic page, homepage `Inspect (readonly)` chain entry,
+  `### Inspect` grid card and "Targeting a pane by layout?"
+  decision-tree cluster on the tools index, {ref}`concepts`
+  Discovery enumeration, a "Spin up the dev server in the
+  bottom-right pane" row in the prompting-patterns table, a new
+  corner-targeting recipe in {ref}`recipes`, and refreshed example
+  responses on {tooliconl}`get-pane-info` and
+  {tooliconl}`snapshot-pane` showing the new geometry block.
+  {tooliconl}`display-message` "Avoid when" guidance now redirects
+  layout-relative use cases to the corner-finder. (#34)
 
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 

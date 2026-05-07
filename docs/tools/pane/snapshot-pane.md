@@ -34,6 +34,15 @@ Response:
   "cursor_y": 4,
   "pane_width": 80,
   "pane_height": 24,
+  "pane_left": 0,
+  "pane_top": 0,
+  "pane_right": 79,
+  "pane_bottom": 23,
+  "pane_at_left": true,
+  "pane_at_right": true,
+  "pane_at_top": true,
+  "pane_at_bottom": true,
+  "pane_tty": "/dev/pts/5",
   "pane_in_mode": false,
   "pane_mode": null,
   "scroll_position": null,
@@ -44,6 +53,13 @@ Response:
   "is_caller": false
 }
 ```
+
+The geometry block (`pane_left` / `pane_top` / `pane_right` /
+`pane_bottom` and the four `pane_at_*` predicates) is fetched in the
+same `display-message` round-trip as the cursor and mode fields, so
+there is no extra tmux call. To target a layout-relative pane (e.g.
+"the bottom-right pane") use {tooliconl}`find-pane-by-position`
+instead of computing edges from this snapshot.
 
 ```{fastmcp-tool-input} pane_tools.snapshot_pane
 ```

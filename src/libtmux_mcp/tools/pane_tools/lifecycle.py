@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import typing as t
+
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._utils import (
@@ -9,12 +11,16 @@ from libtmux_mcp._utils import (
     _get_caller_identity,
     _get_server,
     _resolve_pane,
+    _resolve_window,
     _serialize_pane,
     handle_tool_errors,
 )
 from libtmux_mcp.models import (
     PaneInfo,
 )
+
+#: The four window corners ``find_pane_by_position`` accepts.
+PaneCorner = t.Literal["top-left", "top-right", "bottom-left", "bottom-right"]
 
 
 @handle_tool_errors
@@ -259,3 +265,88 @@ def get_pane_info(
         window_id=window_id,
     )
     return _serialize_pane(pane)
+
+
+@handle_tool_errors
+def find_pane_by_position(
+    corner: PaneCorner,
+    window_id: str | None = None,
+    window_index: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    socket_name: str | None = None,
+) -> PaneInfo:
+    """Find the pane occupying a corner of a tmux window.
+
+    Composes the four ``pane_at_*`` predicates so callers can target a
+    layout-relative position (e.g. "the bottom-right pane") in one
+    round-trip instead of listing every pane and computing the
+    geometry. Resolves the window the same way as the other
+    window-scoped tools.
+
+    Parameters
+    ----------
+    corner : str
+        One of ``'top-left'``, ``'top-right'``, ``'bottom-left'``,
+        ``'bottom-right'``.
+    window_id : str, optional
+        Window ID (e.g. '@1').
+    window_index : str, optional
+        Window index. Requires session_name or session_id.
+    session_name : str, optional
+        Session name.
+    session_id : str, optional
+        Session ID.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    PaneInfo
+        Serialized pane occupying the requested corner.
+
+    Raises
+    ------
+    ToolError
+        If no pane satisfies both edge predicates for that corner — in
+        practice only possible for layouts tmux itself produced via
+        custom layout strings; the built-in layouts always have a pane
+        at every corner.
+    """
+    server = _get_server(socket_name=socket_name)
+    window = _resolve_window(
+        server,
+        window_id=window_id,
+        window_index=window_index,
+        session_name=session_name,
+        session_id=session_id,
+    )
+
+    vertical, horizontal = corner.split("-")
+    matches = [
+        p
+        for p in window.panes
+        if getattr(p, f"at_{vertical}", False) and getattr(p, f"at_{horizontal}", False)
+    ]
+    if not matches:
+        msg = (
+            f"No pane found at corner {corner!r} in window "
+            f"{window.window_id}. This is unusual — built-in layouts "
+            "always have a pane at every corner."
+        )
+        raise ToolError(msg)
+
+    # When more than one pane qualifies (e.g. a single-pane window
+    # touches all four edges, or an unusual layout), prefer the pane
+    # whose top-left coordinate is furthest from window origin (0,0).
+    # That picks the visually innermost pane for the corner — i.e.
+    # for 'bottom-right', the pane with the largest pane_left +
+    # pane_top, which sits visually closest to the bottom-right.
+    def _innermost_score(p: t.Any) -> int:
+        try:
+            return int(p.pane_left or 0) + int(p.pane_top or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    matches.sort(key=_innermost_score, reverse=True)
+    return _serialize_pane(matches[0])

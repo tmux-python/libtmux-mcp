@@ -38,6 +38,7 @@ These natural-language prompts reliably trigger the right tool sequences:
 |--------|-------------------|
 | [Run `pytest` in my build pane and show results]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` → {toolref}`capture-pane` |
 | [Start the dev server and wait until it's ready]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` (for "listening on") |
+| [Spin up the dev server in the bottom-right pane]{.prompt} | {toolref}`find-pane-by-position` (corner=bottom-right) → {toolref}`send-keys` → {toolref}`wait-for-text` |
 | [Check if any pane has errors]{.prompt} | {toolref}`search-panes` with pattern "error" |
 | [Set up a workspace with editor, server, and tests]{.prompt} | {toolref}`create-session` → {toolref}`split-window` (x2) → {toolref}`set-pane-title` (x3) |
 | [What's running in my tmux sessions?]{.prompt} | {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`capture-pane` |

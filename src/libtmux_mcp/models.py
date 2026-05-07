@@ -53,6 +53,46 @@ class PaneInfo(BaseModel):
     pane_index: str | None = Field(default=None, description="Pane index")
     pane_width: str | None = Field(default=None, description="Width in columns")
     pane_height: str | None = Field(default=None, description="Height in rows")
+    pane_left: int | None = Field(
+        default=None,
+        description="Left edge column, 0-based and window-relative.",
+    )
+    pane_top: int | None = Field(
+        default=None,
+        description="Top edge row, 0-based and window-relative.",
+    )
+    pane_right: int | None = Field(
+        default=None,
+        description="Right edge column (inclusive), window-relative.",
+    )
+    pane_bottom: int | None = Field(
+        default=None,
+        description="Bottom edge row (inclusive), window-relative.",
+    )
+    pane_at_left: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's left edge.",
+    )
+    pane_at_right: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's right edge.",
+    )
+    pane_at_top: bool | None = Field(
+        default=None,
+        description=(
+            "True when the pane touches the window's top edge. tmux "
+            "accounts for ``pane-border-status`` here, so the top row "
+            "may be 1 instead of 0 when the status bar is at the top."
+        ),
+    )
+    pane_at_bottom: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's bottom edge.",
+    )
+    pane_tty: str | None = Field(
+        default=None,
+        description="TTY device path of the pane (e.g. '/dev/pts/5').",
+    )
     pane_current_command: str | None = Field(
         default=None, description="Running command"
     )
@@ -84,6 +124,45 @@ class PaneContentMatch(BaseModel):
     """A pane whose captured content matched a search pattern."""
 
     pane_id: str = Field(description="Pane ID (e.g. '%1')")
+    pane_left: int | None = Field(
+        default=None,
+        description="Left edge column, 0-based and window-relative.",
+    )
+    pane_top: int | None = Field(
+        default=None,
+        description="Top edge row, 0-based and window-relative.",
+    )
+    pane_right: int | None = Field(
+        default=None,
+        description="Right edge column (inclusive), window-relative.",
+    )
+    pane_bottom: int | None = Field(
+        default=None,
+        description="Bottom edge row (inclusive), window-relative.",
+    )
+    pane_at_left: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's left edge.",
+    )
+    pane_at_right: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's right edge.",
+    )
+    pane_at_top: bool | None = Field(
+        default=None,
+        description=(
+            "True when the pane touches the window's top edge. tmux "
+            "accounts for ``pane-border-status`` here."
+        ),
+    )
+    pane_at_bottom: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's bottom edge.",
+    )
+    pane_tty: str | None = Field(
+        default=None,
+        description="TTY device path of the pane (e.g. '/dev/pts/5').",
+    )
     pane_current_command: str | None = Field(
         default=None, description="Running command"
     )
@@ -170,6 +249,45 @@ class PaneSnapshot(BaseModel):
     cursor_y: int = Field(description="Cursor row (0-based)")
     pane_width: int = Field(description="Pane width in columns")
     pane_height: int = Field(description="Pane height in rows")
+    pane_left: int | None = Field(
+        default=None,
+        description="Left edge column, 0-based and window-relative.",
+    )
+    pane_top: int | None = Field(
+        default=None,
+        description="Top edge row, 0-based and window-relative.",
+    )
+    pane_right: int | None = Field(
+        default=None,
+        description="Right edge column (inclusive), window-relative.",
+    )
+    pane_bottom: int | None = Field(
+        default=None,
+        description="Bottom edge row (inclusive), window-relative.",
+    )
+    pane_at_left: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's left edge.",
+    )
+    pane_at_right: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's right edge.",
+    )
+    pane_at_top: bool | None = Field(
+        default=None,
+        description=(
+            "True when the pane touches the window's top edge. tmux "
+            "accounts for ``pane-border-status`` here."
+        ),
+    )
+    pane_at_bottom: bool | None = Field(
+        default=None,
+        description="True when the pane touches the window's bottom edge.",
+    )
+    pane_tty: str | None = Field(
+        default=None,
+        description="TTY device path of the pane (e.g. '/dev/pts/5').",
+    )
     pane_in_mode: bool = Field(description="True if pane is in copy-mode or view-mode")
     pane_mode: str | None = Field(
         default=None, description="Mode name (e.g. 'copy-mode') or None if normal"

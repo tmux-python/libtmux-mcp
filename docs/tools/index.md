@@ -15,6 +15,10 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 - Only need metadata (PID, path, size)? → {tool}`get-pane-info`
 - Need an arbitrary tmux variable? → {tool}`display-message`
 
+**Targeting a pane by layout?**
+- "The bottom-right pane", "top-left", any corner → {tool}`find-pane-by-position`
+- Already know the `pane_id` → use it directly
+
 **Running a command?**
 - {tool}`send-keys` — then {tool}`wait-for-text` + {tool}`capture-pane`
 - Pasting multi-line text? → {tool}`paste-text`
@@ -98,6 +102,12 @@ Read visible content of a pane.
 :link: get-pane-info
 :link-type: ref
 Get detailed pane metadata.
+:::
+
+:::{grid-item-card} find_pane_by_position
+:link: find-pane-by-position
+:link-type: ref
+Resolve "the bottom-right pane" (or any corner) to a `PaneInfo`.
 :::
 
 :::{grid-item-card} search_panes
