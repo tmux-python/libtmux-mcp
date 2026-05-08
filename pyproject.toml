@@ -26,7 +26,17 @@ classifiers = [
   "Typing :: Typed",
 ]
 
-keywords = ["tmux", "mcp", "model-context-protocol", "terminal", "ai"]
+keywords = [
+  "tmux",
+  "pane",
+  "window",
+  "session",
+  "terminal",
+  "terminal-multiplexer",
+  "mcp",
+  "model-context-protocol",
+  "ai",
+]
 homepage = "http://github.com/tmux-python/libtmux-mcp/"
 readme = "README.md"
 packages = [
