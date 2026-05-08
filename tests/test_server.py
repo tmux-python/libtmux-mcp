@@ -374,6 +374,106 @@ def test_readonly_hint_visible_only_on_readonly_tier(
 
 
 # ---------------------------------------------------------------------------
+# Discovery anchors — BM25 lexicon and alwaysLoad meta hints
+# ---------------------------------------------------------------------------
+
+#: The six high-traffic discovery anchors. ToolSearch BM25-ranks
+#: against tool ``description`` (FastMCP's griffe parser hands the
+#: leading paragraph in), so the anchors carry a buried-synonym
+#: lexicon plus an inline anti-trigger to widen the indexed surface
+#: and add explicit boundaries.
+_DISCOVERY_ANCHORS = frozenset(
+    [
+        "list_panes",
+        "list_windows",
+        "list_sessions",
+        "snapshot_pane",
+        "search_panes",
+        "capture_pane",
+    ]
+)
+
+
+#: Discovery anchors that carry the ``anthropic/alwaysLoad`` per-tool
+#: meta hint. Read-only only — best-effort hint to Claude Code that
+#: keeps a tiny tmux vocabulary always-visible without preloading
+#: every tool's schema.
+_ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"])
+
+
+def test_server_advertised_as_tmux() -> None:
+    """``serverInfo.name`` aligns with the README registration slug.
+
+    Cross-client display fields show ``serverInfo.name``; aligning to
+    ``tmux`` removes a papercut where users registering via the README
+    get ``mcp__tmux__*`` tool prefixes but the protocol-handshake name
+    still says ``libtmux``.
+    """
+    from libtmux_mcp.server import mcp
+
+    assert mcp.name == "tmux"
+
+
+def test_discovery_anchor_descriptions_carry_tmux_and_synonyms() -> None:
+    """The six discovery anchors carry tmux + a buried synonym in BM25 corpus.
+
+    FastMCP's ``parse_docstring`` extracts the leading text block
+    before the first ``Parameters`` / ``Returns`` section as
+    ``tool.description``. Both that paragraph and any subsequent prose
+    ride into the BM25 corpus, so burying terminal / shell /
+    scrollback / multiplexer / workspace synonyms in natural prose
+    widens the indexed lexicon without leaving a discovery-engineering
+    artifact in user-facing ``--help`` output.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="desc-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    synonyms = {"terminal", "shell", "scrollback", "multiplexer", "workspace"}
+    for tool_name in _DISCOVERY_ANCHORS:
+        tool = tools.get(tool_name)
+        assert tool is not None, f"tool not registered: {tool_name}"
+        desc = (tool.description or "").lower()
+        assert "tmux" in desc, f"{tool_name} description missing 'tmux'"
+        assert any(s in desc for s in synonyms), (
+            f"{tool_name} description missing a synonym from {synonyms}: {desc[:200]!r}"
+        )
+
+
+def test_discovery_anchors_marked_alwaysload() -> None:
+    """``list_panes``, ``list_windows``, ``snapshot_pane`` carry alwaysLoad.
+
+    Best-effort hint — FastMCP passes ``meta`` opaquely, so honoring
+    is delegated to Claude Code where the field is documented at
+    ``code.claude.com/docs/en/mcp`` (v2.1.121+). The test asserts only
+    the positive contract; over-specifying the negative space is
+    chrome.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="meta-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    for tool_name in _ALWAYS_LOAD_ANCHORS:
+        tool = tools.get(tool_name)
+        assert tool is not None, f"tool not registered: {tool_name}"
+        meta = getattr(tool, "meta", None) or {}
+        assert meta.get("anthropic/alwaysLoad") is True, (
+            f"{tool_name} meta missing anthropic/alwaysLoad: {meta!r}"
+        )
+
+
 # Lifespan tests
 # ---------------------------------------------------------------------------
 

@@ -86,11 +86,12 @@ def search_panes(
     offset: int = 0,
     socket_name: str | None = None,
 ) -> SearchPanesResult:
-    """Search for text across all pane contents.
+    """Search visible terminal text across all tmux panes.
 
-    Use this when users ask what panes 'contain', 'mention', or 'show'.
-    Searches each pane's visible content and returns panes where the
-    pattern is found, with matching lines.
+    Use when the user asks what panes 'contain', 'mention', or 'show' —
+    e.g. 'find the pane with the pytest failure'. Searches each pane's
+    visible terminal scrollback content (not editor or browser text)
+    and returns panes where the pattern is found, with matching lines.
 
     Bounded output contract
     -----------------------

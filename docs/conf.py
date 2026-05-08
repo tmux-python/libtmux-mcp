@@ -10,7 +10,31 @@ import typing as t
 from gp_sphinx.config import make_linkcode_resolve, merge_sphinx_config
 from gp_sphinx.defaults import DEFAULT_SPHINX_FONT_PRELOAD
 
+# Docs-only shim: ``sphinx_autodoc_fastmcp.ToolCollector.tool()`` is a mock
+# of ``FastMCP.tool()`` and only accepts ``title``, ``annotations``, ``tags``.
+# Tools that pass ``meta=DISCOVERY_META`` for the per-tool
+# ``anthropic/alwaysLoad`` hint (verified at runtime via per-tool ``meta=``)
+# raise ``TypeError`` inside the mock, which silently drops the entire
+# enclosing module's tools from the docs catalog. Patch the mock to accept
+# and ignore ``meta`` so the docs build's tool registry stays complete.
+# Upstream fix is to add ``**kwargs`` to the mock signature; this shim is
+# the minimum viable workaround until then.
+from sphinx_autodoc_fastmcp._collector import (
+    ToolCollector,
+)
+
 import libtmux_mcp
+
+_orig_tool_collector_tool = ToolCollector.tool
+
+
+def _patched_tool_collector_tool(self: ToolCollector, **kwargs: t.Any) -> t.Any:
+    """Drop ``meta`` from kwargs so the mock signature still binds."""
+    kwargs.pop("meta", None)
+    return _orig_tool_collector_tool(self, **kwargs)
+
+
+ToolCollector.tool = _patched_tool_collector_tool  # type: ignore[assignment,method-assign]
 
 if t.TYPE_CHECKING:
     from sphinx.application import Sphinx

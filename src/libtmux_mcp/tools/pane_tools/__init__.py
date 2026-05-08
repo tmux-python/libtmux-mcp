@@ -18,6 +18,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING_DESTRUCTIVE,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
+    DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -118,9 +119,12 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Wait For Text", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         wait_for_text
     )
-    mcp.tool(title="Snapshot Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        snapshot_pane
-    )
+    mcp.tool(
+        title="Snapshot Pane",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+        meta=DISCOVERY_META,
+    )(snapshot_pane)
     mcp.tool(
         title="Wait For Content Change",
         annotations=ANNOTATIONS_RO,
