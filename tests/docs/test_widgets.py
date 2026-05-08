@@ -61,7 +61,7 @@ def test_build_panels_first_cell_is_claude_code_uvx() -> None:
 def test_body_for_cli_client_returns_shell_command() -> None:
     """CLI clients get the literal ``<tool> mcp add ...`` shell command."""
     body = _body_for(CLIENTS[0], METHODS[0])  # claude-code + uvx
-    assert body == "claude mcp add libtmux -- uvx libtmux-mcp"
+    assert body == "claude mcp add tmux -- uvx libtmux-mcp"
 
 
 def test_body_for_json_client_returns_config_snippet() -> None:
@@ -230,7 +230,7 @@ class HighlightCase(t.NamedTuple):
 HIGHLIGHT_CASES: list[HighlightCase] = [
     HighlightCase(
         test_id="console-claude-code-uvx",
-        code="$ claude mcp add libtmux -- uvx libtmux-mcp",
+        code="$ claude mcp add tmux -- uvx libtmux-mcp",
         language="console",
     ),
     HighlightCase(
@@ -244,7 +244,7 @@ HIGHLIGHT_CASES: list[HighlightCase] = [
             """\
             {
                 "mcpServers": {
-                    "libtmux": {
+                    "tmux": {
                         "command": "uvx",
                         "args": ["libtmux-mcp"]
                     }

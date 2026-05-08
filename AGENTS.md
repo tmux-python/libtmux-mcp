@@ -394,7 +394,7 @@ Good:
 ```console
 $ claude mcp add \
     --scope user \
-    libtmux -- \
+    tmux -- \
     uv --directory ~/work/python/libtmux-mcp \
     run libtmux-mcp
 ```
@@ -402,7 +402,7 @@ $ claude mcp add \
 Bad:
 
 ```console
-$ claude mcp add --scope user libtmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
+$ claude mcp add --scope user tmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
 ```
 
 ## Debugging Tips

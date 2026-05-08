@@ -4,13 +4,22 @@
 
 Copy-pasteable configuration for every supported MCP client. If your client isn't listed, any tool supporting MCP stdio transport will work with the JSON config pattern.
 
+```{note}
+**Migrating from the `libtmux` slug.** Earlier versions of these docs
+used `claude mcp add libtmux …`; this page now uses `tmux` to match
+`serverInfo.name` and the `mcp__tmux__*` tool prefix. Existing
+`libtmux` registrations keep working — re-register only if you want
+the new slug. The package name (`libtmux-mcp`), Python module
+(`libtmux_mcp`), and GitHub repo are unchanged.
+```
+
 ## Claude Code
 
 `````{tab} uvx
 With [uv](https://docs.astral.sh/uv/) installed:
 
 ```console
-$ claude mcp add libtmux -- uvx libtmux-mcp
+$ claude mcp add tmux -- uvx libtmux-mcp
 ```
 `````
 
@@ -18,7 +27,7 @@ $ claude mcp add libtmux -- uvx libtmux-mcp
 With [pipx](https://pipx.pypa.io/) installed:
 
 ```console
-$ claude mcp add libtmux -- pipx run libtmux-mcp
+$ claude mcp add tmux -- pipx run libtmux-mcp
 ```
 `````
 
@@ -32,7 +41,7 @@ $ pip install --user --upgrade libtmux libtmux-mcp
 Then register:
 
 ```console
-$ claude mcp add libtmux -- libtmux-mcp
+$ claude mcp add tmux -- libtmux-mcp
 ```
 `````
 
@@ -48,7 +57,7 @@ With [uv](https://docs.astral.sh/uv/) installed:
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "uvx",
             "args": ["libtmux-mcp"]
         }
@@ -63,7 +72,7 @@ With [pipx](https://pipx.pypa.io/) installed:
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "pipx",
             "args": ["run", "libtmux-mcp"]
         }
@@ -84,7 +93,7 @@ Then use this config:
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "libtmux-mcp"
         }
     }
@@ -98,7 +107,7 @@ Then use this config:
 With [uv](https://docs.astral.sh/uv/) installed:
 
 ```console
-$ codex mcp add libtmux -- uvx libtmux-mcp
+$ codex mcp add tmux -- uvx libtmux-mcp
 ```
 `````
 
@@ -106,7 +115,7 @@ $ codex mcp add libtmux -- uvx libtmux-mcp
 With [pipx](https://pipx.pypa.io/) installed:
 
 ```console
-$ codex mcp add libtmux -- pipx run libtmux-mcp
+$ codex mcp add tmux -- pipx run libtmux-mcp
 ```
 `````
 
@@ -120,7 +129,7 @@ $ pip install --user --upgrade libtmux libtmux-mcp
 Then register:
 
 ```console
-$ codex mcp add libtmux -- libtmux-mcp
+$ codex mcp add tmux -- libtmux-mcp
 ```
 `````
 
@@ -130,7 +139,7 @@ $ codex mcp add libtmux -- libtmux-mcp
 Add to `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.libtmux]
+[mcp_servers.tmux]
 command = "uvx"
 args = ["libtmux-mcp"]
 ```
@@ -143,7 +152,7 @@ args = ["libtmux-mcp"]
 With [uv](https://docs.astral.sh/uv/) installed:
 
 ```console
-$ gemini mcp add libtmux uvx -- libtmux-mcp
+$ gemini mcp add tmux uvx -- libtmux-mcp
 ```
 `````
 
@@ -151,7 +160,7 @@ $ gemini mcp add libtmux uvx -- libtmux-mcp
 With [pipx](https://pipx.pypa.io/) installed:
 
 ```console
-$ gemini mcp add libtmux pipx -- run libtmux-mcp
+$ gemini mcp add tmux pipx -- run libtmux-mcp
 ```
 `````
 
@@ -165,7 +174,7 @@ $ pip install --user --upgrade libtmux libtmux-mcp
 Then register:
 
 ```console
-$ gemini mcp add libtmux libtmux-mcp
+$ gemini mcp add tmux libtmux-mcp
 ```
 `````
 
@@ -181,7 +190,7 @@ With [uv](https://docs.astral.sh/uv/) installed:
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "uvx",
             "args": ["libtmux-mcp"]
         }
@@ -196,7 +205,7 @@ With [pipx](https://pipx.pypa.io/) installed:
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "pipx",
             "args": ["run", "libtmux-mcp"]
         }
@@ -217,7 +226,7 @@ Then use this config:
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "libtmux-mcp"
         }
     }
@@ -252,7 +261,7 @@ For live development, point your client at a local checkout via `uv --directory`
 ```console
 $ claude mcp add \
     --scope user \
-    libtmux -- \
+    tmux -- \
     uv --directory ~/work/python/libtmux-mcp \
     run libtmux-mcp
 ```
@@ -263,7 +272,7 @@ $ claude mcp add \
 **Codex CLI:**
 
 ```console
-$ codex mcp add libtmux -- \
+$ codex mcp add tmux -- \
     uv --directory ~/work/python/libtmux-mcp \
     run libtmux-mcp
 ```
@@ -273,7 +282,7 @@ $ codex mcp add libtmux -- \
 ```console
 $ gemini mcp add \
     --scope user \
-    libtmux uv -- \
+    tmux uv -- \
     --directory ~/work/python/libtmux-mcp \
     run libtmux-mcp
 ```
@@ -283,7 +292,7 @@ $ gemini mcp add \
 ```json
 {
     "mcpServers": {
-        "libtmux": {
+        "tmux": {
             "command": "uv",
             "args": [
                 "--directory", "~/work/python/libtmux-mcp",
