@@ -295,10 +295,31 @@ def test_build_instructions_always_includes_safety() -> None:
     assert "LIBTMUX_SAFETY" in result
 
 
-@pytest.mark.parametrize("tier", [TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE])
-@pytest.mark.parametrize("tmux_pane", ["", "%42"])
+@pytest.mark.parametrize(
+    ("tier", "tmux_pane", "tmux_env"),
+    [
+        (TAG_READONLY, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TAG_MUTATING, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TAG_DESTRUCTIVE, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TAG_READONLY, "", ""),
+        (TAG_MUTATING, "", ""),
+        (TAG_DESTRUCTIVE, "", ""),
+        # Variable-length stress: longer socket name + multi-digit pane id.
+        # Guards against future text additions tipping a realistic case
+        # over the 2KB budget. Exercises BOTH axes — a multi-digit pane id
+        # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET). Margin
+        # ~2 bytes; if a future text addition trips this, either trim
+        # further or fall back to a tighter compression form (drop spaces
+        # around ``/`` in HOOKS, drop spaces after colons in the safety
+        # paragraph) for additional bytes of margin.
+        (TAG_READONLY, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
+    ],
+)
 def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
-    monkeypatch: pytest.MonkeyPatch, tier: str, tmux_pane: str
+    monkeypatch: pytest.MonkeyPatch,
+    tier: str,
+    tmux_pane: str,
+    tmux_env: str,
 ) -> None:
     """The transmitted instructions= string fits Claude Code's 2KB budget.
 
@@ -309,10 +330,15 @@ def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
     (tier, tmux_pane) combination, otherwise Claude Code silently
     truncates the agent-context block — the only server-side fix for
     "current window" anaphora.
+
+    Includes a variable-length stress case (longer socket name +
+    multi-digit pane id) so realistic runtime injections of
+    ``TMUX_PANE`` / ``TMUX`` cannot push the total over the budget
+    without the test catching it.
     """
     if tmux_pane:
         monkeypatch.setenv("TMUX_PANE", tmux_pane)
-        monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+        monkeypatch.setenv("TMUX", tmux_env)
     else:
         monkeypatch.delenv("TMUX_PANE", raising=False)
         monkeypatch.delenv("TMUX", raising=False)
