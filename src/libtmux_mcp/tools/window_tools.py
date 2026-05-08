@@ -12,6 +12,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -48,11 +49,12 @@ def list_panes(
     socket_name: str | None = None,
     filters: dict[str, str] | str | None = None,
 ) -> list[PaneInfo]:
-    """List panes in a tmux window, session, or across the entire server.
+    """List tmux panes (terminal multiplexer splits) in a window, session, or server.
 
-    Only searches pane metadata (current command, title, working directory).
-    To search the actual text visible in terminal panes, use search_panes
-    instead.
+    Use for terminal panes — including 'this pane', 'current pane',
+    'split pane', 'the bottom shell' — not editor splits or browser panes.
+    Only searches pane metadata (current command, title, working directory);
+    to search the actual visible terminal text, use search_panes.
 
     Parameters
     ----------
@@ -472,9 +474,12 @@ def move_window(
 
 def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
-    mcp.tool(title="List Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        list_panes
-    )
+    mcp.tool(
+        title="List Panes",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+        meta=DISCOVERY_META,
+    )(list_panes)
     mcp.tool(title="Get Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         get_window_info
     )

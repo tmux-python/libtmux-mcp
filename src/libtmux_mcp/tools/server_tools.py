@@ -40,10 +40,12 @@ def list_sessions(
     socket_name: str | None = None,
     filters: dict[str, str] | str | None = None,
 ) -> list[SessionInfo]:
-    """List all tmux sessions.
+    """List tmux sessions (terminal workspaces) on a tmux server.
 
-    Use as the starting point for discovery — call this before targeting
-    specific sessions, windows, or panes.
+    Use for tmux multiplexer sessions — 'this session', 'my workspace',
+    'the dev session' — not login sessions or HTTP sessions. The starting
+    point for discovery — call this before targeting specific sessions,
+    windows, or panes.
 
     Parameters
     ----------

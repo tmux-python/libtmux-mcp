@@ -266,9 +266,10 @@ def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
 
 
 mcp = FastMCP(
-    name="libtmux",
+    name="tmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),
+    website_url="https://libtmux-mcp.git-pull.com/",
     lifespan=_lifespan,
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early
