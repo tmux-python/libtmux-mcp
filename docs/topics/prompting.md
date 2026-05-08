@@ -28,7 +28,33 @@ pane for manual inspection.
 
 The server also dynamically adds:
 - **Safety tier context**: Which tier is active and what tools are available
-- **Caller pane awareness**: If the server runs inside tmux, it tells the agent which pane is its own (via `TMUX_PANE`)
+- **Caller pane awareness**: If the server runs inside tmux, it tells the agent which pane is its own (via `TMUX_PANE`). See {ref}`concepts` "Agent self-awareness" for details.
+
+## Activation and discovery
+
+This server is designed to fire on bare terminal-surface phrasing — *"split this pane"*, *"what's in my current window"*, *"start a session for the build"* — without you having to say "tmux". The server treats `pane`, `session`, `window`, and `split` as positive triggers; tmux ID prefixes (`%1`, `@1`, `$1`) are unambiguous.
+
+The server stays out of the way when you mean a browser window, an editor split, an i3/Hyprland workspace, or a Jupyter notebook cell — if your phrasing is ambiguous, the agent will ask before acting.
+
+### Always-on tool listing (Claude Code only)
+
+[Claude Code](https://code.claude.com/docs/en/mcp) defers loading MCP tool schemas when they exceed ~10% of your context window. By default, the three discovery anchors ({toolref}`list-panes`, {toolref}`list-windows`, {toolref}`snapshot-pane`) carry an `anthropic/alwaysLoad: true` hint so bare *"pane"* / *"window"* prompts surface this server without a `ToolSearch` hop.
+
+To force libtmux-mcp's *full* schema list to load upfront — useful if you also want {toolref}`send-keys`, {toolref}`capture-pane`, {toolref}`select-window` etc. preloaded — add `"alwaysLoad": true` at the server entry level (requires Claude Code v2.1.121+):
+
+```json
+{
+  "mcpServers": {
+    "tmux": {
+      "command": "uvx",
+      "args": ["libtmux-mcp"],
+      "alwaysLoad": true
+    }
+  }
+}
+```
+
+Cost: ~3-5K tokens of permanent context budget. Use only if libtmux-mcp is one of your top-3 most-used MCPs.
 
 ## Effective prompt patterns
 
@@ -89,6 +115,18 @@ tmux panes. Split windows to run related processes side-by-side.
 Use wait_for_text to know when a server is ready before running tests
 that depend on it.
 ```
+
+### To bias activation on bare "pane" / "window" / "session"
+
+```{code-block} text
+:class: system-prompt
+
+This project uses tmux for its development workflow. When the user
+says "pane", "window", or "session" without further qualification,
+prefer the tmux MCP tools (libtmux-mcp) before assuming GUI semantics.
+```
+
+This is the lever closest to the failure mode for *"current window"* / *"this session"* anaphora — a project-level instructions file (`AGENTS.md`, `CLAUDE.md`, or whichever your host honors) lives one prompt-layer above the MCP server's `instructions` and your host composes it into the system prompt with higher priority.
 
 ## Tool selection heuristics
 
