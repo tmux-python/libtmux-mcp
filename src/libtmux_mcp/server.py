@@ -104,7 +104,8 @@ _INSTR_WAIT_NOT_POLL = (
 #: explanation into a tool description.
 _INSTR_HOOKS_GAP = (
     "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. "
-    "Write-hooks belong in your tmux config file, not a transient MCP session."
+    "Write-hooks survive process death; keep them in your tmux config file, "
+    "not a transient MCP session."
 )
 
 #: Gap-explainer: ``list_buffers`` is intentionally absent because tmux
@@ -149,9 +150,9 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
 
     # Safety tier context
     parts.append(
-        f"\n\nSafety level: {safety_level}. Tiers: readonly (reads), "
-        "mutating (reads+sends), destructive (reads+sends+kills). Set via "
-        "LIBTMUX_SAFETY env var; off-tier tools are hidden."
+        f"\n\nSafety level: {safety_level} "
+        "(readonly: read; mutating: read+send; destructive: read+send+kill). "
+        "Set LIBTMUX_SAFETY; off-tier tools are hidden."
     )
 
     # Tier-conditioned discoverability hint. False-positive activation is

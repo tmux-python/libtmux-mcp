@@ -173,6 +173,20 @@ def test_base_instructions_document_hook_boundary() -> None:
     assert "tmux config file" in _BASE_INSTRUCTIONS
 
 
+def test_hooks_gap_keeps_process_death_rationale() -> None:
+    """Hook-gap segment carries the rationale, not just the rule.
+
+    Defensively pinned to ``_INSTR_HOOKS_GAP`` rather than
+    ``_BASE_INSTRUCTIONS`` so a future refactor that moves "tmux config
+    file" into a different segment is caught here, not only by the
+    line-173 test on the joined string.
+    """
+    from libtmux_mcp.server import _INSTR_HOOKS_GAP
+
+    assert "survive process death" in _INSTR_HOOKS_GAP
+    assert "tmux config file" in _INSTR_HOOKS_GAP
+
+
 def test_base_instructions_document_socket_name_contract() -> None:
     """_BASE_INSTRUCTIONS frames the socket_name promise precisely.
 
