@@ -475,31 +475,39 @@ def move_window(
 def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(
-        title="List Panes",
+        title="List tmux Panes",
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY},
         meta=DISCOVERY_META,
     )(list_panes)
-    mcp.tool(title="Get Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        get_window_info
-    )
-    mcp.tool(title="Split Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
-        split_window
-    )
     mcp.tool(
-        title="Rename Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(get_window_info)
+    mcp.tool(
+        title="Split tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+    )(split_window)
+    mcp.tool(
+        title="Rename tmux Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(rename_window)
     mcp.tool(
-        title="Kill Window",
+        title="Kill tmux Window",
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_DESTRUCTIVE},
     )(kill_window)
     mcp.tool(
-        title="Select Layout", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Select tmux Layout",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(select_layout)
     mcp.tool(
-        title="Resize Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Resize tmux Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(resize_window)
     mcp.tool(
-        title="Move Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Move tmux Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(move_window)

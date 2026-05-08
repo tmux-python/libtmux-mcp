@@ -414,6 +414,67 @@ def test_readonly_hint_visible_only_on_readonly_tier(
 
 
 # ---------------------------------------------------------------------------
+# Tool title audit — display-time disambiguation contract
+# ---------------------------------------------------------------------------
+
+#: Tools whose title must include the word ``tmux``. Hierarchy nouns
+#: (window, session, server, option, environment, hook, buffer, channel)
+#: collide with browser / editor / WM / OS-channel domains; the qualifier
+#: is load-bearing for display surfaces (Claude Code's tool catalog UI,
+#: ``claude mcp list`` outputs). Title is NOT in BM25's search corpus
+#: (verified vs FastMCP's _extract_searchable_text), so this lever is
+#: purely human-readable disambiguation. ``display_message`` is included
+#: because its title was pre-qualified as "Evaluate tmux Format String"
+#: by an earlier rename — pinning it here guards against silent
+#: regression to "Evaluate Format String".
+_TMUX_QUALIFIED_TOOLS = frozenset(
+    [
+        # 5 server-level
+        "list_sessions",
+        "list_servers",
+        "create_session",
+        "kill_server",
+        "get_server_info",
+        # 6 session-level
+        "list_windows",
+        "get_session_info",
+        "create_window",
+        "rename_session",
+        "kill_session",
+        "select_window",
+        # 8 window-level
+        "list_panes",
+        "get_window_info",
+        "split_window",
+        "rename_window",
+        "kill_window",
+        "select_layout",
+        "resize_window",
+        "move_window",
+        # 2 option
+        "show_option",
+        "set_option",
+        # 2 env
+        "show_environment",
+        "set_environment",
+        # 2 hook
+        "show_hooks",
+        "show_hook",
+        # 4 buffer
+        "load_buffer",
+        "paste_buffer",
+        "show_buffer",
+        "delete_buffer",
+        # 2 wait_for channel
+        "wait_for_channel",
+        "signal_channel",
+        # 1 pre-qualified pane tool — see docstring above
+        "display_message",
+    ]
+)
+
+
+# ---------------------------------------------------------------------------
 # Discovery anchors — BM25 lexicon and alwaysLoad meta hints
 # ---------------------------------------------------------------------------
 
@@ -439,6 +500,35 @@ _DISCOVERY_ANCHORS = frozenset(
 #: keeps a tiny tmux vocabulary always-visible without preloading
 #: every tool's schema.
 _ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"])
+
+
+#: Verbs-of-art whose titles stay generic — they are tmux-specific
+#: terms already and over-prefixing reads as visual chrome.
+#: ``display_message`` is exempt from this set (already qualified as
+#: "Evaluate tmux Format String"; pinned in _TMUX_QUALIFIED_TOOLS).
+_VERBS_OF_ART = frozenset(
+    [
+        "send_keys",
+        "capture_pane",
+        "snapshot_pane",
+        "paste_text",
+        "get_pane_info",
+        "find_pane_by_position",
+        "clear_pane",
+        "search_panes",
+        "wait_for_text",
+        "wait_for_content_change",
+        "select_pane",
+        "swap_pane",
+        "enter_copy_mode",
+        "exit_copy_mode",
+        "resize_pane",
+        "kill_pane",
+        "respawn_pane",
+        "set_pane_title",
+        "pipe_pane",
+    ]
+)
 
 
 def test_server_advertised_as_tmux() -> None:
@@ -514,6 +604,64 @@ def test_discovery_anchors_marked_alwaysload() -> None:
         )
 
 
+def test_hierarchy_tool_titles_carry_tmux_qualifier() -> None:
+    """Hierarchy-noun titles include 'tmux' for display disambiguation.
+
+    Without the qualifier, "List Windows" competes with browser /
+    editor / WM MCPs that share the noun. Title is NOT BM25-indexed
+    (FastMCP's _extract_searchable_text only concatenates name +
+    description + parameter names + parameter descriptions), so this
+    test guards the human-readable disambiguation contract for tool
+    catalog UIs and ``claude mcp list``-style outputs only.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="title-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    for tool_name in _TMUX_QUALIFIED_TOOLS:
+        tool = tools.get(tool_name)
+        assert tool is not None, f"tool not registered: {tool_name}"
+        assert tool.title is not None, f"{tool_name} missing title"
+        assert "tmux" in tool.title.lower(), (
+            f"{tool_name} title {tool.title!r} should include 'tmux'"
+        )
+
+
+def test_verbs_of_art_titles_unchanged() -> None:
+    """Verb-of-art titles stay generic — over-prefixing is visual chrome.
+
+    Send Keys, Pipe Pane, Snapshot Pane, Capture Pane, Paste Text,
+    etc. are tmux-specific terms already. Adding ``tmux`` to the title
+    delivers no display-disambiguation lift and inflates every tool
+    catalog entry.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="verbs-of-art-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    for tool_name in _VERBS_OF_ART:
+        tool = tools.get(tool_name)
+        assert tool is not None, f"tool not registered: {tool_name}"
+        assert tool.title is not None, f"{tool_name} missing title"
+        assert "tmux" not in tool.title.lower(), (
+            f"{tool_name} title {tool.title!r} should NOT include 'tmux' "
+            "— it's a verb-of-art, already disambiguated by the verb"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Lifespan tests
 # ---------------------------------------------------------------------------
 
