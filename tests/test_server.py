@@ -281,6 +281,98 @@ def test_build_instructions_always_includes_safety() -> None:
     assert "LIBTMUX_SAFETY" in result
 
 
+@pytest.mark.parametrize("tier", [TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE])
+@pytest.mark.parametrize("tmux_pane", ["", "%42"])
+def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
+    monkeypatch: pytest.MonkeyPatch, tier: str, tmux_pane: str
+) -> None:
+    """The transmitted instructions= string fits Claude Code's 2KB budget.
+
+    The static ``_BASE_INSTRUCTIONS`` length is not the contract —
+    ``_build_instructions`` appends a safety-tier block, an optional
+    readonly-tier hint, and an optional ``$TMUX_PANE`` agent-context
+    block. The full transmitted string must be ≤ 2048 bytes for every
+    (tier, tmux_pane) combination, otherwise Claude Code silently
+    truncates the agent-context block — the only server-side fix for
+    "current window" anaphora.
+    """
+    if tmux_pane:
+        monkeypatch.setenv("TMUX_PANE", tmux_pane)
+        monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+    else:
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.delenv("TMUX", raising=False)
+
+    instructions = _build_instructions(safety_level=tier)
+    size = len(instructions.encode())
+    assert size <= 2048, (
+        f"tier={tier} tmux_pane={tmux_pane!r}: "
+        f"{size} bytes exceeds Claude Code's 2KB ceiling"
+    )
+
+
+def test_base_instructions_document_scope() -> None:
+    """``_BASE_INSTRUCTIONS`` carries an activation rule with anti-triggers.
+
+    The SCOPE segment names positive triggers (pane, current, %, @, $)
+    and explicit anti-triggers (browser/editor/GUI/Jupyter) plus a
+    safety-valve clause for the ambiguous case. Without this segment,
+    bare 'pane'/'window'/'session' rely on the LLM to *infer* the tmux
+    context from each tool's description; with it, the LLM has explicit
+    boundaries it can quote when the user's phrasing is ambiguous.
+    """
+    for required in (
+        "TRIGGERS:",
+        "ANTI-TRIGGERS:",
+        "pane",
+        "'%'",
+        "'@'",
+        "'$'",
+        "VS Code",
+        "i3",
+        "Jupyter",
+        "clarifying question",
+    ):
+        assert required in _BASE_INSTRUCTIONS, f"missing: {required!r}"
+
+
+def test_scope_segment_carries_anti_triggers() -> None:
+    """SCOPE segment carries the activation rule, not just _BASE_INSTRUCTIONS.
+
+    Defensively pinned to ``_INSTR_SCOPE`` rather than the joined
+    string so a future refactor that moves the SCOPE content to a
+    different segment is caught here, not only by the
+    test_base_instructions_document_scope test on the joined string.
+    """
+    from libtmux_mcp.server import _INSTR_SCOPE
+
+    assert "TRIGGERS:" in _INSTR_SCOPE
+    assert "ANTI-TRIGGERS:" in _INSTR_SCOPE
+    assert "VS Code" in _INSTR_SCOPE
+    assert "Jupyter" in _INSTR_SCOPE
+    assert "clarifying question" in _INSTR_SCOPE
+
+
+@pytest.mark.parametrize("tier", [TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE])
+def test_readonly_hint_visible_only_on_readonly_tier(
+    monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """The 'Readonly mode:' investigation hint appears only on readonly.
+
+    False-positive activation is cheap on readonly (worst case: an
+    extra ``list_panes`` call) and expensive on mutating/destructive
+    (where ``kill_*`` is one mis-routed query away). Reuse the existing
+    safety axis instead of shipping a separate discoverability knob.
+    """
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("TMUX", raising=False)
+    instructions = _build_instructions(safety_level=tier)
+    if tier == TAG_READONLY:
+        assert "Readonly mode:" in instructions
+    else:
+        assert "Readonly mode:" not in instructions
+
+
 # ---------------------------------------------------------------------------
 # Lifespan tests
 # ---------------------------------------------------------------------------
