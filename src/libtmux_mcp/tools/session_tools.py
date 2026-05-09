@@ -12,6 +12,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -37,10 +38,12 @@ def list_windows(
     socket_name: str | None = None,
     filters: dict[str, str] | str | None = None,
 ) -> list[WindowInfo]:
-    """List windows in a tmux session, or all windows across sessions.
+    """List tmux windows (terminal tabs) in a session, or across the server.
 
-    Only searches window metadata (name, index, layout). To search
-    the actual text visible in terminal panes, use search_panes instead.
+    Use for tmux windows — 'current window', 'this tab' (when terminal-
+    contextual) — not browser tabs or desktop windows. Only searches
+    window metadata (name, index, layout); to search the actual visible
+    terminal text, use search_panes.
 
     Parameters
     ----------
@@ -329,9 +332,12 @@ def select_window(
 
 def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
-    mcp.tool(title="List Windows", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        list_windows
-    )
+    mcp.tool(
+        title="List Windows",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+        meta=DISCOVERY_META,
+    )(list_windows)
     mcp.tool(title="Get Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         get_session_info
     )

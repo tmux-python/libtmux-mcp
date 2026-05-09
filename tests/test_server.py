@@ -173,6 +173,20 @@ def test_base_instructions_document_hook_boundary() -> None:
     assert "tmux config file" in _BASE_INSTRUCTIONS
 
 
+def test_hooks_gap_keeps_process_death_rationale() -> None:
+    """Hook-gap segment carries the rationale, not just the rule.
+
+    Defensively pinned to ``_INSTR_HOOKS_GAP`` rather than
+    ``_BASE_INSTRUCTIONS`` so a future refactor that moves "tmux config
+    file" into a different segment is caught here, not only by the
+    line-173 test on the joined string.
+    """
+    from libtmux_mcp.server import _INSTR_HOOKS_GAP
+
+    assert "survive process death" in _INSTR_HOOKS_GAP
+    assert "tmux config file" in _INSTR_HOOKS_GAP
+
+
 def test_base_instructions_document_socket_name_contract() -> None:
     """_BASE_INSTRUCTIONS frames the socket_name promise precisely.
 
@@ -281,7 +295,225 @@ def test_build_instructions_always_includes_safety() -> None:
     assert "LIBTMUX_SAFETY" in result
 
 
+@pytest.mark.parametrize(
+    ("tier", "tmux_pane", "tmux_env"),
+    [
+        (TAG_READONLY, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TAG_MUTATING, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TAG_DESTRUCTIVE, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TAG_READONLY, "", ""),
+        (TAG_MUTATING, "", ""),
+        (TAG_DESTRUCTIVE, "", ""),
+        # Variable-length stress: longer socket name + multi-digit pane id.
+        # Guards against future text additions tipping a realistic case
+        # over the 2KB budget. Exercises BOTH axes — a multi-digit pane id
+        # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET). Margin
+        # ~2 bytes; if a future text addition trips this, either trim
+        # further or fall back to a tighter compression form (drop spaces
+        # around ``/`` in HOOKS, drop spaces after colons in the safety
+        # paragraph) for additional bytes of margin.
+        (TAG_READONLY, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
+    ],
+)
+def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
+    monkeypatch: pytest.MonkeyPatch,
+    tier: str,
+    tmux_pane: str,
+    tmux_env: str,
+) -> None:
+    """The transmitted instructions= string fits Claude Code's 2KB budget.
+
+    The static ``_BASE_INSTRUCTIONS`` length is not the contract —
+    ``_build_instructions`` appends a safety-tier block, an optional
+    readonly-tier hint, and an optional ``$TMUX_PANE`` agent-context
+    block. The full transmitted string must be ≤ 2048 bytes for every
+    (tier, tmux_pane) combination, otherwise Claude Code silently
+    truncates the agent-context block — the only server-side fix for
+    "current window" anaphora.
+
+    Includes a variable-length stress case (longer socket name +
+    multi-digit pane id) so realistic runtime injections of
+    ``TMUX_PANE`` / ``TMUX`` cannot push the total over the budget
+    without the test catching it.
+    """
+    if tmux_pane:
+        monkeypatch.setenv("TMUX_PANE", tmux_pane)
+        monkeypatch.setenv("TMUX", tmux_env)
+    else:
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.delenv("TMUX", raising=False)
+
+    instructions = _build_instructions(safety_level=tier)
+    size = len(instructions.encode())
+    assert size <= 2048, (
+        f"tier={tier} tmux_pane={tmux_pane!r}: "
+        f"{size} bytes exceeds Claude Code's 2KB ceiling"
+    )
+
+
+def test_base_instructions_document_scope() -> None:
+    """``_BASE_INSTRUCTIONS`` carries an activation rule with anti-triggers.
+
+    The SCOPE segment names positive triggers (pane, current, %, @, $)
+    and explicit anti-triggers (browser/editor/GUI/Jupyter) plus a
+    safety-valve clause for the ambiguous case. Without this segment,
+    bare 'pane'/'window'/'session' rely on the LLM to *infer* the tmux
+    context from each tool's description; with it, the LLM has explicit
+    boundaries it can quote when the user's phrasing is ambiguous.
+    """
+    for required in (
+        "TRIGGERS:",
+        "ANTI-TRIGGERS:",
+        "pane",
+        "'%'",
+        "'@'",
+        "'$'",
+        "VS Code",
+        "i3",
+        "Jupyter",
+        "clarifying question",
+    ):
+        assert required in _BASE_INSTRUCTIONS, f"missing: {required!r}"
+
+
+def test_scope_segment_carries_anti_triggers() -> None:
+    """SCOPE segment carries the activation rule, not just _BASE_INSTRUCTIONS.
+
+    Defensively pinned to ``_INSTR_SCOPE`` rather than the joined
+    string so a future refactor that moves the SCOPE content to a
+    different segment is caught here, not only by the
+    test_base_instructions_document_scope test on the joined string.
+    """
+    from libtmux_mcp.server import _INSTR_SCOPE
+
+    assert "TRIGGERS:" in _INSTR_SCOPE
+    assert "ANTI-TRIGGERS:" in _INSTR_SCOPE
+    assert "VS Code" in _INSTR_SCOPE
+    assert "Jupyter" in _INSTR_SCOPE
+    assert "clarifying question" in _INSTR_SCOPE
+
+
+@pytest.mark.parametrize("tier", [TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE])
+def test_readonly_hint_visible_only_on_readonly_tier(
+    monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """The 'Readonly mode:' investigation hint appears only on readonly.
+
+    False-positive activation is cheap on readonly (worst case: an
+    extra ``list_panes`` call) and expensive on mutating/destructive
+    (where ``kill_*`` is one mis-routed query away). Reuse the existing
+    safety axis instead of shipping a separate discoverability knob.
+    """
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.delenv("TMUX", raising=False)
+    instructions = _build_instructions(safety_level=tier)
+    if tier == TAG_READONLY:
+        assert "Readonly mode:" in instructions
+    else:
+        assert "Readonly mode:" not in instructions
+
+
 # ---------------------------------------------------------------------------
+# Discovery anchors — BM25 lexicon and alwaysLoad meta hints
+# ---------------------------------------------------------------------------
+
+#: The six high-traffic discovery anchors. ToolSearch BM25-ranks
+#: against tool ``description`` (FastMCP's griffe parser hands the
+#: leading paragraph in), so the anchors carry a buried-synonym
+#: lexicon plus an inline anti-trigger to widen the indexed surface
+#: and add explicit boundaries.
+_DISCOVERY_ANCHORS = frozenset(
+    [
+        "list_panes",
+        "list_windows",
+        "list_sessions",
+        "snapshot_pane",
+        "search_panes",
+        "capture_pane",
+    ]
+)
+
+
+#: Discovery anchors that carry the ``anthropic/alwaysLoad`` per-tool
+#: meta hint. Read-only only — best-effort hint to Claude Code that
+#: keeps a tiny tmux vocabulary always-visible without preloading
+#: every tool's schema.
+_ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"])
+
+
+def test_server_advertised_as_tmux() -> None:
+    """``serverInfo.name`` aligns with the README registration slug.
+
+    Cross-client display fields show ``serverInfo.name``; aligning to
+    ``tmux`` removes a papercut where users registering via the README
+    get ``mcp__tmux__*`` tool prefixes but the protocol-handshake name
+    still says ``libtmux``.
+    """
+    from libtmux_mcp.server import mcp
+
+    assert mcp.name == "tmux"
+
+
+def test_discovery_anchor_descriptions_carry_tmux_and_synonyms() -> None:
+    """The six discovery anchors carry tmux + a buried synonym in BM25 corpus.
+
+    FastMCP's ``parse_docstring`` extracts the leading text block
+    before the first ``Parameters`` / ``Returns`` section as
+    ``tool.description``. Both that paragraph and any subsequent prose
+    ride into the BM25 corpus, so burying terminal / shell /
+    scrollback / multiplexer / workspace synonyms in natural prose
+    widens the indexed lexicon without leaving a discovery-engineering
+    artifact in user-facing ``--help`` output.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="desc-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    synonyms = {"terminal", "shell", "scrollback", "multiplexer", "workspace"}
+    for tool_name in _DISCOVERY_ANCHORS:
+        tool = tools.get(tool_name)
+        assert tool is not None, f"tool not registered: {tool_name}"
+        desc = (tool.description or "").lower()
+        assert "tmux" in desc, f"{tool_name} description missing 'tmux'"
+        assert any(s in desc for s in synonyms), (
+            f"{tool_name} description missing a synonym from {synonyms}: {desc[:200]!r}"
+        )
+
+
+def test_discovery_anchors_marked_alwaysload() -> None:
+    """``list_panes``, ``list_windows``, ``snapshot_pane`` carry alwaysLoad.
+
+    Best-effort hint — FastMCP passes ``meta`` opaquely, so honoring
+    is delegated to Claude Code where the field is documented at
+    ``code.claude.com/docs/en/mcp`` (v2.1.121+). The test asserts only
+    the positive contract; over-specifying the negative space is
+    chrome.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="meta-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    for tool_name in _ALWAYS_LOAD_ANCHORS:
+        tool = tools.get(tool_name)
+        assert tool is not None, f"tool not registered: {tool_name}"
+        meta = getattr(tool, "meta", None) or {}
+        assert meta.get("anthropic/alwaysLoad") is True, (
+            f"{tool_name} meta missing anthropic/alwaysLoad: {meta!r}"
+        )
+
+
 # Lifespan tests
 # ---------------------------------------------------------------------------
 

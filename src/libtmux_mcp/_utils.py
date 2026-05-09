@@ -328,6 +328,21 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+
+#: Per-tool MCP ``meta`` payload that hints clients to keep this tool
+#: always visible (not deferred). FastMCP passes ``meta`` opaquely
+#: (verified vs ``~/study/python/fastmcp/src`` — no special handling);
+#: honoring is delegated to Claude Code, where ``alwaysLoad`` is
+#: documented at https://code.claude.com/docs/en/mcp (v2.1.121+).
+#:
+#: Best-effort by design — safe no-op for clients that don't index the
+#: ``anthropic/*`` namespace. Apply only to read-tier discovery anchors
+#: (``list_panes``, ``list_windows``, ``snapshot_pane``); each
+#: always-loaded tool consumes a fixed schema budget in clients that
+#: honour the hint, so widening the set has a real cost.
+DISCOVERY_META: dict[str, t.Any] = {
+    "anthropic/alwaysLoad": True,
+}
 #: Annotations for tools that stay in the ``mutating`` tier (so they remain
 #: visible to default-profile agents) but whose default behaviour can
 #: terminate processes or otherwise lose state.

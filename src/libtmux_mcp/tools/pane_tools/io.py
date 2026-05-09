@@ -137,10 +137,12 @@ def capture_pane(
     max_lines: int | None = CAPTURE_DEFAULT_MAX_LINES,
     socket_name: str | None = None,
 ) -> str:
-    """Capture the visible contents of a tmux pane.
+    """Capture the visible contents of a tmux pane (terminal scrollback).
 
-    This is the tool for reading what is displayed in a terminal. Use
-    search_panes to search for text across multiple panes at once.
+    Use for tmux pane output — 'capture the build log', 'what did the
+    server print' — not editor file contents. The tool for reading what
+    is displayed in a terminal; use search_panes to search across
+    multiple panes at once.
 
     Output is tail-preserved: when the capture exceeds ``max_lines``
     the oldest lines are dropped and the returned string is prefixed

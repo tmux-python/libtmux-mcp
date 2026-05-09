@@ -61,68 +61,65 @@ _ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 # ---------------------------------------------------------------------------
 
 _INSTR_HIERARCHY = (
-    "libtmux MCP server for programmatic tmux control. "
+    "libtmux MCP server for tmux. "
     "tmux hierarchy: Server > Session > Window > Pane. "
-    "Use pane_id (e.g. '%1') as the preferred targeting method - "
-    "it is globally unique within a tmux server. "
-    "Use send_keys to execute commands and capture_pane to read output. "
-    "Targeted tmux tools accept an optional socket_name parameter "
-    "(defaults to LIBTMUX_SOCKET env var); list_servers discovers "
-    "sockets via TMUX_TMPDIR plus optional extra_socket_paths instead."
+    "Prefer pane_id (e.g. '%1') for targeting. "
+    "Targeted tmux tools accept socket_name (defaults to LIBTMUX_SOCKET); "
+    "list_servers discovers sockets via TMUX_TMPDIR plus extra_socket_paths."
+)
+
+#: Activation rule. Names positive triggers and explicit anti-triggers
+#: so bare 'pane'/'window'/'session' default to tmux but the server
+#: stays out of the way for browser/editor/GUI/Jupyter contexts.
+_INSTR_SCOPE = (
+    "TRIGGERS: invoke for tmux objects (panes, windows, sessions). "
+    "Bare 'pane', 'split', 'this terminal', 'send keys', 'scrollback', "
+    "'copy mode' default to tmux. IDs '%' (pane), '@' (window), "
+    "'$' (session) are unambiguous.\n"
+    "ANTI-TRIGGERS: do NOT invoke for browser windows/tabs, editor panes "
+    "(VS Code, Cursor, Neovim splits), GUI windows (i3, sway, Hyprland), "
+    "Jupyter cells, login/HTTP sessions.\n"
+    "When ambiguous on bare 'window'/'session', ask one clarifying question."
 )
 
 _INSTR_METADATA_VS_CONTENT = (
-    "IMPORTANT — metadata vs content: list_windows, list_panes, and "
-    "list_sessions only search metadata (names, IDs, current command). "
-    "To find text that is actually visible in terminals — when users ask "
-    "what panes 'contain', 'mention', 'show', or 'have' — use "
-    "search_panes to search across all pane contents, or list_panes + "
-    "capture_pane on each pane for manual inspection."
+    "metadata vs content: list_windows, list_panes, list_sessions search "
+    "metadata only. Use search_panes or capture_pane to find text inside "
+    "terminals — what panes 'contain', 'mention', 'show'."
 )
 
 _INSTR_READ_TOOLS = (
-    "READ TOOLS TO PREFER: snapshot_pane returns pane content plus "
-    "cursor position, mode, and scroll state in one call — use it "
-    "instead of capture_pane + get_pane_info when you need context. "
-    "display_message evaluates a tmux format string (e.g. "
-    "'#{pane_current_command}', '#{session_name}') against a target "
-    "and returns the expanded value — cheaper than parsing captured "
-    "output. (The tool is named after the tmux 'display-message -p' "
-    "verb it wraps; its MCP title is 'Evaluate tmux Format String'.)"
+    "Prefer snapshot_pane over capture_pane + get_pane_info. "
+    "display_message evaluates a tmux format string against a target."
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: for 'run command, wait for output' workflows "
-    "use wait_for_text (matches text/regex on a pane) or "
-    "wait_for_content_change (waits for any change). These block "
-    "server-side until the condition is met or the timeout expires, "
-    "which is dramatically cheaper in agent turns than capture_pane "
-    "in a retry loop."
+    "WAIT, DON'T POLL: use wait_for_text (text/regex) or "
+    "wait_for_content_change instead of capture_pane retry loops; "
+    "both block server-side until the condition or timeout."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module
 #: comment above for when to add another ``_GAP`` segment vs. push the
 #: explanation into a tool description.
 _INSTR_HOOKS_GAP = (
-    "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. Write-hook "
-    "tools are intentionally not exposed — tmux hooks survive process "
-    "death, so they belong in your tmux config file, not a transient "
-    "MCP session."
+    "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. "
+    "Write-hooks survive process death; keep them in your tmux config file, "
+    "not a transient MCP session."
 )
 
 #: Gap-explainer: ``list_buffers`` is intentionally absent because tmux
 #: buffers can include OS clipboard history. See module comment above.
 _INSTR_BUFFERS_GAP = (
-    "BUFFERS: load_buffer stages content, paste_buffer delivers it into "
-    "a pane, delete_buffer removes the staged buffer. Track owned "
-    "buffers via the BufferRef returned from load_buffer — there is no "
-    "list_buffers tool because tmux buffers may include OS clipboard "
-    "history (passwords, private snippets)."
+    "BUFFERS: load_buffer stages, paste_buffer delivers, delete_buffer "
+    "removes. Track via the BufferRef returned from load_buffer — no "
+    "list_buffers tool because tmux buffers may include OS clipboard history."
 )
 
 _BASE_INSTRUCTIONS = "\n\n".join(
     (
         _INSTR_HIERARCHY,
+        _INSTR_SCOPE,
         _INSTR_METADATA_VS_CONTENT,
         _INSTR_READ_TOOLS,
         _INSTR_WAIT_NOT_POLL,
@@ -153,14 +150,21 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
 
     # Safety tier context
     parts.append(
-        f"\n\nSafety level: {safety_level}. "
-        "Available tiers: 'readonly' (read operations only), "
-        "'mutating' (default, read + write + send_keys), "
-        "'destructive' (all operations including kill commands). "
-        "Set via LIBTMUX_SAFETY env var. "
-        "Tools outside the active tier are hidden and will not appear in "
-        "tool listings."
+        f"\n\nSafety level: {safety_level} "
+        "(readonly: read; mutating: read+send; destructive: read+send+kill). "
+        "Set LIBTMUX_SAFETY; off-tier tools are hidden."
     )
+
+    # Tier-conditioned discoverability hint. False-positive activation is
+    # cheap on readonly (worst case: an extra list_panes call) and
+    # expensive on mutating/destructive (where kill_* is one mis-routed
+    # query away). Reuse the existing safety axis instead of shipping a
+    # separate LIBTMUX_DISCOVERABILITY knob.
+    if safety_level == TAG_READONLY:
+        parts.append(
+            "\n\nReadonly mode: when uncertain about terminal state, prefer "
+            "one read-only probe (snapshot_pane, list_panes, search_panes)."
+        )
 
     # Agent tmux context
     tmux_pane = os.environ.get("TMUX_PANE")
@@ -171,18 +175,13 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
         socket_path = env_parts[0] if env_parts else None
         socket_name = socket_path.rsplit("/", 1)[-1] if socket_path else None
 
-        context = (
-            f"\n\nAgent context: This MCP server is running inside "
-            f"tmux pane {tmux_pane}"
-        )
+        context = f"\n\nAgent context: this MCP runs inside tmux pane {tmux_pane}"
         if socket_name:
-            context += f" (socket: {socket_name})"
+            context += f" (socket {socket_name})"
         context += (
-            ". Tool results annotate the caller's own pane with "
-            "is_caller=true. Use this to distinguish your own pane from "
-            "others. To answer 'which pane/window/session am I in?' call "
-            "list_panes (or snapshot_pane) and filter for is_caller=true — "
-            "your pane is identified above. No dedicated whoami tool exists."
+            ". Tool results mark the caller's own pane is_caller=true; "
+            "filter list_panes for is_caller=true to answer "
+            "'which pane am I in?' (no whoami tool)."
         )
         parts.append(context)
 
@@ -268,9 +267,10 @@ def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
 
 
 mcp = FastMCP(
-    name="libtmux",
+    name="tmux",
     version=__version__,
     instructions=_build_instructions(safety_level=_safety_level),
+    website_url="https://libtmux-mcp.git-pull.com/",
     lifespan=_lifespan,
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early

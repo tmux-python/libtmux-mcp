@@ -6,6 +6,21 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+- Bare *"pane"* / *"window"* / *"session"* prompts now reliably
+  activate libtmux-mcp without the user saying "tmux". An
+  `_INSTR_SCOPE` instruction segment names positive triggers
+  + explicit anti-triggers (browser, editor, i3, Jupyter); six
+  discovery-anchor docstrings carry tmux-vocabulary synonyms
+  (terminal / shell / scrollback / multiplexer / workspace) so
+  the BM25 corpus indexes them; {tooliconl}`list-panes`,
+  {tooliconl}`list-windows`, and {tooliconl}`snapshot-pane`
+  carry an `anthropic/alwaysLoad: true` per-tool meta hint
+  (Claude Code v2.1.121+). `serverInfo.name` is now `tmux`.
+  Transmitted `instructions=` re-fits Claude Code's 2KB
+  ceiling across all safety tiers. (#37)
+
 ## libtmux-mcp 0.1.0a5 (2026-05-06)
 
 _Pane geometry on response models, the `find_pane_by_position`

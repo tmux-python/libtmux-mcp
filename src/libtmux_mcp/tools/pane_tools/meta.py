@@ -76,11 +76,13 @@ def snapshot_pane(
     max_lines: int | None = CAPTURE_DEFAULT_MAX_LINES,
     socket_name: str | None = None,
 ) -> PaneSnapshot:
-    """Take a rich snapshot of a tmux pane: content + cursor + mode + scroll state.
+    """Snapshot a tmux pane: visible terminal output, cursor, mode, scroll.
 
+    Use for terminal-contents inspection — 'what's in my pane', 'the
+    current shell output' — not editor panes or browser viewports.
     Returns everything capture_pane and get_pane_info return, plus cursor
     position, copy-mode state, and scroll position — in a single call.
-    Use this instead of separate capture_pane + get_pane_info calls when
+    Prefer this over separate capture_pane + get_pane_info calls when
     you need to reason about cursor location or pane mode.
 
     The ``content`` field is tail-preserved: when the captured pane
