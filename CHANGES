@@ -14,27 +14,31 @@ new `MIGRATION` page documenting the rename._
 
 ### What's new
 
-- **Bare "pane" / "window" / "session" prompts now activate
-  libtmux-mcp** — no need to say "tmux". (#37)
-  - Trigger logic pairs positive triggers with explicit
-    anti-triggers (browser, editor, i3, Jupyter) to avoid false
-    activations.
-  - Six discovery-anchor docstrings carry tmux-vocabulary synonyms
-    (terminal, shell, scrollback, multiplexer, workspace) so the
-    BM25 corpus indexes them.
-  - {tooliconl}`list-panes`, {tooliconl}`list-windows`, and
-    {tooliconl}`snapshot-pane` ship with
-    `anthropic/alwaysLoad: true` (Claude Code v2.1.121+).
-  - `serverInfo.name` is now `tmux`; transmitted `instructions=`
-    refit under Claude Code's 2KB ceiling on every safety tier.
-- **Registration slug `libtmux` → `tmux` (recommended).** Existing
-  `libtmux` registrations keep working. (#40)
-  - Updated across {ref}`clients`, the install widget, and
-    `AGENTS.md` examples.
-  - `mcp_swap.py` keeps `libtmux` as default for backward
-    compatibility.
-  - New {ref}`migration` page (root `MIGRATION` with a
-    `docs/migration.md` wrapper) — home for future rename notes.
+**Bare "pane" / "window" / "session" prompts now activate libtmux-mcp**
+
+No "tmux" prefix required in your prompts. (#37)
+
+- Trigger logic pairs positive triggers with explicit anti-triggers
+  (browser, editor, i3, Jupyter) to avoid false activations.
+- Six discovery-anchor docstrings carry tmux-vocabulary synonyms
+  (terminal, shell, scrollback, multiplexer, workspace) so the
+  BM25 corpus indexes them.
+- {tooliconl}`list-panes`, {tooliconl}`list-windows`, and
+  {tooliconl}`snapshot-pane` ship with `anthropic/alwaysLoad: true`
+  (Claude Code v2.1.121+).
+- `serverInfo.name` is now `tmux`; transmitted `instructions=` refit
+  under Claude Code's 2KB ceiling on every safety tier.
+
+**Registration slug `libtmux` → `tmux` (recommended)**
+
+Existing `libtmux` registrations keep working. (#40)
+
+- Updated across {ref}`clients`, the install widget, and `AGENTS.md`
+  examples.
+- `mcp_swap.py` keeps `libtmux` as default for backward
+  compatibility.
+- New {ref}`migration` page (root `MIGRATION` with a
+  `docs/migration.md` wrapper) — home for future rename notes.
 
 ### Documentation
 
