@@ -34,7 +34,7 @@ libtmux-mcp 0.1.0a5 ships {tooliconl}`find-pane-by-position` for layout-relative
 
 **Layout-relative pane targeting via {tooliconl}`find-pane-by-position`**
 
-A new read-only tool resolves a layout-relative phrase ("the bottom-right pane", any corner) to a `PaneInfo` in one call, composing the four `pane_at_*` edge predicates with a position tie-break for ambiguous layouts (e.g. single-pane windows that touch every edge). Replaces the previous {tooliconl}`display-message`-and-parse workaround. (#34)
+A new read-only tool resolves a layout-relative phrase ("the bottom-right pane", any corner) to a {class}`~libtmux_mcp.models.PaneInfo` in one call, composing the four `pane_at_*` edge predicates with a position tie-break for ambiguous layouts (e.g. single-pane windows that touch every edge). Replaces the previous {tooliconl}`display-message`-and-parse workaround. (#34)
 
 **Pane geometry on response models**
 
@@ -94,11 +94,11 @@ Both were sync handlers running blocking subprocess waits on the main loop, free
 
 ## libtmux-mcp 0.1.0a2 (2026-04-19)
 
-libtmux-mcp 0.1.0a2 is the FastMCP alignment release. New tools span discovery, waits, buffers, hooks, and pane/window navigation; four prompt recipes ship; and a five-stage middleware stack adds audit, safety-tier gating, transparent readonly retries, and tail-preserving response trimming. {tooliconl}`search-panes` now returns a paginated `SearchPanesResult` instead of a bare list — the breaking change is documented below. (#15)
+libtmux-mcp 0.1.0a2 is the FastMCP alignment release. New tools span discovery, waits, buffers, hooks, and pane/window navigation; four prompt recipes ship; and a five-stage middleware stack adds audit, safety-tier gating, transparent readonly retries, and tail-preserving response trimming. {tooliconl}`search-panes` now returns a paginated {class}`~libtmux_mcp.models.SearchPanesResult` instead of a bare list — the breaking change is documented below. (#15)
 
 ### Breaking changes
 
-**{tooliconl}`search-panes` returns `SearchPanesResult`**
+**{tooliconl}`search-panes` returns {class}`~libtmux_mcp.models.SearchPanesResult`**
 
 {tooliconl}`search-panes` now returns {class}`~libtmux_mcp.models.SearchPanesResult` instead of `list[`{class}`~libtmux_mcp.models.PaneContentMatch``]`. Matches moved to `.matches`; new `truncated`, `truncated_panes`, `total_panes_matched`, `offset`, `limit` fields enable pagination.
 
@@ -145,7 +145,7 @@ Tool input schemas now carry per-parameter `description` fields auto-extracted f
 - {tooliconl}`search-panes` neutralizes tmux format-string injection in the regex fast path.
 - macOS `TMUX_TMPDIR` self-kill guard resolves the server socket via `tmux display-message #{socket_path}` before env-based reconstruction.
 - `build_dev_workspace` prompt: real tool parameter names, no waiting for shell prompts after screen-grabbing launches (`vim`, `watch`, `tail -f`), and a new `log_command` parameter to replace the Linux-only `/var/log/syslog` default.
-- `ReadonlyRetryMiddleware` retry warnings log under `libtmux_mcp.retry`.
+- {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` retry warnings log under `libtmux_mcp.retry`.
 
 ### Documentation
 
