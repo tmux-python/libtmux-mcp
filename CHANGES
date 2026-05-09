@@ -149,7 +149,7 @@ Tool input schemas now carry per-parameter `description` fields auto-extracted f
 
 ### Documentation
 
-New per-tool pages — `buffers.md`, `hooks.md`, `waits.md`, `tools/index.md` — and `panes.md` documents the `SearchPanesResult` migration. `safety.md` covers the macOS `TMUX_TMPDIR` caveat, the audit log, `pipe_pane`, and `set_environment`.
+New per-tool category pages — {doc}`/tools/buffer/index`, {doc}`/tools/hook/index`, and the {doc}`/tools/index` landing — with {doc}`/tools/pane/index` documenting the {class}`~libtmux_mcp.models.SearchPanesResult` migration. {ref}`safety` covers the macOS `TMUX_TMPDIR` caveat, the audit log, {tooliconl}`pipe-pane`, and {tooliconl}`set-environment`.
 
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
@@ -157,10 +157,10 @@ libtmux-mcp 0.1.0a1 expands pane / window / session navigation with new tools an
 
 ### What's new
 
-- New pane tools: `snapshot_pane`, `wait_for_content_change`, `select_pane`, `swap_pane`, `pipe_pane`, `display_message`, `enter_copy_mode`, `exit_copy_mode`, and `paste_text`. (#11)
-- New session tool: `select_window` — navigate by ID, index, or direction. (#11)
-- New window tool: `move_window` — reorder within a session or across sessions. (#11)
-- New models: `PaneSnapshot` and `ContentChangeResult`. (#11)
+- New pane tools: {tooliconl}`snapshot-pane`, {tooliconl}`wait-for-content-change`, {tooliconl}`select-pane`, {tooliconl}`swap-pane`, {tooliconl}`pipe-pane`, {tooliconl}`display-message`, {tooliconl}`enter-copy-mode`, {tooliconl}`exit-copy-mode`, and {tooliconl}`paste-text`. (#11)
+- New session tool: {tooliconl}`select-window` — navigate by ID, index, or direction. (#11)
+- New window tool: {tooliconl}`move-window` — reorder within a session or across sessions. (#11)
+- New models: {class}`~libtmux_mcp.models.PaneSnapshot` and {class}`~libtmux_mcp.models.ContentChangeResult`. (#11)
 
 ### Documentation
 
