@@ -21,6 +21,19 @@ _Notes on upcoming releases will be added here_
   Transmitted `instructions=` re-fits Claude Code's 2KB
   ceiling across all safety tiers. (#37)
 
+### Documentation
+
+- Hierarchy-noun tool titles gain a `tmux` qualifier (e.g.
+  *"List Sessions"* → *"List tmux Sessions"*) for display-time
+  disambiguation in catalog UIs and `claude mcp list`-style
+  outputs. Verbs-of-art ({tooliconl}`send-keys`,
+  {tooliconl}`pipe-pane`, {tooliconl}`snapshot-pane`,
+  {tooliconl}`capture-pane`, {tooliconl}`paste-text`) stay
+  generic — already tmux-specific terms; over-prefixing reads
+  as visual chrome. Title is NOT in BM25's search corpus
+  (verified vs FastMCP's `_extract_searchable_text`); this is
+  pure catalog polish, no activation impact. (#38)
+
 ## libtmux-mcp 0.1.0a5 (2026-05-06)
 
 _Pane geometry on response models, the `find_pane_by_position`

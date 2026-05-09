@@ -118,9 +118,13 @@ def set_environment(
 
 def register(mcp: FastMCP) -> None:
     """Register environment tools with the MCP instance."""
-    mcp.tool(title="Show Environment", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_environment
-    )
     mcp.tool(
-        title="Set Environment", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Show tmux Environment",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+    )(show_environment)
+    mcp.tool(
+        title="Set tmux Environment",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(set_environment)

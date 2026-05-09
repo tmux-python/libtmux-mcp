@@ -212,12 +212,12 @@ async def signal_channel(
 def register(mcp: FastMCP) -> None:
     """Register wait-for channel tools with the MCP instance."""
     mcp.tool(
-        title="Wait For Channel",
+        title="Wait For tmux Channel",
         annotations=ANNOTATIONS_MUTATING,
         tags={TAG_MUTATING},
     )(wait_for_channel)
     mcp.tool(
-        title="Signal Channel",
+        title="Signal tmux Channel",
         annotations=ANNOTATIONS_MUTATING,
         tags={TAG_MUTATING},
     )(signal_channel)

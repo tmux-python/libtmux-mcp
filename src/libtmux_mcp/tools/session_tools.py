@@ -333,25 +333,29 @@ def select_window(
 def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
     mcp.tool(
-        title="List Windows",
+        title="List tmux Windows",
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY},
         meta=DISCOVERY_META,
     )(list_windows)
-    mcp.tool(title="Get Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        get_session_info
-    )
     mcp.tool(
-        title="Create Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+        title="Get tmux Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(get_session_info)
+    mcp.tool(
+        title="Create tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
     )(create_window)
     mcp.tool(
-        title="Rename Session", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Rename tmux Session",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(rename_session)
     mcp.tool(
-        title="Kill Session",
+        title="Kill tmux Session",
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_DESTRUCTIVE},
     )(kill_session)
     mcp.tool(
-        title="Select Window", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Select tmux Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
     )(select_window)

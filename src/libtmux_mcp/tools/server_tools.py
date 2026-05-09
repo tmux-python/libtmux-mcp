@@ -336,18 +336,22 @@ def list_servers(
 
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
-    mcp.tool(title="List Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        list_sessions
-    )
-    mcp.tool(title="List Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        list_servers
-    )
     mcp.tool(
-        title="Create Session", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+        title="List tmux Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(list_sessions)
+    mcp.tool(
+        title="List tmux Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(list_servers)
+    mcp.tool(
+        title="Create tmux Session",
+        annotations=ANNOTATIONS_CREATE,
+        tags={TAG_MUTATING},
     )(create_session)
     mcp.tool(
-        title="Kill Server", annotations=ANNOTATIONS_DESTRUCTIVE, tags={TAG_DESTRUCTIVE}
+        title="Kill tmux Server",
+        annotations=ANNOTATIONS_DESTRUCTIVE,
+        tags={TAG_DESTRUCTIVE},
     )(kill_server)
-    mcp.tool(title="Get Server Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        get_server_info
-    )
+    mcp.tool(
+        title="Get tmux Server Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(get_server_info)

@@ -384,19 +384,19 @@ def register(mcp: FastMCP) -> None:
     into a shell). Other buffer tools are plain mutating ops on the
     tmux buffer store.
     """
-    mcp.tool(title="Load Buffer", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
-        load_buffer
-    )
     mcp.tool(
-        title="Paste Buffer",
+        title="Load tmux Buffer", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING}
+    )(load_buffer)
+    mcp.tool(
+        title="Paste tmux Buffer",
         annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING},
     )(paste_buffer)
-    mcp.tool(title="Show Buffer", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+    mcp.tool(title="Show tmux Buffer", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         show_buffer
     )
     mcp.tool(
-        title="Delete Buffer",
+        title="Delete tmux Buffer",
         annotations=ANNOTATIONS_MUTATING,
         tags={TAG_MUTATING},
     )(delete_buffer)

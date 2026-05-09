@@ -141,9 +141,9 @@ def set_option(
 
 def register(mcp: FastMCP) -> None:
     """Register option tools with the MCP instance."""
-    mcp.tool(title="Show Option", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+    mcp.tool(title="Show tmux Option", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         show_option
     )
-    mcp.tool(title="Set Option", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING})(
-        set_option
-    )
+    mcp.tool(
+        title="Set tmux Option", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+    )(set_option)

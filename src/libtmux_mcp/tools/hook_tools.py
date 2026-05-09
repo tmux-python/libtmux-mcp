@@ -259,9 +259,9 @@ def show_hook(
 
 def register(mcp: FastMCP) -> None:
     """Register read-only hook tools with the MCP instance."""
-    mcp.tool(title="Show Hooks", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+    mcp.tool(title="Show tmux Hooks", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         show_hooks
     )
-    mcp.tool(title="Show Hook", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+    mcp.tool(title="Show tmux Hook", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         show_hook
     )
