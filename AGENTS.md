@@ -407,26 +407,30 @@ $ claude mcp add --scope user tmux -- uv --directory ~/work/python/libtmux-mcp r
 
 ### Changelog Conventions
 
-These rules apply when authoring entries in `CHANGES`, which is included into `docs/history.md` and rendered as the Sphinx changelog page.
+These rules apply when authoring entries in `CHANGES`, which is included into `docs/history.md` and rendered as the Sphinx changelog page. Modeled on Django's release-notes shape — deliverables get titles and prose, not bullets.
 
-**Optimize for scannability.**
+**Open with a multi-sentence lead paragraph.** Plain prose, no italic. Two to four sentences telling the reader what shipped and who cares — user-visible takeaways, not internal mechanism. Cross-reference detail docs with `{ref}` to keep the lead compact.
 
-- Open every release entry with an italicized one-line tagline stating the release focus. This is the 10,000-foot view that appears first on the rendered page.
-- Front-load each entry with the user-visible value. When an entry has multiple related sub-changes, use a bold-paragraph subheading (`**Foo**`) under `### What's new`, then a one-line prose lede with the PR ref, then flat bullets for mechanism. This matches the shape used in 0.1.0a2, 0.1.0a4, 0.1.0a5, and 0.1.0a6.
-- Group items under fixed subheadings, in this order when present: `### Breaking changes`, `### Dependencies`, `### What's new`, `### Fixes`, `### Documentation`, `### Development`. Dev tooling (helper scripts, internal automation) belongs under `### Development`, not `### What's new`.
-- For breaking changes and deprecations, show the migration path with concrete inline code (commands, before/after).
-- End each entry with the PR or issue number `(#NN)` so readers can follow the trail.
+**Each deliverable is a section, not a bullet.** Inside `### What's new`, every distinct deliverable gets a `**Bold subheading**` naming it in user vocabulary, followed by 1-3 prose paragraphs explaining what shipped. Don't wrap a paragraph in `- ` — bullets are for enumerable lists, not paragraph containers. Cross-link detail docs (`See {ref}\`foo\` for details.`) so prose stays focused.
 
-**Avoid cognitive overload.**
+**The deliverable test.** Before writing an entry, ask: "What's the deliverable, in user vocabulary?" If you can't answer in one sentence, the entry isn't ready. Mechanism (LIFO ordering, helper internals, byte counters, schema-validation locations) belongs in PR descriptions and code comments, not the changelog.
 
-- Don't include fragile metrics that decay over time: token ceilings, third-party client version pins, percent improvements tied to a specific benchmark, exact byte counts. Describe the *capability* or *optimization*, not the math.
-- Don't leak internal jargon: private symbols (leading-underscore identifiers), algorithm names, backend scaffolding. Stick to the user-visible API surface.
-- Don't write walls of text. If an entry needs depth, split with flat bullets under a bold subheading — the user-visible takeaway leads, mechanism follows.
-- Don't bury breaking changes inside a feature list. They get their own subheading at the top of the entry.
+**Fixed subheadings**, in this order when present: `### Breaking changes`, `### Dependencies`, `### What's new`, `### Fixes`, `### Documentation`, `### Development`. Dev tooling (helper scripts, internal automation) lives under `### Development`. For breaking changes, show the migration path with concrete inline code (commands, before/after).
 
-**MyST roles in CHANGES.** Tool references use `{tooliconl}` (inline-friendly badge), class references use `{class}`, exceptions use `{exc}`, functions use `{func}`, attributes use `{attr}`, internal anchors use `{ref}`. See **Sphinx Cross-Reference Roles for MCP Tools** above for the full table.
+**PR refs `(#NN)`** sit at the end of each deliverable's prose paragraph, not on every sentence.
 
-**Summarization style.** When a user asks "what changed in the latest version?" or similar, lead with the entry's italic tagline verbatim, followed by each `**bold subheading**` under `### What's new`. Cite `(#NN)` PR refs only if the user asks for source links. Don't invent versions, dates, or numbers not present in `CHANGES`. Don't quote line numbers or file offsets — those shift as the file evolves.
+**When bullets are appropriate.** Catch-all sections (`### Fixes`, occasionally `### Documentation`) with 3+ genuinely small items use bullets — one line each, never paragraphs. If a bullet swells past two lines, it's not a bullet anymore; promote it to a `**Bold subheading**` with prose body.
+
+**Anti-patterns.**
+
+- Fragile metrics: token ceilings, third-party client version pins, percent benchmarks, exact byte counts. Describe the *capability*, not the math.
+- Internal jargon: private symbols (leading-underscore identifiers), algorithm names exposed for the first time, backend scaffolding.
+- Walls of text dressed up as bullets.
+- Buried breaking changes — they get their own subheading at the top of the entry.
+
+**MyST roles.** Tool references use `{tooliconl}` (inline-friendly badge), class references use `{class}`, exceptions use `{exc}`, functions use `{func}`, attributes use `{attr}`, internal anchors use `{ref}`. See **Sphinx Cross-Reference Roles for MCP Tools** above for the full table.
+
+**Summarization style.** When a user asks "what changed in the latest version?" or similar, lead with the entry's lead paragraph (paraphrased if needed), followed by each `**Bold subheading**` under `### What's new` with a one-sentence summary. Cite `(#NN)` only if the user asks for source links. Don't invent versions, dates, or numbers not present in `CHANGES`. Don't quote line numbers or file offsets — those shift as the file evolves.
 
 ## Debugging Tips
 
