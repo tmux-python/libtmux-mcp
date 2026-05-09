@@ -139,5 +139,6 @@ glossary
 
 project/index
 history
+migration
 GitHub <https://github.com/tmux-python/libtmux-mcp>
 ```

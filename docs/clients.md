@@ -4,14 +4,8 @@
 
 Copy-pasteable configuration for every supported MCP client. If your client isn't listed, any tool supporting MCP stdio transport will work with the JSON config pattern.
 
-```{note}
-**Migrating from the `libtmux` slug.** Earlier versions of these docs
-used `claude mcp add libtmux …`; this page now uses `tmux` to match
-`serverInfo.name` and the `mcp__tmux__*` tool prefix. Existing
-`libtmux` registrations keep working — re-register only if you want
-the new slug. The package name (`libtmux-mcp`), Python module
-(`libtmux_mcp`), and GitHub repo are unchanged.
-```
+See {ref}`migration` for the recommended `tmux` registration slug
+(existing `libtmux` registrations keep working).
 
 ## Claude Code
 
