@@ -1,0 +1,66 @@
+# Migration notes
+
+Migration and deprecation notes for libtmux-mcp are here, see {ref}`history`
+for the full release log.
+
+```{admonition} Welcome on board! 👋
+1. 📌 For safety, **always** pin the package version in your install
+2. 📖 Check the migration notes _(You are here)_
+3. 📣 If a deprecation interrupted you - past, present, or future - voice your opinion on the [tracker].
+
+   We want to make libtmux-mcp fun, reliable, and useful for users.
+
+   API changes can be painful.
+
+   If we can do something to draw the sting, we'll do it. We're taking a balanced approach. That's why these notes are here!
+
+   (Please pin the package. 🙏)
+
+   [tracker]: https://github.com/tmux-python/libtmux-mcp/discussions
+```
+
+## libtmux-mcp 0.1.0a6 (unreleased)
+
+### Recommended registration slug: `libtmux` → `tmux`
+
+Earlier docs and install widgets recommended registering the server as
+`libtmux`. From 0.1.0a6 onward the recommended slug is `tmux`, matching
+the value of `serverInfo.name` returned in the MCP handshake and the
+`mcp__tmux__*` tool prefix that clients namespace tool calls under.
+
+**Existing installations continue to work.** The slug is a per-install
+user choice — your client looks up the server by whatever name you
+registered. Migration is optional; it only matters if you want the new
+`tmux` prefix on tool calls. Claude Code's `claude mcp remove <name>`
+auto-detects the registration scope (verified against
+`claude --version 2.1.138`), so the commands below work whether you
+originally registered at `local`, `user`, or `project` scope.
+
+#### Before
+
+```console
+$ claude mcp add libtmux -- uvx libtmux-mcp
+```
+
+→ tools surface as `mcp__libtmux__list_panes`, `mcp__libtmux__send_keys`, …
+
+#### After
+
+```console
+$ claude mcp remove libtmux
+```
+
+```console
+$ claude mcp add tmux -- uvx libtmux-mcp
+```
+
+→ tools surface as `mcp__tmux__list_panes`, `mcp__tmux__send_keys`, …
+
+#### What's unchanged
+
+- PyPI package name: `libtmux-mcp`
+- Python module: `libtmux_mcp`
+- GitHub repository: <https://github.com/tmux-python/libtmux-mcp>
+- Existing `mcp__libtmux__*` references in CLAUDE.md / AGENTS.md
+  templates and agent histories continue to work if you keep the
+  `libtmux` slug.
