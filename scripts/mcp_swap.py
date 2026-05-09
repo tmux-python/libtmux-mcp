@@ -579,7 +579,16 @@ def _spec_from_entry(entry: t.Any, *, fmt: t.Literal["json", "toml"]) -> McpServ
 
 
 def resolve_repo_meta(repo: pathlib.Path) -> tuple[str, str]:
-    """Derive (server_name, entry_command) from the repo's pyproject.toml."""
+    """Derive (server_name, entry_command) from the repo's pyproject.toml.
+
+    The server name is the registration slug used as the config-file key
+    (``mcpServers.<slug>`` in JSON, ``[mcp_servers.<slug>]`` in TOML).
+    Default: package name with the trailing ``-mcp`` stripped
+    (``libtmux-mcp`` → ``libtmux``). This matches the slug existing
+    users registered under, so ``mcp_swap use-local`` swaps their
+    entry in place. README and ``serverInfo.name`` recommend ``tmux``
+    for fresh installs; pass ``--server tmux`` to target that.
+    """
     pyproject = repo / "pyproject.toml"
     doc = tomlkit.parse(pyproject.read_text())
     project = doc.get("project")

@@ -108,7 +108,12 @@ def _pinned_claude_entry() -> dict[str, t.Any]:
 
 
 def test_resolve_repo_meta_strips_mcp_suffix(fake_repo: pathlib.Path) -> None:
-    """``libtmux-mcp`` resolves to server name ``libtmux`` and entry ``libtmux-mcp``."""
+    """``libtmux-mcp`` resolves to server name ``libtmux`` and entry ``libtmux-mcp``.
+
+    The default matches the slug pre-existing users registered under;
+    ``--server tmux`` is the override to target the README/serverInfo
+    slug for fresh installs.
+    """
     server, entry = mcp_swap.resolve_repo_meta(fake_repo)
     assert server == "libtmux"
     assert entry == "libtmux-mcp"

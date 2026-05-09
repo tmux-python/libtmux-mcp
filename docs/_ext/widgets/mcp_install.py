@@ -91,7 +91,7 @@ _JSON_BODIES: collections.abc.Mapping[str, str] = {
         """\
         {
             "mcpServers": {
-                "libtmux": {
+                "tmux": {
                     "command": "uvx",
                     "args": ["libtmux-mcp"]
                 }
@@ -102,7 +102,7 @@ _JSON_BODIES: collections.abc.Mapping[str, str] = {
         """\
         {
             "mcpServers": {
-                "libtmux": {
+                "tmux": {
                     "command": "pipx",
                     "args": ["run", "libtmux-mcp"]
                 }
@@ -113,7 +113,7 @@ _JSON_BODIES: collections.abc.Mapping[str, str] = {
         """\
         {
             "mcpServers": {
-                "libtmux": {
+                "tmux": {
                     "command": "libtmux-mcp"
                 }
             }
@@ -122,15 +122,15 @@ _JSON_BODIES: collections.abc.Mapping[str, str] = {
 }
 
 _CLI_BODIES: collections.abc.Mapping[tuple[str, str], str] = {
-    ("claude-code", "uvx"): "claude mcp add libtmux -- uvx libtmux-mcp",
-    ("claude-code", "pipx"): "claude mcp add libtmux -- pipx run libtmux-mcp",
-    ("claude-code", "pip"): "claude mcp add libtmux -- libtmux-mcp",
-    ("codex", "uvx"): "codex mcp add libtmux -- uvx libtmux-mcp",
-    ("codex", "pipx"): "codex mcp add libtmux -- pipx run libtmux-mcp",
-    ("codex", "pip"): "codex mcp add libtmux -- libtmux-mcp",
-    ("gemini", "uvx"): "gemini mcp add libtmux uvx -- libtmux-mcp",
-    ("gemini", "pipx"): "gemini mcp add libtmux pipx -- run libtmux-mcp",
-    ("gemini", "pip"): "gemini mcp add libtmux libtmux-mcp",
+    ("claude-code", "uvx"): "claude mcp add tmux -- uvx libtmux-mcp",
+    ("claude-code", "pipx"): "claude mcp add tmux -- pipx run libtmux-mcp",
+    ("claude-code", "pip"): "claude mcp add tmux -- libtmux-mcp",
+    ("codex", "uvx"): "codex mcp add tmux -- uvx libtmux-mcp",
+    ("codex", "pipx"): "codex mcp add tmux -- pipx run libtmux-mcp",
+    ("codex", "pip"): "codex mcp add tmux -- libtmux-mcp",
+    ("gemini", "uvx"): "gemini mcp add tmux uvx -- libtmux-mcp",
+    ("gemini", "pipx"): "gemini mcp add tmux pipx -- run libtmux-mcp",
+    ("gemini", "pip"): "gemini mcp add tmux libtmux-mcp",
 }
 
 
