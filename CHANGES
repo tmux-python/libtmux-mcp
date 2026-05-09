@@ -20,6 +20,13 @@ _Notes on upcoming releases will be added here_
   (Claude Code v2.1.121+). `serverInfo.name` is now `tmux`.
   Transmitted `instructions=` re-fits Claude Code's 2KB
   ceiling across all safety tiers. (#37)
+- Recommended registration slug `libtmux` → `tmux` across
+  {ref}`clients`, the install widget, and `AGENTS.md`
+  examples. Existing `libtmux` registrations keep working;
+  `mcp_swap.py` retains its `libtmux` default for backward
+  compatibility. New {ref}`migration` page (root `MIGRATION`
+  + `docs/migration.md` wrapper) documents the rename and
+  serves as the home for future migration notes. (#40)
 
 ### Documentation
 
