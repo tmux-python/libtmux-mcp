@@ -428,7 +428,9 @@ These rules apply when authoring entries in `CHANGES`, which is included into `d
 - Walls of text dressed up as bullets.
 - Buried breaking changes — they get their own subheading at the top of the entry.
 
-**MyST roles.** Tool references use `{tooliconl}` (inline-friendly badge), class references use `{class}`, exceptions use `{exc}`, functions use `{func}`, attributes use `{attr}`, internal anchors use `{ref}`. See **Sphinx Cross-Reference Roles for MCP Tools** above for the full table.
+**Always link autodoc'd APIs.** Any class, function, exception, attribute, or tool slug that has its own rendered page must be cited via the appropriate role (`{class}`, `{func}`, `{exc}`, `{attr}`, `{tooliconl}`) — never with plain backticks. Doc pages without explicit ref labels use `{doc}` (e.g. `{doc}\`/tools/buffer/index\``). Plain backticks are correct for code syntax (`{user,project}`, `True`), env vars (`LIBTMUX_SOCKET`), pydantic field names on returned models (`pane_at_*`), parameter names, and file paths that aren't doc pages — anything without an autodoc destination.
+
+**MyST roles.** Tool references use `{tooliconl}` (inline-friendly badge), class references use `{class}`, exceptions use `{exc}`, functions use `{func}`, attributes use `{attr}`, internal anchors use `{ref}`, doc-path links use `{doc}`. See **Sphinx Cross-Reference Roles for MCP Tools** above for the full table.
 
 **Summarization style.** When a user asks "what changed in the latest version?" or similar, lead with the entry's lead paragraph (paraphrased if needed), followed by each `**Bold subheading**` under `### What's new` with a one-sentence summary. Cite `(#NN)` only if the user asks for source links. Don't invent versions, dates, or numbers not present in `CHANGES`. Don't quote line numbers or file offsets — those shift as the file evolves.
 
