@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a6 (2026-05-09)
+
+_Activation on bare *pane* / *window* / *session* prompts (without
+saying "tmux"), the `tmux` registration slug recommendation, and a
+new `MIGRATION` page documenting the rename._
+
 ### What's new
 
 - Bare *"pane"* / *"window"* / *"session"* prompts now reliably
