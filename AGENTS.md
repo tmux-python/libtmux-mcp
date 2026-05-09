@@ -405,6 +405,29 @@ Bad:
 $ claude mcp add --scope user tmux -- uv --directory ~/work/python/libtmux-mcp run libtmux-mcp
 ```
 
+### Changelog Conventions
+
+These rules apply when authoring entries in `CHANGES`, which is included into `docs/history.md` and rendered as the Sphinx changelog page.
+
+**Optimize for scannability.**
+
+- Open every release entry with an italicized one-line tagline stating the release focus. This is the 10,000-foot view that appears first on the rendered page.
+- Front-load each entry with the user-visible value. When an entry has multiple related sub-changes, use a bold-paragraph subheading (`**Foo**`) under `### What's new`, then a one-line prose lede with the PR ref, then flat bullets for mechanism. This matches the shape used in 0.1.0a2, 0.1.0a4, 0.1.0a5, and 0.1.0a6.
+- Group items under fixed subheadings, in this order when present: `### Breaking changes`, `### Dependencies`, `### What's new`, `### Fixes`, `### Documentation`, `### Development`. Dev tooling (helper scripts, internal automation) belongs under `### Development`, not `### What's new`.
+- For breaking changes and deprecations, show the migration path with concrete inline code (commands, before/after).
+- End each entry with the PR or issue number `(#NN)` so readers can follow the trail.
+
+**Avoid cognitive overload.**
+
+- Don't include fragile metrics that decay over time: token ceilings, third-party client version pins, percent improvements tied to a specific benchmark, exact byte counts. Describe the *capability* or *optimization*, not the math.
+- Don't leak internal jargon: private symbols (leading-underscore identifiers), algorithm names, backend scaffolding. Stick to the user-visible API surface.
+- Don't write walls of text. If an entry needs depth, split with flat bullets under a bold subheading — the user-visible takeaway leads, mechanism follows.
+- Don't bury breaking changes inside a feature list. They get their own subheading at the top of the entry.
+
+**MyST roles in CHANGES.** Tool references use `{tooliconl}` (inline-friendly badge), class references use `{class}`, exceptions use `{exc}`, functions use `{func}`, attributes use `{attr}`, internal anchors use `{ref}`. See **Sphinx Cross-Reference Roles for MCP Tools** above for the full table.
+
+**Summarization style.** When a user asks "what changed in the latest version?" or similar, lead with the entry's italic tagline verbatim, followed by each `**bold subheading**` under `### What's new`. Cite `(#NN)` PR refs only if the user asks for source links. Don't invent versions, dates, or numbers not present in `CHANGES`. Don't quote line numbers or file offsets — those shift as the file evolves.
+
 ## Debugging Tips
 
 When stuck in debugging loops:
