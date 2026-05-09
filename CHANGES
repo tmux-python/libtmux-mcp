@@ -40,6 +40,11 @@ _Notes on upcoming releases will be added here_
   as visual chrome. Title is NOT in BM25's search corpus
   (verified vs FastMCP's `_extract_searchable_text`); this is
   pure catalog polish, no activation impact. (#38)
+- {ref}`prompting` gains "Activation and discovery"
+  (positive/anti-trigger prose, the Claude Code `alwaysLoad: true`
+  JSON snippet for full schema preload, ~3-5K token cost
+  noted) and a project-bias template under "System prompt
+  fragments" for `AGENTS.md` / `CLAUDE.md`. (#39)
 
 ## libtmux-mcp 0.1.0a5 (2026-05-06)
 
