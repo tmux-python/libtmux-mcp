@@ -17,7 +17,7 @@ new `MIGRATION` page documenting the rename._
 - Bare *"pane"* / *"window"* / *"session"* prompts now reliably
   activate libtmux-mcp without the user saying "tmux". An
   `_INSTR_SCOPE` instruction segment names positive triggers
-  + explicit anti-triggers (browser, editor, i3, Jupyter); six
+  alongside explicit anti-triggers (browser, editor, i3, Jupyter); six
   discovery-anchor docstrings carry tmux-vocabulary synonyms
   (terminal / shell / scrollback / multiplexer / workspace) so
   the BM25 corpus indexes them; {tooliconl}`list-panes`,
@@ -31,7 +31,7 @@ new `MIGRATION` page documenting the rename._
   examples. Existing `libtmux` registrations keep working;
   `mcp_swap.py` retains its `libtmux` default for backward
   compatibility. New {ref}`migration` page (root `MIGRATION`
-  + `docs/migration.md` wrapper) documents the rename and
+  with a `docs/migration.md` wrapper) documents the rename and
   serves as the home for future migration notes. (#40)
 
 ### Documentation
