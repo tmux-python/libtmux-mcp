@@ -25,9 +25,10 @@ No "tmux" prefix required in your prompts. (#37)
   BM25 corpus indexes them.
 - {tooliconl}`list-panes`, {tooliconl}`list-windows`, and
   {tooliconl}`snapshot-pane` ship with `anthropic/alwaysLoad: true`
-  (Claude Code v2.1.121+).
-- `serverInfo.name` is now `tmux`; transmitted `instructions=` refit
-  under Claude Code's 2KB ceiling on every safety tier.
+  for clients that preload tool schemas.
+- `serverInfo.name` is now `tmux`; transmitted `instructions=`
+  retuned to fit Claude Code's instruction budget on every safety
+  tier.
 
 **Registration slug `libtmux` → `tmux` (recommended)**
 
@@ -49,9 +50,8 @@ Existing `libtmux` registrations keep working. (#40)
   {tooliconl}`pipe-pane`, {tooliconl}`snapshot-pane`,
   {tooliconl}`capture-pane`, {tooliconl}`paste-text`) stay
   generic — already tmux-specific terms; over-prefixing reads
-  as visual chrome. Title is NOT in BM25's search corpus
-  (verified vs FastMCP's `_extract_searchable_text`); this is
-  pure catalog polish, no activation impact. (#38)
+  as visual chrome. Title is NOT in BM25's search corpus; this
+  is pure catalog polish, no activation impact. (#38)
 - {ref}`prompting` gains "Activation and discovery"
   (positive/anti-trigger prose, the Claude Code `alwaysLoad: true`
   JSON snippet for full schema preload, ~3-5K token cost
@@ -92,26 +92,6 @@ user/system config scope._
   is a breaking schema change deferred as a separate follow-up.
   (#34)
 
-### Development
-
-- `scripts/mcp_swap.py` — `use-local` and `revert` accept
-  `--scope {user,project}` so a Claude install can target either the
-  top-level `mcpServers` fallback (every project without an override
-  picks it up) or the per-project `projects.<abs>.mcpServers` entry.
-  Default `project` preserves the previous behaviour. Codex / Cursor /
-  Gemini have no per-project layer; the flag is silently coerced to
-  `user` for them. A single install can hold both scopes
-  simultaneously with independent backups, and `revert --scope user`
-  restores just one layer. Full `revert` unwinds in LIFO order via an
-  explicit `seq_no` counter on each state entry — no reliance on dict
-  iteration through the JSON round-trip. Shape validation is
-  centralised in `_claude_user_servers` / `_claude_project_node`
-  helpers so read / write / delete fail symmetrically with
-  `RuntimeError` on a malformed Claude config. The state-file schema
-  is internal — no compatibility contract; running an older `mcp_swap`
-  against a newer `state.json` is undefined behaviour and not
-  supported. (#35)
-
 ### Documentation
 
 - Bump gp-sphinx docs stack to v0.0.1a16 — docs site now renders
@@ -134,6 +114,25 @@ user/system config scope._
   {tooliconl}`display-message` "Avoid when" guidance now redirects
   layout-relative use cases to the corner-finder. (#34)
 
+### Development
+
+- `scripts/mcp_swap.py` — `use-local` and `revert` accept
+  `--scope {user,project}` so a Claude install can target either the
+  top-level `mcpServers` fallback (every project without an override
+  picks it up) or the per-project `projects.<abs>.mcpServers` entry.
+  Default `project` preserves the previous behaviour. Codex / Cursor /
+  Gemini have no per-project layer; the flag is silently coerced to
+  `user` for them. A single install can hold both scopes
+  simultaneously with independent backups, and `revert --scope user`
+  restores just one layer. Full `revert` unwinds in LIFO order via an
+  explicit `seq_no` counter on each state entry — no reliance on dict
+  iteration through the JSON round-trip. Shape validation is
+  centralised so read / write / delete fail symmetrically with
+  `RuntimeError` on a malformed Claude config. The state-file schema
+  is internal — no compatibility contract; running an older `mcp_swap`
+  against a newer `state.json` is undefined behaviour and not
+  supported. (#35)
+
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
 _`respawn_pane`, single-object info reads, and the cross-CLI `mcp_swap` dev script._
@@ -152,17 +151,14 @@ _`respawn_pane`, single-object info reads, and the cross-CLI `mcp_swap` dev scri
   pane); buffers, hooks, and options have existing read paths and are
   deliberately excluded. (#27)
 
-**Dev scripts**
+**API decisions for {tooliconl}`respawn-pane`**
 
-- `scripts/mcp_swap.py`. Point Claude / Codex / Cursor / Gemini at a
-  local checkout in one command. `just mcp-use-local` rewrites each
-  CLI's global config to run the local repo via `uv`;
-  `just mcp-revert` restores from a timestamped backup.
-  `just mcp-detect` and `just mcp-status` report install state.
-  Atomic writes, `--dry-run` mode, per-CLI state file, env
-  preservation on replacement, layout-shape guard before mutating
-  Claude's per-project config. Scope is global configs only — see
-  `scripts/README.md`. (#27)
+- Parameter renamed `shell_command` → `shell` to align with
+  {tooliconl}`split-window` and upstream `Pane.respawn(shell=)`.
+- Resolver fallbacks (`session_name` / `session_id` /
+  `window_id`) dropped — the runtime guard rejected any call
+  missing `pane_id` anyway.
+- Validation now lives at the FastMCP schema boundary. (#27)
 
 ### Documentation
 
@@ -187,14 +183,17 @@ _`respawn_pane`, single-object info reads, and the cross-CLI `mcp_swap` dev scri
   {tooliconl}`get-session-info`, and {tooliconl}`get-window-info`.
   (#27)
 
-### API decisions (pre-release)
+### Development
 
-- {tooliconl}`respawn-pane` settles on `shell` (renamed from
-  `shell_command`) to align with {tooliconl}`split-window` and
-  upstream `Pane.respawn(shell=)`, and drops the `session_name` /
-  `session_id` / `window_id` resolver fallbacks — the runtime guard
-  rejected any call missing `pane_id` anyway. Validation now lives at
-  the FastMCP schema boundary. (#27)
+- `scripts/mcp_swap.py`. Point Claude / Codex / Cursor / Gemini at a
+  local checkout in one command. `just mcp-use-local` rewrites each
+  CLI's global config to run the local repo via `uv`;
+  `just mcp-revert` restores from a timestamped backup.
+  `just mcp-detect` and `just mcp-status` report install state.
+  Atomic writes, `--dry-run` mode, per-CLI state file, env
+  preservation on replacement, layout-shape guard before mutating
+  Claude's per-project config. Scope is global configs only — see
+  `scripts/README.md`. (#27)
 
 ## libtmux-mcp 0.1.0a3 (2026-04-19)
 
@@ -212,14 +211,12 @@ _Post-0.1.0a2 smoke-test fixes and `libtmux` floor bump_
 
 ### Fixes
 
-- Pane `is_caller` annotation no longer false-positives across tmux
-  sockets. `_serialize_pane`, `snapshot_pane`, and `search_panes` all
-  compared `pane.pane_id == TMUX_PANE` without verifying the caller's
-  socket, so a caller on socket A pane `%0` was marked `is_caller=True`
-  for any `%0` on any other server. The annotation now reuses
-  `_caller_is_on_server` (the same socket-scoped comparator used by
-  the self-kill guard) via the new `_compute_is_caller` helper
-  (#22, fixes #19).
+- **Pane `is_caller` annotation no longer false-positives across
+  tmux sockets.** (#22, fixes #19)
+  - Symptom: a caller on socket A pane `%0` was marked
+    `is_caller=True` for any `%0` on every other tmux server.
+  - Fix: the annotation now compares the caller's socket identity,
+    matching the socket-scoped check used by the self-kill guard.
 - {tooliconl}`wait-for-channel` and {tooliconl}`signal-channel` no
   longer block the FastMCP event loop. Both were sync `def` handlers
   running `subprocess.run(timeout=N)` on the main loop — for the
@@ -330,6 +327,8 @@ _FastMCP alignment: new tools, prompts, and middleware (#15)_
 
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
+_New pane / window / session navigation tools and a gp-sphinx docs visual refresh._
+
 ### What's new
 
 - New pane tools: `snapshot_pane`, `wait_for_content_change`, `select_pane`, `swap_pane`, `pipe_pane`, `display_message`, `enter_copy_mode`, `exit_copy_mode`, and `paste_text` (#11)
@@ -344,9 +343,10 @@ _FastMCP alignment: new tools, prompts, and middleware (#15)_
 
 ## libtmux-mcp 0.1.0a0 (2026-03-22)
 
-### New features
+_Initial standalone release, extracted from libtmux's MCP branch._
 
-- Initial release as standalone package
+### What's new
+
 - MCP tools across 6 modules (server, session, window, pane, options, environment)
 - `tmux://` URI resources for browsing tmux hierarchy
 - Safety tier middleware (`readonly`, `mutating`, `destructive`)
