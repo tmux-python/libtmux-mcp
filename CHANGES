@@ -15,9 +15,9 @@ new `MIGRATION` page documenting the rename._
 ### What's new
 
 - Bare *"pane"* / *"window"* / *"session"* prompts now reliably
-  activate libtmux-mcp without the user saying "tmux". An
-  `_INSTR_SCOPE` instruction segment names positive triggers
-  alongside explicit anti-triggers (browser, editor, i3, Jupyter); six
+  activate libtmux-mcp without the user saying "tmux". Server
+  instructions name positive triggers alongside explicit anti-triggers
+  (browser, editor, i3, Jupyter); six
   discovery-anchor docstrings carry tmux-vocabulary synonyms
   (terminal / shell / scrollback / multiplexer / workspace) so
   the BM25 corpus indexes them; {tooliconl}`list-panes`,
