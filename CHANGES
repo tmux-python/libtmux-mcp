@@ -100,7 +100,7 @@ libtmux-mcp 0.1.0a2 is the FastMCP alignment release. It expands the server from
 
 **{tooliconl}`search-panes` returns {class}`~libtmux_mcp.models.SearchPanesResult`**
 
-{tooliconl}`search-panes` now returns a result object with matches and pagination metadata instead of the earlier `list[PaneContentMatch]` shape. Existing callers should iterate over `.matches`; callers that search large tmux workspaces can also inspect `truncated`, `truncated_panes`, `total_panes_matched`, `offset`, and `limit`.
+{tooliconl}`search-panes` now returns a result object with matches and pagination metadata instead of the earlier `list[`{class}`~libtmux_mcp.models.PaneContentMatch``]` shape. Existing callers should iterate over `.matches`; callers that search large tmux workspaces can also inspect `truncated`, `truncated_panes`, `total_panes_matched`, `offset`, and `limit`.
 
 ```python
 # Before
