@@ -8,175 +8,189 @@ _Notes on upcoming releases will be added here_
 
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
 
-libtmux-mcp 0.1.0a6 makes the server discoverable on bare "pane" / "window" / "session" prompts (no need to say "tmux"), recommends the `tmux` registration slug for new installs, and ships a {ref}`migration` page covering the rename. Existing `libtmux` registrations keep working.
+libtmux-mcp 0.1.0a6 is the activation and registration cleanup release. It makes the server much easier for MCP clients to discover from ordinary "pane", "window", and "session" prompts, standardizes new setup docs around the `tmux` registration slug, and adds migration guidance for existing `libtmux` registrations. Existing installs keep working; the release changes defaults and documentation so new installs line up with the tool prefix users actually see.
 
 ### What's new
 
-**Bare "pane" / "window" / "session" prompts now activate libtmux-mcp**
+**Bare tmux prompts now find the server**
 
-No "tmux" prefix required in your prompts. The server activates on bare tmux-noun phrasings ("split this pane", "show me the bottom window") and explicitly stays out of editor, browser, i3, and Jupyter contexts. Discovery surfaces ({tooliconl}`list-panes`, {tooliconl}`list-windows`, {tooliconl}`snapshot-pane`) ship with the `alwaysLoad` hint for clients that preload tool schemas, and the MCP `serverInfo.name` is now `tmux` so tools surface under the `mcp__tmux__*` prefix. See {ref}`prompting` for the full activation contract. (#37)
+Agents no longer need the word "tmux" in every prompt before this server becomes relevant. The server instructions now name the positive cases users naturally write, such as "split this pane", "current window", and "this session", while steering clients away from unrelated browser tabs, editor splits, tiling-window-manager panes, and notebook cells. The discovery anchors most likely to answer those prompts - {tooliconl}`list-panes`, {tooliconl}`list-windows`, and {tooliconl}`snapshot-pane` - also carry the preload hint used by clients that keep a small always-available schema set. See {ref}`prompting` for the user-facing activation contract. (#37)
 
-**Registration slug `libtmux` → `tmux` (recommended)**
+**New installs are documented as `tmux`**
 
-The recommended registration name for new installs is `tmux`, matching the server's `serverInfo.name` and the tool-call prefix clients use. Existing `libtmux` registrations keep working — the slug is a per-install user choice, not a server-side rename. See {ref}`migration` for the upgrade walk-through. (#40)
+The recommended registration slug is now `tmux`, matching the MCP `serverInfo.name` and the `mcp__tmux__*` tool-call prefix surfaced by clients. The package name, import name, and existing user-created `libtmux` registrations are unchanged; only the documented install target moves to the clearer slug. See {ref}`migration` for the walkthrough. (#40)
 
 ### Documentation
 
-Hierarchy-noun tool titles gain a `tmux` qualifier ("List Sessions" → "List tmux Sessions") for display-time disambiguation in catalog UIs and `claude mcp list`-style outputs; verbs-of-art ({tooliconl}`send-keys`, {tooliconl}`pipe-pane`, {tooliconl}`snapshot-pane`, {tooliconl}`capture-pane`, {tooliconl}`paste-text`) stay generic since they're already tmux-specific (#38).
+Hierarchy-noun tool titles now include a `tmux` qualifier in catalog-style displays, so entries like "List tmux Sessions" stay understandable when a client shows tools from several MCP servers together. Tmux-specific verbs such as {tooliconl}`send-keys`, {tooliconl}`pipe-pane`, {tooliconl}`snapshot-pane`, {tooliconl}`capture-pane`, and {tooliconl}`paste-text` keep their shorter names because the verb already identifies the tmux operation. (#38)
 
-The {ref}`prompting` topic gains an "Activation and discovery" section with positive- and anti-trigger prose, the `alwaysLoad: true` JSON snippet, and a system-prompt-fragment template for `AGENTS.md` / `CLAUDE.md` (#39).
+The {ref}`prompting` guide gains an activation and discovery section with positive triggers, anti-triggers, a client-level `alwaysLoad` example, and a project-instructions fragment for teams that want stronger bias toward tmux when users say "this pane" or "current window". (#39)
 
 ## libtmux-mcp 0.1.0a5 (2026-05-06)
 
-libtmux-mcp 0.1.0a5 ships {tooliconl}`find-pane-by-position` for layout-relative pane lookup ("the bottom-right pane"), surfaces window-relative pane geometry on response models so agents can reason about layout off returned data, and gives the `mcp_swap` dev script `--scope` targeting for either user-global or per-project Claude config.
+libtmux-mcp 0.1.0a5 makes layout-relative pane targeting a first-class workflow. Agents can ask for "the bottom-right pane" directly, reason from typed geometry returned on pane models, and avoid parsing tmux format strings for common layout questions. The release also polishes the documentation site after the theme migration and extends the local MCP swap helper so Claude users can choose project-local or user-global config.
 
 ### What's new
 
 **Layout-relative pane targeting via {tooliconl}`find-pane-by-position`**
 
-A new read-only tool resolves a layout-relative phrase ("the bottom-right pane", any corner) to a {class}`~libtmux_mcp.models.PaneInfo` in one call, composing the four `pane_at_*` edge predicates with a position tie-break for ambiguous layouts (e.g. single-pane windows that touch every edge). Replaces the previous {tooliconl}`display-message`-and-parse workaround. (#34)
+{tooliconl}`find-pane-by-position` resolves a window corner - top-left, top-right, bottom-left, or bottom-right - to a single {class}`~libtmux_mcp.models.PaneInfo`. This replaces the old workaround of calling {tooliconl}`display-message` with `#{pane_at_bottom}` / `#{pane_at_right}` and parsing raw string output. Single-pane and otherwise ambiguous layouts resolve deterministically, so the common "use the only pane" case does not require an extra branch in the agent workflow. (#34)
 
-**Pane geometry on response models**
+**Pane responses now carry geometry**
 
-{class}`~libtmux_mcp.models.PaneInfo`, {class}`~libtmux_mcp.models.PaneContentMatch`, and {class}`~libtmux_mcp.models.PaneSnapshot` now carry window-relative `pane_left` / `pane_top` / `pane_right` / `pane_bottom`, the four `pane_at_*` edge predicates, and `pane_tty`. Agents reason about layout off the returned model instead of expanding tmux format strings by hand; {tooliconl}`snapshot-pane` fetches the new fields in its existing `display-message` round-trip with no extra tmux call. The older `pane_width` / `pane_height` fields stay typed as strings for now; switching them is a deferred breaking change. (#34)
+{class}`~libtmux_mcp.models.PaneInfo`, {class}`~libtmux_mcp.models.PaneContentMatch`, and {class}`~libtmux_mcp.models.PaneSnapshot` now include window-relative coordinates, edge predicates, and the pane TTY. That means an agent can inspect returned data to decide whether a pane is at the left edge, bottom edge, or a specific corner instead of making another tmux query. The older `pane_width` and `pane_height` fields intentionally keep their existing string typing in this alpha; changing those fields is left for a later breaking-change window. (#34)
 
 ### Documentation
 
-The docs site moves to `gp-furo-theme` (a Tailwind v4 respin of Furo) with `sphinx-vite-builder` handling theme assets (#33).
+The docs site moves onto `gp-furo-theme` with `sphinx-vite-builder` handling the theme asset pipeline, so the rendered site follows the same gp-sphinx docs stack used by the rest of the project documentation. (#33)
 
-First-paint jank is eliminated — the install widget no longer flashes on `localStorage` restore, and font-driven layout pops are gone (#36).
+The install widget and above-the-fold typography no longer shift after first paint. Saved install-widget choices now render in the correct panel immediately, and the fonts and logo used on the landing page are loaded early enough to avoid visible swaps. (#36)
 
-{tooliconl}`find-pane-by-position` is reachable across the docs site (topic page, homepage chain, tools index, recipes, example responses); {tooliconl}`display-message` "Avoid when" guidance redirects layout-relative uses to the corner-finder (#34).
+The new corner-finder appears anywhere a reader is likely to look for targeting guidance: the homepage tool chain, tools index, pane tools page, prompting guide, recipes, and example responses. Existing {tooliconl}`display-message` guidance now points layout-relative pane selection at {tooliconl}`find-pane-by-position` instead of teaching agents to expand pane-edge format variables by hand. (#34)
 
 ### Development
 
-`scripts/mcp_swap.py` gains `--scope {user,project}` so a Claude install can target either the user-global config or a per-project entry; the flag is a no-op on Codex / Cursor / Gemini, which only have a global layer. (#35)
+`scripts/mcp_swap.py` gains `--scope {user,project}` for Claude. Project scope keeps the safe local override used while working in this checkout; user scope intentionally changes the fallback used from other projects. Codex, Cursor, and Gemini have only a global layer, so the flag is accepted there without creating a fake per-project mode. (#35)
 
 ## libtmux-mcp 0.1.0a4 (2026-05-02)
 
-libtmux-mcp 0.1.0a4 adds {tooliconl}`respawn-pane` for restarting wedged panes in place, single-object info reads ({tooliconl}`get-session-info`, {tooliconl}`get-window-info`) that complete the four-level metadata hierarchy, and a cross-CLI `mcp_swap` dev script for pointing local installs at a checkout. The `respawn-pane` API settles on `shell` (renamed from `shell_command`) ahead of the stable release.
+libtmux-mcp 0.1.0a4 adds pane recovery and closes the last gap in the core hierarchy's single-object metadata reads. Agents can restart a stuck pane without losing its identity, fetch known sessions or windows directly, and use a bundled development script to point local MCP clients at a checkout. The {tooliconl}`respawn-pane` parameter name settles on `shell` before the stable API, replacing the earlier alpha spelling `shell_command`.
 
 ### What's new
 
-**Restart a wedged pane with {tooliconl}`respawn-pane`**
+**Restart wedged panes in place with {tooliconl}`respawn-pane`**
 
-Restart a pane in place, preserving `pane_id` and the surrounding window layout. The alternative {tooliconl}`kill-pane` + {tooliconl}`split-window` invalidates pane references and rearranges the window. The API takes `shell` (renamed from `shell_command` to align with {tooliconl}`split-window` and upstream `Pane.respawn(shell=)`); resolver fallbacks were dropped because the runtime guard rejected any call missing `pane_id` anyway. (#27)
+{tooliconl}`respawn-pane` restarts the process in an existing tmux pane while preserving the `pane_id` and the window layout. That is the right recovery primitive for long-running agent sessions: {tooliconl}`kill-pane` followed by {tooliconl}`split-window` creates a new pane, invalidates stored handles, and can disturb the surrounding layout. The final alpha API uses `shell` for the replacement command to match {tooliconl}`split-window` and libtmux's upstream respawn naming. (#27)
 
-**Single-object info reads: {tooliconl}`get-session-info`, {tooliconl}`get-window-info`**
+**Direct metadata reads for sessions and windows**
 
-Single-object metadata reads when you already have an ID. Completes the four-level `get_*_info` hierarchy (server / session / window / pane); buffers, hooks, and options have existing read paths and are deliberately excluded. (#27)
+{tooliconl}`get-session-info` and {tooliconl}`get-window-info` complete the server/session/window/pane metadata pattern alongside {tooliconl}`get-server-info` and {tooliconl}`get-pane-info`. Callers that already have an ID or a scoped index no longer need to call a list tool and filter the response. Buffers, hooks, options, and environment values keep their existing show/load/read tools rather than gaining redundant `get_*_info` wrappers. (#27)
 
 ### Documentation
 
-{ref}`safety` gains a {tooliconl}`respawn-pane` "Footgun" subsection alongside {tooliconl}`pipe-pane` and {tooliconl}`set-environment`, covering the `kill=true` default and OS-process-table visibility for `shell` / `environment`. The macOS `TMUX_TMPDIR` caveat is rewritten — tmux's three-step socket-path resolution is documented, so operators no longer need to set it explicitly. LLM-facing discoverability tightened across {tooliconl}`display-message` and {tooliconl}`pipe-pane`. New topic pages added for {tooliconl}`respawn-pane`, {tooliconl}`get-session-info`, and {tooliconl}`get-window-info`. (#27)
+{ref}`safety` now documents {tooliconl}`respawn-pane` as a mutating recovery tool with real process side effects, including the `kill=true` default and the visibility tradeoffs of passing command or environment data through tmux. The same update refreshes socket-guard notes for macOS, tightens guidance around {tooliconl}`display-message` and {tooliconl}`pipe-pane`, and adds dedicated tool pages for the new recovery and metadata tools. (#27)
 
 ### Development
 
-`scripts/mcp_swap.py` lands as the cross-CLI dev script. `just mcp-use-local` rewrites Claude / Codex / Cursor / Gemini global config to point at a local checkout via `uv`; `just mcp-revert` rolls back from a timestamped backup. See `scripts/README.md` for setup. (#27)
+`scripts/mcp_swap.py` lands as local dogfooding infrastructure for Claude, Codex, Cursor, and Gemini. It detects installed clients, shows the current libtmux-mcp registration, rewrites config to run this checkout through `uv`, and reverts from backups. The `just mcp-use-local` and `just mcp-revert` recipes wrap that flow for branch QA. (#27)
 
 ## libtmux-mcp 0.1.0a3 (2026-04-19)
 
-libtmux-mcp 0.1.0a3 fixes a cross-socket false-positive in the `is_caller` pane annotation, ports two wait/signal tools off the blocking event loop, and bumps the libtmux floor to pick up upstream pytest-fixture cleanup.
+libtmux-mcp 0.1.0a3 is a focused correctness release after the FastMCP alignment work. It fixes caller identity across multiple tmux sockets, moves channel waits off the FastMCP event loop, and raises the libtmux floor to pick up upstream pytest-fixture cleanup. The result is less surprising metadata in multi-server setups and fewer stalled clients during long waits.
 
 ### Dependencies
 
-Minimum `libtmux>=0.55.1` (was `>=0.55.0`) for [tmux-python/libtmux#661](https://github.com/tmux-python/libtmux/pull/661), which fixes pytest-plugin socket-reaper leaks under `/tmp/tmux-<uid>/`. Downstream effect: no local conftest reaper needed in libtmux-mcp.
+Minimum `libtmux>=0.55.1` (was `>=0.55.0`) for [tmux-python/libtmux#661](https://github.com/tmux-python/libtmux/pull/661), which fixes pytest-plugin socket cleanup under `/tmp/tmux-<uid>/`.
 
 ### Fixes
 
-**Pane `is_caller` annotation no longer false-positives across tmux sockets**
+**Pane caller identity is socket-aware**
 
-A caller on socket A pane `%0` was marked `is_caller=True` for any `%0` on every other tmux server. The annotation now compares the caller's socket identity, matching the socket-scoped check used by the self-kill guard. (#22, fixes #19)
+The `is_caller` pane annotation no longer treats pane `%0` on every tmux server as the current agent pane just because the pane IDs match. The annotation now compares the caller's tmux socket as well, matching the self-protection checks used around destructive tools. This fixes {class}`~libtmux_mcp.models.PaneInfo`, {class}`~libtmux_mcp.models.PaneSnapshot`, and {class}`~libtmux_mcp.models.PaneContentMatch` responses in multi-socket environments. (#22, fixes #19)
 
-**{tooliconl}`wait-for-channel` and {tooliconl}`signal-channel` no longer block the FastMCP event loop**
+**Channel waits no longer stall the MCP server**
 
-Both were sync handlers running blocking subprocess waits on the main loop, freezing other tool calls and MCP pings for the duration of the wait. Ported to async with `asyncio.to_thread`, matching {tooliconl}`wait-for-text` / {tooliconl}`wait-for-content-change`. (#21, fixes #18)
+{tooliconl}`wait-for-channel` and {tooliconl}`signal-channel` now run their blocking tmux subprocess work outside the event loop. Other tool calls and client keepalives can continue while a wait is pending, matching the async behavior already used by {tooliconl}`wait-for-text` and {tooliconl}`wait-for-content-change`. (#21, fixes #18)
 
 ## libtmux-mcp 0.1.0a2 (2026-04-19)
 
-libtmux-mcp 0.1.0a2 is the FastMCP alignment release. New tools span discovery, waits, buffers, hooks, and pane/window navigation; four prompt recipes ship; and a five-stage middleware stack adds audit, safety-tier gating, transparent readonly retries, and tail-preserving response trimming. {tooliconl}`search-panes` now returns a paginated {class}`~libtmux_mcp.models.SearchPanesResult` instead of a bare list — the breaking change is documented below. (#15)
+libtmux-mcp 0.1.0a2 is the FastMCP alignment release. It expands the server from a basic tmux wrapper into a broader agent automation surface with discovery, waits, buffers, hooks, pane/window navigation, prompt recipes, middleware, and bounded terminal output. The release includes one response-shape breaking change: {tooliconl}`search-panes` now returns a paginated {class}`~libtmux_mcp.models.SearchPanesResult` instead of a bare list. (#15)
 
 ### Breaking changes
 
 **{tooliconl}`search-panes` returns {class}`~libtmux_mcp.models.SearchPanesResult`**
 
-{tooliconl}`search-panes` now returns {class}`~libtmux_mcp.models.SearchPanesResult` instead of `list[`{class}`~libtmux_mcp.models.PaneContentMatch``]`. Matches moved to `.matches`; new `truncated`, `truncated_panes`, `total_panes_matched`, `offset`, `limit` fields enable pagination.
+{tooliconl}`search-panes` now returns a result object with matches and pagination metadata instead of the earlier `list[PaneContentMatch]` shape. Existing callers should iterate over `.matches`; callers that search large tmux workspaces can also inspect `truncated`, `truncated_panes`, `total_panes_matched`, `offset`, and `limit`.
 
 ```python
 # Before
-for m in search_panes(...):
+for match in search_panes(...):
     ...
 
 # After
-for m in search_panes(...).matches:
+for match in search_panes(...).matches:
     ...
 ```
 
-**Minimum `fastmcp>=3.2.4`** (was `>=3.1.0`). Required for {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` and per-parameter input-schema descriptions.
+**Minimum `fastmcp>=3.2.4`** (was `>=3.1.0`). The newer FastMCP release is required for {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` and per-parameter input-schema descriptions.
 
 ### What's new
 
-**New tools**
+**Discovery and synchronization tools**
 
-- Discovery: {tooliconl}`list-servers`.
-- Waits: {tooliconl}`wait-for-text`, {tooliconl}`wait-for-content-change`, {tooliconl}`wait-for-channel`, {tooliconl}`signal-channel`.
-- Buffers: {tooliconl}`load-buffer`, {tooliconl}`paste-buffer`, {tooliconl}`show-buffer`, {tooliconl}`delete-buffer`.
-- Hooks (read-only): {tooliconl}`show-hook`, {tooliconl}`show-hooks`.
-- Pane / window: {tooliconl}`snapshot-pane`, {tooliconl}`pipe-pane`, {tooliconl}`display-message`, {tooliconl}`paste-text`, {tooliconl}`select-pane`, {tooliconl}`swap-pane`, {tooliconl}`select-window`, {tooliconl}`move-window`, {tooliconl}`enter-copy-mode`, {tooliconl}`exit-copy-mode`.
+{tooliconl}`list-servers` discovers live tmux servers, including explicitly provided socket paths. The wait family adds content waits ({tooliconl}`wait-for-text`, {tooliconl}`wait-for-content-change`) and tmux channel synchronization ({tooliconl}`wait-for-channel`, {tooliconl}`signal-channel`) so agents can wait for explicit milestones instead of sleeping or repeatedly capturing panes. (#15)
 
-**Prompt recipes**
+**Buffers, hooks, and richer pane/window control**
 
-Four prompts ship: `run_and_wait`, `diagnose_failing_pane`, `build_dev_workspace`, and `interrupt_gracefully`. Set `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1` to expose them as tools for tools-only MCP clients.
+Agent-namespaced buffer tools - {tooliconl}`load-buffer`, {tooliconl}`paste-buffer`, {tooliconl}`show-buffer`, and {tooliconl}`delete-buffer` - support staged multi-line input without overloading keystroke simulation. Read-only hook tools ({tooliconl}`show-hook`, {tooliconl}`show-hooks`) expose tmux hook state without adding write-hooks that survive process death. The pane and window surface grows with {tooliconl}`snapshot-pane`, {tooliconl}`pipe-pane`, {tooliconl}`display-message`, {tooliconl}`paste-text`, {tooliconl}`select-pane`, {tooliconl}`swap-pane`, {tooliconl}`select-window`, {tooliconl}`move-window`, {tooliconl}`enter-copy-mode`, and {tooliconl}`exit-copy-mode`. (#15)
 
-**Middleware stack**
+**Prompt recipes for common agent workflows**
 
-{class}`~libtmux_mcp.middleware.AuditMiddleware` adds digest-redacted argument summaries; {class}`~libtmux_mcp.middleware.SafetyMiddleware` gates tool visibility by safety tier; {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` transparently retries readonly tools on transient {exc}`libtmux.exc.LibTmuxException` (mutating tools never retry); {class}`~libtmux_mcp.middleware.TailPreservingResponseLimitingMiddleware` trims oversized output from the head so the active prompt survives. Standard timing and error-handling middleware round out the stack.
+Four MCP prompts ship for repeatable tmux work: `run_and_wait`, `diagnose_failing_pane`, `build_dev_workspace`, and `interrupt_gracefully`. Clients that only expose tools can opt into tool-shaped prompt access with `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1`. See {ref}`prompts-overview` for the prompt catalog. (#15)
 
-**Bounded outputs**
+**Middleware for safer long-running automation**
 
-{tooliconl}`capture-pane`, {tooliconl}`snapshot-pane`, and {tooliconl}`show-buffer` accept a `max_lines` parameter with tail-preserving truncation and typed `content_truncated` / `content_truncated_lines` signals. Pass `max_lines=None` to opt out.
+The middleware stack now includes {class}`~libtmux_mcp.middleware.AuditMiddleware` for digest-redacted argument summaries, {class}`~libtmux_mcp.middleware.SafetyMiddleware` for safety-tier visibility, {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` for transient readonly libtmux failures, and {class}`~libtmux_mcp.middleware.TailPreservingResponseLimitingMiddleware` for oversized tool output. Timing and error-handling middleware round out the request path. (#15)
 
-**Per-parameter input schemas**
+**Tail-preserving bounded output**
 
-Tool input schemas now carry per-parameter `description` fields auto-extracted from NumPy-style docstrings. The lifespan startup probe fails fast with {exc}`RuntimeError` if `tmux` is missing on `PATH`. {attr}`~libtmux_mcp.models.SessionInfo.active_pane_id` surfaces the pane id returned by {tooliconl}`create-session`.
+{tooliconl}`capture-pane`, {tooliconl}`snapshot-pane`, and {tooliconl}`show-buffer` accept `max_lines` and report whether older lines were trimmed. Truncation keeps the newest terminal output, which is usually the active prompt or most recent command result. Pass `max_lines=None` when a caller intentionally wants the full scrollback or buffer. (#15)
+
+**Better schemas and startup failures**
+
+Tool input schemas now include parameter descriptions extracted from docstrings, so clients can explain arguments without separate docs lookups. Startup also fails with a clear {exc}`RuntimeError` when `tmux` is not available on `PATH`, and {attr}`~libtmux_mcp.models.SessionInfo.active_pane_id` tells callers which pane was created by {tooliconl}`create-session`. (#15)
 
 ### Fixes
 
 - {tooliconl}`search-panes` neutralizes tmux format-string injection in the regex fast path.
-- macOS `TMUX_TMPDIR` self-kill guard resolves the server socket via `tmux display-message #{socket_path}` before env-based reconstruction.
-- `build_dev_workspace` prompt: real tool parameter names, no waiting for shell prompts after screen-grabbing launches (`vim`, `watch`, `tail -f`), and a new `log_command` parameter to replace the Linux-only `/var/log/syslog` default.
-- {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` retry warnings log under `libtmux_mcp.retry`.
+- The macOS self-kill guard resolves the live tmux socket before falling back to `TMUX_TMPDIR` reconstruction.
+- The `build_dev_workspace` prompt uses real tool parameter names, avoids waiting for prompts after screen-grabbing commands, and replaces a Linux-specific log default with `log_command`.
+- {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` logs retry warnings under `libtmux_mcp.retry`.
 
 ### Documentation
 
-New per-tool category pages — {doc}`/tools/buffer/index`, {doc}`/tools/hook/index`, and the {doc}`/tools/index` landing — with {doc}`/tools/pane/index` documenting the {class}`~libtmux_mcp.models.SearchPanesResult` migration. {ref}`safety` covers the macOS `TMUX_TMPDIR` caveat, the audit log, {tooliconl}`pipe-pane`, and {tooliconl}`set-environment`.
+The tools documentation gains category pages for {doc}`/tools/buffer/index`, {doc}`/tools/hook/index`, and {doc}`/tools/index`. The pane tools docs explain the {class}`~libtmux_mcp.models.SearchPanesResult` migration, while {ref}`safety` documents the audit log, socket caveats, {tooliconl}`pipe-pane`, and {tooliconl}`set-environment`. (#15)
 
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 
-libtmux-mcp 0.1.0a1 expands pane / window / session navigation with new tools and refreshes the API docs visuals via gp-sphinx.
+libtmux-mcp 0.1.0a1 expands the tmux control surface around the workflows agents actually perform after they find a pane. It adds richer screen snapshots, waits, navigation, pane/window movement, copy-mode entry points, live logging, and bracketed paste support. The docs also adopt the gp-sphinx visual stack so the generated API and tool pages become easier to scan. (#11)
 
 ### What's new
 
-- New pane tools: {tooliconl}`snapshot-pane`, {tooliconl}`wait-for-content-change`, {tooliconl}`select-pane`, {tooliconl}`swap-pane`, {tooliconl}`pipe-pane`, {tooliconl}`display-message`, {tooliconl}`enter-copy-mode`, {tooliconl}`exit-copy-mode`, and {tooliconl}`paste-text`. (#11)
-- New session tool: {tooliconl}`select-window` — navigate by ID, index, or direction. (#11)
-- New window tool: {tooliconl}`move-window` — reorder within a session or across sessions. (#11)
-- New models: {class}`~libtmux_mcp.models.PaneSnapshot` and {class}`~libtmux_mcp.models.ContentChangeResult`. (#11)
+**Screen snapshots and waits**
+
+{tooliconl}`snapshot-pane` returns terminal content together with cursor position, copy-mode state, and scroll position in a single read. {tooliconl}`wait-for-content-change` lets an agent wait for any visible update when it does not know the exact text to expect. {class}`~libtmux_mcp.models.PaneSnapshot` and {class}`~libtmux_mcp.models.ContentChangeResult` carry those responses in typed models. (#11)
+
+**Pane and window navigation**
+
+{tooliconl}`select-pane`, {tooliconl}`swap-pane`, {tooliconl}`select-window`, and {tooliconl}`move-window` let agents navigate within tmux and rearrange panes or windows without asking a user to manually focus the target. Directional window selection is scoped to the requested session, and pane selection handles next/previous relative navigation through concrete pane IDs. (#11)
+
+**Terminal I/O helpers**
+
+{tooliconl}`pipe-pane` logs live pane output to a file, {tooliconl}`display-message` exposes tmux format expansion as a read-only metadata escape hatch, {tooliconl}`enter-copy-mode` and {tooliconl}`exit-copy-mode` control copy-mode state, and {tooliconl}`paste-text` uses tmux buffers for multi-line input where raw keystroke simulation is fragile. (#11)
 
 ### Documentation
 
-API docs gain visual improvements from [gp-sphinx](https://gp-sphinx.git-pull.com)-based Sphinx packages (#10). Bumps the gp-sphinx docs stack to v0.0.1a8 (#14).
+The API docs adopt the gp-sphinx documentation stack: card-style API layouts, safety and scope badges, MyST cross-reference roles, improved CLI-doc section scoping, IBM Plex typography, and FastMCP-aware tool rendering. The docs dependency stack is then refreshed to gp-sphinx `0.0.1a8`. (#10, #14)
 
 ## libtmux-mcp 0.1.0a0 (2026-03-22)
 
-libtmux-mcp 0.1.0a0 is the initial standalone release, extracted from libtmux's MCP branch. The package wraps libtmux as an MCP server with safety-tiered tools for agentic tmux control.
+libtmux-mcp 0.1.0a0 is the first standalone alpha release, extracted from libtmux's MCP branch. It packages libtmux-backed tmux control as an MCP server with typed tools, hierarchy resources, safety tiers, and socket-aware server selection. The release establishes the base contract that later alphas expand: inspect tmux state, make scoped mutations, and keep destructive operations behind an explicit safety tier.
 
 ### What's new
 
-- MCP tools across 6 modules (server, session, window, pane, options, environment).
-- `tmux://` URI resources for browsing tmux hierarchy.
-- Safety-tier middleware (`readonly`, `mutating`, `destructive`).
-- Socket isolation via `LIBTMUX_SOCKET` / `LIBTMUX_SOCKET_PATH` env vars.
-- Agent self-awareness via `TMUX_PANE` detection.
-- Server caching with `is_alive()` eviction.
-- Pydantic models for all tool outputs.
-- Full type safety (mypy strict).
+**Standalone MCP server for tmux**
+
+The package exposes tmux sessions, windows, panes, options, and environment operations through MCP tools backed by libtmux. It includes the console entry point, FastMCP server wiring, and the first set of Pydantic response models for tool output.
+
+**Browsable tmux hierarchy**
+
+`tmux://` resources let MCP clients browse the tmux hierarchy from server to sessions, windows, and panes. Tool resolvers accept the normal tmux identifiers so callers can move between resource browsing and concrete tool calls.
+
+**Safety and socket isolation**
+
+The initial server ships with readonly, mutating, and destructive safety tiers, controlled by `LIBTMUX_SAFETY`. Socket selection through `LIBTMUX_SOCKET` and `LIBTMUX_SOCKET_PATH` lets the same process target isolated tmux servers, and `TMUX_PANE` awareness marks the pane that belongs to the calling agent.
+
+**Typed implementation baseline**
+
+Server caching, resolver helpers, standardized error handling, and strict mypy coverage provide the internal foundation for later tool families. All initial tool responses are typed through Pydantic models rather than ad hoc dictionaries.
