@@ -409,6 +409,8 @@ $ claude mcp add --scope user tmux -- uv --directory ~/work/python/libtmux-mcp r
 
 These rules apply when authoring entries in `CHANGES`, which is included into `docs/history.md` and rendered as the Sphinx changelog page. Modeled on Django's release-notes shape — deliverables get titles and prose, not bullets.
 
+**Release entry boilerplate.** Every release header is `## libtmux-mcp X.Y.Z (YYYY-MM-DD)`. The file opens with a `## libtmux-mcp 0.1.x (unreleased)` placeholder block fenced by `<!-- KEEP THIS PLACEHOLDER ... -->` and `<!-- END PLACEHOLDER ... -->` HTML comments — new release entries land immediately below the END marker, never above it.
+
 **Open with a multi-sentence lead paragraph.** Plain prose, no italic. Two to four sentences telling the reader what shipped and who cares — user-visible takeaways, not internal mechanism. Cross-reference detail docs with `{ref}` to keep the lead compact.
 
 **Each deliverable is a section, not a bullet.** Inside `### What's new`, every distinct deliverable gets a `**Bold subheading**` naming it in user vocabulary, followed by 1-3 prose paragraphs explaining what shipped. Don't wrap a paragraph in `- ` — bullets are for enumerable lists, not paragraph containers. Cross-link detail docs (`See {ref}\`foo\` for details.`) so prose stays focused.
