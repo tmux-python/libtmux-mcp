@@ -78,6 +78,34 @@ More clients and JSON config: [client setup docs](https://libtmux-mcp.git-pull.c
 
 The agent manages tmux directly. No copy-pasting terminal output. No switching windows to check on long-running processes.
 
+## When the server earns its keep
+
+For a single `tmux send-keys`, the server doesn't. It earns its keep
+the moment the agent has to wait, inspect, or avoid damaging the
+terminal it is using — pytest finishing, a dev server printing its
+port, a deploy log settling. The difference then is not more access
+to tmux, but a better place to put the control loop.
+
+The server-side moves are three:
+
+**Waiting.** [`wait_for_text`](https://libtmux-mcp.git-pull.com/tools/pane/wait-for-text/)
+and [`wait_for_content_change`](https://libtmux-mcp.git-pull.com/tools/pane/wait-for-content-change/)
+block inside the server until the condition fires. The alternative is
+the model polling `capture-pane` in a loop, paying both context tokens
+and round-trip latency for every turn.
+
+**Reading.** [`snapshot_pane`](https://libtmux-mcp.git-pull.com/tools/pane/snapshot-pane/)
+returns content, cursor, copy-mode state, and scroll offset as one
+typed value. The alternative is several `tmux` invocations stitched
+together with regex.
+
+**Guarding.** The server detects the agent's own pane across sockets
+and declines self-destructive operations — [`kill_session`](https://libtmux-mcp.git-pull.com/tools/session/kill-session/)
+on itself fails loudly instead of silently terminating the host
+environment the agent is running in. [`LIBTMUX_SAFETY`](https://libtmux-mcp.git-pull.com/configuration/#envvar-LIBTMUX_SAFETY)
+(`read`, `read+send`, `read+send+kill`) hides whole tiers from the
+client's tool list before any prompt is built.
+
 ## Documentation
 
 Full docs, guides, and tool reference: **[libtmux-mcp.git-pull.com](https://libtmux-mcp.git-pull.com)**
