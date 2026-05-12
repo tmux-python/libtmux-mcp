@@ -261,7 +261,7 @@ def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
             if not name.startswith(_MCP_BUFFER_PREFIX):
                 continue
             try:
-                server.cmd("delete-buffer", "-b", name)
+                server.delete_buffer(buffer_name=name)
             except Exception as err:
                 logger.debug("buffer GC: delete-buffer %s failed: %s", name, err)
 

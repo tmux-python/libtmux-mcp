@@ -328,13 +328,10 @@ def paste_text(
             msg = f"load-buffer failed: {stderr or e}"
             raise ToolError(msg) from e
 
-        # Paste from the named buffer. -d deletes only that named buffer,
-        # leaving any unnamed user buffer intact.
-        paste_args = ["-b", buffer_name, "-d"]
-        if bracket:
-            paste_args.append("-p")  # bracketed paste mode
-        paste_args.extend(["-t", pane.pane_id or ""])
-        pane.cmd("paste-buffer", *paste_args)
+        # Paste from the named buffer. ``delete_after=True`` (``-d``)
+        # deletes only that named buffer, leaving any unnamed user
+        # buffer intact.
+        pane.paste_buffer(buffer_name=buffer_name, bracket=bracket, delete_after=True)
     finally:
         if tmppath is not None:
             pathlib.Path(tmppath).unlink(missing_ok=True)
@@ -342,6 +339,6 @@ def paste_text(
         # deletes it), but if paste-buffer failed before -d took effect
         # we leak an entry in the tmux server. Best-effort delete.
         with contextlib.suppress(Exception):
-            server.cmd("delete-buffer", "-b", buffer_name)
+            server.delete_buffer(buffer_name=buffer_name)
 
     return f"Text pasted to pane {pane.pane_id}"
