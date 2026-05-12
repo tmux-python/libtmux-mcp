@@ -271,15 +271,15 @@ def test_select_window_last_on_single_window_session_raises(
 ) -> None:
     """select_window last with no prior window must surface the tmux error.
 
-    Regression guard: session.cmd("last-window") on a session that has
-    never had a previously-active window emits "no last window" on
-    stderr, but the tool previously discarded the return value and
-    returned the unchanged active window as if the navigation had
-    worked.
+    Regression guard: ``Session.last_window`` on a session that has
+    never had a previously-active window raises ``LibTmuxException``
+    with tmux's "no last window" stderr; the tool previously discarded
+    the return value and returned the unchanged active window as if
+    the navigation had worked.
     """
     # The fixture session is freshly created: there is no previously-
     # active window for last-window to jump back to.
-    with pytest.raises(ToolError, match="last-window"):
+    with pytest.raises(ToolError, match="no last window"):
         select_window(
             direction="last",
             session_name=mcp_session.session_name,
