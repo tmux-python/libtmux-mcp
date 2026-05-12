@@ -233,12 +233,15 @@ def clear_pane(
         session_id=session_id,
         window_id=window_id,
     )
-    # Split into two cmd() calls — pane.reset() in libtmux <= 0.55.0 sends
-    # `send-keys -R \; clear-history` as one call, but subprocess doesn't
-    # interpret \; as a tmux command separator so clear-history never runs.
+    # Two separate calls — pane.reset() in libtmux 0.56.0 still sends
+    # `send-keys -R \; clear-history` as one call but subprocess doesn't
+    # interpret \; as a tmux command separator, so clear-history never
+    # runs. The bare `-R` send is left as a raw cmd() because
+    # Pane.send_keys requires a cmd string and would emit an extra
+    # empty key alongside the reset flag.
     # See: https://github.com/tmux-python/libtmux/issues/650
     pane.cmd("send-keys", "-R")
-    pane.cmd("clear-history")
+    pane.clear_history()
     return f"Pane cleared: {pane.pane_id}"
 
 

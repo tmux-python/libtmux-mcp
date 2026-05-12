@@ -75,7 +75,7 @@ def pipe_pane(
     )
 
     if output_path is None:
-        pane.cmd("pipe-pane")
+        pane.pipe()
         return f"Piping stopped for pane {pane.pane_id}"
 
     if not output_path.strip():
@@ -83,5 +83,5 @@ def pipe_pane(
         raise ToolError(msg)
 
     redirect = ">>" if append else ">"
-    pane.cmd("pipe-pane", f"cat {redirect} {shlex.quote(output_path)}")
+    pane.pipe(f"cat {redirect} {shlex.quote(output_path)}")
     return f"Piping pane {pane.pane_id} to {output_path}"
