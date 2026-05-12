@@ -12,6 +12,7 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
+libtmux = false
 gp-sphinx = false
 sphinx-autodoc-sphinx = false
 sphinx-autodoc-api-style = false
@@ -1187,7 +1188,7 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.2.4,<4.0.0" },
-    { name = "libtmux", specifier = ">=0.55.1,<1.0" },
+    { name = "libtmux", specifier = ">=0.56.0,<1.0" },
 ]
 
 [package.metadata.requires-dev]
