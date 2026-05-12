@@ -63,8 +63,8 @@ def display_message(
         session_id=session_id,
         window_id=window_id,
     )
-    result = pane.cmd("display-message", "-p", format_string)
-    return "\n".join(result.stdout) if result.stdout else ""
+    stdout = pane.display_message(format_string, get_text=True)
+    return "\n".join(stdout) if stdout else ""
 
 
 @handle_tool_errors
@@ -159,8 +159,8 @@ def snapshot_pane(
         "#{pane_tty}",
     ]
     fmt = _SEP.join(_FMT_VARS)
-    result = pane.cmd("display-message", "-p", fmt)
-    raw = result.stdout[0] if result.stdout else ""
+    stdout = pane.display_message(fmt, get_text=True)
+    raw = stdout[0] if stdout else ""
     # Pad defensively to guarantee one slot per format var even if tmux
     # drops an unknown variable on older versions.
     parts = (raw.split(_SEP) + [""] * len(_FMT_VARS))[: len(_FMT_VARS)]
