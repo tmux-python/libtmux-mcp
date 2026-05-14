@@ -228,7 +228,7 @@ def test_use_local_with_no_prior_entry_writes_empty_env(
     assert mcp_swap.cmd_use_local(args) == 0
 
     config = tomlkit.parse(info.config_path.read_text())
-    table = config["mcp_servers"]["libtmux"]  # type: ignore[index]
+    table = config["mcp_servers"]["libtmux"]
     assert isinstance(table, tomlkit.items.Table)
     assert "env" not in table
 
