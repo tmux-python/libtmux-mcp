@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `libtmux>=0.56.0`** (was `>=0.55.1`). Unlocks the new tmux-command wrappers shipped in libtmux 0.56.0 — {meth}`~libtmux.Pane.respawn`, {meth}`~libtmux.Pane.copy_mode`, {meth}`~libtmux.Pane.pipe`, {meth}`~libtmux.Pane.swap`, {meth}`~libtmux.Pane.paste_buffer`, {meth}`~libtmux.Pane.clear_history`, {meth}`~libtmux.Pane.display_message`, {meth}`~libtmux.Server.delete_buffer`, and the {meth}`~libtmux.Session.next_window` / {meth}`~libtmux.Session.previous_window` / {meth}`~libtmux.Session.last_window` trio — so the MCP no longer falls back to raw `cmd()` calls for tmux commands the upstream API now covers. (#46)
+
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
 
 libtmux-mcp 0.1.0a6 is the activation and registration cleanup release. It makes the server much easier for MCP clients to discover from ordinary "pane", "window", and "session" prompts, standardizes new setup docs around the `tmux` registration slug, and adds migration guidance for existing `libtmux` registrations. Existing installs keep working; the release changes defaults and documentation so new installs line up with the tool prefix users actually see.

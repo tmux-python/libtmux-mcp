@@ -268,11 +268,7 @@ def paste_buffer(
         session_id=session_id,
         window_id=window_id,
     )
-    paste_args: list[str] = ["-b", cname]
-    if bracket:
-        paste_args.append("-p")
-    paste_args.extend(["-t", pane.pane_id or ""])
-    pane.cmd("paste-buffer", *paste_args)
+    pane.paste_buffer(buffer_name=cname, bracket=bracket)
     return f"Buffer {cname!r} pasted to pane {pane.pane_id}"
 
 

@@ -71,6 +71,9 @@ def resize_pane(
     )
     if zoom is not None:
         window = pane.window
+        # ``window_zoomed_flag`` isn't declared on the libtmux Window
+        # dataclass in 0.56.0, and Window has no ``display_message``
+        # wrapper — keep the raw cmd() until upstream surfaces one.
         result = window.cmd("display-message", "-p", "#{window_zoomed_flag}")
         is_zoomed = bool(result.stdout) and result.stdout[0] == "1"
         if zoom and not is_zoomed:
@@ -171,7 +174,7 @@ def select_pane(
         idx = panes.index(active)
         step = 1 if direction == "next" else -1
         target_pane = panes[(idx + step) % len(panes)]
-        server.cmd("select-pane", target=target_pane.pane_id)
+        target_pane.select()
 
     # Query the active pane ID directly from tmux to avoid stale cache
     target = window.window_id or ""
@@ -216,8 +219,8 @@ def swap_pane(
     server = _get_server(socket_name=socket_name)
     # Validate both panes exist
     source = _resolve_pane(server, pane_id=source_pane_id)
-    _resolve_pane(server, pane_id=target_pane_id)
+    target = _resolve_pane(server, pane_id=target_pane_id)
 
-    server.cmd("swap-pane", "-s", source_pane_id, "-t", target_pane_id)
+    source.swap(target=target)
     source.refresh()
     return _serialize_pane(source)

@@ -233,12 +233,15 @@ def clear_pane(
         session_id=session_id,
         window_id=window_id,
     )
-    # Split into two cmd() calls — pane.reset() in libtmux <= 0.55.0 sends
-    # `send-keys -R \; clear-history` as one call, but subprocess doesn't
-    # interpret \; as a tmux command separator so clear-history never runs.
+    # Two separate calls — pane.reset() in libtmux 0.56.0 still sends
+    # `send-keys -R \; clear-history` as one call but subprocess doesn't
+    # interpret \; as a tmux command separator, so clear-history never
+    # runs. The bare `-R` send is left as a raw cmd() because
+    # Pane.send_keys requires a cmd string and would emit an extra
+    # empty key alongside the reset flag.
     # See: https://github.com/tmux-python/libtmux/issues/650
     pane.cmd("send-keys", "-R")
-    pane.cmd("clear-history")
+    pane.clear_history()
     return f"Pane cleared: {pane.pane_id}"
 
 
@@ -325,13 +328,10 @@ def paste_text(
             msg = f"load-buffer failed: {stderr or e}"
             raise ToolError(msg) from e
 
-        # Paste from the named buffer. -d deletes only that named buffer,
-        # leaving any unnamed user buffer intact.
-        paste_args = ["-b", buffer_name, "-d"]
-        if bracket:
-            paste_args.append("-p")  # bracketed paste mode
-        paste_args.extend(["-t", pane.pane_id or ""])
-        pane.cmd("paste-buffer", *paste_args)
+        # Paste from the named buffer. ``delete_after=True`` (``-d``)
+        # deletes only that named buffer, leaving any unnamed user
+        # buffer intact.
+        pane.paste_buffer(buffer_name=buffer_name, bracket=bracket, delete_after=True)
     finally:
         if tmppath is not None:
             pathlib.Path(tmppath).unlink(missing_ok=True)
@@ -339,6 +339,6 @@ def paste_text(
         # deletes it), but if paste-buffer failed before -d took effect
         # we leak an entry in the tmux server. Best-effort delete.
         with contextlib.suppress(Exception):
-            server.cmd("delete-buffer", "-b", buffer_name)
+            server.delete_buffer(buffer_name=buffer_name)
 
     return f"Text pasted to pane {pane.pane_id}"

@@ -150,30 +150,12 @@ def respawn_pane(
             "Use a manual tmux command if intended."
         )
         raise ToolError(msg)
-    # Stopgap: ``libtmux>=0.55.1`` has no ``Pane.respawn()`` yet — the
-    # wrapper exists on the upstream ``tmux-parity`` branch (see
-    # ``libtmux/pane.py:respawn``) and mirrors this argv shape: ``-k``,
-    # ``-c <dir>``, repeated ``-e<KEY>=<VAL>`` (single-arg form, NOT
-    # split ``-e KEY=VAL`` — tmux's args parser accepts both but
-    # upstream emits the joined form), then optional trailing shell.
-    # When the release line picks it up, swap ``pane.cmd("respawn-pane",
-    # *argv)`` for ``pane.respawn(kill=kill, start_directory=
-    # start_directory, environment=environment, shell=shell)`` and drop
-    # the stderr branch — ``Pane.respawn`` raises ``LibTmuxException``.
-    argv: list[str] = []
-    if kill:
-        argv.append("-k")
-    if start_directory is not None:
-        argv.extend(["-c", start_directory])
-    if environment:
-        argv.extend(f"-e{k}={v}" for k, v in environment.items())
-    if shell is not None:
-        argv.append(shell)
-    result = pane.cmd("respawn-pane", *argv)
-    if result.stderr:
-        stderr = " ".join(result.stderr).strip()
-        msg = f"tmux respawn-pane failed: {stderr}"
-        raise ToolError(msg)
+    pane.respawn(
+        kill=kill,
+        start_directory=start_directory,
+        environment=environment,
+        shell=shell,
+    )
     # Pick up fresh pane_pid and any command/path updates; tmux does
     # not invalidate the underlying object on respawn.
     pane.refresh()
