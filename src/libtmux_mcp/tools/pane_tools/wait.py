@@ -22,6 +22,9 @@ from libtmux_mcp.models import (
     WaitForTextResult,
 )
 
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+
 logger = logging.getLogger(__name__)
 
 #: Exceptions that indicate "client transport is gone, keep polling".
@@ -96,6 +99,34 @@ async def _maybe_log(
         return
 
 
+def _read_grid_position(pane: Pane) -> int:
+    """Return ``history_size + cursor_y`` for ``pane``.
+
+    The result is an absolute grid index that remains stable as new
+    content scrolls the cursor row into history. Used by
+    ``wait_for_text`` to anchor a baseline before polling so stale
+    scrollback no longer matches; see issue #45.
+
+    Uses ``:`` as the format separator because both values are
+    integers and ``:`` cannot appear in their stringification.
+    """
+    result = pane.cmd("display-message", "-p", "#{history_size}:#{cursor_y}")
+    raw = result.stdout[0] if result.stdout else "0:0"
+    hs_str, cy_str = raw.split(":", 1)
+    return int(hs_str) + int(cy_str)
+
+
+def _read_history_size(pane: Pane) -> int:
+    """Return the current ``#{history_size}`` for ``pane``.
+
+    Read on every poll tick by ``wait_for_text`` because tmux's
+    ``-S`` is relative to the live ``hsize``, which grows as lines
+    scroll out of the visible region.
+    """
+    result = pane.cmd("display-message", "-p", "#{history_size}")
+    return int(result.stdout[0]) if result.stdout else 0
+
+
 @handle_tool_errors_async
 async def wait_for_text(
     pattern: str,
@@ -107,16 +138,30 @@ async def wait_for_text(
     timeout: float = 8.0,
     interval: float = 0.05,
     match_case: bool = False,
-    content_start: int | None = None,
-    content_end: int | None = None,
     socket_name: str | None = None,
     ctx: Context | None = None,
 ) -> WaitForTextResult:
-    """Wait for text to appear in a tmux pane.
+    r"""Wait for NEW text to appear in a tmux pane.
 
-    Polls the pane content at regular intervals until the pattern is found
-    or the timeout is reached. Use this instead of polling capture_pane
-    manually — it saves agent tokens and turns.
+    Polls the pane at regular intervals until ``pattern`` appears on a
+    line written *after* the call starts, or the timeout is reached.
+    Use this instead of polling :func:`capture_pane` manually — it
+    saves agent tokens and turns.
+
+    **What "new" means.** At entry the tool snapshots the pane's absolute
+    grid position (``history_size + cursor_y``) and only matches lines
+    written below that baseline. Stale scrollback that was already
+    present when the call began is ignored. For the synchronous "is
+    the pattern in the pane right now?" check, call
+    {tooliconl}`search-panes` instead.
+
+    **Adversarial-safety pattern.** If you cannot trust that the
+    pattern only appears after your action — for example because the
+    pane prints recurring prompts, log lines, or output from background
+    processes you do not control — bracket your command with a unique
+    sentinel: ``cmd; echo __WAIT_$RANDOM__`` and wait for the sentinel
+    instead of ``cmd``'s natural output. tmux's grid model cannot
+    distinguish "your output" from "theirs"; the sentinel can.
 
     When a :class:`fastmcp.Context` is available, this tool emits
     periodic ``ctx.report_progress`` notifications so MCP clients can
@@ -147,10 +192,6 @@ async def wait_for_text(
         Seconds between polls. Default 0.05 (50ms).
     match_case : bool
         Whether to match case. Default False (case-insensitive).
-    content_start : int, optional
-        Start line for capture. Negative values reach into scrollback.
-    content_end : int, optional
-        End line for capture.
     socket_name : str, optional
         tmux socket name.
     ctx : fastmcp.Context, optional
@@ -164,6 +205,24 @@ async def wait_for_text(
 
     Notes
     -----
+    **Scrollback truncation.** If ``history-limit`` is small and the
+    baseline line rolls out of history during the wait, tmux clips
+    ``-S`` to the oldest available line (``cmd-capture-pane.c``); the
+    worst case degrades to pre-baseline behaviour on the surviving
+    portion of history rather than an infinite false-match loop.
+
+    **Reverse-index sequences (``\\eM``).** Programs that rewrite
+    history below the baseline can theoretically re-introduce stale
+    text into the captured range. This is rare on the main screen
+    because pagers (``less``, ``more``) and other heavy users run on
+    the alternate screen, which has a fresh grid and does not
+    interact with the baseline.
+
+    **``clear`` / ``reset``.** With the default ``scroll-on-clear``
+    option, cleared content scrolls into history (``screen-write.c``
+    ``screen_write_clearscreen``), so the baseline anchor is
+    unaffected.
+
     **Safety tier.** Tagged ``readonly`` because the tool observes
     pane state without mutating it. Readonly clients may therefore
     block for the caller-supplied ``timeout`` (default 8 s, caller
@@ -193,6 +252,17 @@ async def wait_for_text(
     )
 
     assert pane.pane_id is not None
+
+    # Snapshot the pane's absolute grid position before polling. ``hs0 +
+    # cy0`` is invariant under subsequent scrolling — tmux's ``-S`` is
+    # relative to the live ``hsize`` at capture time
+    # (cmd-capture-pane.c: ``top = gd->hsize + n``), so re-reading
+    # ``hsize`` each tick and computing ``baseline_abs - hsize_now + 1``
+    # always points at "the first line written after entry". Mirrors
+    # the snapshot-before-loop pattern in ``wait_for_content_change``
+    # below; see issue #45.
+    baseline_abs = await asyncio.to_thread(_read_grid_position, pane)
+
     matched_lines: list[str] = []
     start_time = time.monotonic()
     deadline = start_time + timeout
@@ -208,12 +278,16 @@ async def wait_for_text(
                 message=f"Polling pane {pane.pane_id} for pattern",
             )
 
-            # FastMCP direct-awaits async tools on the main event loop; the
-            # libtmux capture_pane call is a blocking subprocess.run. Push
-            # to the default executor so concurrent tool calls are not
-            # starved during long waits.
+            # FastMCP direct-awaits async tools on the main event loop;
+            # the libtmux display-message + capture_pane calls are both
+            # blocking subprocess.run. Push to the default executor so
+            # concurrent tool calls are not starved during long waits.
+            hs_now = await asyncio.to_thread(_read_history_size, pane)
+            # ``+ 1`` skips the baseline line itself so we don't
+            # re-match the row the cursor sat on at entry.
+            start_line = baseline_abs - hs_now + 1
             lines = await asyncio.to_thread(
-                pane.capture_pane, start=content_start, end=content_end
+                pane.capture_pane, start=start_line, end=None
             )
             hits = [line for line in lines if compiled.search(line)]
             if hits:
