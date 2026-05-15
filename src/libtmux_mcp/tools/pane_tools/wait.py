@@ -110,8 +110,8 @@ def _read_grid_position(pane: Pane) -> int:
     Uses ``:`` as the format separator because both values are
     integers and ``:`` cannot appear in their stringification.
     """
-    result = pane.cmd("display-message", "-p", "#{history_size}:#{cursor_y}")
-    raw = result.stdout[0] if result.stdout else "0:0"
+    stdout = pane.display_message("#{history_size}:#{cursor_y}", get_text=True)
+    raw = stdout[0] if stdout else "0:0"
     hs_str, cy_str = raw.split(":", 1)
     return int(hs_str) + int(cy_str)
 
@@ -123,8 +123,8 @@ def _read_history_size(pane: Pane) -> int:
     ``-S`` is relative to the live ``hsize``, which grows as lines
     scroll out of the visible region.
     """
-    result = pane.cmd("display-message", "-p", "#{history_size}")
-    return int(result.stdout[0]) if result.stdout else 0
+    stdout = pane.display_message("#{history_size}", get_text=True)
+    return int(stdout[0]) if stdout else 0
 
 
 @handle_tool_errors_async
