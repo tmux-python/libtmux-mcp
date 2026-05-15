@@ -265,6 +265,13 @@ async def wait_for_text(
 
     assert pane.pane_id is not None
 
+    # Anchor ``start_time`` before the baseline read so a stalled
+    # tmux server cannot blow the user-supplied ``timeout`` budget
+    # — libtmux's ``tmux_cmd`` uses ``Popen.communicate()`` with no
+    # subprocess timeout, so the read can block arbitrarily long.
+    start_time = time.monotonic()
+    deadline = start_time + timeout
+
     # Snapshot the pane's absolute grid position before polling. ``hs0 +
     # cy0`` is invariant under subsequent scrolling — tmux's ``-S`` is
     # relative to the live ``hsize`` at capture time
@@ -277,8 +284,6 @@ async def wait_for_text(
     pane_height = await asyncio.to_thread(_read_pane_height, pane)
 
     matched_lines: list[str] = []
-    start_time = time.monotonic()
-    deadline = start_time + timeout
     found = False
 
     try:
