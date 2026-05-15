@@ -99,44 +99,45 @@ async def _maybe_log(
         return
 
 
-def _read_grid_position(pane: Pane) -> int:
-    """Return ``history_size + cursor_y`` for ``pane``.
+class _PaneState(t.NamedTuple):
+    """Per-tick snapshot of pane state used by :func:`wait_for_text`.
 
-    The result is an absolute grid index that remains stable as new
-    content scrolls the cursor row into history. Used by
-    ``wait_for_text`` to anchor a baseline before polling so stale
-    scrollback no longer matches; see issue #45.
-
-    Uses ``:`` as the format separator because both values are
-    integers and ``:`` cannot appear in their stringification.
+    Read in one ``display-message`` round-trip so the loop costs two
+    subprocesses per tick (state + capture) instead of growing
+    linearly with each new field. ``|`` is the field separator —
+    history/cursor/height are integers, ``pane_pid`` is a numeric PID
+    string, and ``pane_dead`` is the literal ``"0"``/``"1"`` flag.
     """
-    stdout = pane.display_message("#{history_size}:#{cursor_y}", get_text=True)
-    raw = stdout[0] if stdout else "0:0"
-    hs_str, cy_str = raw.split(":", 1)
-    return int(hs_str) + int(cy_str)
+
+    history_size: int
+    cursor_y: int
+    pane_height: int
+    pane_pid: str
+    pane_dead: bool
 
 
-def _read_history_size(pane: Pane) -> int:
-    """Return the current ``#{history_size}`` for ``pane``.
+def _read_pane_state(pane: Pane) -> _PaneState:
+    """Return a :class:`_PaneState` snapshot for ``pane``.
 
-    Read on every poll tick by ``wait_for_text`` because tmux's
-    ``-S`` is relative to the live ``hsize``, which grows as lines
-    scroll out of the visible region.
+    Combines the per-tick reads ``wait_for_text`` needs into a single
+    ``display-message`` call. ``history_size + cursor_y`` gives the
+    absolute grid anchor at entry; ``pane_height`` gates the bottom-
+    row capture clip; ``pane_pid`` and ``pane_dead`` surface
+    respawn-pane and pane-death events that invalidate the baseline.
     """
-    stdout = pane.display_message("#{history_size}", get_text=True)
-    return int(stdout[0]) if stdout else 0
-
-
-def _read_pane_height(pane: Pane) -> int:
-    """Return ``#{pane_height}`` (the visible-region row count, ``sy``).
-
-    Read once at entry by ``wait_for_text`` to gate the bottom-row
-    capture clip: when the computed ``start_line`` would land below
-    the visible region, ``cmd-capture-pane`` clips back to the bottom
-    row and returns stale text. The guard short-circuits that path.
-    """
-    stdout = pane.display_message("#{pane_height}", get_text=True)
-    return int(stdout[0]) if stdout else 0
+    stdout = pane.display_message(
+        "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}",
+        get_text=True,
+    )
+    raw = stdout[0] if stdout else "0|0|0||0"
+    hs, cy, sy, pid, dead = raw.split("|", 4)
+    return _PaneState(
+        history_size=int(hs),
+        cursor_y=int(cy),
+        pane_height=int(sy),
+        pane_pid=pid,
+        pane_dead=dead == "1",
+    )
 
 
 @handle_tool_errors_async
@@ -282,16 +283,17 @@ async def wait_for_text(
     start_time = time.monotonic()
     deadline = start_time + timeout
 
-    # Snapshot the pane's absolute grid position before polling. ``hs0 +
-    # cy0`` is invariant under subsequent scrolling — tmux's ``-S`` is
-    # relative to the live ``hsize`` at capture time
-    # (cmd-capture-pane.c: ``top = gd->hsize + n``), so re-reading
-    # ``hsize`` each tick and computing ``baseline_abs - hsize_now + 1``
-    # always points at "the first line written after entry". Mirrors
-    # the snapshot-before-loop pattern in ``wait_for_content_change``
-    # below; see issue #45.
-    baseline_abs = await asyncio.to_thread(_read_grid_position, pane)
-    pane_height = await asyncio.to_thread(_read_pane_height, pane)
+    # Snapshot the pane state before polling. ``hs0 + cy0`` is the
+    # absolute grid anchor — invariant under subsequent scrolling
+    # because tmux's ``-S`` is relative to the live ``hsize`` at
+    # capture time (cmd-capture-pane.c: ``top = gd->hsize + n``).
+    # ``pane_pid`` lets us detect a respawn-pane mid-wait that would
+    # otherwise leave the absolute anchor pointing at the old
+    # process's output. See issue #45.
+    entry = await asyncio.to_thread(_read_pane_state, pane)
+    baseline_abs = entry.history_size + entry.cursor_y
+    pane_height = entry.pane_height
+    baseline_pid = entry.pane_pid
 
     matched_lines: list[str] = []
     found = False
@@ -310,10 +312,20 @@ async def wait_for_text(
             # the libtmux display-message + capture_pane calls are both
             # blocking subprocess.run. Push to the default executor so
             # concurrent tool calls are not starved during long waits.
-            hs_now = await asyncio.to_thread(_read_history_size, pane)
+            state = await asyncio.to_thread(_read_pane_state, pane)
+            if state.pane_dead:
+                msg = f"pane {pane.pane_id} died during wait"
+                raise ToolError(msg)
+            if state.pane_pid != baseline_pid:
+                msg = (
+                    f"pane {pane.pane_id} was respawned during wait "
+                    f"(pid {baseline_pid} -> {state.pane_pid}); "
+                    "baseline anchor no longer valid"
+                )
+                raise ToolError(msg)
             # ``+ 1`` skips the baseline line itself so we don't
             # re-match the row the cursor sat on at entry.
-            start_line = baseline_abs - hs_now + 1
+            start_line = baseline_abs - state.history_size + 1
             # ``capture-pane -S`` clips a below-visible start back to
             # the bottom row (cmd-capture-pane.c, post-tmux-3.0), so a
             # naive capture would return stale bottom-row text whenever

@@ -1398,6 +1398,72 @@ def test_wait_for_text_rejects_tiny_interval(
         )
 
 
+def test_wait_for_text_raises_on_pane_respawn(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Respawning the pane mid-wait invalidates the baseline anchor.
+
+    The baseline absolute index is computed against the original
+    pane process's grid. ``respawn-pane`` clears the visible region
+    but preserves ``hsize`` (``screen_reinit``), so the math keeps
+    pointing at the *old* process's content — silently miscapturing.
+    ``wait_for_text`` detects the ``pane_pid`` change and surfaces
+    it as a ToolError instead.
+    """
+    import asyncio
+
+    async def respawn_after_delay() -> None:
+        # Let wait_for_text capture its baseline first, then swap
+        # the pane process so pane_pid changes.
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="sleep 30")
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="NEVER_APPEARS_xyz",
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await respawn_after_delay()
+        return await wait_task
+
+    with pytest.raises(ToolError, match="respawned during wait"):
+        asyncio.run(run())
+
+
+def test_wait_for_text_raises_on_pane_death(mcp_server: Server, mcp_pane: Pane) -> None:
+    """A pane whose process has exited surfaces as a ToolError.
+
+    With ``remain-on-exit`` set, tmux keeps the pane alive after its
+    child exits and reports ``#{pane_dead}=1``. The wait loop checks
+    that flag every tick and bails with a ToolError instead of
+    polling stale content until timeout.
+    """
+    import asyncio
+
+    mcp_pane.window.set_option("remain-on-exit", "on")
+    mcp_pane.respawn(kill=True, shell="true")
+
+    def _is_dead() -> bool:
+        flag = mcp_pane.display_message("#{pane_dead}", get_text=True)
+        return bool(flag) and flag[0] == "1"
+
+    retry_until(_is_dead, 3, raises=True)
+
+    with pytest.raises(ToolError, match="died during wait"):
+        asyncio.run(
+            wait_for_text(
+                pattern="anything",
+                pane_id=mcp_pane.pane_id,
+                timeout=1.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
 def test_wait_for_text_rejects_non_positive_timeout(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
