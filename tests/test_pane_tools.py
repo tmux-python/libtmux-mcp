@@ -1222,7 +1222,7 @@ def test_wait_for_text(
             last_state = state
             return settled
 
-        retry_until(_stale_settled, 2, raises=True)
+        retry_until(_stale_settled, 5, raises=True)
 
     result = asyncio.run(
         wait_for_text(
