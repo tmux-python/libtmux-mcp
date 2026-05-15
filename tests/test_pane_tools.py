@@ -55,6 +55,22 @@ def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
     assert "sent" in result.lower()
 
 
+def test_send_keys_docstring_cross_links_wait_for_channel() -> None:
+    """``send_keys`` docstring steers agents at ``wait_for_channel`` first.
+
+    Agents read tool descriptions when picking a synchronization primitive.
+    After the baseline-anchor design landed, ``send_keys`` →
+    ``wait_for_text`` can race for fast commands (the baseline locks after
+    the keys are buffered), and the channel pattern is strictly cheaper
+    for command completion. The docstring must therefore mention both
+    ``wait_for_channel`` and ``run_and_wait`` so the agent can find the
+    safe pattern without a separate docs lookup.
+    """
+    assert send_keys.__doc__ is not None
+    assert "wait_for_channel" in send_keys.__doc__
+    assert "run_and_wait" in send_keys.__doc__
+
+
 def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     """capture_pane returns pane content."""
     result = capture_pane(

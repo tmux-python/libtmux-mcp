@@ -32,9 +32,23 @@ def send_keys(
 ) -> str:
     """Send keys (commands or text) to a tmux pane.
 
-    After sending, use wait_for_text to block until the command completes,
-    or capture_pane to read the result. Do not capture_pane immediately —
-    there is a race condition.
+    After sending, choose your synchronization primitive based on what you
+    control:
+
+    - **Deterministic (preferred):** compose ``tmux wait-for -S <channel>``
+      into the shell command and call ``wait_for_channel``. See the
+      ``run_and_wait`` prompt for the canonical status-preserving pattern.
+      Cheaper in agent turns and immune to baseline races.
+    - **Pattern-match:** call ``wait_for_text`` when the output you await
+      is yours to author and won't appear before the wait locks its
+      baseline (e.g. a sentinel ``echo`` after a long command). Fast
+      ``echo`` statements can race the baseline read; reserve this for
+      output the agent does not control.
+    - **Any change:** call ``wait_for_content_change`` when you don't know
+      the output shape.
+
+    Do NOT call ``capture_pane`` immediately — both the read and the
+    pattern-match paths race the pane's PTY draw.
 
     Parameters
     ----------

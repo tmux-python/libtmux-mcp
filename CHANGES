@@ -24,6 +24,12 @@ wait_for_text(pattern="OK")
 
 When the pane's `history-limit` causes the baseline grid row to be trimmed mid-wait (or `clear-history` runs, or `history-limit` is shrunk while the wait is running), {tooliconl}`wait-for-text` now raises `ToolError` instead of silently returning stale matches or missing new output. The absolute baseline anchor relies on tmux's `history_size` being monotonically non-decreasing; once `grid_collect_history` fires there is no server-side way to recover the original anchor. For deterministic command-completion synchronization, compose `tmux wait-for -S <channel>` into the shell command and use {tooliconl}`wait-for-channel`. (#45 follow-up)
 
+### Documentation
+
+**Wait family is re-framed around {tooliconl}`wait-for-channel` as the deterministic primitive**
+
+The {tooliconl}`send-keys` docstring, the server system instructions, and the {tooliconl}`wait-for-text` docstring now point agents at {tooliconl}`wait-for-channel` with composed `tmux wait-for -S` for command completion, and reserve {tooliconl}`wait-for-text` / {tooliconl}`wait-for-content-change` for output the agent does not author. The `run_and_wait` recipe is the canonical status-preserving pattern. (#45 follow-up)
+
 ### Dependencies
 
 **Minimum `libtmux>=0.56.0`** (was `>=0.55.1`). Unlocks the new tmux-command wrappers shipped in libtmux 0.56.0 — {meth}`~libtmux.Pane.respawn`, {meth}`~libtmux.Pane.copy_mode`, {meth}`~libtmux.Pane.pipe`, {meth}`~libtmux.Pane.swap`, {meth}`~libtmux.Pane.paste_buffer`, {meth}`~libtmux.Pane.clear_history`, {meth}`~libtmux.Pane.display_message`, {meth}`~libtmux.Server.delete_buffer`, and the {meth}`~libtmux.Session.next_window` / {meth}`~libtmux.Session.previous_window` / {meth}`~libtmux.Session.last_window` trio — so the MCP no longer falls back to raw `cmd()` calls for tmux commands the upstream API now covers. (#46)

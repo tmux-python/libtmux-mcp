@@ -182,6 +182,19 @@ async def wait_for_text(
     instead of ``cmd``'s natural output. tmux's grid model cannot
     distinguish "your output" from "theirs"; the sentinel can.
 
+    **When NOT to use this — sequential ``send_keys`` race.** If you
+    call ``send_keys`` and immediately ``wait_for_text``, fast output
+    (``echo``, prompt-return after ``^C``) can land *before* this tool
+    snapshots the baseline, and the match is then invisible to the
+    wait. The race is small but real on CI and over remote sockets.
+    For commands you author, prefer the channel pattern: append
+    ``; tmux wait-for -S <channel>`` to your ``send_keys`` payload and
+    call ``wait_for_channel`` instead. The ``run_and_wait`` prompt at
+    ``libtmux_mcp.prompts.recipes`` shows the safe, status-preserving
+    composition. Reserve ``wait_for_text`` for output you do not
+    control (third-party process logs, daemon prompts, interactive
+    supervisors).
+
     When a :class:`fastmcp.Context` is available, this tool emits
     periodic ``ctx.report_progress`` notifications so MCP clients can
     show a "polling pane X... (elapsed/timeout)" indicator during long
