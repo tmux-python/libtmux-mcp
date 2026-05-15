@@ -1128,23 +1128,35 @@ class WaitForTextFixture(t.NamedTuple):
     """Test fixture for wait_for_text."""
 
     test_id: str
-    command: str | None
+    #: Command sent BEFORE ``wait_for_text`` is called. Its output is
+    #: expected to be present in the pane scrollback (and therefore
+    #: above the baseline) by the time the wait begins. Used to verify
+    #: that stale scrollback no longer matches (#45). The positive
+    #: "text appears after baseline" case lives in
+    #: ``test_wait_for_text_matches_new_output_after_baseline`` rather
+    #: than this fixture because it needs ``asyncio.gather`` to
+    #: coordinate emission against the running poll loop — synchronous
+    #: setup races the shell's enter-processing on CI and shifts the
+    #: baseline past single-line output.
+    pre_command: str | None
     pattern: str
     timeout: float
     expected_found: bool
 
 
 WAIT_FOR_TEXT_FIXTURES: list[WaitForTextFixture] = [
+    # Regression for #45: pre-existing scrollback must NOT match.
     WaitForTextFixture(
-        test_id="text_found",
-        command="echo WAIT_MARKER_abc123",
-        pattern="WAIT_MARKER_abc123",
-        timeout=2.0,
-        expected_found=True,
+        test_id="stale_scrollback_does_not_match",
+        pre_command="echo WAIT_MARKER_stale",
+        pattern="WAIT_MARKER_stale",
+        timeout=0.5,
+        expected_found=False,
     ),
+    # Genuinely absent pattern still times out cleanly.
     WaitForTextFixture(
         test_id="timeout_not_found",
-        command=None,
+        pre_command=None,
         pattern="NEVER_EXISTS_xyz999",
         timeout=0.3,
         expected_found=False,
@@ -1161,7 +1173,7 @@ def test_wait_for_text(
     mcp_server: Server,
     mcp_pane: Pane,
     test_id: str,
-    command: str | None,
+    pre_command: str | None,
     pattern: str,
     timeout: float,
     expected_found: bool,
@@ -1169,8 +1181,48 @@ def test_wait_for_text(
     """wait_for_text polls pane content for a pattern."""
     import asyncio
 
-    if command is not None:
-        mcp_pane.send_keys(command, enter=True)
+    if pre_command is not None:
+        mcp_pane.send_keys(pre_command, enter=True)
+        # Wait until the pane has fully settled before measuring the
+        # baseline. "Settled" means:
+        #
+        #   (a) the OUTPUT line is present — ``line.strip() == pattern``,
+        #       distinguishing the shell's actual output from the typed
+        #       echo line that contains ``pattern`` as a substring (and
+        #       which would otherwise trip a naive ``pattern in capture``
+        #       predicate while keys are still buffered pre-enter), and
+        #   (b) ``(history_size, cursor_y)`` is unchanged across two
+        #       consecutive polls — zsh prints async prompt-redraw
+        #       lines (vcs_info, precmd hooks) some milliseconds after
+        #       the initial prompt, and those redraws keep growing
+        #       hsize *during* ``wait_for_text``'s window, pulling
+        #       pre-baseline rows back into the visible-relative
+        #       ``start_line`` capture. Waiting them out anchors the
+        #       baseline below all async output.
+        #
+        # A fixed ``time.sleep`` would do the same job but couples the
+        # test to a wall-clock value (the project's idiom for
+        # tmux-state waits is ``retry_until`` — used throughout this
+        # file).
+        last_state: tuple[int, int] = (-1, -1)
+
+        def _stale_settled() -> bool:
+            nonlocal last_state
+            raw = mcp_pane.cmd(
+                "display-message", "-p", "#{history_size}:#{cursor_y}"
+            ).stdout
+            if not raw:
+                return False
+            hs_str, cy_str = raw[0].split(":", 1)
+            state = (int(hs_str), int(cy_str))
+            has_output_line = any(
+                line.strip() == pattern for line in mcp_pane.capture_pane()
+            )
+            settled = state == last_state and has_output_line
+            last_state = state
+            return settled
+
+        retry_until(_stale_settled, 2, raises=True)
 
     result = asyncio.run(
         wait_for_text(
@@ -1188,6 +1240,48 @@ def test_wait_for_text(
 
     if expected_found:
         assert len(result.matched_lines) >= 1
+
+
+def test_wait_for_text_matches_new_output_after_baseline(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """wait_for_text finds output written AFTER its baseline snapshot.
+
+    Coordinates the marker emission against the running poll loop via
+    :func:`asyncio.gather` so ``send_keys`` is guaranteed to fire
+    *after* :func:`wait_for_text` has captured its baseline. Without
+    that coordination the test races the shell's enter-processing —
+    if the shell advances the cursor before the baseline read on CI,
+    ``start_line`` shifts past the single-line marker and the poll
+    loop misses it (the failure mode that took the original
+    synchronous ``send_keys`` + ``asyncio.run`` shape to all six tmux
+    matrix slots on PR #47 commit aa8de89).
+    """
+    import asyncio
+
+    async def emit_after_baseline() -> None:
+        # The baseline read is a single display-message round trip
+        # (<5 ms in practice); 0.2 s gives wait_for_text plenty of
+        # headroom to lock the baseline before the marker fires.
+        await asyncio.sleep(0.2)
+        await asyncio.to_thread(mcp_pane.send_keys, "echo WAIT_MARKER_after", True)
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="WAIT_MARKER_after",
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    result = asyncio.run(run())
+    assert result.found is True
+    assert result.timed_out is False
+    assert any("WAIT_MARKER_after" in line for line in result.matched_lines)
 
 
 def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None:
