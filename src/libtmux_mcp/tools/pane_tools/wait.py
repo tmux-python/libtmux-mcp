@@ -168,6 +168,12 @@ async def wait_for_text(
     the pattern in the pane right now?" check, call
     {tooliconl}`search-panes` instead.
 
+    In-place updates to the entry cursor's row — carriage-return
+    rewrites, progress spinners, single-line status updates — are
+    not observed; only rows below the entry cursor count as "new."
+    Use {tooliconl}`wait-for-content-change` or pair the command
+    with a sentinel for those cases.
+
     **Adversarial-safety pattern.** If you cannot trust that the
     pattern only appears after your action — for example because the
     pane prints recurring prompts, log lines, or output from background
@@ -224,12 +230,20 @@ async def wait_for_text(
     worst case degrades to pre-baseline behaviour on the surviving
     portion of history rather than an infinite false-match loop.
 
-    **Reverse-index sequences (``\\eM``).** Programs that rewrite
-    history below the baseline can theoretically re-introduce stale
-    text into the captured range. This is rare on the main screen
-    because pagers (``less``, ``more``) and other heavy users run on
-    the alternate screen, which has a fresh grid and does not
-    interact with the baseline.
+    **In-place rewrites below the baseline.** Programs that paint
+    over rows the tool will capture — cursor-position escape
+    sequences, full-screen progress displays, anything that rewrites
+    rows it already wrote — can re-introduce text the caller saw
+    earlier. Each tick captures the current contents of rows below
+    the baseline; tmux's grid model cannot distinguish "fresh write"
+    from "repaint with the same characters."
+    ``screen_write_reverseindex`` (``screen-write.c``) only scrolls
+    the visible region within ``[rupper, rlower]`` and never touches
+    ``hsize``, so ``\\eM`` itself does not invalidate the anchor —
+    but the surrounding TUI render loop may. Full-screen TUIs
+    typically run on the alternate screen (a separate grid that
+    this tool does not traverse), so the main-screen pattern is
+    rare in practice.
 
     **``clear`` / ``reset``.** With the default ``scroll-on-clear``
     option, cleared content scrolls into history (``screen-write.c``
