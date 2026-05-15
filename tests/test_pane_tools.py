@@ -1488,6 +1488,138 @@ def test_wait_for_text_rejects_non_positive_timeout(
         )
 
 
+def test_wait_for_text_raises_on_history_rollover(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A history trim mid-wait surfaces as ToolError, not silent miss.
+
+    The rollover guard fires when ``state.history_size <
+    entry.history_size``. To force that we (1) pre-fill the pane with
+    scrollback so ``entry.history_size`` is large at wait entry, then
+    (2) run ``clear-history`` mid-wait — tmux's ``grid_clear_history``
+    (``grid.c``) sets ``gd->hsize = 0`` synchronously, dropping hsize
+    below the baseline. The wait then detects the drop and raises
+    instead of silently false-matching or missing output.
+
+    ``clear-history`` is chosen (rather than shrinking ``history-limit``
+    retroactively) because the retroactive-trim path landed in tmux
+    master commit 195a9cf and is not in tmux 3.6a or earlier releases.
+    ``clear-history`` works on all supported tmux versions.
+    """
+    import asyncio
+
+    mcp_pane.send_keys("for i in $(seq 1 100); do echo prefill$i; done", enter=True)
+
+    def _prefilled() -> bool:
+        hs = mcp_pane.display_message("#{history_size}", get_text=True)
+        return bool(hs) and int(hs[0]) >= 50
+
+    retry_until(_prefilled, 5, raises=True)
+
+    async def clear_after_delay() -> None:
+        # Let wait_for_text snapshot the baseline first, then drop
+        # hsize to 0 with clear-history.
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.cmd, "clear-history")
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="NEVER_APPEARS_rollover",
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await clear_after_delay()
+        return await wait_task
+
+    with pytest.raises(ToolError, match="history rolled over"):
+        asyncio.run(run())
+
+
+def test_wait_for_text_succeeds_when_history_grows_normally(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Monotonic history growth without trim does NOT trip the rollover guard.
+
+    The guard fires only when ``state.history_size < entry.history_size``.
+    Many lines scrolling into a generous ``history-limit`` keep hsize
+    monotonically increasing, so a long-output command followed by a
+    sentinel marker must still match cleanly.
+    """
+    import asyncio
+
+    async def emit_after_baseline() -> None:
+        await asyncio.sleep(0.1)
+        cmd = "for i in $(seq 1 50); do echo line$i; done; echo WAIT_MARKER_grows_ok"
+        await asyncio.to_thread(mcp_pane.send_keys, cmd, True)
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="WAIT_MARKER_grows_ok",
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    result = asyncio.run(run())
+    assert result.found is True
+    assert result.timed_out is False
+
+
+def test_wait_for_text_handles_resize_during_wait(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Mid-wait resize keys the bottom-row clip to the LIVE pane height.
+
+    Without the ``state.pane_height`` fix, the bottom-row clip guard
+    stays keyed to the entry-time pane height. Shrinking the pane
+    mid-wait would then leave the guard too lax — the capture would
+    fire past the new bottom and tmux's ``-S`` clip would return stale
+    bottom-row text. The fix re-reads ``pane_height`` each tick so the
+    guard matches the current visible region.
+    """
+    import asyncio
+
+    # Park a stale marker on the last visible row and freeze output.
+    # Same parking shape as test_wait_for_text_does_not_match_bottom_row_clip.
+    fill_and_park = (
+        "for i in $(seq 1 30); do echo filler; done; "
+        "printf STALE_RESIZE_MARKER; sleep 60"
+    )
+    mcp_pane.respawn(kill=True, shell=f"sh -c '{fill_and_park}'")
+
+    def _ready() -> bool:
+        return any("STALE_RESIZE_MARKER" in line for line in mcp_pane.capture_pane())
+
+    retry_until(_ready, 5, raises=True)
+
+    async def resize_after_delay() -> None:
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.cmd, "resize-pane", "-y", "5")
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="STALE_RESIZE_MARKER",
+                pane_id=mcp_pane.pane_id,
+                timeout=0.5,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await resize_after_delay()
+        return await wait_task
+
+    result = asyncio.run(run())
+    assert result.found is False
+    assert result.timed_out is True
+
+
 def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text calls ``ctx.report_progress`` at each poll tick.
 

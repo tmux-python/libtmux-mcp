@@ -224,11 +224,15 @@ async def wait_for_text(
 
     Notes
     -----
-    **Scrollback truncation.** If ``history-limit`` is small and the
-    baseline line rolls out of history during the wait, tmux clips
-    ``-S`` to the oldest available line (``cmd-capture-pane.c``); the
-    worst case degrades to pre-baseline behaviour on the surviving
-    portion of history rather than an infinite false-match loop.
+    **Scrollback rollover raises.** When ``history-limit`` is reached
+    mid-wait, tmux's ``grid_collect_history`` (``grid.c``) frees the
+    oldest scrollback rows and decrements ``hsize``, invalidating the
+    absolute baseline. The same hsize-decrement fires on
+    ``clear-history`` and on shrinking ``history-limit`` mid-wait.
+    The tool raises ``ToolError`` ("history rolled over during wait")
+    rather than silently false-matching or silently missing output;
+    the caller can re-arm ``wait_for_text`` or switch to
+    ``wait_for_channel`` for deterministic synchronization.
 
     **In-place rewrites below the baseline.** Programs that paint
     over rows the tool will capture — cursor-position escape
@@ -306,7 +310,6 @@ async def wait_for_text(
     # process's output. See issue #45.
     entry = await asyncio.to_thread(_read_pane_state, pane)
     baseline_abs = entry.history_size + entry.cursor_y
-    pane_height = entry.pane_height
     baseline_pid = entry.pane_pid
 
     matched_lines: list[str] = []
@@ -337,15 +340,34 @@ async def wait_for_text(
                     "baseline anchor no longer valid"
                 )
                 raise ToolError(msg)
+            # When tmux's ``history-limit`` is reached, ``grid_collect_history``
+            # (grid.c) frees the oldest scrollback rows and decrements
+            # ``gd->hsize``, so absolute index math anchored on
+            # ``history_size + cursor_y`` is no longer recoverable. The same
+            # hsize-decrement also fires on ``clear-history`` and on shrinking
+            # the ``history-limit`` option mid-wait. There is no server-side way
+            # to disambiguate "trimmed" from "still anchored", so surface the
+            # lost anchor as ``ToolError`` instead of silently false-matching
+            # or silently missing output.
+            if state.history_size < entry.history_size:
+                msg = (
+                    f"pane {pane.pane_id} history rolled over during wait "
+                    f"(history_size {entry.history_size} -> "
+                    f"{state.history_size}); baseline anchor lost — "
+                    "re-arm wait_for_text or use wait_for_channel for "
+                    "deterministic synchronization"
+                )
+                raise ToolError(msg)
             # ``+ 1`` skips the baseline line itself so we don't
             # re-match the row the cursor sat on at entry.
             start_line = baseline_abs - state.history_size + 1
-            # ``capture-pane -S`` clips a below-visible start back to
-            # the bottom row (cmd-capture-pane.c, post-tmux-3.0), so a
-            # naive capture would return stale bottom-row text whenever
-            # no new rows have appeared below the cursor yet. Skip the
-            # capture entirely on those ticks.
-            if start_line >= pane_height:
+            # ``capture-pane -S`` clips a below-visible start back to the
+            # bottom row (cmd-capture-pane.c, post-tmux-3.0), so a naive
+            # capture would return stale bottom-row text whenever no new rows
+            # have appeared below the cursor yet. Compare against
+            # ``state.pane_height`` (re-read each tick) so a resize mid-wait
+            # doesn't leave the guard keyed to a stale height.
+            if start_line >= state.pane_height:
                 lines: list[str] = []
             else:
                 lines = await asyncio.to_thread(
