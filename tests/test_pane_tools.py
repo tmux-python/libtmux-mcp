@@ -1355,6 +1355,72 @@ def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None
         )
 
 
+def test_wait_for_text_rejects_empty_pattern(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """An empty pattern matches every line and returns found=True instantly.
+
+    ``re.compile('')`` succeeds and ``re.search`` reports a zero-width
+    match on every string, so the first poll would return
+    ``found=True`` against whatever was in the pane. Reject explicitly.
+    """
+    import asyncio
+
+    with pytest.raises(ToolError, match="pattern must be a non-empty string"):
+        asyncio.run(
+            wait_for_text(
+                pattern="",
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_wait_for_text_rejects_tiny_interval(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A sub-10ms interval lets the poll loop saturate the tmux server.
+
+    ``asyncio.sleep(0)`` yields but does not idle, so an unguarded
+    ``interval=0`` fires tmux subprocesses as fast as the scheduler
+    hands them out — a self-inflicted server-side DoS.
+    """
+    import asyncio
+
+    with pytest.raises(ToolError, match=r"interval must be at least 0\.01"):
+        asyncio.run(
+            wait_for_text(
+                pattern="anything",
+                pane_id=mcp_pane.pane_id,
+                interval=0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_wait_for_text_rejects_non_positive_timeout(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A non-positive timeout is ambiguous; reject rather than guess.
+
+    The loop body runs one probe before the deadline check, so
+    ``timeout=0`` would complete a single synchronous capture in a
+    "wait" tool — surprising. Reject explicitly so callers pick a
+    meaningful budget.
+    """
+    import asyncio
+
+    with pytest.raises(ToolError, match="timeout must be positive"):
+        asyncio.run(
+            wait_for_text(
+                pattern="anything",
+                pane_id=mcp_pane.pane_id,
+                timeout=0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
 def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text calls ``ctx.report_progress`` at each poll tick.
 

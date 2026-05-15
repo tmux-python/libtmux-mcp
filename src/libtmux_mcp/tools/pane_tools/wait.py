@@ -245,6 +245,16 @@ async def wait_for_text(
     calls. If you need to rate-limit wait tools, do it at the
     transport layer or with dedicated middleware.
     """
+    if not pattern:
+        msg = "pattern must be a non-empty string"
+        raise ToolError(msg)
+    if interval < 0.01:
+        msg = f"interval must be at least 0.01 s (received {interval})"
+        raise ToolError(msg)
+    if timeout <= 0:
+        msg = f"timeout must be positive (received {timeout})"
+        raise ToolError(msg)
+
     search_pattern = pattern if regex else re.escape(pattern)
     flags = 0 if match_case else re.IGNORECASE
     try:
