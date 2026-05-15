@@ -1284,6 +1284,62 @@ def test_wait_for_text_matches_new_output_after_baseline(
     assert any("WAIT_MARKER_after" in line for line in result.matched_lines)
 
 
+def test_wait_for_text_does_not_match_bottom_row_clip(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """wait_for_text must not match stale text sitting on the cursor row.
+
+    When the cursor is at the last visible row at entry,
+    ``start_line = cy0 + 1`` points below the visible region and
+    tmux's ``capture-pane -S`` clips back to the bottom row
+    (``cmd-capture-pane.c``). Without the bottom-aware guard the
+    poll loop captures the stale cursor-row text and matches it
+    instantly.
+
+    The pane is respawned with a shell-free ``sh -c`` command that
+    prints the marker without a trailing newline and then sleeps —
+    so ``hsize`` and ``cursor_y`` stay frozen for the duration of
+    the wait. Running this with zsh in the loop produced a
+    multi-line history burst on shell exit / exec that lowered
+    ``start_line`` below ``pane_height`` and disengaged the guard.
+    """
+    import asyncio
+
+    # Replace the default shell with a single sh invocation: emit
+    # filler rows to push the cursor to the bottom of the visible
+    # region, print the marker without a trailing newline so it
+    # stays on the cursor row, then sleep so nothing else scrolls
+    # into history. Fixture teardown kills the pane (and the sleep)
+    # at test exit.
+    fill_and_park = (
+        "for i in $(seq 1 30); do echo filler; done; "
+        "printf STALE_BOTTOM_MARKER; sleep 60"
+    )
+    mcp_pane.respawn(kill=True, shell=f"sh -c '{fill_and_park}'")
+
+    def _bottom_row_ready() -> bool:
+        state = mcp_pane.display_message("#{pane_height}:#{cursor_y}", get_text=True)
+        if not state:
+            return False
+        sy_str, cy_str = state[0].split(":", 1)
+        if int(cy_str) != int(sy_str) - 1:
+            return False
+        return any("STALE_BOTTOM_MARKER" in line for line in mcp_pane.capture_pane())
+
+    retry_until(_bottom_row_ready, 5, raises=True)
+
+    result = asyncio.run(
+        wait_for_text(
+            pattern="STALE_BOTTOM_MARKER",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.found is False
+    assert result.timed_out is True
+
+
 def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text raises ToolError on invalid regex when regex=True."""
     import asyncio

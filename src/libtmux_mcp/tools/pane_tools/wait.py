@@ -127,6 +127,18 @@ def _read_history_size(pane: Pane) -> int:
     return int(stdout[0]) if stdout else 0
 
 
+def _read_pane_height(pane: Pane) -> int:
+    """Return ``#{pane_height}`` (the visible-region row count, ``sy``).
+
+    Read once at entry by ``wait_for_text`` to gate the bottom-row
+    capture clip: when the computed ``start_line`` would land below
+    the visible region, ``cmd-capture-pane`` clips back to the bottom
+    row and returns stale text. The guard short-circuits that path.
+    """
+    stdout = pane.display_message("#{pane_height}", get_text=True)
+    return int(stdout[0]) if stdout else 0
+
+
 @handle_tool_errors_async
 async def wait_for_text(
     pattern: str,
@@ -262,6 +274,7 @@ async def wait_for_text(
     # the snapshot-before-loop pattern in ``wait_for_content_change``
     # below; see issue #45.
     baseline_abs = await asyncio.to_thread(_read_grid_position, pane)
+    pane_height = await asyncio.to_thread(_read_pane_height, pane)
 
     matched_lines: list[str] = []
     start_time = time.monotonic()
@@ -286,9 +299,17 @@ async def wait_for_text(
             # ``+ 1`` skips the baseline line itself so we don't
             # re-match the row the cursor sat on at entry.
             start_line = baseline_abs - hs_now + 1
-            lines = await asyncio.to_thread(
-                pane.capture_pane, start=start_line, end=None
-            )
+            # ``capture-pane -S`` clips a below-visible start back to
+            # the bottom row (cmd-capture-pane.c, post-tmux-3.0), so a
+            # naive capture would return stale bottom-row text whenever
+            # no new rows have appeared below the cursor yet. Skip the
+            # capture entirely on those ticks.
+            if start_line >= pane_height:
+                lines: list[str] = []
+            else:
+                lines = await asyncio.to_thread(
+                    pane.capture_pane, start=start_line, end=None
+                )
             hits = [line for line in lines if compiled.search(line)]
             if hits:
                 matched_lines.extend(hits)
