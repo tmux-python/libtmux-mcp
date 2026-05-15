@@ -6,9 +6,33 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**{tooliconl}`wait-for-text` drops `content_start` / `content_end`**
+
+The baseline anchor introduced in this release follows the pane's grid position automatically, so the previous manual capture-range parameters have no remaining purpose. Agents that named them should drop them from their call sites. (#45)
+
+```python
+# Before
+wait_for_text(pattern="OK", content_start=-100)
+
+# After
+wait_for_text(pattern="OK")
+```
+
 ### Dependencies
 
 **Minimum `libtmux>=0.56.0`** (was `>=0.55.1`). Unlocks the new tmux-command wrappers shipped in libtmux 0.56.0 — {meth}`~libtmux.Pane.respawn`, {meth}`~libtmux.Pane.copy_mode`, {meth}`~libtmux.Pane.pipe`, {meth}`~libtmux.Pane.swap`, {meth}`~libtmux.Pane.paste_buffer`, {meth}`~libtmux.Pane.clear_history`, {meth}`~libtmux.Pane.display_message`, {meth}`~libtmux.Server.delete_buffer`, and the {meth}`~libtmux.Session.next_window` / {meth}`~libtmux.Session.previous_window` / {meth}`~libtmux.Session.last_window` trio — so the MCP no longer falls back to raw `cmd()` calls for tmux commands the upstream API now covers. (#46)
+
+### Fixes
+
+**{tooliconl}`wait-for-text` waits for new output, not stale scrollback**
+
+{tooliconl}`wait-for-text` now anchors on the pane's grid position at entry and only matches lines written after the call begins; the previous behaviour returned `found=True` on the first poll whenever the pattern already lived in the pane. Panes that die or are respawned mid-wait surface a `ToolError`. For the synchronous "is the pattern in the pane right now?" case, call {tooliconl}`search-panes`. (#45)
+
+**{tooliconl}`wait-for-text` rejects misused `pattern` / `interval` / `timeout`**
+
+Empty `pattern`, `interval` below 10 ms, and non-positive `timeout` each now raise `ToolError` at entry instead of silently matching every line, spinning the tmux server in a tight loop, or completing a surprise single probe. (#45)
 
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
 
