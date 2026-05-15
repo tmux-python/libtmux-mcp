@@ -1134,10 +1134,10 @@ class WaitForTextFixture(t.NamedTuple):
     #: that stale scrollback no longer matches (#45). The positive
     #: "text appears after baseline" case lives in
     #: ``test_wait_for_text_matches_new_output_after_baseline`` rather
-    #: than this fixture because it needs ``asyncio.gather`` to
-    #: coordinate emission against the running poll loop — synchronous
-    #: setup races the shell's enter-processing on CI and shifts the
-    #: baseline past single-line output.
+    #: than this fixture because it needs ``asyncio.create_task`` plus
+    #: a sequenced ``await`` to coordinate emission against the running
+    #: poll loop — synchronous setup races the shell's enter-processing
+    #: on CI and shifts the baseline past single-line output.
     pre_command: str | None
     pattern: str
     timeout: float
@@ -1247,15 +1247,16 @@ def test_wait_for_text_matches_new_output_after_baseline(
 ) -> None:
     """wait_for_text finds output written AFTER its baseline snapshot.
 
-    Coordinates the marker emission against the running poll loop via
-    :func:`asyncio.gather` so ``send_keys`` is guaranteed to fire
-    *after* :func:`wait_for_text` has captured its baseline. Without
-    that coordination the test races the shell's enter-processing —
-    if the shell advances the cursor before the baseline read on CI,
-    ``start_line`` shifts past the single-line marker and the poll
-    loop misses it (the failure mode that took the original
-    synchronous ``send_keys`` + ``asyncio.run`` shape to all six tmux
-    matrix slots on PR #47 commit aa8de89).
+    Coordinates the marker emission against the running poll loop by
+    starting :func:`wait_for_text` via :func:`asyncio.create_task`,
+    then ``await``-ing the emit coroutine, then ``await``-ing the
+    wait task. Sequencing matters: the explicit start-then-emit
+    ordering guarantees ``send_keys`` fires *after* the baseline
+    read; :func:`asyncio.gather` would schedule both concurrently
+    and lose that guarantee. Without coordination the test races
+    the shell's enter-processing — if the shell advances the cursor
+    before the baseline read on CI, ``start_line`` shifts past the
+    single-line marker and the poll loop misses it.
     """
     import asyncio
 
