@@ -234,6 +234,12 @@ async def wait_for_text(
     the caller can re-arm ``wait_for_text`` or switch to
     ``wait_for_channel`` for deterministic synchronization.
 
+    **Wrapped lines are joined for matching.** Captures pass tmux's
+    ``-J`` flag so a pattern that spans the pane's visual wrap is
+    still matched against the joined logical line. The returned
+    ``matched_lines`` entry for such a hit is the joined line and
+    can therefore be longer than ``pane_width``.
+
     **In-place rewrites below the baseline.** Programs that paint
     over rows the tool will capture — cursor-position escape
     sequences, full-screen progress displays, anything that rewrites
@@ -370,8 +376,18 @@ async def wait_for_text(
             if start_line >= state.pane_height:
                 lines: list[str] = []
             else:
+                # ``join_wrapped=True`` adds tmux's ``-J`` so visually
+                # wrapped lines are returned as one logical line. Without
+                # this, a pattern that spans tmux's wrap column is split
+                # across two rows and ``re.search`` against each row in
+                # isolation never matches. Trade-off: the returned
+                # ``matched_lines`` can contain a single string longer
+                # than ``pane_width``.
                 lines = await asyncio.to_thread(
-                    pane.capture_pane, start=start_line, end=None
+                    pane.capture_pane,
+                    start=start_line,
+                    end=None,
+                    join_wrapped=True,
                 )
             hits = [line for line in lines if compiled.search(line)]
             if hits:

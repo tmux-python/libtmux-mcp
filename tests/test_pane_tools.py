@@ -1620,6 +1620,56 @@ def test_wait_for_text_handles_resize_during_wait(
     assert result.timed_out is True
 
 
+def test_wait_for_text_matches_pattern_across_wrap(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A pattern that spans tmux's visual wrap matches via ``-J``.
+
+    The poll loop passes ``join_wrapped=True`` to ``capture-pane`` so a
+    pattern that crosses the wrap boundary is matched against the
+    joined logical line. Without that flag, each visual row is its own
+    string and a regex against any one row never sees the full marker.
+
+    The command line is composed of three ``printf`` calls so the
+    echoed command text does NOT contain the marker as a literal
+    substring — only the produced output (after the three pieces
+    concatenate on stdout) does.
+    """
+    import asyncio
+
+    width_raw = mcp_pane.display_message("#{pane_width}", get_text=True)
+    assert width_raw is not None
+    pane_width = int(width_raw[0])
+
+    filler_len = max(1, pane_width - 5)
+    payload = (
+        f"printf 'x%.0s' $(seq 1 {filler_len}); "
+        "printf 'WRA'; printf 'PPED_MARKER'; printf '_xyz'; echo"
+    )
+    marker = "WRAPPED_MARKER_xyz"
+
+    async def emit_after_baseline() -> None:
+        await asyncio.sleep(0.2)
+        await asyncio.to_thread(mcp_pane.send_keys, payload, True)
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern=marker,
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    result = asyncio.run(run())
+    assert result.found is True
+    assert result.timed_out is False
+    assert any(marker in line for line in result.matched_lines)
+
+
 def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> None:
     """wait_for_text calls ``ctx.report_progress`` at each poll tick.
 

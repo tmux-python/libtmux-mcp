@@ -30,6 +30,10 @@ When the pane's `history-limit` causes the baseline grid row to be trimmed mid-w
 
 ### Fixes
 
+**{tooliconl}`wait-for-text` matches patterns across visually-wrapped lines**
+
+The poll-loop capture now passes tmux's `-J` flag (`join_wrapped=True` on `Pane.capture_pane`), so a pattern that crosses the pane's visual wrap is still matched against the joined logical line. Long error strings like `"Build failed: module not found"` that tmux split across two rows previously slipped through `re.search`. The joined logical line is returned in `matched_lines` and may exceed `pane_width`. (#45 follow-up)
+
 **{tooliconl}`wait-for-text` waits for new output, not stale scrollback**
 
 {tooliconl}`wait-for-text` now anchors on the pane's grid position at entry and only matches lines written after the call begins; the previous behaviour returned `found=True` on the first poll whenever the pattern already lived in the pane. Panes that die or are respawned mid-wait surface a `ToolError`. For the synchronous "is the pattern in the pane right now?" case, call {tooliconl}`search-panes`. (#45)
