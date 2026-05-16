@@ -1121,11 +1121,7 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.56.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7d/62/896e1e0412dd76c88926604d5a231feb9b116d6f32abe19054e244504dbc/libtmux-0.56.0.tar.gz", hash = "sha256:bddf52214405e4f64850826d44cbc958d4a01c53432983cee0e2856bdbbaaedb", size = 476168, upload-time = "2026-05-10T13:40:23.774Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/ce/4319c912164fa142956c73ba50ed6f2aac2ca7cced2e96c8320114f1c937/libtmux-0.56.0-py3-none-any.whl", hash = "sha256:ddf70de0f287666fb0f02082732f28eed46450de1828c995da3de2b12042ab60", size = 97768, upload-time = "2026-05-10T13:40:22.189Z" },
-]
+source = { git = "https://github.com/tmux-python/libtmux.git?branch=parity-pt-2#78f425abe586e845d580092c69353bab71b7d42b" }
 
 [[package]]
 name = "libtmux-mcp"
@@ -1188,7 +1184,7 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.2.4,<4.0.0" },
-    { name = "libtmux", specifier = ">=0.56.0,<1.0" },
+    { name = "libtmux", git = "https://github.com/tmux-python/libtmux.git?branch=parity-pt-2" },
 ]
 
 [package.metadata.requires-dev]
