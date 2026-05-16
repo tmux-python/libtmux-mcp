@@ -394,9 +394,11 @@ long-lived process, I would not hijack it -- I would use a different pane.
 ### Act
 
 The agent calls {tooliconl}`clear-pane`, then {tooliconl}`send-keys` with
-`keys: "pytest"`, then {tooliconl}`wait-for-text` with
-`pattern: "passed|failed|error"` and `regex: true`, then
-{tooliconl}`capture-pane` to read the fresh output.
+`keys: "pytest; tmux wait-for -S pytest_done"`, then
+{tooliconl}`wait-for-channel` with `channel: "pytest_done"`, then
+{tooliconl}`capture-pane` to read the fresh output. Composing the
+`tmux wait-for -S` signal directly into the shell command is the
+deterministic path for authored commands.
 
 ### The non-obvious part
 

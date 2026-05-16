@@ -163,6 +163,10 @@ verify that control returns to the shell:
 2. `wait_for_text(pane_id="{pane_id}", pattern="\\$ |\\# |\\% ",
    regex=True, timeout=5.0)` — waits for a common shell prompt
    glyph. Adjust the pattern to match the user's shell theme.
+   The `wait_for_channel` pattern doesn't apply here — `C-c` is a
+   signal, not a shell command, so there's no statement to compose
+   `tmux wait-for -S` into. The shell prompt itself is the only
+   signal that the interrupt landed.
 3. If the wait times out the process is ignoring SIGINT. Stop and
    ask the caller how to proceed — do NOT escalate automatically
    to `C-\\` (SIGQUIT) or `kill`.
