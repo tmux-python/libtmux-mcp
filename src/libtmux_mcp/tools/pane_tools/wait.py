@@ -105,9 +105,8 @@ class _PaneState(t.NamedTuple):
     Read in one ``display-message`` round-trip so the loop costs two
     subprocesses per tick (state + capture) instead of growing
     linearly with each new field. ``|`` is the field separator —
-    history/cursor/height/limit are integers, ``pane_pid`` is a
-    numeric PID string, and ``pane_dead`` is the literal
-    ``"0"``/``"1"`` flag.
+    history/cursor/height are integers, ``pane_pid`` is a numeric PID
+    string, and ``pane_dead`` is the literal ``"0"``/``"1"`` flag.
     """
 
     history_size: int
@@ -115,7 +114,6 @@ class _PaneState(t.NamedTuple):
     pane_height: int
     pane_pid: str
     pane_dead: bool
-    history_limit: int
 
 
 def _read_pane_state(pane: Pane) -> _PaneState:
@@ -125,26 +123,34 @@ def _read_pane_state(pane: Pane) -> _PaneState:
     ``display-message`` call. ``history_size + cursor_y`` gives the
     absolute grid anchor at entry; ``pane_height`` gates the bottom-
     row capture clip; ``pane_pid`` and ``pane_dead`` surface
-    respawn-pane and pane-death events that invalidate the baseline;
-    ``history_limit`` lets the poll loop detect the trim-risk band
-    (the upper 10% near ``history-limit`` where ``grid_collect_history``
-    is firing but ``hsize`` stays clamped at the cap).
+    respawn-pane and pane-death events that invalidate the baseline.
     """
     stdout = pane.display_message(
-        "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}|"
-        "#{history_limit}",
+        "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}",
         get_text=True,
     )
-    raw = stdout[0] if stdout else "0|0|0||0|0"
-    hs, cy, sy, pid, dead, hlimit = raw.split("|", 5)
+    raw = stdout[0] if stdout else "0|0|0||0"
+    hs, cy, sy, pid, dead = raw.split("|", 4)
     return _PaneState(
         history_size=int(hs),
         cursor_y=int(cy),
         pane_height=int(sy),
         pane_pid=pid,
         pane_dead=dead == "1",
-        history_limit=int(hlimit),
     )
+
+
+def _read_history_limit(pane: Pane) -> int:
+    """Read the pane's ``history-limit`` once.
+
+    Fixed at pane creation (retroactive change only lands in tmux 3.7+),
+    so the result is safe to cache for the lifetime of a wait. Kept out
+    of :func:`_read_pane_state` so the per-tick read doesn't pay for a
+    value that never changes between polls.
+    """
+    stdout = pane.display_message("#{history_limit}", get_text=True)
+    raw = stdout[0] if stdout else "0"
+    return int(raw)
 
 
 @handle_tool_errors_async
@@ -348,6 +354,7 @@ async def wait_for_text(
     entry = await asyncio.to_thread(_read_pane_state, pane)
     baseline_abs = entry.history_size + entry.cursor_y
     baseline_pid = entry.pane_pid
+    baseline_hlimit = await asyncio.to_thread(_read_history_limit, pane)
 
     matched_lines: list[str] = []
     found = False
@@ -409,18 +416,13 @@ async def wait_for_text(
             # grid_collect_history trim during continuous output, where
             # hsize bounces between (hlimit - hlimit/10) and hlimit
             # faster than we can poll. Emit a one-shot warning when
-            # sampled state is in the trim-risk band AND state has
-            # advanced since entry, so agents subscribed to MCP log
-            # notifications know to verify results or switch to
-            # wait_for_channel.
-            if not warned_risk_band and state.history_limit > 0:
-                trim_batch = max(state.history_limit // 10, 1)
-                risk_floor = state.history_limit - trim_batch
-                advanced = (
-                    state.history_size > entry.history_size
-                    or state.cursor_y != entry.cursor_y
-                )
-                if state.history_size >= risk_floor and advanced:
+            # sampled state is in the trim-risk band so agents
+            # subscribed to MCP log notifications know to verify
+            # results or switch to wait_for_channel.
+            if not warned_risk_band and baseline_hlimit > 0:
+                trim_batch = max(baseline_hlimit // 10, 1)
+                risk_floor = baseline_hlimit - trim_batch
+                if state.history_size >= risk_floor:
                     await _maybe_log(
                         ctx,
                         level="warning",
@@ -428,7 +430,7 @@ async def wait_for_text(
                             f"pane {pane.pane_id} is polling in the "
                             "history-limit trim-risk band "
                             f"(history_size {state.history_size} / "
-                            f"history_limit {state.history_limit}); "
+                            f"history_limit {baseline_hlimit}); "
                             "wait_for_text correctness is best-effort "
                             "here. For deterministic synchronization "
                             "use wait_for_channel."

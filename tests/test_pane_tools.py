@@ -2046,6 +2046,67 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
     ), f"expected a trim-risk-band warning, got: {log_calls}"
 
 
+def test_wait_for_text_warns_when_already_in_risk_band(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` warns immediately if entry is already in the risk band.
+
+    Unlike ``test_wait_for_text_warns_in_history_limit_risk_band`` which
+    advances into the band, this covers the case where the pane is
+    already near ``history-limit`` at entry. Without output (idle wait),
+    the simplified predicate (no ``advanced`` gate) must still fire the
+    one-shot warning.
+    """
+    import asyncio
+
+    mcp_pane.session.cmd("set-option", "-g", "history-limit", "50")
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    def _hlimit_locked() -> bool:
+        hl = fresh_pane.display_message("#{history_limit}", get_text=True)
+        return bool(hl) and int(hl[0]) == 50
+
+    retry_until(_hlimit_locked, 5, raises=True)
+
+    # history-limit is 50. Risk floor (top 10%) is 45.
+    # Print 100 lines to ensure hsize reaches the cap (50).
+    fresh_pane.send_keys("for i in $(seq 1 100); do echo line$i; done", True)
+
+    def _prefilled() -> bool:
+        hs = fresh_pane.display_message("#{history_size}", get_text=True)
+        # We need it to be in the risk band (>= 45).
+        return bool(hs) and int(hs[0]) >= 45
+
+    retry_until(_prefilled, 10, raises=True)
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(self, *args: t.Any, **kwargs: t.Any) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    async def run() -> None:
+        # Idle wait: no new output, no cursor movement.
+        await wait_for_text(
+            pattern="NEVER_MATCH_idle_risk",
+            pane_id=fresh_pane.pane_id,
+            timeout=0.5,
+            interval=0.1,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _RecordingContext()),
+        )
+
+    asyncio.run(run())
+
+    assert any(
+        level == "warning" and "trim-risk band" in msg for level, msg in log_calls
+    ), f"expected a trim-risk-band warning during idle wait, got: {log_calls}"
+
+
 def test_wait_for_content_change_warns_on_timeout(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
