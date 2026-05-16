@@ -20,9 +20,11 @@ wait_for_text(pattern="OK", content_start=-100)
 wait_for_text(pattern="OK")
 ```
 
-**{tooliconl}`wait-for-text` raises on history rollover**
+**{tooliconl}`wait-for-text` raises on a subset of history-rollover events**
 
-When the pane's `history-limit` causes the baseline grid row to be trimmed mid-wait (or `clear-history` runs), {tooliconl}`wait-for-text` now raises `ToolError` instead of silently returning stale matches or missing new output. The absolute baseline anchor relies on `history_size` not shrinking due to row eviction; once `grid_collect_history` frees those rows there is no server-side way to recover the original anchor. (Resize-grow also decrements `history_size`, but does not evict rows — that case is exempted by also checking `pane_height`.) For deterministic command-completion synchronization, compose `tmux wait-for -S <channel>` into the shell command and use {tooliconl}`wait-for-channel`. (#45 follow-up)
+When the pane's `history-limit` causes `hsize` to shrink below the entry baseline mid-wait — typically via `clear-history`, or via retroactive `history-limit` shrink on tmux >= 3.7 (commit `195a9cf`) — {tooliconl}`wait-for-text` now raises `ToolError` instead of silently returning stale matches or missing new output. Resize-grow also decrements `hsize` (rows pulled back from history), but does not evict row data; that case is exempted by also checking `pane_height`.
+
+The guard does **not** reliably detect `grid_collect_history` trim that occurs during continuous output: tmux's trim-then-scroll bounce keeps sampled `hsize` clamped near the cap, so the predicate stays false even though rows are being evicted. For deterministic command-completion synchronization, compose `tmux wait-for -S <channel>` into the shell command and use {tooliconl}`wait-for-channel`. {tooliconl}`wait-for-text` also emits a runtime `notifications/message` warning when polling within the trim-risk band (see ### Fixes), so MCP clients can surface "correctness is best-effort here" without the call failing. (#45 follow-up; tracking issue filed in libtmux for a deeper detection helper.)
 
 ### Documentation
 

@@ -1504,23 +1504,15 @@ def test_wait_for_text_rejects_non_positive_timeout(
         )
 
 
-def test_wait_for_text_raises_on_history_rollover(
+def test_wait_for_text_raises_when_history_is_cleared(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
-    """A history trim mid-wait surfaces as ToolError, not silent miss.
+    """``clear-history`` during a wait drops ``hsize`` to 0, tripping the guard.
 
-    The rollover guard fires when ``state.history_size <
-    entry.history_size``. To force that we (1) pre-fill the pane with
-    scrollback so ``entry.history_size`` is large at wait entry, then
-    (2) run ``clear-history`` mid-wait — tmux's ``grid_clear_history``
-    (``grid.c``) sets ``gd->hsize = 0`` synchronously, dropping hsize
-    below the baseline. The wait then detects the drop and raises
-    instead of silently false-matching or missing output.
-
-    ``clear-history`` is chosen (rather than shrinking ``history-limit``
-    retroactively) because the retroactive-trim path landed in tmux
-    master commit 195a9cf and is not in tmux 3.6a or earlier releases.
-    ``clear-history`` works on all supported tmux versions.
+    Pre-fills scrollback, starts the wait, then runs ``clear-history``
+    on the pane. tmux's ``grid_clear_history`` sets ``gd->hsize = 0``
+    synchronously, so the next poll sees ``state.history_size <
+    entry.history_size`` and raises ``ToolError``.
     """
     import asyncio
 
@@ -1550,7 +1542,7 @@ def test_wait_for_text_raises_on_history_rollover(
         await clear_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="history rolled over"):
+    with pytest.raises(ToolError, match="history shrank below entry baseline"):
         asyncio.run(run())
 
 
@@ -1593,21 +1585,13 @@ def test_wait_for_text_survives_resize_grow_with_scrolled_history(
 ) -> None:
     """Resize-grow that pulls lines from history must NOT trip the rollover guard.
 
-    tmux's ``screen_resize_y`` (``screen.c:451-465``) decrements
-    ``gd->hsize`` on a vertical grow when ``hscrolled > 0`` — rows
-    from history are pulled back into the visible region. The rows
-    themselves are NOT freed; only the history/visible-region
-    boundary shifts and absolute indices stay valid.
-
-    The rollover guard distinguishes this case from real row eviction
-    by ALSO requiring ``pane_height`` to not have grown. Resize-grow
-    increases ``pane_height``, so the conjunction is false and the
-    guard correctly does NOT fire.
-
-    Before this distinction was added (initial Phase 1 predicate),
-    the same sequence raised a spurious "history rolled over"
-    ``ToolError`` for any agent whose pane got resized mid-wait by a
-    WM event, font/zoom change, or mosh reconnect.
+    tmux's ``screen_resize_y`` decrements ``gd->hsize`` on a vertical
+    grow when ``hscrolled > 0`` — rows from history are pulled back
+    into the visible region. The rows themselves are NOT freed; only
+    the history/visible-region boundary shifts and absolute indices
+    stay valid. The guard's conjunction with ``pane_height <=
+    entry.pane_height`` exempts this case, because resize-grow also
+    increases ``pane_height``.
     """
     import asyncio
 

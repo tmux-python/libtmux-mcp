@@ -237,14 +237,21 @@ async def wait_for_text(
 
     Notes
     -----
-    **Scrollback rollover raises.** When ``history-limit`` is reached
-    mid-wait, tmux's ``grid_collect_history`` (``grid.c``) frees the
-    oldest scrollback rows and decrements ``hsize``, invalidating the
-    absolute baseline. The same hsize-decrement fires on
-    ``clear-history``. The tool raises ``ToolError`` ("history rolled
-    over during wait") rather than silently false-matching or silently
-    missing output; the caller can re-arm ``wait_for_text`` or switch
-    to ``wait_for_channel`` for deterministic synchronization.
+    **Scrollback rollover detection is partial.** The tool raises
+    ``ToolError`` when ``hsize`` shrinks below the entry value — which
+    catches ``clear-history``, retroactive ``history-limit`` shrink
+    (tmux >= 3.7, commit ``195a9cf``), and rollover events where the
+    dip is observable between polls. It does **not** reliably detect
+    ``grid_collect_history`` trim that fires during continuous output:
+    tmux trims (~10% of ``history-limit``) then immediately scrolls
+    new lines back, so sampled ``hsize`` can stay clamped at the cap
+    and never appear below entry. tmux exposes no monotonic trim
+    counter or hook to disambiguate. For deterministic
+    command-completion synchronization use ``wait_for_channel``; for
+    observation flows that approach ``history-limit``, see the
+    runtime ``ctx.warning`` notification emitted by this tool in the
+    trim-risk band. (Tracking: a libtmux issue investigating a
+    libtmux-side trim-detection helper.)
 
     Note that ``hsize`` also decrements on resize-grow when there is
     scrolled history available (``screen.c`` ``screen_resize_y``),
@@ -385,8 +392,8 @@ async def wait_for_text(
                 and state.pane_height <= entry.pane_height
             ):
                 msg = (
-                    f"pane {pane.pane_id} history rolled over during wait "
-                    f"(history_size {entry.history_size} -> "
+                    f"pane {pane.pane_id} history shrank below entry "
+                    f"baseline (history_size {entry.history_size} -> "
                     f"{state.history_size}); baseline anchor lost — "
                     "re-arm wait_for_text or use wait_for_channel for "
                     "deterministic synchronization"
