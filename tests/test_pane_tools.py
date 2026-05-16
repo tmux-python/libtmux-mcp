@@ -1962,6 +1962,90 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
     ), f"expected a timeout warning, got: {log_calls}"
 
 
+def test_wait_for_text_warns_in_history_limit_risk_band(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` emits a warning when polling near ``history-limit``.
+
+    With a small ``history-limit`` and a burst of output that forces
+    ``grid_collect_history`` to fire repeatedly, sampled ``history_size``
+    enters the trim-risk band (top 10% of ``history_limit``). The wait's
+    strict-shrink predicate cannot see those trims (hsize stays clamped
+    at the cap), so the tool emits a one-shot ``ctx.warning`` notification
+    so MCP clients can decide whether to keep waiting, retry, or switch
+    to ``wait_for_channel``.
+
+    The wait's ``found`` / ``timed_out`` result is intentionally not
+    asserted — once polling enters the risk band, correctness is
+    best-effort. The test pins the warning contract (what the tool
+    guarantees), not the match contract (what tmux's grid model
+    fundamentally can't).
+    """
+    import asyncio
+
+    # ``history-limit`` is session-scope and the effective per-pane value
+    # is locked in at pane creation. Set the option globally, then split a
+    # fresh pane that inherits the small limit. The mcp_pane fixture's
+    # original pane keeps its larger limit and is unaffected.
+    mcp_pane.session.cmd("set-option", "-g", "history-limit", "50")
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    def _hlimit_locked() -> bool:
+        hl = fresh_pane.display_message("#{history_limit}", get_text=True)
+        return bool(hl) and int(hl[0]) == 50
+
+    retry_until(_hlimit_locked, 5, raises=True)
+
+    log_calls: list[tuple[str, str]] = []
+
+    class _RecordingContext:
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            return
+
+        async def warning(self, message: str) -> None:
+            log_calls.append(("warning", message))
+
+    async def burst_after_delay() -> None:
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(
+            fresh_pane.send_keys,
+            "for i in $(seq 1 200); do echo burst$i; done",
+            True,
+        )
+
+    async def run() -> None:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="WILL_NEVER_MATCH_riskband_qZ9",
+                pane_id=fresh_pane.pane_id,
+                timeout=2.0,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+                ctx=t.cast("t.Any", _RecordingContext()),
+            )
+        )
+        await burst_after_delay()
+        try:
+            await wait_task
+        except ToolError:
+            # The strict-shrink guard may or may not fire depending on
+            # whether the dip is observable between polls. Either way,
+            # we only assert the warning contract, not the result type.
+            return
+
+    asyncio.run(run())
+
+    assert any(
+        level == "warning" and "trim-risk band" in msg for level, msg in log_calls
+    ), f"expected a trim-risk-band warning, got: {log_calls}"
+
+
 def test_wait_for_content_change_warns_on_timeout(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
