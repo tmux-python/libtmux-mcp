@@ -349,10 +349,14 @@ async def wait_for_text(
 
     assert pane.pane_id is not None
 
-    # Anchor ``start_time`` before the baseline read so a stalled
-    # tmux server cannot blow the user-supplied ``timeout`` budget
-    # — libtmux's ``tmux_cmd`` uses ``Popen.communicate()`` with no
-    # subprocess timeout, so the read can block arbitrarily long.
+    # Anchor ``start_time`` before the baseline read so the elapsed
+    # time returned in ``WaitForTextResult.elapsed_seconds`` reflects
+    # total call duration, including the baseline read. The
+    # user-supplied ``timeout`` still cannot bound a stalled tmux
+    # command — libtmux's ``tmux_cmd`` uses ``Popen.communicate()``
+    # with no subprocess timeout, so a hung tmux read can exceed the
+    # budget. The early anchor measures that blowout; it doesn't
+    # prevent it.
     start_time = time.monotonic()
     deadline = start_time + timeout
 
