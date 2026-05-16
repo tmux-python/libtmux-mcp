@@ -1588,6 +1588,76 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
     assert result.timed_out is False
 
 
+def test_wait_for_text_survives_resize_grow_with_scrolled_history(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Resize-grow that pulls lines from history must NOT trip the rollover guard.
+
+    tmux's ``screen_resize_y`` (``screen.c:451-465``) decrements
+    ``gd->hsize`` on a vertical grow when ``hscrolled > 0`` — rows
+    from history are pulled back into the visible region. The rows
+    themselves are NOT freed; only the history/visible-region
+    boundary shifts and absolute indices stay valid.
+
+    The rollover guard distinguishes this case from real row eviction
+    by ALSO requiring ``pane_height`` to not have grown. Resize-grow
+    increases ``pane_height``, so the conjunction is false and the
+    guard correctly does NOT fire.
+
+    Before this distinction was added (initial Phase 1 predicate),
+    the same sequence raised a spurious "history rolled over"
+    ``ToolError`` for any agent whose pane got resized mid-wait by a
+    WM event, font/zoom change, or mosh reconnect.
+    """
+    import asyncio
+
+    # Pre-fill scrollback so hscrolled > 0 — rows must have already
+    # scrolled past the visible region for screen_resize_y to have
+    # anything to pull back on grow.
+    mcp_pane.send_keys("for i in $(seq 1 100); do echo prefill$i; done", enter=True)
+
+    def _prefilled() -> bool:
+        hs = mcp_pane.display_message("#{history_size}", get_text=True)
+        return bool(hs) and int(hs[0]) >= 50
+
+    retry_until(_prefilled, 5, raises=True)
+
+    # Read current pane height; we'll grow past it during the wait.
+    height_raw = mcp_pane.display_message("#{pane_height}", get_text=True)
+    assert height_raw is not None
+    current_height = int(height_raw[0])
+    target_height = current_height + 3
+
+    async def grow_after_delay() -> None:
+        # Let wait_for_text snapshot the baseline first, then grow
+        # the window vertically. screen_resize_y pulls rows from
+        # history back into view, decrementing hsize.
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(
+            mcp_pane.window.cmd,
+            "resize-window",
+            "-y",
+            str(target_height),
+        )
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                pattern="NEVER_APPEARS_resize_grow",
+                pane_id=mcp_pane.pane_id,
+                timeout=1.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await grow_after_delay()
+        return await wait_task
+
+    # The wait must complete cleanly via timeout — NOT a ToolError.
+    result = asyncio.run(run())
+    assert result.found is False
+    assert result.timed_out is True
+
+
 def test_wait_for_text_handles_resize_during_wait(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

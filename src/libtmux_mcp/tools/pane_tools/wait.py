@@ -241,11 +241,18 @@ async def wait_for_text(
     mid-wait, tmux's ``grid_collect_history`` (``grid.c``) frees the
     oldest scrollback rows and decrements ``hsize``, invalidating the
     absolute baseline. The same hsize-decrement fires on
-    ``clear-history`` and on shrinking ``history-limit`` mid-wait.
-    The tool raises ``ToolError`` ("history rolled over during wait")
-    rather than silently false-matching or silently missing output;
-    the caller can re-arm ``wait_for_text`` or switch to
-    ``wait_for_channel`` for deterministic synchronization.
+    ``clear-history``. The tool raises ``ToolError`` ("history rolled
+    over during wait") rather than silently false-matching or silently
+    missing output; the caller can re-arm ``wait_for_text`` or switch
+    to ``wait_for_channel`` for deterministic synchronization.
+
+    Note that ``hsize`` also decrements on resize-grow when there is
+    scrolled history available (``screen.c`` ``screen_resize_y``),
+    but in that case the row data is not freed — only the
+    history/visible-region boundary moves and absolute indices stay
+    valid. The guard distinguishes the two cases by also requiring
+    ``pane_height`` to not have grown, so resize-grow continues
+    polling cleanly.
 
     **Wrapped lines are joined for matching.** Captures pass tmux's
     ``-J`` flag so a pattern that spans the pane's visual wrap is
@@ -363,12 +370,20 @@ async def wait_for_text(
             # (grid.c) frees the oldest scrollback rows and decrements
             # ``gd->hsize``, so absolute index math anchored on
             # ``history_size + cursor_y`` is no longer recoverable. The same
-            # hsize-decrement also fires on ``clear-history`` and on shrinking
-            # the ``history-limit`` option mid-wait. There is no server-side way
-            # to disambiguate "trimmed" from "still anchored", so surface the
-            # lost anchor as ``ToolError`` instead of silently false-matching
-            # or silently missing output.
-            if state.history_size < entry.history_size:
+            # hsize-decrement also fires on ``clear-history``.
+            #
+            # ``hsize`` ALSO decrements on resize-grow when ``hscrolled > 0``
+            # (``screen.c`` ``screen_resize_y``: rows are pulled from history
+            # back into the visible region). In that case no row data is freed
+            # — only the hsize/visible-region partition shifts and absolute
+            # indices stay valid. Trim and resize-grow are distinguished by
+            # ``pane_height``: trim leaves it unchanged, resize-grow increases
+            # it. The conjunction below is the actual signature of row
+            # eviction; resize-grow falls through cleanly.
+            if (
+                state.history_size < entry.history_size
+                and state.pane_height <= entry.pane_height
+            ):
                 msg = (
                     f"pane {pane.pane_id} history rolled over during wait "
                     f"(history_size {entry.history_size} -> "
