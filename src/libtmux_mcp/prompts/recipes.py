@@ -21,9 +21,10 @@ def run_and_wait(
     """Run a shell command in a tmux pane and wait for completion.
 
     The returned template teaches the model the safe composition
-    pattern — always emit ``tmux wait-for -S`` on both success and
-    failure paths so a crash never deadlocks the agent on an
-    edge-triggered signal. See ``docs/topics/prompting.md``.
+    pattern: shell ``;`` semantics fire ``tmux wait-for -S`` whether
+    the command succeeds or fails, so the edge-triggered signal
+    never deadlocks an agent waiting on a crashed command. See
+    ``docs/topics/prompting.md``.
 
     Each invocation embeds a fresh UUID-scoped channel name so
     concurrent agents (or parallel prompt calls from a single agent)
@@ -40,11 +41,9 @@ def run_and_wait(
         Maximum seconds to wait for the signal. Default 60.
     """
     channel = f"libtmux_mcp_wait_{uuid.uuid4().hex}"
-    shell_payload = (
-        f"{command}; __mcp_status=$?; tmux wait-for -S {channel}; exit $__mcp_status"
-    )
+    shell_payload = f"{command}; tmux wait-for -S {channel}"
     return f"""Run this shell command in tmux pane {pane_id} and block
-until it finishes, preserving the command's exit status:
+until it finishes:
 
 ```python
 send_keys(
@@ -58,6 +57,12 @@ capture_pane(pane_id={pane_id!r}, max_lines=100)
 After the channel signals, read the last ~100 lines to verify the
 command's behaviour. Do NOT use a `capture_pane` retry loop —
 `wait_for_channel` is strictly cheaper in agent turns.
+
+The payload does not preserve the command's exit status: doing so
+in an interactive shell would require exiting the shell (which kills
+the pane) or routing through an out-of-band file or tmux variable.
+If you need the status, inspect the captured output for
+command-specific success markers.
 """
 
 

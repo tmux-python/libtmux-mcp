@@ -34,6 +34,10 @@ wait_for_text(pattern="OK")
 
 ### Fixes
 
+**{tooliconl}`wait-for-channel` recipe no longer exits the parent shell**
+
+The `run_and_wait` prompt template previously appended `exit $__mcp_status` to its shell payload to preserve the command's exit status. In an interactive shell that exits the shell itself, destroying single-pane sessions. The recipe now signals completion via `tmux wait-for -S` without exiting, and the equivalent example in {doc}`/tools/pane/wait-for-channel` is similarly fixed. Exit-status preservation in interactive shells is documented as out-of-scope; agents that need it should inspect the captured output for command-specific success markers. (#47)
+
 **{tooliconl}`wait-for-text` matches patterns across visually-wrapped lines**
 
 Long patterns like `"Build failed: module not found"` that tmux wraps at the pane's column width are now matched against the joined logical line. Previously the wrap split the pattern across two captured rows and neither row matched. The joined line is returned in `matched_lines` and can exceed the pane width. (#45)
