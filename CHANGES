@@ -6,6 +6,8 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a7 (2026-05-16)
+
 ### Breaking changes
 
 **{tooliconl}`wait-for-text` waits for new output, not stale scrollback**
