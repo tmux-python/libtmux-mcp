@@ -69,12 +69,12 @@ channel is signalled — strictly cheaper in agent turns than a
 
 ````markdown
 Run this shell command in tmux pane %1 and block
-until it finishes, preserving the command's exit status:
+until it finishes:
 
 ```python
 send_keys(
     pane_id='%1',
-    keys='pytest; __mcp_status=$?; tmux wait-for -S libtmux_mcp_wait_<uuid>; exit $__mcp_status',
+    keys='pytest; tmux wait-for -S libtmux_mcp_wait_<uuid>',
 )
 wait_for_channel(channel='libtmux_mcp_wait_<uuid>', timeout=60.0)
 capture_pane(pane_id='%1', max_lines=100)
@@ -83,12 +83,19 @@ capture_pane(pane_id='%1', max_lines=100)
 After the channel signals, read the last ~100 lines to verify the
 command's behaviour. Do NOT use a `capture_pane` retry loop —
 `wait_for_channel` is strictly cheaper in agent turns.
+
+The payload does not preserve the command's exit status: doing so
+in an interactive shell would require exiting the shell (which kills
+the pane) or routing through an out-of-band file or tmux variable.
+If you need the status, inspect the captured output for
+command-specific success markers.
 ````
 
-The ``__mcp_status=$?`` capture and ``exit $__mcp_status`` mean the
-agent observes the command's real exit code via shell-conventional
-``$?`` — even though the wait-for signal fires regardless of
-success or failure.
+Shell ``;`` semantics fire the ``wait-for -S`` whether ``pytest``
+succeeded or failed, so the edge-triggered signal never deadlocks the
+agent on a crashed command. Status preservation is intentionally
+omitted: chaining ``exit $status`` after the signal would exit the
+interactive shell itself, destroying single-pane sessions.
 
 ---
 

@@ -50,7 +50,7 @@ Empty `pattern`, `interval` below 10 ms, and non-positive `timeout` each raise `
 
 **Wait family is re-framed around {tooliconl}`wait-for-channel` as the deterministic primitive**
 
-The {tooliconl}`send-keys` docstring, server system instructions, {tooliconl}`wait-for-text` docstring, and the user-facing quickstart, gotchas, prompting, troubleshooting, recipes, and send-keys topics now point agents at {tooliconl}`wait-for-channel` with composed `tmux wait-for -S` for command completion. {tooliconl}`wait-for-text` and {tooliconl}`wait-for-content-change` are reframed as the fallbacks for output the agent does not author. The `run_and_wait` recipe shows the canonical status-preserving pattern. (#45)
+The {tooliconl}`send-keys` docstring, server system instructions, {tooliconl}`wait-for-text` docstring, and the user-facing quickstart, gotchas, prompting, troubleshooting, recipes, and send-keys topics now point agents at {tooliconl}`wait-for-channel` with composed `tmux wait-for -S` for command completion. {tooliconl}`wait-for-text` and {tooliconl}`wait-for-content-change` are reframed as the fallbacks for output the agent does not author. The `run_and_wait` recipe shows the canonical safe-completion pattern. (#45)
 
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
 

@@ -37,7 +37,7 @@ def send_keys(
 
     - **Deterministic (preferred):** compose ``tmux wait-for -S <channel>``
       into the shell command and call ``wait_for_channel``. See the
-      ``run_and_wait`` prompt for the canonical status-preserving pattern.
+      ``run_and_wait`` prompt for the canonical safe-completion pattern.
       Cheaper in agent turns and immune to baseline races.
     - **Pattern-match:** call ``wait_for_text`` when the output you await
       is yours to author and won't appear before the wait locks its

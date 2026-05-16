@@ -215,9 +215,9 @@ async def wait_for_text(
     For commands you author, prefer the channel pattern: append
     ``; tmux wait-for -S <channel>`` to your ``send_keys`` payload and
     call ``wait_for_channel`` instead. The ``run_and_wait`` prompt at
-    ``libtmux_mcp.prompts.recipes`` shows the safe, status-preserving
-    composition. Reserve ``wait_for_text`` for output you do not
-    control (third-party process logs, daemon prompts, interactive
+    ``libtmux_mcp.prompts.recipes`` shows the safe composition.
+    Reserve ``wait_for_text`` for output you do not control
+    (third-party process logs, daemon prompts, interactive
     supervisors).
 
     When a :class:`fastmcp.Context` is available, this tool emits
