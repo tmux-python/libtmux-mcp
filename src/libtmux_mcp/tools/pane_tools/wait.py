@@ -556,6 +556,11 @@ async def wait_for_content_change(
     what the output will be — it waits for "something happened" rather than
     a specific pattern.
 
+    Unlike ``wait_for_text``, this tool does not raise ``ToolError`` on
+    pane respawn, pane death, or ``clear-history`` mid-wait — those events
+    surface as ``changed=True`` returns instead. For correctness-sensitive
+    flows prefer ``wait_for_channel`` composed with ``tmux wait-for -S``.
+
     Emits :meth:`fastmcp.Context.report_progress` each tick when a
     Context is injected, so clients can render a progress indicator
     during the wait.
