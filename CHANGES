@@ -28,9 +28,9 @@ wait_for_text(pattern="OK", content_start=-100)
 wait_for_text(pattern="OK")
 ```
 
-**{class}`~libtmux_mcp.models.WaitForTextResult` and {class}`~libtmux_mcp.models.ContentChangeResult` drop `timed_out`**
+**Wait result models drop `timed_out`**
 
-The `timed_out` field was mechanically the boolean negation of the primary result field (`not found` / `not changed`). Callers that read `result.timed_out` should switch to `not result.found` / `not result.changed`. (#47)
+{class}`~libtmux_mcp.models.WaitForTextResult` and {class}`~libtmux_mcp.models.ContentChangeResult` drop the `timed_out` field. It was mechanically the boolean negation of the primary result (`not found` / `not changed`) and carried no information beyond that. Callers should switch to `not result.found` / `not result.changed`. (#47)
 
 ```python
 # Before
