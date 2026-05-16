@@ -8,9 +8,17 @@ _Notes on upcoming releases will be added here_
 
 ### Breaking changes
 
+**{tooliconl}`wait-for-text` waits for new output, not stale scrollback**
+
+{tooliconl}`wait-for-text` now matches lines written *after* the call begins. The previous behaviour returned `found=True` on the first poll whenever the pattern already lived in the pane, so agents synchronising on command output got the wrong result. For the synchronous "is the pattern in the pane right now?" case, call {tooliconl}`search-panes` instead.
+
+Baseline-loss events surface as `ToolError`: pane respawn, pane death, `clear-history`, and any other event that drops history below the entry baseline. Pane resize that pulls lines back from history into the visible region is exempted — the anchor stays valid.
+
+Trim during heavy output near `history-limit` can't be reliably detected from polling alone. When polling approaches that limit, the tool emits a `notifications/message` warning so MCP clients can decide whether to keep waiting, retry, or switch to {tooliconl}`wait-for-channel`. For deterministic command completion, compose `tmux wait-for -S <channel>` into the shell command and call {tooliconl}`wait-for-channel`. (#45)
+
 **{tooliconl}`wait-for-text` drops `content_start` / `content_end`**
 
-The baseline anchor introduced in this release follows the pane's grid position automatically, so the previous manual capture-range parameters have no remaining purpose. Agents that named them should drop them from their call sites. (#45)
+The new baseline anchor follows the pane's grid position automatically, so the manual capture-range parameters have no remaining purpose. Drop them from call sites. (#45)
 
 ```python
 # Before
@@ -20,33 +28,25 @@ wait_for_text(pattern="OK", content_start=-100)
 wait_for_text(pattern="OK")
 ```
 
-**{tooliconl}`wait-for-text` waits for new output, not stale scrollback**
-
-Anchors on the pane's grid position at entry and only matches lines written after the call begins; the previous behaviour returned `found=True` on the first poll whenever the pattern already lived in the pane. For the synchronous "is the pattern in the pane right now?" case, call {tooliconl}`search-panes` instead.
-
-Baseline-loss events surface as `ToolError`: pane respawn, pane death, `clear-history`, and any other shrink of `history_size` below the entry value. Resize-grow is exempted — it decrements `history_size` without freeing row data, so the anchor stays valid.
-
-Trim that fires during continuous output cannot be reliably detected from `history_size` alone: tmux's trim-then-scroll bounce keeps sampled `hsize` clamped near `history-limit`. When polling approaches that band, the tool emits a `notifications/message` warning so MCP clients can decide whether to keep waiting, retry, or switch to {tooliconl}`wait-for-channel`. For deterministic command-completion synchronization, compose `tmux wait-for -S <channel>` into the shell command and call {tooliconl}`wait-for-channel`. (#45)
-
-### Documentation
-
-**Wait family is re-framed around {tooliconl}`wait-for-channel` as the deterministic primitive**
-
-The {tooliconl}`send-keys` docstring, the server system instructions, and the {tooliconl}`wait-for-text` docstring now point agents at {tooliconl}`wait-for-channel` with composed `tmux wait-for -S` for command completion, and reserve {tooliconl}`wait-for-text` / {tooliconl}`wait-for-content-change` for output the agent does not author. The `run_and_wait` recipe is the canonical status-preserving pattern. (#45 follow-up)
-
 ### Dependencies
 
-**Minimum `libtmux>=0.56.0`** (was `>=0.55.1`). Unlocks the new tmux-command wrappers shipped in libtmux 0.56.0 — {meth}`~libtmux.Pane.respawn`, {meth}`~libtmux.Pane.copy_mode`, {meth}`~libtmux.Pane.pipe`, {meth}`~libtmux.Pane.swap`, {meth}`~libtmux.Pane.paste_buffer`, {meth}`~libtmux.Pane.clear_history`, {meth}`~libtmux.Pane.display_message`, {meth}`~libtmux.Server.delete_buffer`, and the {meth}`~libtmux.Session.next_window` / {meth}`~libtmux.Session.previous_window` / {meth}`~libtmux.Session.last_window` trio — so the MCP no longer falls back to raw `cmd()` calls for tmux commands the upstream API now covers. (#46)
+**Minimum `libtmux>=0.56.0`** (was `>=0.55.1`). Picks up libtmux 0.56's typed wrappers for the tmux commands the server invokes — the MCP now uses libtmux's public API instead of raw command-line escapes for pane lifecycle, scrollback, and session navigation. (#46)
 
 ### Fixes
 
 **{tooliconl}`wait-for-text` matches patterns across visually-wrapped lines**
 
-The poll-loop capture now passes tmux's `-J` flag (`join_wrapped=True` on `Pane.capture_pane`), so a pattern that crosses the pane's visual wrap is still matched against the joined logical line. Long error strings like `"Build failed: module not found"` that tmux split across two rows previously slipped through `re.search`. The joined logical line is returned in `matched_lines` and may exceed `pane_width`. (#45)
+Long patterns like `"Build failed: module not found"` that tmux wraps at the pane's column width are now matched against the joined logical line. Previously the wrap split the pattern across two captured rows and neither row matched. The joined line is returned in `matched_lines` and can exceed the pane width. (#45)
 
 **{tooliconl}`wait-for-text` rejects misused `pattern` / `interval` / `timeout`**
 
-Empty `pattern`, `interval` below 10 ms, and non-positive `timeout` each now raise `ToolError` at entry instead of silently matching every line, spinning the tmux server in a tight loop, or completing a surprise single probe. (#45)
+Empty `pattern`, `interval` below 10 ms, and non-positive `timeout` each raise `ToolError` at entry. Previously they silently matched every line, spun the tmux server in a tight loop, or completed a surprise single probe. (#45)
+
+### Documentation
+
+**Wait family is re-framed around {tooliconl}`wait-for-channel` as the deterministic primitive**
+
+The {tooliconl}`send-keys` docstring, server system instructions, {tooliconl}`wait-for-text` docstring, and the user-facing quickstart, gotchas, prompting, troubleshooting, recipes, and send-keys topics now point agents at {tooliconl}`wait-for-channel` with composed `tmux wait-for -S` for command completion. {tooliconl}`wait-for-text` and {tooliconl}`wait-for-content-change` are reframed as the fallbacks for output the agent does not author. The `run_and_wait` recipe shows the canonical status-preserving pattern. (#45)
 
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
 
