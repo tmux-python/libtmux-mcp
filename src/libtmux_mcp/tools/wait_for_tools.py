@@ -17,9 +17,15 @@ connected to it. :func:`wait_for_channel` therefore *requires* a
 timeout and wraps the underlying ``subprocess.run`` call in
 ``timeout=timeout``. Agents SHOULD use the safe composition pattern::
 
-    send_keys("pytest; status=$?; tmux wait-for -S tests_done; exit $status")
+    send_keys("pytest; tmux wait-for -S tests_done")
 
-This ensures the signal fires on both success and failure paths.
+Shell ``;`` semantics fire ``wait-for -S`` whether ``pytest`` succeeded
+or failed, so the edge-triggered signal never deadlocks the wait. Do
+NOT chain ``exit $status`` after the signal — in interactive shells
+that exits the shell itself, which destroys single-pane sessions and
+takes the tmux server down with them. Exit-status preservation in
+interactive shells is out-of-scope; inspect the captured output for
+command-specific success markers.
 """
 
 from __future__ import annotations
@@ -109,15 +115,18 @@ async def wait_for_channel(
     milestones into explicit synchronisation points::
 
         send_keys(
-            "pytest; status=$?; tmux wait-for -S tests_done; exit $status",
+            "pytest; tmux wait-for -S tests_done",
             pane_id=...,
         )
         wait_for_channel("tests_done", timeout=60)
 
-    The ``status=$?; ...; exit $status`` idiom is important: ``wait-for``
-    is edge-triggered, so if the shell command crashes before issuing
-    the signal the wait will block until ``timeout``. Emitting the
-    signal unconditionally (success or failure) avoids that penalty.
+    Shell ``;`` semantics fire ``wait-for -S`` whether the command
+    succeeded or failed, so the edge-triggered signal never deadlocks
+    on a crash. Do NOT chain ``exit $status`` after the signal — in an
+    interactive shell that exits the shell itself, which destroys
+    single-pane sessions. Exit-status preservation in interactive
+    shells is out-of-scope; inspect the captured output for
+    command-specific success markers.
 
     Parameters
     ----------

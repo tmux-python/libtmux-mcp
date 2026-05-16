@@ -35,8 +35,7 @@ Response:
     "Server listening on port 8000"
   ],
   "pane_id": "%2",
-  "elapsed_seconds": 0.002,
-  "timed_out": false
+  "elapsed_seconds": 0.002
 }
 ```
 

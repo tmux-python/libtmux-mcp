@@ -7,7 +7,10 @@
 terminal. This is the primary way to execute commands in tmux panes.
 
 **Avoid when** you need to run something and immediately capture the result —
-send keys first, then use {tooliconl}`capture-pane` or {tooliconl}`wait-for-text`.
+compose `tmux wait-for -S <channel>` into the keys and call
+{tooliconl}`wait-for-channel` for deterministic completion, or fall back to
+{tooliconl}`wait-for-text` / {tooliconl}`wait-for-content-change` when you
+must observe output the agent does not author.
 
 **Side effects:** Sends keystrokes to the pane. If `enter` is true (default),
 the command executes.

@@ -94,9 +94,9 @@ _INSTR_READ_TOOLS = (
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: use wait_for_text (text/regex) or "
-    "wait_for_content_change instead of capture_pane retry loops; "
-    "both block server-side until the condition or timeout."
+    "WAIT, DON'T POLL: prefer wait_for_channel (compose `tmux wait-for -S`) "
+    "for command completion. Else wait_for_text / wait_for_content_change "
+    "for output you don't author."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module

@@ -62,9 +62,9 @@ These natural-language prompts reliably trigger the right tool sequences:
 
 | Prompt | Agent interprets as |
 |--------|-------------------|
-| [Run `pytest` in my build pane and show results]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` → {toolref}`capture-pane` |
-| [Start the dev server and wait until it's ready]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` (for "listening on") |
-| [Spin up the dev server in the bottom-right pane]{.prompt} | {toolref}`find-pane-by-position` (corner=bottom-right) → {toolref}`send-keys` → {toolref}`wait-for-text` |
+| [Run `pytest` in my build pane and show results]{.prompt} | {toolref}`send-keys` (with `tmux wait-for -S` composed in) → {toolref}`wait-for-channel` → {toolref}`capture-pane` |
+| [Start the dev server and wait until it's ready]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` (for "listening on" — third-party output the agent doesn't author) |
+| [Spin up the dev server in the bottom-right pane]{.prompt} | {toolref}`find-pane-by-position` (corner=bottom-right) → {toolref}`send-keys` → {toolref}`wait-for-text` (for the server's readiness banner) |
 | [Check if any pane has errors]{.prompt} | {toolref}`search-panes` with pattern "error" |
 | [Set up a workspace with editor, server, and tests]{.prompt} | {toolref}`create-session` → {toolref}`split-window` (x2) → {toolref}`set-pane-title` (x3) |
 | [What's running in my tmux sessions?]{.prompt} | {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`capture-pane` |
@@ -90,8 +90,13 @@ Copy these into your agent's system instructions (`AGENTS.md`, `CLAUDE.md`, `.cu
 
 When executing long-running commands (servers, builds, test suites),
 use tmux via the libtmux MCP server rather than running them directly.
-This keeps output accessible for later inspection. Use the pattern:
-send_keys → wait_for_text (for completion signal) → capture_pane.
+This keeps output accessible for later inspection.
+
+For command completion, compose `tmux wait-for -S <channel>` into the
+shell command and call wait_for_channel — deterministic, no polling.
+Use wait_for_text or wait_for_content_change for observation flows
+(third-party logs, daemon prompts). Never capture_pane immediately
+after send_keys — the command may still be running.
 ```
 
 ### For safe agent behavior
@@ -134,6 +139,6 @@ When an agent is unsure which tool to use, these rules help:
 
 1. **Discovery first**: Call {toolref}`list-sessions` or {toolref}`list-panes` before acting on specific targets
 2. **Prefer IDs**: Once you have a `pane_id`, use it for all subsequent calls — it never changes during the pane's lifetime
-3. **Wait, don't poll**: Use {toolref}`wait-for-text` instead of repeatedly calling {toolref}`capture-pane` in a loop
+3. **Wait, don't poll**: For commands the agent authors, prefer {toolref}`wait-for-channel` with `tmux wait-for -S <channel>` composed into the command — deterministic and race-free. Fall back to {toolref}`wait-for-text` or {toolref}`wait-for-content-change` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
 4. **Content vs. metadata**: If looking for text *in* a terminal, use {toolref}`search-panes`. If looking for pane *properties* (name, PID, path), use {toolref}`list-panes` or {toolref}`get-pane-info`
 5. **Destructive tools are opt-in**: Never kill sessions, windows, or panes unless the user explicitly asks

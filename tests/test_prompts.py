@@ -50,14 +50,29 @@ def test_prompts_as_tools_enabled_by_env(
 
 
 def test_run_and_wait_returns_string_template() -> None:
-    """``run_and_wait`` prompt produces a string with the safe idiom."""
+    """``run_and_wait`` prompt produces a string with the safe idiom.
+
+    The rendered payload must NOT contain ``exit`` in the shell command
+    portion: an interactive-shell ``exit`` after the signal kills the
+    parent shell, which destroys single-pane tmux sessions. The signal
+    fires unconditionally via shell ``;`` semantics whether the command
+    succeeds or fails — the wait-for primitive doesn't need an exit to
+    preserve safety.
+    """
     from libtmux_mcp.prompts.recipes import run_and_wait
 
     text = run_and_wait(command="pytest", pane_id="%1", timeout=30.0)
     assert "tmux wait-for -S libtmux_mcp_wait_" in text
     assert "wait_for_channel" in text
-    # Exit-status preservation is the whole point — pin it.
-    assert "exit $__mcp_status" in text
+    # The shell payload (between `keys=` and the closing quote) must
+    # not append ``exit`` after the wait-for — that would kill the
+    # parent shell in an interactive pane. Check the rendered keys=
+    # line for the absence of the exit suffix.
+    keys_line = next(
+        line for line in text.splitlines() if line.strip().startswith("keys=")
+    )
+    assert "; exit" not in keys_line
+    assert "exit $" not in keys_line
 
 
 def test_run_and_wait_channel_is_uuid_scoped() -> None:

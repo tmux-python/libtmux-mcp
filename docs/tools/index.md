@@ -20,7 +20,8 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 - Already know the `pane_id` → use it directly
 
 **Running a command?**
-- {tool}`send-keys` — then {tool}`wait-for-text` + {tool}`capture-pane`
+- {tool}`send-keys` (with `tmux wait-for -S <channel>` composed into the keys) → {tool}`wait-for-channel` → {tool}`capture-pane` — the deterministic path for commands the agent authors
+- For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text` or {tool}`wait-for-content-change` between `send-keys` and `capture-pane`
 - Pasting multi-line text? → {tool}`paste-text`
 
 **Creating workspace structure?**

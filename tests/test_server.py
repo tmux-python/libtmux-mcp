@@ -151,14 +151,23 @@ def test_base_instructions_surface_flagship_read_tools() -> None:
 
 
 def test_base_instructions_prefer_wait_over_poll() -> None:
-    """_BASE_INSTRUCTIONS names wait_for_text and wait_for_content_change.
+    """_BASE_INSTRUCTIONS names the wait family with the right primacy.
 
-    The wait tools block server-side, which is dramatically cheaper in
-    agent turns than ``capture_pane`` in a retry loop. Making them
-    discoverable from the instructions is a no-cost UX win.
+    ``wait_for_channel`` is the deterministic primitive (composes
+    ``tmux wait-for -S``) and should appear first; ``wait_for_text``
+    and ``wait_for_content_change`` are the fallbacks for output the
+    agent doesn't author. Making the channel primitive discoverable
+    from the instructions steers agents off the polling-scraper path
+    for command-completion synchronization.
     """
+    assert "wait_for_channel" in _BASE_INSTRUCTIONS
     assert "wait_for_text" in _BASE_INSTRUCTIONS
     assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+    # The channel primitive should be named before the fallbacks so an
+    # agent that scans top-to-bottom encounters the cheaper option first.
+    assert _BASE_INSTRUCTIONS.index("wait_for_channel") < _BASE_INSTRUCTIONS.index(
+        "wait_for_text"
+    )
 
 
 def test_base_instructions_document_hook_boundary() -> None:

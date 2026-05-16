@@ -204,8 +204,11 @@ agent calls {tooliconl}`send-keys` in the original pane:
 ```{warning}
 Calling {toolref}`capture-pane` immediately after {toolref}`send-keys` is a
 race condition. {toolref}`send-keys` returns the moment tmux accepts the
-keystrokes, not when the command finishes. Always use {toolref}`wait-for-text`
-between them.
+keystrokes, not when the command finishes. For commands the agent authors,
+compose `tmux wait-for -S <channel>` into the command and call
+{toolref}`wait-for-channel` — deterministic, race-free. For output the
+agent does not author (server-startup banners, test-result lines like
+the ones above), use {toolref}`wait-for-text` instead.
 ```
 
 ### The non-obvious part
@@ -391,9 +394,11 @@ long-lived process, I would not hijack it -- I would use a different pane.
 ### Act
 
 The agent calls {tooliconl}`clear-pane`, then {tooliconl}`send-keys` with
-`keys: "pytest"`, then {tooliconl}`wait-for-text` with
-`pattern: "passed|failed|error"` and `regex: true`, then
-{tooliconl}`capture-pane` to read the fresh output.
+`keys: "pytest; tmux wait-for -S pytest_done"`, then
+{tooliconl}`wait-for-channel` with `channel: "pytest_done"`, then
+{tooliconl}`capture-pane` to read the fresh output. Composing the
+`tmux wait-for -S` signal directly into the shell command is the
+deterministic path for authored commands.
 
 ### The non-obvious part
 

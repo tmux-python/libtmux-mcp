@@ -31,15 +31,15 @@ The `enter` parameter defaults to `true`, which is correct for commands (`make t
 {"tool": "capture_pane", "arguments": {"pane_id": "%0"}}
 ```
 
-The capture above may return the terminal state **before** pytest runs. Use {tooliconl}`wait-for-text` between them:
+The capture above may return the terminal state **before** pytest runs. Compose `tmux wait-for -S <channel>` into the command and block on {tooliconl}`wait-for-channel` — deterministic, race-free:
 
 ```json
-{"tool": "send_keys", "arguments": {"keys": "pytest", "pane_id": "%0"}}
-{"tool": "wait_for_text", "arguments": {"pattern": "passed|failed|error", "pane_id": "%0", "regex": true}}
+{"tool": "send_keys", "arguments": {"keys": "pytest; tmux wait-for -S pytest_done", "pane_id": "%0"}}
+{"tool": "wait_for_channel", "arguments": {"channel": "pytest_done", "timeout": 60}}
 {"tool": "capture_pane", "arguments": {"pane_id": "%0"}}
 ```
 
-See {ref}`recipes` for the complete pattern.
+For output the agent does not author (third-party logs, daemon prompts, interactive supervisors), substitute {tooliconl}`wait-for-text` for `wait_for_channel`. See {ref}`recipes` for the complete pattern.
 
 ## Window names are not unique across sessions
 
