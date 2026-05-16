@@ -51,11 +51,11 @@ Search all my panes for the word "error".
 
 When you say "run `make test` and show me the output", the agent executes a three-step pattern:
 
-1. {tool}`send-keys` — send the command to a tmux pane
-2. {tool}`wait-for-text` — wait for the shell prompt to return (command finished)
+1. {tool}`send-keys` — send the command (composed with `tmux wait-for -S <channel>`) to a tmux pane
+2. {tool}`wait-for-channel` — block deterministically until the command signals completion
 3. {tool}`capture-pane` — read the terminal output
 
-This **send → wait → capture** sequence is the fundamental workflow. Most agent interactions with tmux follow this pattern or a variation of it.
+This **send → wait → capture** sequence is the fundamental workflow. For commands the agent authors, the channel pattern is deterministic; for output the agent does not author (third-party log lines, daemon prompts, interactive supervisors), substitute {tool}`wait-for-text` for step 2.
 
 ## Next steps
 

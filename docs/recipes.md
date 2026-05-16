@@ -204,8 +204,11 @@ agent calls {tooliconl}`send-keys` in the original pane:
 ```{warning}
 Calling {toolref}`capture-pane` immediately after {toolref}`send-keys` is a
 race condition. {toolref}`send-keys` returns the moment tmux accepts the
-keystrokes, not when the command finishes. Always use {toolref}`wait-for-text`
-between them.
+keystrokes, not when the command finishes. For commands the agent authors,
+compose `tmux wait-for -S <channel>` into the command and call
+{toolref}`wait-for-channel` — deterministic, race-free. For output the
+agent does not author (server-startup banners, test-result lines like
+the ones above), use {toolref}`wait-for-text` instead.
 ```
 
 ### The non-obvious part
