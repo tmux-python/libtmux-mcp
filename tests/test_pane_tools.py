@@ -1301,6 +1301,53 @@ def test_wait_for_text_matches_new_output_after_baseline(
     assert any("WAIT_MARKER_after" in line for line in result.matched_lines)
 
 
+def test_wait_for_text_ignores_stale_below_cursor(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Stale paint-style content below the cursor must not match.
+
+    The cursor-position anchor (``start_line = cy0 + 1``) captures
+    rows below the entry cursor — which can include content that
+    pre-dates the wait (TUI repaints, ``paste-text``, manual cursor
+    positioning). The entry-time content snapshot filters those rows
+    out so only content written after entry matches the regex.
+
+    Setup parks the cursor at row 0 with ``STALE_BELOW`` painted on
+    row 1, then waits for a pattern that's already on screen. The
+    snapshot filter must drop the row before the regex sees it.
+    """
+    import asyncio
+
+    # Print STALE_BELOW, then move the cursor back to the top-left so
+    # row 1 holds stale content that wait_for_text would otherwise
+    # match on the first poll. The trailing sleep keeps the pane state
+    # frozen for the wait's duration. Double-quote the sh -c argument
+    # so the inner single-quoted printf format strings don't break the
+    # outer quoting.
+    paint_and_park = (
+        "printf 'TOP\\nSTALE_BELOW\\n'; "  # write 2 rows; cursor lands on row 2
+        "printf '\\033[H'; "  # ESC[H = move cursor to (0,0)
+        "sleep 60"
+    )
+    mcp_pane.respawn(kill=True, shell=f'sh -c "{paint_and_park}"')
+
+    def _staged() -> bool:
+        return any("STALE_BELOW" in line for line in mcp_pane.capture_pane())
+
+    retry_until(_staged, 5, raises=True)
+
+    result = asyncio.run(
+        wait_for_text(
+            pattern="STALE_BELOW",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.found is False
+    assert result.timed_out is True
+
+
 def test_wait_for_text_does_not_match_bottom_row_clip(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

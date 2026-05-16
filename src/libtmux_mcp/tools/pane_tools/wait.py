@@ -174,12 +174,24 @@ async def wait_for_text(
     Use this instead of polling :func:`capture_pane` manually — it
     saves agent tokens and turns.
 
-    **What "new" means.** At entry the tool snapshots the pane's absolute
-    grid position (``history_size + cursor_y``) and only matches lines
-    written below that baseline. Stale scrollback that was already
-    present when the call began is ignored. For the synchronous "is
-    the pattern in the pane right now?" check, call
+    **What "new" means.** At entry the tool snapshots two things: the
+    pane's absolute grid position (``history_size + cursor_y``) and the
+    contents of every row below the entry cursor. Each tick captures
+    the rows below the original baseline and discards any row whose
+    content matches the entry snapshot — those rows are stale paint
+    that pre-dates the wait, not output written after it. Scrollback
+    that was already present when the call began is ignored, and so
+    is paint-style content left below the cursor by TUI repaints,
+    ``paste-text``, or manual cursor positioning. For the synchronous
+    "is the pattern in the pane right now?" check, call
     {tooliconl}`search-panes` instead.
+
+    The content-delta filter has a rare false-negative case: if new
+    output happens to byte-match a row in the entry snapshot, that
+    new row is filtered out. The patterns agents typically wait on
+    (command-specific markers, full status strings) make this
+    collision unlikely in practice. For stricter "any change"
+    semantics, use {tooliconl}`wait-for-content-change`.
 
     In-place updates to the entry cursor's row — carriage-return
     rewrites, progress spinners, single-line status updates — are
@@ -356,6 +368,22 @@ async def wait_for_text(
     baseline_pid = entry.pane_pid
     baseline_hlimit = await asyncio.to_thread(_read_history_limit, pane)
 
+    # Snapshot rows below the entry cursor by content. The cursor anchor
+    # alone matches any row at start_line onward, which includes stale
+    # paint-style content (TUI repaints, paste-text, manual cursor
+    # positioning) that pre-dates the wait. Filtering per-tick captures
+    # against this set turns the cursor anchor into an honest "content
+    # written after entry" predicate. Stored as a frozenset for O(1)
+    # lookup against the typically small below-cursor row set.
+    entry_below_cursor: frozenset[str] = frozenset(
+        await asyncio.to_thread(
+            pane.capture_pane,
+            start=entry.cursor_y + 1,
+            end=None,
+            join_wrapped=True,
+        )
+    )
+
     matched_lines: list[str] = []
     found = False
     warned_risk_band = False
@@ -462,7 +490,12 @@ async def wait_for_text(
                     end=None,
                     join_wrapped=True,
                 )
-            hits = [line for line in lines if compiled.search(line)]
+            # Filter out lines whose content was already below the
+            # entry cursor — those are stale paint, not output written
+            # after the call began. Then run the regex against the
+            # truly-new lines.
+            new_lines = [line for line in lines if line not in entry_below_cursor]
+            hits = [line for line in new_lines if compiled.search(line)]
             if hits:
                 matched_lines.extend(hits)
                 found = True
