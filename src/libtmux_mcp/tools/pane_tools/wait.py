@@ -246,19 +246,16 @@ async def wait_for_text(
     -----
     **Scrollback rollover detection is partial.** The tool raises
     ``ToolError`` when ``hsize`` shrinks below the entry value — which
-    catches ``clear-history``, retroactive ``history-limit`` shrink
-    (tmux >= 3.7, commit ``195a9cf``), and rollover events where the
-    dip is observable between polls. It does **not** reliably detect
+    catches ``clear-history`` and any rollover where the dip is
+    observable between polls. It does **not** reliably detect
     ``grid_collect_history`` trim that fires during continuous output:
     tmux trims (~10% of ``history-limit``) then immediately scrolls
     new lines back, so sampled ``hsize`` can stay clamped at the cap
-    and never appear below entry. tmux exposes no monotonic trim
-    counter or hook to disambiguate. For deterministic
-    command-completion synchronization use ``wait_for_channel``; for
-    observation flows that approach ``history-limit``, see the
-    runtime ``ctx.warning`` notification emitted by this tool in the
-    trim-risk band. (Tracking: a libtmux issue investigating a
-    libtmux-side trim-detection helper.)
+    and never appear below entry. For deterministic command-completion
+    synchronization use ``wait_for_channel``; for observation flows
+    that approach ``history-limit``, the tool emits a runtime
+    ``ctx.warning`` notification when sampled state enters the
+    trim-risk band.
 
     Note that ``hsize`` also decrements on resize-grow when there is
     scrolled history available (``screen.c`` ``screen_resize_y``),
