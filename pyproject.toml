@@ -137,6 +137,12 @@ sphinx-gp-theme = false
 sphinx-ux-autodoc-layout = false
 sphinx-ux-badges = false
 
+[tool.uv.sources]
+# Temporary smoke-test pin against the libtmux 0.57.0 parity branch
+# (tmux-python/libtmux PR #672). Revert once 0.57.0 ships on PyPI and
+# the dependencies constraint bumps to >=0.57.0.
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", branch = "parity-pt-2" }
+
 [tool.mypy]
 strict = true
 python_version = "3.10"
