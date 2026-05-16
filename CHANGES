@@ -28,6 +28,22 @@ wait_for_text(pattern="OK", content_start=-100)
 wait_for_text(pattern="OK")
 ```
 
+**{class}`~libtmux_mcp.models.WaitForTextResult` and {class}`~libtmux_mcp.models.ContentChangeResult` drop `timed_out`**
+
+The `timed_out` field was mechanically the boolean negation of the primary result field (`not found` / `not changed`). Callers that read `result.timed_out` should switch to `not result.found` / `not result.changed`. (#47)
+
+```python
+# Before
+result = wait_for_text(pattern="OK")
+if result.timed_out:
+    ...
+
+# After
+result = wait_for_text(pattern="OK")
+if not result.found:
+    ...
+```
+
 ### Dependencies
 
 **Minimum `libtmux>=0.56.0`** (was `>=0.55.1`). Picks up libtmux 0.56's typed wrappers for the tmux commands the server invokes — the MCP now uses libtmux's public API instead of raw command-line escapes for pane lifecycle, scrollback, and session navigation. (#46)

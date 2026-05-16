@@ -1250,7 +1250,6 @@ def test_wait_for_text(
     )
     assert isinstance(result, WaitForTextResult)
     assert result.found is expected_found
-    assert result.timed_out is (not expected_found)
     assert result.pane_id == mcp_pane.pane_id
     assert result.elapsed_seconds >= 0
 
@@ -1297,7 +1296,6 @@ def test_wait_for_text_matches_new_output_after_baseline(
 
     result = asyncio.run(run())
     assert result.found is True
-    assert result.timed_out is False
     assert any("WAIT_MARKER_after" in line for line in result.matched_lines)
 
 
@@ -1345,7 +1343,6 @@ def test_wait_for_text_ignores_stale_below_cursor(
         )
     )
     assert result.found is False
-    assert result.timed_out is True
 
 
 def test_wait_for_text_does_not_match_bottom_row_clip(
@@ -1401,7 +1398,6 @@ def test_wait_for_text_does_not_match_bottom_row_clip(
         )
     )
     assert result.found is False
-    assert result.timed_out is True
 
 
 def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -1624,7 +1620,6 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
 
     result = asyncio.run(run())
     assert result.found is True
-    assert result.timed_out is False
 
 
 def test_wait_for_text_survives_resize_grow_with_scrolled_history(
@@ -1686,7 +1681,6 @@ def test_wait_for_text_survives_resize_grow_with_scrolled_history(
     # The wait must complete cleanly via timeout — NOT a ToolError.
     result = asyncio.run(run())
     assert result.found is False
-    assert result.timed_out is True
 
 
 def test_wait_for_text_handles_resize_during_wait(
@@ -1734,7 +1728,6 @@ def test_wait_for_text_handles_resize_during_wait(
 
     result = asyncio.run(run())
     assert result.found is False
-    assert result.timed_out is True
 
 
 def test_wait_for_text_matches_pattern_across_wrap(
@@ -1783,7 +1776,6 @@ def test_wait_for_text_matches_pattern_across_wrap(
 
     result = asyncio.run(run())
     assert result.found is True
-    assert result.timed_out is False
     assert any(marker in line for line in result.matched_lines)
 
 
@@ -1824,7 +1816,6 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
         )
     )
     assert result.found is False
-    assert result.timed_out is True
     assert len(progress_calls) >= 2
     first_progress, first_total, first_msg = progress_calls[0]
     assert first_progress >= 0.0
@@ -1917,7 +1908,6 @@ def test_wait_for_text_suppresses_broken_resource_error(
         )
     )
     assert result.found is False
-    assert result.timed_out is True
 
 
 def test_wait_for_text_warns_on_invalid_regex(
@@ -1972,9 +1962,9 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
 
     Sibling guard to the invalid-regex warning. The timeout case is
     where operators most need a structured signal — the tool returns
-    ``timed_out=True`` in the result but agents and human log readers
-    have to dig into the ``WaitForTextResult`` to notice. The warning
-    surfaces it directly.
+    ``found=False`` but agents and human log readers have to dig into
+    the ``WaitForTextResult`` to notice. The warning surfaces it
+    directly.
     """
     import asyncio
 
@@ -2003,7 +1993,7 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
         )
     )
 
-    assert result.timed_out is True
+    assert result.found is False
     assert any(
         level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
     ), f"expected a timeout warning, got: {log_calls}"
@@ -2022,11 +2012,10 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
     so MCP clients can decide whether to keep waiting, retry, or switch
     to ``wait_for_channel``.
 
-    The wait's ``found`` / ``timed_out`` result is intentionally not
-    asserted — once polling enters the risk band, correctness is
-    best-effort. The test pins the warning contract (what the tool
-    guarantees), not the match contract (what tmux's grid model
-    fundamentally can't).
+    The wait's ``found`` result is intentionally not asserted — once
+    polling enters the risk band, correctness is best-effort. The test
+    pins the warning contract (what the tool guarantees), not the
+    match contract (what tmux's grid model fundamentally can't).
     """
     import asyncio
 
@@ -2212,7 +2201,7 @@ def test_wait_for_content_change_warns_on_timeout(
             ctx=t.cast("t.Any", _RecordingContext()),
         )
     )
-    assert result.timed_out is True
+    assert result.changed is False
     assert any(
         level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
     ), f"expected a timeout warning, got: {log_calls}"
@@ -2542,7 +2531,6 @@ def test_wait_for_content_change_detects_change(
     thread.join()
     assert isinstance(result, ContentChangeResult)
     assert result.changed is True
-    assert result.timed_out is False
     assert result.elapsed_seconds > 0
 
 
@@ -2555,7 +2543,7 @@ def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> 
     machines the shell prompt can take well over 500 ms to fully render
     (cursor blink, zsh right-prompt, git status async hooks) and would
     otherwise be observed as pane-content change during the test window,
-    failing ``timed_out=True`` spuriously under ``--reruns=0``.
+    failing ``changed=True`` spuriously under ``--reruns=0``.
     """
     import time
 
@@ -2594,7 +2582,6 @@ def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> 
     )
     assert isinstance(result, ContentChangeResult)
     assert result.changed is False
-    assert result.timed_out is True
 
 
 # ---------------------------------------------------------------------------

@@ -237,7 +237,6 @@ class WaitForTextResult(BaseModel):
     )
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
-    timed_out: bool = Field(description="Whether the timeout was reached")
 
 
 class PaneSnapshot(BaseModel):
@@ -445,4 +444,3 @@ class ContentChangeResult(BaseModel):
     changed: bool = Field(description="Whether the content changed before timeout")
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
-    timed_out: bool = Field(description="Whether the timeout was reached")

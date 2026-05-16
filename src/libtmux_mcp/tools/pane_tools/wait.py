@@ -534,7 +534,6 @@ async def wait_for_text(
         matched_lines=matched_lines,
         pane_id=pane.pane_id,
         elapsed_seconds=round(elapsed, 3),
-        timed_out=not found,
     )
 
 
@@ -658,5 +657,4 @@ async def wait_for_content_change(
         changed=changed,
         pane_id=pane.pane_id,
         elapsed_seconds=round(elapsed, 3),
-        timed_out=not changed,
     )

@@ -31,8 +31,7 @@ Response:
 {
   "changed": true,
   "pane_id": "%0",
-  "elapsed_seconds": 1.234,
-  "timed_out": false
+  "elapsed_seconds": 1.234
 }
 ```
 
