@@ -1,7 +1,16 @@
 {#
-  MCP install widget: server-rendered client × method matrix.
+  MCP install widget: server-rendered client × method × scope matrix.
   widget_name, clients, methods, panels, pip_prereq, variant are provided by
   MCPInstallWidget.context() / the directive's option merge.
+
+  The scope row is rendered as one __scopes-group per client that has
+  more than one scope. Single-scope clients (Claude Desktop) get no group
+  — the prehydrate CSS in _ext/widgets/_prehydrate.py hides every group
+  and shows only the active client's group via
+  ``html[data-mcp-install-client="X"] .lm-mcp-install__scopes-group
+  [data-scope-client="X"]``. Switching clients in widget.js updates
+  ``<html data-mcp-install-client>`` and the matching group becomes
+  visible without any JS-driven DOM mutation.
 
   Each code block runs through the `highlight` filter (defined in
   docs._ext.widgets._base.make_highlight_filter) which wraps Sphinx's
@@ -42,12 +51,35 @@
     {% endfor %}
   </div>
 
+  <div class="lm-mcp-install__tabs lm-mcp-install__tabs--scopes"
+       role="tablist"
+       aria-label="Config scope">
+    {% for client in clients if client.scopes|length > 1 %}
+    <div class="lm-mcp-install__scopes-group"
+         data-scope-client="{{ client.id }}">
+      {% for scope in client.scopes %}
+      <button type="button"
+              class="lm-mcp-install__tab"
+              role="tab"
+              data-tab-kind="scope"
+              data-tab-client="{{ client.id }}"
+              data-tab-value="{{ scope.id }}"
+              aria-selected="{{ 'true' if loop.first else 'false' }}"
+              tabindex="{{ '0' if loop.first else '-1' }}">
+        {{ scope.label }}
+      </button>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
   <div class="lm-mcp-install__body">
     {% for panel in panels %}
     <div class="lm-mcp-install__panel"
          role="tabpanel"
          data-client="{{ panel.client.id }}"
          data-method="{{ panel.method.id }}"
+         data-scope="{{ panel.scope.id }}"
          tabindex="0"
          {% if not panel.is_default %}hidden{% endif %}>
 
@@ -65,11 +97,24 @@
       </p>
       {% endif %}
 
+      {% if panel.scope.note %}
+      <p class="lm-mcp-install__preamble lm-mcp-install__preamble--manual">
+        {{ panel.scope.note }}
+      </p>
+      {% endif %}
+
       {{ panel.body | highlight(panel.language) }}
 
-      {% if variant != 'compact' %}
+      {#
+        JSON-only clients (Cursor, Claude Desktop) carry the config file in the
+        body itself — without showing the destination path the reader has no
+        way to know where to paste it. CLI clients embed the destination in
+        the command (the CLI binary + ``--scope`` flag both encode it), so
+        the compact variant can safely omit the label for them.
+      #}
+      {% if variant != 'compact' or panel.client.kind == 'json' %}
       <p class="lm-mcp-install__config-file">
-        Config file: <code>{{ panel.client.config_file }}</code>
+        Config file: <code>{{ panel.scope.config_file }}</code>
       </p>
       {% endif %}
     </div>

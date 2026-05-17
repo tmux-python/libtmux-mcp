@@ -11,6 +11,11 @@
  * keeps tab aria-selected and the <html> data-attrs in sync with the
  * current selection. The CSS handles the rest.
  *
+ * Scope is per-client: the localStorage key is
+ * libtmux-mcp.mcp-install.scope.<client_id>. Switching clients reads
+ * that client's saved scope (or DEFAULT_SCOPES fallback) and re-applies
+ * it; switching scope writes to the current client's slot only.
+ *
  * Vanilla JS, no deps.
  */
 (function () {
@@ -19,7 +24,21 @@
   var STORAGE = {
     client: "libtmux-mcp.mcp-install.client",
     method: "libtmux-mcp.mcp-install.method",
+    scope: function (client) { return "libtmux-mcp.mcp-install.scope." + client; },
   };
+
+  // Mirror of docs/_ext/widgets/mcp_install.py:DEFAULT_SCOPES. The prehydrate
+  // <head> script emits the same map; this duplicate is small enough (5
+  // entries) that the cost of keeping them in sync beats reading the literal
+  // back out of the DOM. Update both when adding a client.
+  var DEFAULT_SCOPES = {
+    "claude-code": "local",
+    "claude-desktop": "user",
+    "codex": "user",
+    "gemini": "user",
+    "cursor": "project",
+  };
+
   var SYNC_EVENT = "lm-mcp-install:change";
 
   // Bind once on document/window — these listeners survive every SPA swap.
@@ -38,13 +57,23 @@
   function applySavedState() {
     var widgets = document.querySelectorAll(".lm-mcp-install");
     if (!widgets.length) return;
-    var saved = {
-      client: localStorage.getItem(STORAGE.client),
-      method: localStorage.getItem(STORAGE.method),
-    };
+    var savedClient = localStorage.getItem(STORAGE.client);
+    var savedMethod = localStorage.getItem(STORAGE.method);
     widgets.forEach(function (widget) {
-      if (saved.client) select(widget, "client", saved.client, { persist: false, broadcast: false });
-      if (saved.method) select(widget, "method", saved.method, { persist: false, broadcast: false });
+      // Always re-select client (saved or server-default). Selecting the
+      // client also restores that client's saved scope as a side effect
+      // in `select()`, so we don't need a separate scope branch here.
+      var clientValue = savedClient || ariaSelected(widget, "client");
+      if (clientValue) {
+        select(widget, "client", clientValue, { persist: false, broadcast: false });
+      }
+      if (savedMethod) {
+        select(widget, "method", savedMethod, { persist: false, broadcast: false });
+      }
+      // Always sync — even if no localStorage entries existed, this is the
+      // call that pushes the SSR defaults onto <html data-mcp-install-*>
+      // so the prehydrate CSS rules have all three attrs to match against.
+      syncHtmlAttrs(widget);
     });
   }
 
@@ -72,30 +101,62 @@
   }
 
   function select(widget, kind, value, opts) {
-    var tabs = widget.querySelectorAll('.lm-mcp-install__tab[data-tab-kind="' + kind + '"]');
-    var found = false;
+    // Resolve which tabs to update for this kind. Scope tabs are grouped
+    // per client via [data-tab-client], so we narrow to the active client.
+    var tabSelector;
+    if (kind === "scope") {
+      var html0 = document.documentElement;
+      var activeClient = html0.getAttribute("data-mcp-install-client")
+        || ariaSelected(widget, "client");
+      if (!activeClient) return;
+      tabSelector =
+        '.lm-mcp-install__tab[data-tab-kind="scope"]'
+        + '[data-tab-client="' + activeClient + '"]';
+    } else {
+      tabSelector = '.lm-mcp-install__tab[data-tab-kind="' + kind + '"]';
+    }
+
+    var tabs = widget.querySelectorAll(tabSelector);
+    var hasMatchingTab = false;
     tabs.forEach(function (tab) {
       var match = tab.dataset.tabValue === value;
-      if (match) found = true;
+      if (match) hasMatchingTab = true;
       tab.setAttribute("aria-selected", match ? "true" : "false");
       tab.setAttribute("tabindex", match ? "0" : "-1");
     });
-    if (!found) return; // value not available in this widget — ignore.
+    // For client/method, no matching tab means the value is unknown to this
+    // widget — bail. For scope, single-scope clients (Claude Desktop) have
+    // NO scope group rendered by the template, so tabs.length == 0 is the
+    // expected steady state — fall through so syncHtmlAttrs can still push
+    // the new client's default scope onto <html>.
+    if (kind !== "scope" && !hasMatchingTab) return;
 
-    // Mirror current widget state onto <html> so _prehydrate.py's
-    // @layer mcp-install-prehydrate selectors drive panel visibility.
-    // Both attrs must be present for _panel_active to match, so set them
-    // unconditionally on every selection — including the click-before-saved
-    // case where the user picks a method without ever choosing a client
-    // (the other kind still has its server-default aria-selected to read).
-    var html = document.documentElement;
-    var clientValue = selectedValue(widget, "client");
-    var methodValue = selectedValue(widget, "method");
-    if (clientValue) html.setAttribute("data-mcp-install-client", clientValue);
-    if (methodValue) html.setAttribute("data-mcp-install-method", methodValue);
+    if (kind === "client") {
+      // Switching clients: also restore that client's saved scope (or
+      // default) so the scope row updates atomically with the client change.
+      var savedScope = localStorage.getItem(STORAGE.scope(value))
+        || DEFAULT_SCOPES[value];
+      if (savedScope) {
+        select(widget, "scope", savedScope, { persist: false, broadcast: false });
+      }
+    }
+
+    // Push the resulting widget state onto <html> so prehydrate CSS picks
+    // the right tab, scope group, and panel. Doing this on every select()
+    // keeps all three attrs in sync even when the user only clicks one tab
+    // (the others read from the widget's existing aria-selected state).
+    syncHtmlAttrs(widget);
 
     if (opts.persist) {
-      localStorage.setItem(STORAGE[kind], value);
+      if (kind === "scope") {
+        var clientForScope = document.documentElement
+          .getAttribute("data-mcp-install-client");
+        if (clientForScope) {
+          localStorage.setItem(STORAGE.scope(clientForScope), value);
+        }
+      } else {
+        localStorage.setItem(STORAGE[kind], value);
+      }
     }
     if (opts.broadcast) {
       window.dispatchEvent(
@@ -106,7 +167,31 @@
     }
   }
 
-  function selectedValue(widget, kind) {
+  // Mirror the widget's current tab state onto <html> for all three
+  // dimensions. The prehydrate CSS rules need every attr set for the
+  // (client, method, scope) panel rule to match — leaving one unset
+  // means the @layer hide rule hides the SSR default but no active
+  // rule un-hides any panel, so the body paints empty.
+  function syncHtmlAttrs(widget) {
+    var html = document.documentElement;
+    var client = ariaSelected(widget, "client");
+    var method = ariaSelected(widget, "method");
+    if (client) html.setAttribute("data-mcp-install-client", client);
+    if (method) html.setAttribute("data-mcp-install-method", method);
+    if (client) {
+      var scopeTab = widget.querySelector(
+        '.lm-mcp-install__tab[data-tab-kind="scope"]'
+        + '[data-tab-client="' + client + '"]'
+        + '[aria-selected="true"]'
+      );
+      var scope = scopeTab
+        ? scopeTab.dataset.tabValue
+        : (localStorage.getItem(STORAGE.scope(client)) || DEFAULT_SCOPES[client]);
+      if (scope) html.setAttribute("data-mcp-install-scope", scope);
+    }
+  }
+
+  function ariaSelected(widget, kind) {
     var tab = widget.querySelector(
       '.lm-mcp-install__tab[data-tab-kind="' + kind + '"][aria-selected="true"]'
     );
@@ -115,9 +200,17 @@
 
   function handleKeydown(event, widget, tab) {
     var kind = tab.dataset.tabKind;
-    var tabs = Array.prototype.slice.call(
-      widget.querySelectorAll('.lm-mcp-install__tab[data-tab-kind="' + kind + '"]')
-    );
+    // Keep keyboard nav scoped to the visible group for scope tabs.
+    var tabSelector;
+    if (kind === "scope") {
+      var client = tab.dataset.tabClient;
+      tabSelector =
+        '.lm-mcp-install__tab[data-tab-kind="scope"]'
+        + '[data-tab-client="' + client + '"]';
+    } else {
+      tabSelector = '.lm-mcp-install__tab[data-tab-kind="' + kind + '"]';
+    }
+    var tabs = Array.prototype.slice.call(widget.querySelectorAll(tabSelector));
     var current = tabs.indexOf(tab);
     var next = current;
     switch (event.key) {

@@ -42,43 +42,77 @@ def test_discover_finds_mcp_install() -> None:
 
 
 def test_build_panels_yields_cross_product() -> None:
-    """One panel per (client, method) pair; exactly one flagged as default."""
+    """One panel per (client, method, scope) triple; exactly one flagged default."""
     panels = build_panels()
-    assert len(panels) == len(CLIENTS) * len(METHODS)
+    expected = sum(len(c.scopes) for c in CLIENTS) * len(METHODS)
+    assert len(panels) == expected
     assert panels[0].is_default is True
     assert sum(1 for p in panels if p.is_default) == 1
 
 
-def test_build_panels_first_cell_is_claude_code_uvx() -> None:
-    """First panel is Claude Code + uvx in ``console`` with a ``$ `` prompt body."""
+def test_build_panels_first_cell_is_claude_code_uvx_local() -> None:
+    """First panel is Claude Code + uvx + local in ``console`` with a ``$ `` body."""
     panels = build_panels()
     assert panels[0].client.id == "claude-code"
     assert panels[0].method.id == "uvx"
+    assert panels[0].scope.id == "local"
     assert panels[0].language == "console"
     assert panels[0].body.startswith("$ ")
 
 
 def test_body_for_cli_client_returns_shell_command() -> None:
     """CLI clients get the literal ``<tool> mcp add ...`` shell command."""
-    body = _body_for(CLIENTS[0], METHODS[0])  # claude-code + uvx
+    client = CLIENTS[0]  # claude-code
+    body, language = _body_for(client, METHODS[0], client.scopes[0])
     assert body == "claude mcp add tmux -- uvx libtmux-mcp"
+    assert language == "console"
 
 
 def test_body_for_json_client_returns_config_snippet() -> None:
     """JSON clients get the ``mcpServers`` config snippet for the chosen method."""
     claude_desktop = CLIENTS[1]
-    body = _body_for(claude_desktop, METHODS[0])  # claude-desktop + uvx
+    body, language = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0])
     assert '"command": "uvx"' in body
     assert '"libtmux-mcp"' in body
+    assert language == "json"
+
+
+def test_body_for_claude_code_project_inserts_scope_flag() -> None:
+    """Non-default Claude Code scopes append ``--scope X`` to the install command."""
+    claude_code = CLIENTS[0]
+    project_scope = next(s for s in claude_code.scopes if s.id == "project")
+    body, language = _body_for(claude_code, METHODS[0], project_scope)
+    assert body == "claude mcp add tmux --scope project -- uvx libtmux-mcp"
+    assert language == "console"
+
+
+def test_body_for_codex_project_returns_toml() -> None:
+    """Codex project is the one cell whose kind escapes the client's CLI shape."""
+    codex = next(c for c in CLIENTS if c.id == "codex")
+    project_scope = next(s for s in codex.scopes if s.id == "project")
+    body, language = _body_for(codex, METHODS[0], project_scope)
+    assert language == "toml"
+    assert "[mcp_servers.tmux]" in body
+    assert 'command = "uvx"' in body
+
+
+def test_body_for_gemini_user_inserts_scope_flag() -> None:
+    """Gemini emits ``--scope`` between ``mcp add`` and the server slug."""
+    gemini = next(c for c in CLIENTS if c.id == "gemini")
+    user_scope = next(s for s in gemini.scopes if s.id == "user")
+    body, language = _body_for(gemini, METHODS[0], user_scope)
+    assert body == "gemini mcp add --scope user tmux uvx -- libtmux-mcp"
+    assert language == "console"
 
 
 def test_body_for_unknown_kind_raises() -> None:
     """An unrecognised ``client.kind`` surfaces as a ``ValueError``."""
-    from docs._ext.widgets.mcp_install import Client
+    from docs._ext.widgets.mcp_install import Client, Scope
 
-    fake = Client(id="x", label="X", kind="bogus", config_file="")
+    fake_scope = Scope(id="user", label="User", config_file="", note=None)
+    fake = Client(id="x", label="X", kind="bogus", scopes=(fake_scope,))
     with pytest.raises(ValueError, match="unknown client kind"):
-        _body_for(fake, METHODS[0])
+        _body_for(fake, METHODS[0], fake_scope)
 
 
 # ---------- integration: Sphinx build -------------------------------------
@@ -119,7 +153,7 @@ def test_variant_compact_applied(
     make_app: MakeApp,
     real_widget_srcdir: pathlib.Path,
 ) -> None:
-    """``:variant: compact`` emits the modifier class and hides config-file rows."""
+    """``:variant: compact`` tightens CLI panels but keeps JSON client config paths."""
     (real_widget_srcdir / "index.md").write_text(
         "# Home\n\n```{mcp-install}\n:variant: compact\n```\n",
         encoding="utf-8",
@@ -127,8 +161,12 @@ def test_variant_compact_applied(
     app = _build(make_app, real_widget_srcdir)
     html = (pathlib.Path(app.outdir) / "index.html").read_text(encoding="utf-8")
     assert "lm-mcp-install--compact" in html
-    # Compact hides the config-file row.
-    assert "lm-mcp-install__config-file" not in html
+    # CLI clients embed the destination in the command, so compact omits
+    # their config-file row — but JSON-only clients still need the path
+    # printed below the snippet (paste destination has no other carrier).
+    assert "lm-mcp-install__config-file" in html
+    assert ".cursor/mcp.json" in html
+    assert "claude_desktop_config.json" in html
 
 
 def test_invalid_variant_raises_warning(

@@ -26,6 +26,22 @@
   background: color-mix(in srgb, var(--color-background-secondary) 60%, var(--color-background-primary));
 }
 
+.lm-mcp-install__tabs--scopes {
+  background: color-mix(in srgb, var(--color-background-secondary) 40%, var(--color-background-primary));
+}
+
+/* Scope groups are hidden by default; the prehydrate ``@layer`` rule
+ * makes the active client's group visible. Without that prehydrate rule
+ * no scope tabs would render — that's intentional, the widget shouldn't
+ * paint a scope row at all when JS is disabled, since clicks wouldn't
+ * persist anyway. */
+.lm-mcp-install__scopes-group {
+  display: none;
+  flex-wrap: wrap;
+  gap: 0;
+  width: 100%;
+}
+
 .lm-mcp-install__tab {
   appearance: none;
   background: transparent;

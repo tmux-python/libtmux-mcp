@@ -6,6 +6,16 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**MCP install widget gains a per-client config-scope picker**
+
+The install widget on `index.md`, `quickstart.md`, and `clients.md` now exposes each LLM client's config-scope dimension as a third tab row beneath the install-method tabs. Claude Code surfaces *local* (CLI default), *user*, and *project*; Codex and Gemini surface *user* / *project*; Cursor surfaces *project* / *global*. Single-scope clients (Claude Desktop) get no scope row.
+
+Per-client scope is persisted in its own `libtmux-mcp.mcp-install.scope.<client>` localStorage slot — picking *project* for Cursor doesn't leak into Claude Code's saved scope. Switching clients restores that client's saved scope (or its default) and updates the matching JSON / CLI snippet atomically. JSON-only clients (Cursor, Claude Desktop) now show their config-file path even in the compact front-page variant so the paste destination is always visible.
+
+The anti-flicker mechanism extends in lockstep: the pre-hydrate `<head>` script reads the per-client scope key, the prehydrate `@layer mcp-install-prehydrate` rules enumerate every legal *(client, method, scope)* triple, and every declaration stays `!important` so the CSS Cascade Level 5 layer-priority reversal continues to beat unlayered preflight rules. First paint matches the saved selection with zero CLS — no flash on initial load, no flash on gp-sphinx SPA navigation.
+
 ## libtmux-mcp 0.1.0a7 (2026-05-16)
 
 ### Breaking changes
