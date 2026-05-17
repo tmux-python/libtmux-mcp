@@ -23,6 +23,12 @@ class HighlightFilter(t.Protocol):
     def __call__(self, code: str, language: str = "default") -> markupsafe.Markup: ...
 
 
+class CooldownDaysSlotFilter(t.Protocol):
+    """Callable signature for the Jinja ``cooldown_days_slot`` filter."""
+
+    def __call__(self, html: object) -> markupsafe.Markup: ...
+
+
 class widget_container(nodes.container):  # type: ignore[misc]  # docutils nodes are untyped
     """Wraps a widget's rendered HTML; visit/depart emit the outer div."""
 
@@ -99,6 +105,7 @@ class BaseWidget(abc.ABC):
             lstrip_blocks=True,
         )
         jenv.filters["highlight"] = make_highlight_filter(env)
+        jenv.filters["cooldown_days_slot"] = make_cooldown_days_slot_filter()
         template = jenv.from_string(source)
         context: dict[str, t.Any] = {
             **cls.default_options,
@@ -107,6 +114,35 @@ class BaseWidget(abc.ABC):
             "widget_name": cls.name,
         }
         return template.render(**context)
+
+
+def make_cooldown_days_slot_filter() -> CooldownDaysSlotFilter:
+    """Return a Jinja filter that injects a days-slot ``<span>`` into HTML.
+
+    The Pygments highlighter escapes the ``<DAYS>`` sentinel emitted in
+    days-mode bodies (see :mod:`docs._ext.widgets.mcp_install`) to
+    ``&lt;DAYS&gt;``. This filter walks the highlighted output and
+    swaps every occurrence with a span whose default text content is
+    ``7``:
+
+    .. code-block:: html
+
+        <span class="lm-mcp-install__cooldown-days" data-cooldown-days-slot>7</span>
+
+    The span lives inside a Pygments string-literal span, so it
+    inherits the parent's color but its ``textContent`` can be
+    rewritten by ``widget.js`` when the user picks a different cooldown
+    length. The filter is a no-op for outputs without the sentinel
+    (off and bypass cooldown modes never emit one).
+    """
+    span = (
+        '<span class="lm-mcp-install__cooldown-days" data-cooldown-days-slot>7</span>'
+    )
+
+    def _filter(html: object) -> markupsafe.Markup:
+        return markupsafe.Markup(str(html).replace("&lt;DAYS&gt;", span))
+
+    return _filter
 
 
 def make_highlight_filter(env: BuildEnvironment) -> HighlightFilter:

@@ -15,6 +15,9 @@ from docs._ext.widgets._base import make_highlight_filter
 from docs._ext.widgets._discovery import discover
 from docs._ext.widgets.mcp_install import (
     CLIENTS,
+    COOLDOWNS,
+    DEFAULT_COOLDOWN_DAYS,
+    DEFAULT_COOLDOWN_MODE,
     METHODS,
     MCPInstallWidget,
     _body_for,
@@ -41,47 +44,131 @@ def test_discover_finds_mcp_install() -> None:
     assert issubclass(registry["mcp-install"], BaseWidget)
 
 
+_OFF = next(c for c in COOLDOWNS if c.id == "off")
+_DAYS = next(c for c in COOLDOWNS if c.id == "days")
+_BYPASS = next(c for c in COOLDOWNS if c.id == "bypass")
+
+
 def test_build_panels_yields_cross_product() -> None:
-    """One panel per (client, method, scope) triple; exactly one flagged default."""
+    """One panel per (client, method, scope, cooldown) quadruple; one default."""
     panels = build_panels()
-    expected = sum(len(c.scopes) for c in CLIENTS) * len(METHODS)
+    expected = sum(len(c.scopes) for c in CLIENTS) * len(METHODS) * len(COOLDOWNS)
     assert len(panels) == expected
     assert panels[0].is_default is True
     assert sum(1 for p in panels if p.is_default) == 1
 
 
-def test_build_panels_first_cell_is_claude_code_uvx_local() -> None:
-    """First panel is Claude Code + uvx + local in ``console`` with a ``$ `` body."""
+def test_build_panels_first_cell_is_claude_code_uvx_local_off() -> None:
+    """First panel is Claude Code + uvx + local + off — the SSR-default cell."""
     panels = build_panels()
     assert panels[0].client.id == "claude-code"
     assert panels[0].method.id == "uvx"
     assert panels[0].scope.id == "local"
+    assert panels[0].cooldown.id == "off"
     assert panels[0].language == "console"
     assert panels[0].body.startswith("$ ")
 
 
-def test_body_for_cli_client_returns_shell_command() -> None:
-    """CLI clients get the literal ``<tool> mcp add ...`` shell command."""
+def test_default_cooldown_constants() -> None:
+    """The default mode is ``off`` and the default days value is positive."""
+    assert DEFAULT_COOLDOWN_MODE == "off"
+    assert DEFAULT_COOLDOWN_DAYS > 0
+
+
+def test_body_for_cli_client_off_returns_clean_command() -> None:
+    """Cooldown off leaves the existing CLI command intact (no extra flags)."""
     client = CLIENTS[0]  # claude-code
-    body, language = _body_for(client, METHODS[0], client.scopes[0])
+    body, language, note = _body_for(client, METHODS[0], client.scopes[0], _OFF)
     assert body == "claude mcp add tmux -- uvx libtmux-mcp"
+    assert language == "console"
+    assert note is None
+
+
+def test_body_for_uvx_days_inserts_exclude_newer_sentinel() -> None:
+    """Days mode adds ``--exclude-newer P<DAYS>D`` before ``libtmux-mcp``."""
+    client = CLIENTS[0]
+    body, language, note = _body_for(client, METHODS[0], client.scopes[0], _DAYS)
+    assert body == "claude mcp add tmux -- uvx --exclude-newer P<DAYS>D libtmux-mcp"
+    assert language == "console"
+    assert note is None
+
+
+def test_body_for_uvx_bypass_inserts_no_config_flag() -> None:
+    """Bypass adds ``--no-config`` to the uvx command (flag form, not env)."""
+    client = CLIENTS[0]
+    body, language, note = _body_for(client, METHODS[0], client.scopes[0], _BYPASS)
+    assert body == "claude mcp add tmux -- uvx --no-config libtmux-mcp"
+    assert language == "console"
+    assert note is None  # uvx has a real bypass — no caveat
+
+
+def test_body_for_pipx_bypass_returns_caveat_note() -> None:
+    """Pipx bypass renders identically to off and surfaces a no-op note."""
+    client = CLIENTS[0]
+    pipx = next(m for m in METHODS if m.id == "pipx")
+    body_off, _, note_off = _body_for(client, pipx, client.scopes[0], _OFF)
+    body_bp, _, note_bp = _body_for(client, pipx, client.scopes[0], _BYPASS)
+    assert body_off == body_bp  # same command emitted
+    assert note_off is None
+    assert note_bp is not None
+    assert "pipx" in note_bp.lower()
+
+
+def test_body_for_pip_bypass_returns_caveat_note() -> None:
+    """Pip bypass renders identically to off and surfaces a no-op note."""
+    client = CLIENTS[0]
+    pip = next(m for m in METHODS if m.id == "pip")
+    body_off, _, note_off = _body_for(client, pip, client.scopes[0], _OFF)
+    body_bp, _, note_bp = _body_for(client, pip, client.scopes[0], _BYPASS)
+    assert body_off == body_bp
+    assert note_off is None
+    assert note_bp is not None
+    assert "pip" in note_bp.lower()
+
+
+def test_body_for_pipx_days_uses_pip_args_form() -> None:
+    """Pipx days mode forwards ``--uploaded-prior-to`` via ``--pip-args=``."""
+    client = CLIENTS[0]
+    pipx = next(m for m in METHODS if m.id == "pipx")
+    body, language, _ = _body_for(client, pipx, client.scopes[0], _DAYS)
+    assert "--pip-args=--uploaded-prior-to=P<DAYS>D" in body
     assert language == "console"
 
 
-def test_body_for_json_client_returns_config_snippet() -> None:
+def test_body_for_json_client_off_returns_config_snippet() -> None:
     """JSON clients get the ``mcpServers`` config snippet for the chosen method."""
     claude_desktop = CLIENTS[1]
-    body, language = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0])
+    body, language, _ = _body_for(
+        claude_desktop, METHODS[0], claude_desktop.scopes[0], _OFF
+    )
     assert '"command": "uvx"' in body
     assert '"libtmux-mcp"' in body
     assert language == "json"
+
+
+def test_body_for_json_uvx_days_includes_exclude_newer_arg() -> None:
+    """Days mode for JSON-kind clients shows the flag in the ``args`` array."""
+    claude_desktop = CLIENTS[1]
+    body, _, _ = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0], _DAYS)
+    assert '"--exclude-newer"' in body
+    assert '"P<DAYS>D"' in body
+
+
+def test_body_for_json_uvx_bypass_adds_env_block() -> None:
+    """Bypass for JSON uvx panels adds an ``env`` block setting UV_NO_CONFIG=1."""
+    claude_desktop = CLIENTS[1]
+    body, _, _ = _body_for(
+        claude_desktop, METHODS[0], claude_desktop.scopes[0], _BYPASS
+    )
+    assert '"env":' in body
+    assert '"UV_NO_CONFIG": "1"' in body
 
 
 def test_body_for_claude_code_project_inserts_scope_flag() -> None:
     """Non-default Claude Code scopes append ``--scope X`` to the install command."""
     claude_code = CLIENTS[0]
     project_scope = next(s for s in claude_code.scopes if s.id == "project")
-    body, language = _body_for(claude_code, METHODS[0], project_scope)
+    body, language, _ = _body_for(claude_code, METHODS[0], project_scope, _OFF)
     assert body == "claude mcp add tmux --scope project -- uvx libtmux-mcp"
     assert language == "console"
 
@@ -90,19 +177,42 @@ def test_body_for_codex_project_returns_toml() -> None:
     """Codex project is the one cell whose kind escapes the client's CLI shape."""
     codex = next(c for c in CLIENTS if c.id == "codex")
     project_scope = next(s for s in codex.scopes if s.id == "project")
-    body, language = _body_for(codex, METHODS[0], project_scope)
+    body, language, _ = _body_for(codex, METHODS[0], project_scope, _OFF)
     assert language == "toml"
     assert "[mcp_servers.tmux]" in body
     assert 'command = "uvx"' in body
+
+
+def test_body_for_codex_project_days_inlines_flag_in_toml_args() -> None:
+    """Codex project + days puts ``--exclude-newer P<DAYS>D`` in the args array."""
+    codex = next(c for c in CLIENTS if c.id == "codex")
+    project_scope = next(s for s in codex.scopes if s.id == "project")
+    body, language, _ = _body_for(codex, METHODS[0], project_scope, _DAYS)
+    assert language == "toml"
+    assert '"--exclude-newer"' in body
+    assert '"P<DAYS>D"' in body
 
 
 def test_body_for_gemini_user_inserts_scope_flag() -> None:
     """Gemini emits ``--scope`` between ``mcp add`` and the server slug."""
     gemini = next(c for c in CLIENTS if c.id == "gemini")
     user_scope = next(s for s in gemini.scopes if s.id == "user")
-    body, language = _body_for(gemini, METHODS[0], user_scope)
+    body, language, _ = _body_for(gemini, METHODS[0], user_scope, _OFF)
     assert body == "gemini mcp add --scope user tmux uvx -- libtmux-mcp"
     assert language == "console"
+
+
+def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
+    """Panel.pip_prereq is set only for the pip method, with cooldown applied."""
+    panels = build_panels()
+    pip_panels = [p for p in panels if p.method.id == "pip"]
+    non_pip = [p for p in panels if p.method.id != "pip"]
+    assert all(p.pip_prereq is None for p in non_pip)
+    assert all(p.pip_prereq is not None for p in pip_panels)
+    days_pip = next(p for p in pip_panels if p.cooldown.id == "days")
+    off_pip = next(p for p in pip_panels if p.cooldown.id == "off")
+    assert "--uploaded-prior-to P<DAYS>D" in days_pip.pip_prereq
+    assert "--uploaded-prior-to" not in off_pip.pip_prereq
 
 
 def test_body_for_unknown_kind_raises() -> None:
@@ -112,7 +222,7 @@ def test_body_for_unknown_kind_raises() -> None:
     fake_scope = Scope(id="user", label="User", config_file="", note=None)
     fake = Client(id="x", label="X", kind="bogus", scopes=(fake_scope,))
     with pytest.raises(ValueError, match="unknown client kind"):
-        _body_for(fake, METHODS[0], fake_scope)
+        _body_for(fake, METHODS[0], fake_scope, _OFF)
 
 
 # ---------- integration: Sphinx build -------------------------------------
