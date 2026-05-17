@@ -195,8 +195,11 @@
 }
 
 /* Cooldown days slot inside snippets: inherits Pygments color from
- * the surrounding string-literal span. ``data-cooldown-days-slot``
- * is the JS hook for updating textContent on settings save. */
+ * the surrounding string-literal span. Two ``data-*-slot`` attributes
+ * act as the JS hook for updating textContent on every cooldown-days
+ * change: ``data-cooldown-duration-slot`` (uvx + pip days bodies,
+ * carries ``P<N>D``) and ``data-cooldown-date-slot`` (pipx days bodies,
+ * carries ``YYYY-MM-DD``). */
 .lm-mcp-install__cooldown-days {
   /* No own styling — the wrapping Pygments span carries the color. */
 }

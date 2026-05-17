@@ -18,9 +18,21 @@
   PygmentsBridge — so the output is byte-identical to a native
   ``.. code-block::`` block, meaning sphinx-copybutton + its prompt-strip
   regex work automatically. The output is then run through
-  ``cooldown_days_slot`` which swaps the post-Pygments ``&lt;DAYS&gt;``
-  sentinel for a ``<span data-cooldown-days-slot>`` whose textContent
-  ``widget.js`` updates on every cooldown-days input change.
+  ``cooldown_days_slot`` (defined in
+  docs._ext.widgets._base.make_cooldown_days_slot_filter) which swaps
+  two post-Pygments sentinels:
+
+  * ``&lt;COOLDOWN_DURATION&gt;`` becomes
+    ``<span data-cooldown-duration-slot>P7D</span>`` — used by uvx and
+    pip days bodies, where uv + pip 26.1+ re-evaluate the duration on
+    every invocation.
+  * ``&lt;COOLDOWN_DATE&gt;`` becomes
+    ``<span data-cooldown-date-slot>YYYY-MM-DD</span>`` — used by pipx
+    days bodies because pipx 1.8.0's bundled pip rejects the duration
+    form.
+
+  ``widget.js`` updates both slot kinds' textContent on every
+  cooldown-days input change.
 #}
 <div class="lm-mcp-install lm-mcp-install--{{ variant }}">
   <div class="lm-mcp-install__tabs lm-mcp-install__tabs--clients"

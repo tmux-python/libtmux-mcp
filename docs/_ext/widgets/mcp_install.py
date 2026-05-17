@@ -22,7 +22,7 @@ uv and pip 26.1+ re-evaluate the duration on every invocation, so the
 flag stays fresh forever once saved in an MCP config. ``<COOLDOWN_DATE>``
 lands in pipx bodies because pipx 1.8.0 bundles a pip older than 26.1
 that rejects the duration form; JS recomputes the absolute date on
-every page load. Both sentinels are swapped by ``cooldown_slots``
+every page load. Both sentinels are swapped by ``cooldown_days_slot``
 in ``docs/_ext/widgets/_base.py``.
 """
 
@@ -231,7 +231,7 @@ DEFAULT_COOLDOWN_TYPE: str = "days"
 DEFAULT_COOLDOWN_DAYS: int = 7
 
 
-# Two sentinels swapped by ``cooldown_slots`` in ``_base.py`` after
+# Two sentinels swapped by ``cooldown_days_slot`` in ``_base.py`` after
 # Pygments has escaped them to ``&lt;...&gt;``.
 #
 # * ``<COOLDOWN_DURATION>`` is used by uvx and pip days bodies. uv stores
