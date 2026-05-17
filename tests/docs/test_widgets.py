@@ -11,7 +11,10 @@ import typing as t
 import pytest
 
 from docs._ext.widgets import BaseWidget
-from docs._ext.widgets._base import make_highlight_filter
+from docs._ext.widgets._base import (
+    make_cooldown_days_slot_filter,
+    make_highlight_filter,
+)
 from docs._ext.widgets._discovery import discover
 from docs._ext.widgets.mcp_install import (
     CLIENTS,
@@ -234,6 +237,95 @@ def test_body_for_unknown_kind_raises() -> None:
     fake = Client(id="x", label="X", kind="bogus", scopes=(fake_scope,))
     with pytest.raises(ValueError, match="unknown client kind"):
         _body_for(fake, METHODS[0], fake_scope, _OFF)
+
+
+# ---------- unit: cooldown_days_slot Jinja filter ------------------------
+
+
+def test_cooldown_days_slot_filter_swaps_duration_sentinel() -> None:
+    """``&lt;COOLDOWN_DURATION&gt;`` becomes a ``data-cooldown-duration-slot`` span.
+
+    Pygments escapes the body's ``<COOLDOWN_DURATION>`` sentinel to
+    ``&lt;COOLDOWN_DURATION&gt;`` before the filter runs; the filter
+    swaps that for the slot span carrying ``P<N>D`` as default text.
+    """
+    filt = make_cooldown_days_slot_filter()
+    inp = "uvx --exclude-newer &lt;COOLDOWN_DURATION&gt; libtmux-mcp"
+    out = str(filt(inp))
+    assert "&lt;COOLDOWN_DURATION&gt;" not in out
+    assert 'class="lm-mcp-install__cooldown-days"' in out
+    assert "data-cooldown-duration-slot" in out
+    assert f">P{DEFAULT_COOLDOWN_DAYS}D</span>" in out
+
+
+def test_cooldown_days_slot_filter_swaps_date_sentinel() -> None:
+    """``&lt;COOLDOWN_DATE&gt;`` becomes a ``data-cooldown-date-slot`` span.
+
+    The default date is computed at filter construction time from
+    ``today (UTC) - DEFAULT_COOLDOWN_DAYS``; ``widget.js`` overwrites
+    the slot's textContent on every page load.
+    """
+    filt = make_cooldown_days_slot_filter()
+    inp = "pipx run --pip-args=--uploaded-prior-to=&lt;COOLDOWN_DATE&gt; libtmux-mcp"
+    out = str(filt(inp))
+    assert "&lt;COOLDOWN_DATE&gt;" not in out
+    assert "data-cooldown-date-slot" in out
+    assert re.search(r"data-cooldown-date-slot>\d{4}-\d{2}-\d{2}<", out)
+
+
+def test_cooldown_days_slot_filter_is_no_op_without_sentinels() -> None:
+    """Off and bypass bodies never carry a sentinel and pass through unchanged."""
+    filt = make_cooldown_days_slot_filter()
+    inp = "uvx libtmux-mcp"
+    assert str(filt(inp)) == inp
+
+
+def test_cooldown_days_slot_filter_swaps_both_sentinels_in_one_html() -> None:
+    """A single page renders both uvx (duration) and pipx (date) snippets.
+
+    The Jinja filter is called per body, but the safety net is that a
+    single string with both sentinels still gets both swapped — drift
+    here would silently leave raw sentinels in the rendered HTML.
+    """
+    filt = make_cooldown_days_slot_filter()
+    inp = "left &lt;COOLDOWN_DURATION&gt; middle &lt;COOLDOWN_DATE&gt; right"
+    out = str(filt(inp))
+    assert "data-cooldown-duration-slot" in out
+    assert "data-cooldown-date-slot" in out
+    assert "&lt;COOLDOWN_" not in out
+
+
+def test_cooldown_days_slot_filter_returns_markupsafe_markup() -> None:
+    """Output is ``markupsafe.Markup`` so autoescape doesn't re-escape the span."""
+    import markupsafe
+
+    filt = make_cooldown_days_slot_filter()
+    out = filt("&lt;COOLDOWN_DURATION&gt;")
+    assert isinstance(out, markupsafe.Markup)
+
+
+def test_cooldown_days_slot_filter_registered_on_widget_render(
+    make_app: MakeApp,
+    real_widget_srcdir: pathlib.Path,
+) -> None:
+    """End-to-end: a rendered days-mode panel emits both slot spans correctly.
+
+    Guards against regressing the filter wiring in
+    ``BaseWidget.render()`` (i.e. ``jenv.filters["cooldown_days_slot"]``).
+    """
+    (real_widget_srcdir / "index.md").write_text(
+        "# Home\n\n```{mcp-install}\n```\n",
+        encoding="utf-8",
+    )
+    app = _build(make_app, real_widget_srcdir)
+    html = (pathlib.Path(app.outdir) / "index.html").read_text(encoding="utf-8")
+    # uvx + pip days bodies emit the duration slot; pipx days bodies
+    # emit the date slot. Both kinds must appear in any complete build.
+    assert "data-cooldown-duration-slot" in html
+    assert "data-cooldown-date-slot" in html
+    # And no raw sentinel escapes to the rendered page.
+    assert "&lt;COOLDOWN_DURATION&gt;" not in html
+    assert "&lt;COOLDOWN_DATE&gt;" not in html
 
 
 # ---------- integration: Sphinx build -------------------------------------
