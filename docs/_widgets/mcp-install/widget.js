@@ -137,7 +137,8 @@
       return false;
     }
     if (action === "cooldown-open") {
-      setView("settings");
+      var current = document.documentElement.getAttribute("data-mcp-install-view");
+      setView(current === "settings" ? "install" : "settings");
       event.preventDefault();
       return true;
     }
