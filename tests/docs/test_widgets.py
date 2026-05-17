@@ -211,6 +211,8 @@ def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
     assert all(p.pip_prereq is not None for p in pip_panels)
     days_pip = next(p for p in pip_panels if p.cooldown.id == "days")
     off_pip = next(p for p in pip_panels if p.cooldown.id == "off")
+    assert days_pip.pip_prereq is not None
+    assert off_pip.pip_prereq is not None
     assert "--uploaded-prior-to P<DAYS>D" in days_pip.pip_prereq
     assert "--uploaded-prior-to" not in off_pip.pip_prereq
 
