@@ -199,7 +199,7 @@ def _panel_active_selectors() -> str:
                     f'[data-mcp-install-scope="{s.id}"]'
                 )
                 panel_base = (
-                    f' .lm-mcp-install__panel'
+                    f" .lm-mcp-install__panel"
                     f'[data-client="{c.id}"]'
                     f'[data-method="{m.id}"]'
                     f'[data-scope="{s.id}"]'

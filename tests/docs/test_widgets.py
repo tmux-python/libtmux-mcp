@@ -96,8 +96,7 @@ def test_body_for_uvx_days_inserts_duration_sentinel() -> None:
     client = CLIENTS[0]
     body, language, note = _body_for(client, METHODS[0], client.scopes[0], _DAYS)
     assert body == (
-        "claude mcp add tmux -- uvx --exclude-newer "
-        "<COOLDOWN_DURATION> libtmux-mcp"
+        "claude mcp add tmux -- uvx --exclude-newer <COOLDOWN_DURATION> libtmux-mcp"
     )
     assert language == "console"
     assert note is None
