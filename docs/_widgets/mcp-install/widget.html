@@ -162,16 +162,16 @@
       </button>
       <h3 class="lm-mcp-install__settings-title">Dependency cooldowns</h3>
     </div>
+    <p class="lm-mcp-install__settings-help">
+      Use the <em>Configure cooldowns</em> checkbox above to enable or
+      disable. These settings choose how cooldown behaves once enabled.
+    </p>
     <fieldset class="lm-mcp-install__settings-modes">
-      <legend class="lm-mcp-install__sr-only">Cooldown mode</legend>
-      <label class="lm-mcp-install__settings-mode">
-        <input type="radio" name="cooldown-mode" value="off"
-               data-action="cooldown-mode" checked>
-        <span>Off &mdash; install the latest version your tools resolve</span>
-      </label>
+      <legend class="lm-mcp-install__sr-only">Cooldown type</legend>
       <label class="lm-mcp-install__settings-mode">
         <input type="radio" name="cooldown-mode" value="days"
-               data-action="cooldown-mode">
+               data-action="cooldown-mode"
+               {{ 'checked' if default_cooldown_type == 'days' else '' }}>
         <span>
           Apply a cooldown of
           <input type="number" min="1" max="365"
@@ -184,7 +184,8 @@
       </label>
       <label class="lm-mcp-install__settings-mode">
         <input type="radio" name="cooldown-mode" value="bypass"
-               data-action="cooldown-mode">
+               data-action="cooldown-mode"
+               {{ 'checked' if default_cooldown_type == 'bypass' else '' }}>
         <span>Bypass any global cooldown <small>(uv only)</small></span>
       </label>
     </fieldset>

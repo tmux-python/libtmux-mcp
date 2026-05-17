@@ -10,27 +10,32 @@ every gp-sphinx SPA navigation between docs pages.
 This module emits an inline ``<head>`` script that copies the saved
 selection from ``localStorage`` onto ``<html>`` as
 ``data-mcp-install-client`` / ``data-mcp-install-method`` /
-``data-mcp-install-scope`` / ``data-mcp-install-cooldown-mode`` /
-``data-mcp-install-cooldown-days`` attributes *before first paint*, plus
-a ``<style>`` block whose attribute-selector rules drive the active
-tab + visible scope group + visible panel from those attributes.
-``<html>`` is never replaced by gp-sphinx's ``spa-nav.js`` (it only
-swaps ``.article-container``), so the attributes survive SPA navigation
-and the new article paints in the saved state without the head script
-needing to re-run.
+``data-mcp-install-scope`` / ``data-mcp-install-cooldown-enabled`` /
+``data-mcp-install-cooldown-type`` / ``data-mcp-install-cooldown-days``
+attributes *before first paint*, plus a ``<style>`` block whose
+attribute-selector rules drive the active tab + visible scope group +
+visible panel from those attributes. ``<html>`` is never replaced by
+gp-sphinx's ``spa-nav.js`` (it only swaps ``.article-container``), so
+the attributes survive SPA navigation and the new article paints in
+the saved state without the head script needing to re-run.
 
 Scope is **per-client**: the localStorage key is
-``libtmux-mcp.mcp-install.scope.<client_id>``. Switching clients reads
-that client's saved scope (falling back to ``DEFAULT_SCOPES``) and
-updates ``data-mcp-install-scope``.
+``libtmux-mcp.mcp-install.scope.<client_id>``.
 
-Cooldown mode + days are **global** to the widget: a single
-``libtmux-mcp.mcp-install.cooldown.mode`` and
-``libtmux-mcp.mcp-install.cooldown.days`` localStorage pair drives every
-panel's body variant. ``data-mcp-install-cooldown-days`` is read by
-``widget.js`` (not by these CSS rules) to populate the per-snippet
-``[data-cooldown-days-slot]`` ``<span>`` injected by the
-``cooldown_days_slot`` Jinja filter.
+Cooldown state is **three orthogonal axes**:
+
+* ``libtmux-mcp.mcp-install.cooldown.enabled`` — ``"1"`` / ``"0"`` —
+  master on/off switch.
+* ``libtmux-mcp.mcp-install.cooldown.type`` — ``"days"`` / ``"bypass"`` —
+  cooldown flavor when enabled.
+* ``libtmux-mcp.mcp-install.cooldown.days`` — int — day count when
+  ``type=days``.
+
+The ``cooldown-days`` attribute is read by ``widget.js`` (not by these
+CSS rules) to populate the per-snippet
+``[data-cooldown-duration-slot]`` / ``[data-cooldown-date-slot]``
+spans. The CSS panel rule keys on the ``enabled`` + ``type`` pair to
+pick which panel variant is visible.
 """
 
 from __future__ import annotations
@@ -40,9 +45,9 @@ import typing as t
 
 from .mcp_install import (
     CLIENTS,
-    COOLDOWNS,
     DEFAULT_COOLDOWN_DAYS,
-    DEFAULT_COOLDOWN_MODE,
+    DEFAULT_COOLDOWN_ENABLED,
+    DEFAULT_COOLDOWN_TYPE,
     DEFAULT_SCOPES,
     METHODS,
 )
@@ -93,14 +98,12 @@ def _script() -> str:
     """Inline ``<head>`` script that mirrors localStorage onto ``<html>``.
 
     Emits a ``DEFAULT_SCOPES`` object literal derived from
-    :data:`mcp_install.DEFAULT_SCOPES`, plus the cooldown defaults from
-    :data:`mcp_install.DEFAULT_COOLDOWN_MODE` /
-    :data:`mcp_install.DEFAULT_COOLDOWN_DAYS`, so adding a client / scope
-    / cooldown in Python auto-extends the script. The script is tiny
-    (~400 bytes) and wrapped in try/catch in case ``localStorage`` is
-    disabled (private browsing, restricted environments).
+    :data:`mcp_install.DEFAULT_SCOPES`, plus the cooldown defaults
+    (``enabled`` / ``type`` / ``days``). Adding a client / scope /
+    cooldown mode in Python auto-extends the script.
     """
     defaults_literal = json.dumps(dict(DEFAULT_SCOPES), separators=(",", ":"))
+    enabled_default = "1" if DEFAULT_COOLDOWN_ENABLED else "0"
     return (
         '<script data-cfasync="false">(function(){'
         "try{"
@@ -111,8 +114,11 @@ def _script() -> str:
         + '";'
         'var m=localStorage.getItem("libtmux-mcp.mcp-install.method");'
         'var s=localStorage.getItem("libtmux-mcp.mcp-install.scope."+c)||d[c];'
-        'var cm=localStorage.getItem("libtmux-mcp.mcp-install.cooldown.mode")||"'
-        + DEFAULT_COOLDOWN_MODE
+        'var ce=localStorage.getItem("libtmux-mcp.mcp-install.cooldown.enabled")||"'
+        + enabled_default
+        + '";'
+        'var ct=localStorage.getItem("libtmux-mcp.mcp-install.cooldown.type")||"'
+        + DEFAULT_COOLDOWN_TYPE
         + '";'
         'var cd=localStorage.getItem("libtmux-mcp.mcp-install.cooldown.days")||"'
         + str(DEFAULT_COOLDOWN_DAYS)
@@ -120,7 +126,8 @@ def _script() -> str:
         'if(c)h.setAttribute("data-mcp-install-client",c);'
         'if(m)h.setAttribute("data-mcp-install-method",m);'
         'if(s)h.setAttribute("data-mcp-install-scope",s);'
-        'h.setAttribute("data-mcp-install-cooldown-mode",cm);'
+        'h.setAttribute("data-mcp-install-cooldown-enabled",ce);'
+        'h.setAttribute("data-mcp-install-cooldown-type",ct);'
         'h.setAttribute("data-mcp-install-cooldown-days",cd);'
         "}catch(_){}"
         "})();</script>"
@@ -168,31 +175,64 @@ def _scope_group_visible_selectors() -> str:
 
 
 def _panel_active_selectors() -> str:
-    """One selector per legal (client, method, scope, cooldown) quadruple."""
-    return ",".join(
-        f'html[data-mcp-install-client="{c.id}"]'
-        f'[data-mcp-install-method="{m.id}"]'
-        f'[data-mcp-install-scope="{s.id}"]'
-        f'[data-mcp-install-cooldown-mode="{cd.id}"]'
-        f" .lm-mcp-install__panel"
-        f'[data-client="{c.id}"]'
-        f'[data-method="{m.id}"]'
-        f'[data-scope="{s.id}"]'
-        f'[data-cooldown="{cd.id}"]'
-        for c in CLIENTS
-        for m in METHODS
-        for s in c.scopes
-        for cd in COOLDOWNS
-    )
+    """One selector per legal (client, method, scope, cooldown-state).
+
+    Cooldown state is the (enabled, type) pair. There are three cases:
+
+    * ``enabled=0`` → show the panel whose ``data-cooldown="off"``,
+      regardless of saved type.
+    * ``enabled=1`` + ``type=days`` → show the panel whose
+      ``data-cooldown="days"``.
+    * ``enabled=1`` + ``type=bypass`` → show the panel whose
+      ``data-cooldown="bypass"``.
+
+    Enumerates 30 selectors per case = 90 total (same count as the
+    previous single-``mode`` model, just keyed on the new attr pair).
+    """
+    selectors: list[str] = []
+    for c in CLIENTS:
+        for m in METHODS:
+            for s in c.scopes:
+                base = (
+                    f'[data-mcp-install-client="{c.id}"]'
+                    f'[data-mcp-install-method="{m.id}"]'
+                    f'[data-mcp-install-scope="{s.id}"]'
+                )
+                panel_base = (
+                    f' .lm-mcp-install__panel'
+                    f'[data-client="{c.id}"]'
+                    f'[data-method="{m.id}"]'
+                    f'[data-scope="{s.id}"]'
+                )
+                # enabled=0 → off panel (type is don't-care)
+                selectors.append(
+                    f'html[data-mcp-install-cooldown-enabled="0"]'
+                    f"{base}{panel_base}"
+                    f'[data-cooldown="off"]'
+                )
+                # enabled=1, type=days → days panel
+                selectors.append(
+                    f'html[data-mcp-install-cooldown-enabled="1"]'
+                    f'[data-mcp-install-cooldown-type="days"]'
+                    f"{base}{panel_base}"
+                    f'[data-cooldown="days"]'
+                )
+                # enabled=1, type=bypass → bypass panel
+                selectors.append(
+                    f'html[data-mcp-install-cooldown-enabled="1"]'
+                    f'[data-mcp-install-cooldown-type="bypass"]'
+                    f"{base}{panel_base}"
+                    f'[data-cooldown="bypass"]'
+                )
+    return ",".join(selectors)
 
 
 def _build_style() -> str:
     """Return the ``<style>`` block that drives active state from html attrs.
 
-    Selectors are enumerated from :data:`CLIENTS` / :data:`METHODS` /
-    :data:`COOLDOWNS` so adding a client, method, scope, or cooldown
-    mode auto-extends the prehydrate rules — no second source of truth
-    to drift from.
+    Selectors are enumerated from :data:`CLIENTS` / :data:`METHODS` so
+    adding a client, method, or scope auto-extends the prehydrate rules
+    — no second source of truth to drift from.
 
     Rules are wrapped in ``@layer mcp-install-prehydrate``.
     ``gp-furo-theme`` ships Tailwind v4's preflight inside
@@ -218,12 +258,13 @@ def _build_style() -> str:
     declaration and the active-tab indicator will flash from server
     default to saved state on first paint.
 
-    Cooldown adds a fourth dimension: panel rules now key on
-    ``client x method x scope x cooldown-mode`` for 90 enumerated
-    combinations. The ``cooldown-days`` html attribute does NOT drive a
-    CSS rule — the days number lives in a span ``widget.js`` updates by
-    textContent on every change, so it stays in sync with whatever the
-    user picked while remaining copy-pasteable in the rendered code.
+    Cooldown adds a fourth dimension keyed on the (enabled, type)
+    pair on ``<html>`` rather than a single ``cooldown-mode`` attr.
+    The ``cooldown-days`` html attribute does NOT drive a CSS rule —
+    the days number lives in spans ``widget.js`` updates by
+    textContent on every change (both duration ``P<N>D`` and
+    absolute-date forms coexist; uvx + pip use duration, pipx uses
+    absolute).
     """
     client_ids = tuple(c.id for c in CLIENTS)
     method_ids = tuple(m.id for m in METHODS)

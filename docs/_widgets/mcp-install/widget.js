@@ -12,10 +12,22 @@
  * current selection. The CSS handles the rest.
  *
  * Scope is per-client (storage key `libtmux-mcp.mcp-install.scope.<id>`).
- * Cooldown is global (storage keys `libtmux-mcp.mcp-install.cooldown.mode`
- * and `.cooldown.days`). The cooldown days value is also reflected into
- * every `[data-cooldown-days-slot]` span's textContent on save so the
- * rendered snippet stays copy-pasteable.
+ *
+ * Cooldown state is split into three orthogonal axes:
+ *   - `cooldown.enabled` ("1" | "0"): master on/off
+ *   - `cooldown.type`    ("days" | "bypass"): cooldown flavor when enabled
+ *   - `cooldown.days`    int: day count when type=days
+ *
+ * The checkbox in the method-tab row flips `enabled` only — it does *not*
+ * change the install/settings view. The "Configure cooldowns" label is the
+ * only entry point to the settings view. Inside settings, touching the
+ * radio or days input auto-sets enabled=1 (implicit activation).
+ *
+ * Days slots come in two flavors — uvx and pip days bodies embed a
+ * duration slot (`P<N>D`, self-refreshing in both uv and pip 26.1+),
+ * while pipx days bodies embed an absolute-date slot (pipx 1.8.0's
+ * bundled pip <26.1 rejects duration). Both are updated on every days
+ * input change.
  *
  * Vanilla JS, no deps.
  */
@@ -26,7 +38,8 @@
     client: "libtmux-mcp.mcp-install.client",
     method: "libtmux-mcp.mcp-install.method",
     scope: function (client) { return "libtmux-mcp.mcp-install.scope." + client; },
-    cooldownMode: "libtmux-mcp.mcp-install.cooldown.mode",
+    cooldownEnabled: "libtmux-mcp.mcp-install.cooldown.enabled",
+    cooldownType: "libtmux-mcp.mcp-install.cooldown.type",
     cooldownDays: "libtmux-mcp.mcp-install.cooldown.days",
   };
 
@@ -42,9 +55,10 @@
     "cursor": "project",
   };
 
-  var DEFAULT_COOLDOWN_MODE = "off";
+  var DEFAULT_COOLDOWN_ENABLED = false;
+  var DEFAULT_COOLDOWN_TYPE = "days";
   var DEFAULT_COOLDOWN_DAYS = 7;
-  var VALID_COOLDOWN_MODES = { off: 1, days: 1, bypass: 1 };
+  var VALID_COOLDOWN_TYPES = { days: 1, bypass: 1 };
 
   var SYNC_EVENT = "lm-mcp-install:change";
 
@@ -68,8 +82,9 @@
     if (!widgets.length) return;
     var savedClient = localStorage.getItem(STORAGE.client);
     var savedMethod = localStorage.getItem(STORAGE.method);
-    var savedMode = readCooldownMode();
-    var savedDays = readCooldownDays();
+    var enabled = readCooldownEnabled();
+    var type = readCooldownType();
+    var days = readCooldownDays();
     widgets.forEach(function (widget) {
       // Always re-select client (saved or server-default). Selecting the
       // client also restores that client's saved scope as a side effect
@@ -87,7 +102,7 @@
       syncHtmlAttrs(widget);
       // Cooldown state: paint UI + slot text from the same saved values
       // the prehydrate script already pushed onto <html>.
-      applyCooldownToWidget(widget, savedMode, savedDays);
+      applyCooldownToWidget(widget, enabled, type, days);
     });
     // Settings view is transient — always reset to install view on
     // first load and every SPA nav. (The user wouldn't expect to land
@@ -143,31 +158,35 @@
     if (!widget) return;
     var action = el.dataset.action;
     if (action === "cooldown-toggle") {
-      var nextMode = el.checked
-        ? (readCooldownMode() !== "off" ? readCooldownMode() : "days")
-        : "off";
-      setCooldownMode(nextMode, { persist: true, broadcast: true });
-      if (el.checked) setView("settings");
-      else setView("install");
+      // Master on/off only. Does NOT change view. Does NOT change
+      // type or days. Just flips ``cooldown.enabled``.
+      setCooldownEnabled(el.checked, { persist: true, broadcast: true });
       return;
     }
     if (action === "cooldown-mode") {
-      setCooldownMode(el.value, { persist: true, broadcast: true });
+      // Radio selection in settings -> set type, auto-enable.
+      setCooldownType(el.value, { persist: true, broadcast: true });
+      if (!readCooldownEnabled()) {
+        setCooldownEnabled(true, { persist: true, broadcast: true });
+      }
       return;
     }
     if (action === "cooldown-days") {
+      // Days input in settings -> set days, auto-enable, force type=days.
       var n = clampDays(parseInt(el.value, 10));
       setCooldownDays(n, { persist: true, broadcast: true });
-      // Also flip mode to "days" so the snippet reflects the input.
-      if (readCooldownMode() !== "days") {
-        setCooldownMode("days", { persist: true, broadcast: true });
+      if (readCooldownType() !== "days") {
+        setCooldownType("days", { persist: true, broadcast: true });
+      }
+      if (!readCooldownEnabled()) {
+        setCooldownEnabled(true, { persist: true, broadcast: true });
       }
     }
   }
 
   function onInput(e) {
-    // ``input`` fires on every keystroke for number inputs. We mirror
-    // the computed cutoff date into every slot span so the snippet
+    // ``input`` fires on every keystroke for number inputs. We mirror the
+    // computed duration + cutoff date into every slot span so the snippet
     // updates in real time even before the user blurs the field.
     // localStorage write happens only on ``change`` (see onChange) to
     // avoid hammering writes.
@@ -177,7 +196,7 @@
     if (!widget) return;
     var n = parseInt(el.value, 10);
     if (!isNaN(n) && n >= 1) {
-      updateAllCooldownDateSlots(n);
+      updateAllCooldownSlots(n);
       document.documentElement.setAttribute("data-mcp-install-cooldown-days", String(n));
     }
   }
@@ -193,15 +212,17 @@
   function onBroadcast(event) {
     document.querySelectorAll(".lm-mcp-install").forEach(function (widget) {
       if (widget === event.detail.origin) return;
-      if (event.detail.kind === "cooldown-mode") {
-        applyCooldownToWidget(widget, event.detail.value, readCooldownDays());
+      var kind = event.detail.kind;
+      if (kind === "cooldown-enabled" || kind === "cooldown-type" || kind === "cooldown-days") {
+        applyCooldownToWidget(
+          widget,
+          readCooldownEnabled(),
+          readCooldownType(),
+          readCooldownDays()
+        );
         return;
       }
-      if (event.detail.kind === "cooldown-days") {
-        applyCooldownToWidget(widget, readCooldownMode(), event.detail.value);
-        return;
-      }
-      select(widget, event.detail.kind, event.detail.value, { persist: false, broadcast: false });
+      select(widget, kind, event.detail.value, { persist: false, broadcast: false });
     });
   }
 
@@ -343,9 +364,16 @@
 
   // -------- cooldown helpers --------------------------------------------
 
-  function readCooldownMode() {
-    var m = localStorage.getItem(STORAGE.cooldownMode);
-    return VALID_COOLDOWN_MODES[m] ? m : DEFAULT_COOLDOWN_MODE;
+  function readCooldownEnabled() {
+    var v = localStorage.getItem(STORAGE.cooldownEnabled);
+    if (v === "1") return true;
+    if (v === "0") return false;
+    return DEFAULT_COOLDOWN_ENABLED;
+  }
+
+  function readCooldownType() {
+    var t = localStorage.getItem(STORAGE.cooldownType);
+    return VALID_COOLDOWN_TYPES[t] ? t : DEFAULT_COOLDOWN_TYPE;
   }
 
   function readCooldownDays() {
@@ -360,18 +388,33 @@
     return n;
   }
 
-  function setCooldownMode(mode, opts) {
-    if (!VALID_COOLDOWN_MODES[mode]) return;
-    document.documentElement.setAttribute("data-mcp-install-cooldown-mode", mode);
-    if (opts.persist) localStorage.setItem(STORAGE.cooldownMode, mode);
-    // Sync every widget's UI: checkbox, radio, slot text contents.
+  function setCooldownEnabled(enabled, opts) {
+    var v = enabled ? "1" : "0";
+    document.documentElement.setAttribute("data-mcp-install-cooldown-enabled", v);
+    if (opts.persist) localStorage.setItem(STORAGE.cooldownEnabled, v);
     document.querySelectorAll(".lm-mcp-install").forEach(function (widget) {
-      applyCooldownToWidget(widget, mode, readCooldownDays());
+      applyCooldownToWidget(widget, enabled, readCooldownType(), readCooldownDays());
     });
     if (opts.broadcast) {
       window.dispatchEvent(
         new CustomEvent(SYNC_EVENT, {
-          detail: { origin: null, kind: "cooldown-mode", value: mode },
+          detail: { origin: null, kind: "cooldown-enabled", value: v },
+        })
+      );
+    }
+  }
+
+  function setCooldownType(type, opts) {
+    if (!VALID_COOLDOWN_TYPES[type]) return;
+    document.documentElement.setAttribute("data-mcp-install-cooldown-type", type);
+    if (opts.persist) localStorage.setItem(STORAGE.cooldownType, type);
+    document.querySelectorAll(".lm-mcp-install").forEach(function (widget) {
+      applyCooldownToWidget(widget, readCooldownEnabled(), type, readCooldownDays());
+    });
+    if (opts.broadcast) {
+      window.dispatchEvent(
+        new CustomEvent(SYNC_EVENT, {
+          detail: { origin: null, kind: "cooldown-type", value: type },
         })
       );
     }
@@ -381,7 +424,7 @@
     var n = clampDays(days);
     document.documentElement.setAttribute("data-mcp-install-cooldown-days", String(n));
     if (opts.persist) localStorage.setItem(STORAGE.cooldownDays, String(n));
-    updateAllCooldownDateSlots(n);
+    updateAllCooldownSlots(n);
     // Sync the days input across every widget (multi-widget page).
     document.querySelectorAll('[data-action="cooldown-days"]').forEach(function (input) {
       if (document.activeElement !== input) input.value = String(n);
@@ -396,40 +439,53 @@
   }
 
   function daysToIsoDate(n) {
-    // YYYY-MM-DD in UTC. We use an absolute date rather than ISO 8601
-    // duration (P<N>D) because pipx 1.8.0 bundles a pip older than 26.1,
-    // which rejects the duration syntax. Absolute dates work in uv,
-    // pip 26.0+, and pipx's bundled pip — portable across the matrix.
+    // YYYY-MM-DD in UTC, for pipx (pipx 1.8.0's bundled pip <26.1 rejects
+    // the duration form). uv and pip 26.1+ both accept this absolute form
+    // too, but the duration form is preferred for them because it stays
+    // self-refreshing in the user's saved MCP config.
     var ms = Date.now() - n * 86400000;
     return new Date(ms).toISOString().slice(0, 10);
   }
 
-  function updateAllCooldownDateSlots(n) {
-    var iso = daysToIsoDate(n);
+  function daysToIsoDuration(n) {
+    // P<N>D in ISO 8601. Used by uvx and pip days panels.
+    return "P" + n + "D";
+  }
+
+  function updateAllCooldownSlots(n) {
+    var duration = daysToIsoDuration(n);
+    var date = daysToIsoDate(n);
+    document.querySelectorAll("[data-cooldown-duration-slot]").forEach(function (slot) {
+      slot.textContent = duration;
+    });
     document.querySelectorAll("[data-cooldown-date-slot]").forEach(function (slot) {
-      slot.textContent = iso;
+      slot.textContent = date;
     });
   }
 
-  function applyCooldownToWidget(widget, mode, days) {
-    // Checkbox: checked iff mode != "off".
+  function applyCooldownToWidget(widget, enabled, type, days) {
+    // Checkbox: checked iff enabled.
     var toggle = widget.querySelector(".lm-mcp-install__cooldown-toggle");
-    if (toggle) toggle.checked = mode !== "off";
+    if (toggle) toggle.checked = !!enabled;
     // Radio: the matching radio in the settings form.
     widget.querySelectorAll('[data-action="cooldown-mode"]').forEach(function (radio) {
-      radio.checked = radio.value === mode;
+      radio.checked = radio.value === type;
     });
     // Days input value (don't clobber while typing).
     var daysInput = widget.querySelector('[data-action="cooldown-days"]');
     if (daysInput && document.activeElement !== daysInput) {
       daysInput.value = String(days);
     }
-    // Cooldown date slots inside snippets (this widget's panels only —
-    // other widgets get updated by their own applyCooldownToWidget call in
-    // applySavedState).
-    var iso = daysToIsoDate(days);
+    // Slot contents for this widget's panels (other widgets get updated
+    // by their own applyCooldownToWidget call). Both duration and date
+    // slots are refreshed — only one kind is visible per panel.
+    var duration = daysToIsoDuration(days);
+    var date = daysToIsoDate(days);
+    widget.querySelectorAll("[data-cooldown-duration-slot]").forEach(function (slot) {
+      slot.textContent = duration;
+    });
     widget.querySelectorAll("[data-cooldown-date-slot]").forEach(function (slot) {
-      slot.textContent = iso;
+      slot.textContent = date;
     });
   }
 

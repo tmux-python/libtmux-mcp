@@ -9,16 +9,21 @@ cooldown via ``--no-config`` / ``UV_NO_CONFIG``). Together these
 produce 90 server-rendered panels (3 + 1 + 2 + 2 + 2 = 10 scopes,
 times 3 methods, times 3 cooldown modes).
 
-``DEFAULT_SCOPES`` / ``DEFAULT_COOLDOWN_MODE`` / ``DEFAULT_COOLDOWN_DAYS``
-are consumed by ``_prehydrate.py`` so Python remains the single source
-of truth for which (client, method, scope, cooldown) cell wins on
-first paint.
+Cooldown state is split across three orthogonal axes:
+``DEFAULT_COOLDOWN_ENABLED`` (master on/off), ``DEFAULT_COOLDOWN_TYPE``
+(``"days"`` vs ``"bypass"``), and ``DEFAULT_COOLDOWN_DAYS`` (day count).
+These (along with ``DEFAULT_SCOPES``) are consumed by ``_prehydrate.py``
+so Python remains the single source of truth for which (client,
+method, scope, cooldown) cell wins on first paint.
 
-The ``<DAYS>`` sentinel appears in days-mode bodies wherever a span
-will eventually be injected (via the ``cooldown_days_slot`` Jinja
-filter in ``docs/_ext/widgets/_base.py``). The default value rendered
-into the slot is ``DEFAULT_COOLDOWN_DAYS``; ``widget.js`` swaps the
-slot's textContent when the user picks a different value.
+Two sentinels appear in days-mode bodies. ``<COOLDOWN_DURATION>`` lands
+in uvx + pip bodies and survives as ISO 8601 duration ``P<N>D`` — both
+uv and pip 26.1+ re-evaluate the duration on every invocation, so the
+flag stays fresh forever once saved in an MCP config. ``<COOLDOWN_DATE>``
+lands in pipx bodies because pipx 1.8.0 bundles a pip older than 26.1
+that rejects the duration form; JS recomputes the absolute date on
+every page load. Both sentinels are swapped by ``cooldown_slots``
+in ``docs/_ext/widgets/_base.py``.
 """
 
 from __future__ import annotations
@@ -222,18 +227,25 @@ DEFAULT_SCOPES: collections.abc.Mapping[str, str] = {
     client.id: client.scopes[0].id for client in CLIENTS
 }
 
-DEFAULT_COOLDOWN_MODE: str = COOLDOWNS[0].id  # "off"
+DEFAULT_COOLDOWN_ENABLED: bool = False
+DEFAULT_COOLDOWN_TYPE: str = "days"
 DEFAULT_COOLDOWN_DAYS: int = 7
 
 
-# Sentinel that ``cooldown_days_slot`` (in ``_base.py``) replaces with a
-# ``<span data-cooldown-date-slot>YYYY-MM-DD</span>`` after Pygments has
-# escaped it to ``&lt;COOLDOWN_DATE&gt;``. We emit an absolute date instead
-# of ISO 8601 duration (``P7D``) because pipx 1.8.0 bundles a pip older
-# than 26.1, which doesn't accept the duration form. Absolute dates have
-# worked across uv, pip 26.0+, and pipx's bundled pip — so this is the
-# portable form. ``widget.js`` rewrites the slot's ``textContent`` to
-# ``today - savedDays days`` whenever the user changes the days input.
+# Two sentinels swapped by ``cooldown_slots`` in ``_base.py`` after
+# Pygments has escaped them to ``&lt;...&gt;``.
+#
+# * ``<COOLDOWN_DURATION>`` is used by uvx and pip days bodies. uv stores
+#   the value as ``ExcludeNewerValue::Relative(ExcludeNewerSpan)`` and
+#   re-evaluates ``now - N days`` at every resolver call, so the saved
+#   ``.mcp.json`` arg ``"P7D"`` stays fresh forever. pip 26.1+ does the
+#   same at flag-parse time on every invocation.
+# * ``<COOLDOWN_DATE>`` is used by pipx days bodies because pipx 1.8.0
+#   bundles a pip older than 26.1, which rejects the duration form with
+#   ``Invalid isoformat``. The absolute date is computed in JS from
+#   ``today - savedDays``; the build-time default drifts daily but
+#   ``widget.js`` refreshes the slot on every page load.
+_DURATION_SENTINEL = "<COOLDOWN_DURATION>"
 _DATE_SENTINEL = "<COOLDOWN_DATE>"
 
 
@@ -253,7 +265,7 @@ def default_cooldown_date(days: int) -> str:
 
 PIP_PREREQ_OFF: str = "pip install --user --upgrade libtmux libtmux-mcp"
 PIP_PREREQ_DAYS: str = (
-    f"pip install --user --upgrade --uploaded-prior-to {_DATE_SENTINEL}"
+    f"pip install --user --upgrade --uploaded-prior-to {_DURATION_SENTINEL}"
     " libtmux libtmux-mcp"
 )
 
@@ -280,12 +292,15 @@ def _tool_command(method: Method, cooldown: Cooldown) -> str:
     """
     if method.id == "uvx":
         if cooldown.id == "days":
-            return f"uvx --exclude-newer {_DATE_SENTINEL} libtmux-mcp"
+            return f"uvx --exclude-newer {_DURATION_SENTINEL} libtmux-mcp"
         if cooldown.id == "bypass":
             return "uvx --no-config libtmux-mcp"
         return "uvx libtmux-mcp"
     if method.id == "pipx":
         if cooldown.id == "days":
+            # pipx 1.8.0 bundles pip <26.1, which doesn't accept the
+            # duration form — emit an absolute date instead. JS recomputes
+            # ``today - savedDays`` on every page load.
             return (
                 f"pipx run --pip-args=--uploaded-prior-to={_DATE_SENTINEL} libtmux-mcp"
             )
@@ -329,7 +344,7 @@ def _json_body(method: Method, cooldown: Cooldown) -> str:
     if method.id == "uvx":
         command = "uvx"
         if cooldown.id == "days":
-            args = f'"--exclude-newer", "{_DATE_SENTINEL}", "libtmux-mcp"'
+            args = f'"--exclude-newer", "{_DURATION_SENTINEL}", "libtmux-mcp"'
         else:
             args = '"libtmux-mcp"'
     elif method.id == "pipx":
@@ -373,7 +388,7 @@ def _toml_body(method: Method, cooldown: Cooldown) -> str:
     if method.id == "uvx":
         command, args_inner = "uvx", '"libtmux-mcp"'
         if cooldown.id == "days":
-            args_inner = f'"--exclude-newer", "{_DATE_SENTINEL}", "libtmux-mcp"'
+            args_inner = f'"--exclude-newer", "{_DURATION_SENTINEL}", "libtmux-mcp"'
     elif method.id == "pipx":
         command, args_inner = "pipx", '"run", "libtmux-mcp"'
         if cooldown.id == "days":
@@ -497,6 +512,7 @@ class MCPInstallWidget(BaseWidget):
             "methods": METHODS,
             "cooldowns": COOLDOWNS,
             "panels": build_panels(),
-            "default_cooldown_mode": DEFAULT_COOLDOWN_MODE,
+            "default_cooldown_enabled": DEFAULT_COOLDOWN_ENABLED,
+            "default_cooldown_type": DEFAULT_COOLDOWN_TYPE,
             "default_cooldown_days": DEFAULT_COOLDOWN_DAYS,
         }

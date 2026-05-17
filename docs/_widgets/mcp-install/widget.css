@@ -282,6 +282,16 @@ html[data-mcp-install-view="settings"] .lm-mcp-install__body--settings {
   color: var(--color-foreground-primary);
 }
 
+.lm-mcp-install__settings-help {
+  margin: 0 0 0.8rem 0;
+  font-size: 0.9em;
+  color: var(--color-foreground-secondary);
+}
+
+.lm-mcp-install__settings-help em {
+  font-style: italic;
+}
+
 .lm-mcp-install__settings-modes {
   border: 0;
   padding: 0;

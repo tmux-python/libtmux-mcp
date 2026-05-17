@@ -17,7 +17,8 @@ from docs._ext.widgets.mcp_install import (
     CLIENTS,
     COOLDOWNS,
     DEFAULT_COOLDOWN_DAYS,
-    DEFAULT_COOLDOWN_MODE,
+    DEFAULT_COOLDOWN_ENABLED,
+    DEFAULT_COOLDOWN_TYPE,
     METHODS,
     MCPInstallWidget,
     _body_for,
@@ -70,8 +71,9 @@ def test_build_panels_first_cell_is_claude_code_uvx_local_off() -> None:
 
 
 def test_default_cooldown_constants() -> None:
-    """The default mode is ``off`` and the default days value is positive."""
-    assert DEFAULT_COOLDOWN_MODE == "off"
+    """The default state is disabled, type ``days``, days positive."""
+    assert DEFAULT_COOLDOWN_ENABLED is False
+    assert DEFAULT_COOLDOWN_TYPE == "days"
     assert DEFAULT_COOLDOWN_DAYS > 0
 
 
@@ -84,18 +86,18 @@ def test_body_for_cli_client_off_returns_clean_command() -> None:
     assert note is None
 
 
-def test_body_for_uvx_days_inserts_exclude_newer_sentinel() -> None:
-    """Days mode adds ``--exclude-newer <DATE>`` before ``libtmux-mcp``.
+def test_body_for_uvx_days_inserts_duration_sentinel() -> None:
+    """Uvx days mode adds ``--exclude-newer P<N>D`` (duration form).
 
-    The widget emits an absolute-date sentinel (rather than ``P<N>D``
-    duration) because pipx 1.8.0 bundles a pip older than 26.1, which
-    only accepts absolute datetimes. Using the same sentinel across uv,
-    pip, and pipx keeps the rendered snippets portable.
+    uv stores the value as ``ExcludeNewerValue::Relative(ExcludeNewerSpan)``
+    and re-evaluates ``now - N days`` on every resolver call, so a saved
+    ``.mcp.json`` arg ``"P7D"`` stays fresh forever.
     """
     client = CLIENTS[0]
     body, language, note = _body_for(client, METHODS[0], client.scopes[0], _DAYS)
-    assert (
-        body == "claude mcp add tmux -- uvx --exclude-newer <COOLDOWN_DATE> libtmux-mcp"
+    assert body == (
+        "claude mcp add tmux -- uvx --exclude-newer "
+        "<COOLDOWN_DURATION> libtmux-mcp"
     )
     assert language == "console"
     assert note is None
@@ -134,8 +136,8 @@ def test_body_for_pip_bypass_returns_caveat_note() -> None:
     assert "pip" in note_bp.lower()
 
 
-def test_body_for_pipx_days_uses_pip_args_form() -> None:
-    """Pipx days mode forwards ``--uploaded-prior-to`` via ``--pip-args=``."""
+def test_body_for_pipx_days_uses_pip_args_form_with_absolute_date() -> None:
+    """Pipx days uses absolute date (pipx 1.8.0's bundled pip rejects P<N>D)."""
     client = CLIENTS[0]
     pipx = next(m for m in METHODS if m.id == "pipx")
     body, language, _ = _body_for(client, pipx, client.scopes[0], _DAYS)
@@ -155,11 +157,11 @@ def test_body_for_json_client_off_returns_config_snippet() -> None:
 
 
 def test_body_for_json_uvx_days_includes_exclude_newer_arg() -> None:
-    """Days mode for JSON-kind clients shows the flag in the ``args`` array."""
+    """Days mode for JSON-kind clients shows the duration flag in ``args``."""
     claude_desktop = CLIENTS[1]
     body, _, _ = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0], _DAYS)
     assert '"--exclude-newer"' in body
-    assert '"<COOLDOWN_DATE>"' in body
+    assert '"<COOLDOWN_DURATION>"' in body
 
 
 def test_body_for_json_uvx_bypass_adds_env_block() -> None:
@@ -192,13 +194,13 @@ def test_body_for_codex_project_returns_toml() -> None:
 
 
 def test_body_for_codex_project_days_inlines_flag_in_toml_args() -> None:
-    """Codex project + days puts ``--exclude-newer <DATE>`` in the args array."""
+    """Codex project + days puts ``--exclude-newer <DURATION>`` in the args array."""
     codex = next(c for c in CLIENTS if c.id == "codex")
     project_scope = next(s for s in codex.scopes if s.id == "project")
     body, language, _ = _body_for(codex, METHODS[0], project_scope, _DAYS)
     assert language == "toml"
     assert '"--exclude-newer"' in body
-    assert '"<COOLDOWN_DATE>"' in body
+    assert '"<COOLDOWN_DURATION>"' in body
 
 
 def test_body_for_gemini_user_inserts_scope_flag() -> None:
@@ -221,7 +223,7 @@ def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
     off_pip = next(p for p in pip_panels if p.cooldown.id == "off")
     assert days_pip.pip_prereq is not None
     assert off_pip.pip_prereq is not None
-    assert "--uploaded-prior-to <COOLDOWN_DATE>" in days_pip.pip_prereq
+    assert "--uploaded-prior-to <COOLDOWN_DURATION>" in days_pip.pip_prereq
     assert "--uploaded-prior-to" not in off_pip.pip_prereq
 
 
