@@ -23,6 +23,12 @@ class HighlightFilter(t.Protocol):
     def __call__(self, code: str, language: str = "default") -> markupsafe.Markup: ...
 
 
+class CooldownDaysSlotFilter(t.Protocol):
+    """Callable signature for the Jinja ``cooldown_days_slot`` filter."""
+
+    def __call__(self, html: object) -> markupsafe.Markup: ...
+
+
 class widget_container(nodes.container):  # type: ignore[misc]  # docutils nodes are untyped
     """Wraps a widget's rendered HTML; visit/depart emit the outer div."""
 
@@ -99,6 +105,7 @@ class BaseWidget(abc.ABC):
             lstrip_blocks=True,
         )
         jenv.filters["highlight"] = make_highlight_filter(env)
+        jenv.filters["cooldown_days_slot"] = make_cooldown_days_slot_filter()
         template = jenv.from_string(source)
         context: dict[str, t.Any] = {
             **cls.default_options,
@@ -107,6 +114,53 @@ class BaseWidget(abc.ABC):
             "widget_name": cls.name,
         }
         return template.render(**context)
+
+
+def make_cooldown_days_slot_filter() -> CooldownDaysSlotFilter:
+    """Return a Jinja filter that injects cooldown slot ``<span>``s.
+
+    The Pygments highlighter escapes two days-mode sentinels emitted in
+    snippet bodies (see :mod:`docs._ext.widgets.mcp_install`):
+
+    * ``&lt;COOLDOWN_DURATION&gt;`` — used by uvx and pip days bodies.
+      Swapped for a span whose default text content is ``P<N>D`` (ISO
+      8601 duration). uv stores the value as
+      ``ExcludeNewerValue::Relative(ExcludeNewerSpan)`` and recomputes
+      ``now - N days`` on every resolver call; pip 26.1+ does the same
+      at flag-parse time per invocation. The snippet stays fresh
+      forever once saved to an MCP config.
+    * ``&lt;COOLDOWN_DATE&gt;`` — used by pipx days bodies because
+      pipx 1.8.0 bundles a pip older than 26.1 that rejects the
+      duration form with ``Invalid isoformat``. Swapped for a span
+      whose default text content is an absolute ISO date
+      (``today - default-days``). Drifts daily but ``widget.js``
+      refreshes the slot on every page load.
+
+    Both spans live inside a Pygments string-literal span and inherit
+    the parent's color. Their ``textContent`` is rewritten by
+    ``widget.js`` whenever the user changes the days input. The filter
+    is a no-op for outputs without either sentinel (off and bypass
+    cooldown modes never emit one).
+    """
+    from .mcp_install import DEFAULT_COOLDOWN_DAYS, default_cooldown_date
+
+    default_date = default_cooldown_date(DEFAULT_COOLDOWN_DAYS)
+    duration_span = (
+        '<span class="lm-mcp-install__cooldown-days"'
+        f" data-cooldown-duration-slot>P{DEFAULT_COOLDOWN_DAYS}D</span>"
+    )
+    date_span = (
+        '<span class="lm-mcp-install__cooldown-days"'
+        f" data-cooldown-date-slot>{default_date}</span>"
+    )
+
+    def _filter(html: object) -> markupsafe.Markup:
+        s = str(html)
+        s = s.replace("&lt;COOLDOWN_DURATION&gt;", duration_span)
+        s = s.replace("&lt;COOLDOWN_DATE&gt;", date_span)
+        return markupsafe.Markup(s)
+
+    return _filter
 
 
 def make_highlight_filter(env: BuildEnvironment) -> HighlightFilter:

@@ -12,6 +12,10 @@ _Notes on upcoming releases will be added here_
 
 The MCP install widget on the front page, {doc}`/quickstart`, and {ref}`clients` now lets you pick a config scope per LLM client alongside the install method — *local* / *user* / *project* for Claude Code, *user* / *project* for Codex and Gemini, *project* / *global* for Cursor. JSON-only clients (Cursor, Claude Desktop) also show the destination config-file path next to the snippet so the paste target is never a guess. Your scope choice is remembered per-client, so switching between clients restores each one's last selection.
 
+**Installer picker can apply or bypass dependency cooldowns**
+
+A new *Configure cooldowns* control on the install widget lets you tack a cooldown onto the snippet without leaving the page. Pick a delay in days (uv's `--exclude-newer`, pip's `--uploaded-prior-to`, pipx's `--pip-args`) to wait out community vetting before pulling a fresh release, or pick *Bypass any global cooldown* to skip a `~/.config/uv/uv.toml` cutoff and grab the latest libtmux-mcp anyway. The setting persists across pages, and the embedded *What are cooldowns?* expander links to the [Datadog Security Labs writeup](https://securitylabs.datadoghq.com/articles/dependency-cooldowns/) and [cooldowns.dev](https://cooldowns.dev/) if you want the supply-chain context. (#31)
+
 ## libtmux-mcp 0.1.0a7 (2026-05-16)
 
 ### Breaking changes

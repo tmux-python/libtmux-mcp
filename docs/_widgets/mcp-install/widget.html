@@ -1,6 +1,7 @@
 {#
-  MCP install widget: server-rendered client × method × scope matrix.
-  widget_name, clients, methods, panels, pip_prereq, variant are provided by
+  MCP install widget: server-rendered client x method x scope x cooldown
+  matrix. widget_name, clients, methods, cooldowns, panels,
+  default_cooldown_mode, default_cooldown_days, variant are provided by
   MCPInstallWidget.context() / the directive's option merge.
 
   The scope row is rendered as one __scopes-group per client that has
@@ -14,9 +15,24 @@
 
   Each code block runs through the `highlight` filter (defined in
   docs._ext.widgets._base.make_highlight_filter) which wraps Sphinx's
-  PygmentsBridge —
-  so the output is byte-identical to a native ``.. code-block::`` block,
-  meaning sphinx-copybutton + its prompt-strip regex work automatically.
+  PygmentsBridge — so the output is byte-identical to a native
+  ``.. code-block::`` block, meaning sphinx-copybutton + its prompt-strip
+  regex work automatically. The output is then run through
+  ``cooldown_days_slot`` (defined in
+  docs._ext.widgets._base.make_cooldown_days_slot_filter) which swaps
+  two post-Pygments sentinels:
+
+  * ``&lt;COOLDOWN_DURATION&gt;`` becomes
+    ``<span data-cooldown-duration-slot>P7D</span>`` — used by uvx and
+    pip days bodies, where uv + pip 26.1+ re-evaluate the duration on
+    every invocation.
+  * ``&lt;COOLDOWN_DATE&gt;`` becomes
+    ``<span data-cooldown-date-slot>YYYY-MM-DD</span>`` — used by pipx
+    days bodies because pipx 1.8.0's bundled pip rejects the duration
+    form.
+
+  ``widget.js`` updates both slot kinds' textContent on every
+  cooldown-days input change.
 #}
 <div class="lm-mcp-install lm-mcp-install--{{ variant }}">
   <div class="lm-mcp-install__tabs lm-mcp-install__tabs--clients"
@@ -49,6 +65,23 @@
       {{ method.label }}
     </button>
     {% endfor %}
+
+    <div class="lm-mcp-install__cooldown-control">
+      <input type="checkbox"
+             id="lm-mcp-install__cooldown-toggle"
+             class="lm-mcp-install__cooldown-toggle"
+             data-action="cooldown-toggle"
+             aria-label="Apply a dependency cooldown">
+      <button type="button"
+              class="lm-mcp-install__cooldown-label-text"
+              data-action="cooldown-open"
+              aria-label="Open cooldown settings">Configure cooldowns</button>
+      <button type="button"
+              class="lm-mcp-install__cooldown-help"
+              data-action="cooldown-help"
+              aria-label="What are cooldowns?"
+              title="What are cooldowns?">?</button>
+    </div>
   </div>
 
   <div class="lm-mcp-install__tabs lm-mcp-install__tabs--scopes"
@@ -73,13 +106,14 @@
     {% endfor %}
   </div>
 
-  <div class="lm-mcp-install__body">
+  <div class="lm-mcp-install__body lm-mcp-install__body--install">
     {% for panel in panels %}
     <div class="lm-mcp-install__panel"
          role="tabpanel"
          data-client="{{ panel.client.id }}"
          data-method="{{ panel.method.id }}"
          data-scope="{{ panel.scope.id }}"
+         data-cooldown="{{ panel.cooldown.id }}"
          tabindex="0"
          {% if not panel.is_default %}hidden{% endif %}>
 
@@ -90,7 +124,7 @@
       {% elif panel.method.id == 'pip' %}
       <p class="lm-mcp-install__preamble">Install the packages first:</p>
       <div class="lm-mcp-install__code--prereq">
-        {{ ("$ " ~ pip_prereq) | highlight("console") }}
+        {{ (("$ " ~ panel.pip_prereq) | highlight("console")) | cooldown_days_slot }}
       </div>
       <p class="lm-mcp-install__preamble">
         Then {{ 'register' if panel.client.kind == 'cli' else 'use this config' }}:
@@ -103,7 +137,13 @@
       </p>
       {% endif %}
 
-      {{ panel.body | highlight(panel.language) }}
+      {{ (panel.body | highlight(panel.language)) | cooldown_days_slot }}
+
+      {% if panel.note %}
+      <p class="lm-mcp-install__cooldown-note">
+        {{ panel.note }}
+      </p>
+      {% endif %}
 
       {#
         JSON-only clients (Cursor, Claude Desktop) carry the config file in the
@@ -119,5 +159,63 @@
       {% endif %}
     </div>
     {% endfor %}
+  </div>
+
+  <div class="lm-mcp-install__body lm-mcp-install__body--settings"
+       role="dialog"
+       aria-label="Cooldown settings">
+    <div class="lm-mcp-install__settings-header">
+      <button type="button"
+              class="lm-mcp-install__back"
+              data-action="cooldown-back"
+              aria-label="Back to installer">
+        <span class="lm-mcp-install__back-icon" aria-hidden="true">&larr;</span>
+        <span class="lm-mcp-install__back-text">Back</span>
+      </button>
+      <h3 class="lm-mcp-install__settings-title">Dependency cooldowns</h3>
+    </div>
+    <p class="lm-mcp-install__settings-help">
+      Use the <em>Configure cooldowns</em> checkbox above to enable or
+      disable. These settings choose how cooldown behaves once enabled.
+    </p>
+    <fieldset class="lm-mcp-install__settings-modes">
+      <legend class="lm-mcp-install__sr-only">Cooldown type</legend>
+      <label class="lm-mcp-install__settings-mode">
+        <input type="radio" name="cooldown-mode" value="days"
+               data-action="cooldown-mode"
+               {{ 'checked' if default_cooldown_type == 'days' else '' }}>
+        <span>
+          Apply a cooldown of
+          <input type="number" min="1" max="365"
+                 value="{{ default_cooldown_days }}"
+                 class="lm-mcp-install__cooldown-days-input"
+                 data-action="cooldown-days"
+                 aria-label="Cooldown in days">
+          days
+        </span>
+      </label>
+      <label class="lm-mcp-install__settings-mode">
+        <input type="radio" name="cooldown-mode" value="bypass"
+               data-action="cooldown-mode"
+               {{ 'checked' if default_cooldown_type == 'bypass' else '' }}>
+        <span>Bypass any global cooldown <small>(uv only)</small></span>
+      </label>
+    </fieldset>
+    <details class="lm-mcp-install__cooldown-explainer">
+      <summary>What are cooldowns?</summary>
+      <p>
+        Cooldowns delay picking up newly uploaded packages so the
+        community has time to spot supply-chain attacks before you
+        install. Most package managers don't apply one by default
+        &mdash; you opt in via a global setting in your tool's config.
+      </p>
+      <p>
+        Learn more at
+        <a href="https://cooldowns.dev/" target="_blank" rel="noopener">cooldowns.dev</a>
+        &middot;
+        <a href="https://securitylabs.datadoghq.com/articles/dependency-cooldowns/"
+           target="_blank" rel="noopener">Datadog Security Labs writeup</a>.
+      </p>
+    </details>
   </div>
 </div>

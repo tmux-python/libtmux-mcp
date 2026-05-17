@@ -11,10 +11,17 @@ import typing as t
 import pytest
 
 from docs._ext.widgets import BaseWidget
-from docs._ext.widgets._base import make_highlight_filter
+from docs._ext.widgets._base import (
+    make_cooldown_days_slot_filter,
+    make_highlight_filter,
+)
 from docs._ext.widgets._discovery import discover
 from docs._ext.widgets.mcp_install import (
     CLIENTS,
+    COOLDOWNS,
+    DEFAULT_COOLDOWN_DAYS,
+    DEFAULT_COOLDOWN_ENABLED,
+    DEFAULT_COOLDOWN_TYPE,
     METHODS,
     MCPInstallWidget,
     _body_for,
@@ -41,47 +48,139 @@ def test_discover_finds_mcp_install() -> None:
     assert issubclass(registry["mcp-install"], BaseWidget)
 
 
+_OFF = next(c for c in COOLDOWNS if c.id == "off")
+_DAYS = next(c for c in COOLDOWNS if c.id == "days")
+_BYPASS = next(c for c in COOLDOWNS if c.id == "bypass")
+
+
 def test_build_panels_yields_cross_product() -> None:
-    """One panel per (client, method, scope) triple; exactly one flagged default."""
+    """One panel per (client, method, scope, cooldown) quadruple; one default."""
     panels = build_panels()
-    expected = sum(len(c.scopes) for c in CLIENTS) * len(METHODS)
+    expected = sum(len(c.scopes) for c in CLIENTS) * len(METHODS) * len(COOLDOWNS)
     assert len(panels) == expected
     assert panels[0].is_default is True
     assert sum(1 for p in panels if p.is_default) == 1
 
 
-def test_build_panels_first_cell_is_claude_code_uvx_local() -> None:
-    """First panel is Claude Code + uvx + local in ``console`` with a ``$ `` body."""
+def test_build_panels_first_cell_is_claude_code_uvx_local_off() -> None:
+    """First panel is Claude Code + uvx + local + off — the SSR-default cell."""
     panels = build_panels()
     assert panels[0].client.id == "claude-code"
     assert panels[0].method.id == "uvx"
     assert panels[0].scope.id == "local"
+    assert panels[0].cooldown.id == "off"
     assert panels[0].language == "console"
     assert panels[0].body.startswith("$ ")
 
 
-def test_body_for_cli_client_returns_shell_command() -> None:
-    """CLI clients get the literal ``<tool> mcp add ...`` shell command."""
+def test_default_cooldown_constants() -> None:
+    """The default state is disabled, type ``days``, days positive."""
+    assert DEFAULT_COOLDOWN_ENABLED is False
+    assert DEFAULT_COOLDOWN_TYPE == "days"
+    assert DEFAULT_COOLDOWN_DAYS > 0
+
+
+def test_body_for_cli_client_off_returns_clean_command() -> None:
+    """Cooldown off leaves the existing CLI command intact (no extra flags)."""
     client = CLIENTS[0]  # claude-code
-    body, language = _body_for(client, METHODS[0], client.scopes[0])
+    body, language, note = _body_for(client, METHODS[0], client.scopes[0], _OFF)
     assert body == "claude mcp add tmux -- uvx libtmux-mcp"
+    assert language == "console"
+    assert note is None
+
+
+def test_body_for_uvx_days_inserts_duration_sentinel() -> None:
+    """Uvx days mode adds ``--exclude-newer P<N>D`` (duration form).
+
+    uv stores the value as ``ExcludeNewerValue::Relative(ExcludeNewerSpan)``
+    and re-evaluates ``now - N days`` on every resolver call, so a saved
+    ``.mcp.json`` arg ``"P7D"`` stays fresh forever.
+    """
+    client = CLIENTS[0]
+    body, language, note = _body_for(client, METHODS[0], client.scopes[0], _DAYS)
+    assert body == (
+        "claude mcp add tmux -- uvx --exclude-newer <COOLDOWN_DURATION> libtmux-mcp"
+    )
+    assert language == "console"
+    assert note is None
+
+
+def test_body_for_uvx_bypass_inserts_no_config_flag() -> None:
+    """Bypass adds ``--no-config`` to the uvx command (flag form, not env)."""
+    client = CLIENTS[0]
+    body, language, note = _body_for(client, METHODS[0], client.scopes[0], _BYPASS)
+    assert body == "claude mcp add tmux -- uvx --no-config libtmux-mcp"
+    assert language == "console"
+    assert note is None  # uvx has a real bypass — no caveat
+
+
+def test_body_for_pipx_bypass_returns_caveat_note() -> None:
+    """Pipx bypass renders identically to off and surfaces a no-op note."""
+    client = CLIENTS[0]
+    pipx = next(m for m in METHODS if m.id == "pipx")
+    body_off, _, note_off = _body_for(client, pipx, client.scopes[0], _OFF)
+    body_bp, _, note_bp = _body_for(client, pipx, client.scopes[0], _BYPASS)
+    assert body_off == body_bp  # same command emitted
+    assert note_off is None
+    assert note_bp is not None
+    assert "pipx" in note_bp.lower()
+
+
+def test_body_for_pip_bypass_returns_caveat_note() -> None:
+    """Pip bypass renders identically to off and surfaces a no-op note."""
+    client = CLIENTS[0]
+    pip = next(m for m in METHODS if m.id == "pip")
+    body_off, _, note_off = _body_for(client, pip, client.scopes[0], _OFF)
+    body_bp, _, note_bp = _body_for(client, pip, client.scopes[0], _BYPASS)
+    assert body_off == body_bp
+    assert note_off is None
+    assert note_bp is not None
+    assert "pip" in note_bp.lower()
+
+
+def test_body_for_pipx_days_uses_pip_args_form_with_absolute_date() -> None:
+    """Pipx days uses absolute date (pipx 1.8.0's bundled pip rejects P<N>D)."""
+    client = CLIENTS[0]
+    pipx = next(m for m in METHODS if m.id == "pipx")
+    body, language, _ = _body_for(client, pipx, client.scopes[0], _DAYS)
+    assert "--pip-args=--uploaded-prior-to=<COOLDOWN_DATE>" in body
     assert language == "console"
 
 
-def test_body_for_json_client_returns_config_snippet() -> None:
+def test_body_for_json_client_off_returns_config_snippet() -> None:
     """JSON clients get the ``mcpServers`` config snippet for the chosen method."""
     claude_desktop = CLIENTS[1]
-    body, language = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0])
+    body, language, _ = _body_for(
+        claude_desktop, METHODS[0], claude_desktop.scopes[0], _OFF
+    )
     assert '"command": "uvx"' in body
     assert '"libtmux-mcp"' in body
     assert language == "json"
+
+
+def test_body_for_json_uvx_days_includes_exclude_newer_arg() -> None:
+    """Days mode for JSON-kind clients shows the duration flag in ``args``."""
+    claude_desktop = CLIENTS[1]
+    body, _, _ = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0], _DAYS)
+    assert '"--exclude-newer"' in body
+    assert '"<COOLDOWN_DURATION>"' in body
+
+
+def test_body_for_json_uvx_bypass_adds_env_block() -> None:
+    """Bypass for JSON uvx panels adds an ``env`` block setting UV_NO_CONFIG=1."""
+    claude_desktop = CLIENTS[1]
+    body, _, _ = _body_for(
+        claude_desktop, METHODS[0], claude_desktop.scopes[0], _BYPASS
+    )
+    assert '"env":' in body
+    assert '"UV_NO_CONFIG": "1"' in body
 
 
 def test_body_for_claude_code_project_inserts_scope_flag() -> None:
     """Non-default Claude Code scopes append ``--scope X`` to the install command."""
     claude_code = CLIENTS[0]
     project_scope = next(s for s in claude_code.scopes if s.id == "project")
-    body, language = _body_for(claude_code, METHODS[0], project_scope)
+    body, language, _ = _body_for(claude_code, METHODS[0], project_scope, _OFF)
     assert body == "claude mcp add tmux --scope project -- uvx libtmux-mcp"
     assert language == "console"
 
@@ -90,19 +189,44 @@ def test_body_for_codex_project_returns_toml() -> None:
     """Codex project is the one cell whose kind escapes the client's CLI shape."""
     codex = next(c for c in CLIENTS if c.id == "codex")
     project_scope = next(s for s in codex.scopes if s.id == "project")
-    body, language = _body_for(codex, METHODS[0], project_scope)
+    body, language, _ = _body_for(codex, METHODS[0], project_scope, _OFF)
     assert language == "toml"
     assert "[mcp_servers.tmux]" in body
     assert 'command = "uvx"' in body
+
+
+def test_body_for_codex_project_days_inlines_flag_in_toml_args() -> None:
+    """Codex project + days puts ``--exclude-newer <DURATION>`` in the args array."""
+    codex = next(c for c in CLIENTS if c.id == "codex")
+    project_scope = next(s for s in codex.scopes if s.id == "project")
+    body, language, _ = _body_for(codex, METHODS[0], project_scope, _DAYS)
+    assert language == "toml"
+    assert '"--exclude-newer"' in body
+    assert '"<COOLDOWN_DURATION>"' in body
 
 
 def test_body_for_gemini_user_inserts_scope_flag() -> None:
     """Gemini emits ``--scope`` between ``mcp add`` and the server slug."""
     gemini = next(c for c in CLIENTS if c.id == "gemini")
     user_scope = next(s for s in gemini.scopes if s.id == "user")
-    body, language = _body_for(gemini, METHODS[0], user_scope)
+    body, language, _ = _body_for(gemini, METHODS[0], user_scope, _OFF)
     assert body == "gemini mcp add --scope user tmux uvx -- libtmux-mcp"
     assert language == "console"
+
+
+def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
+    """Panel.pip_prereq is set only for the pip method, with cooldown applied."""
+    panels = build_panels()
+    pip_panels = [p for p in panels if p.method.id == "pip"]
+    non_pip = [p for p in panels if p.method.id != "pip"]
+    assert all(p.pip_prereq is None for p in non_pip)
+    assert all(p.pip_prereq is not None for p in pip_panels)
+    days_pip = next(p for p in pip_panels if p.cooldown.id == "days")
+    off_pip = next(p for p in pip_panels if p.cooldown.id == "off")
+    assert days_pip.pip_prereq is not None
+    assert off_pip.pip_prereq is not None
+    assert "--uploaded-prior-to <COOLDOWN_DURATION>" in days_pip.pip_prereq
+    assert "--uploaded-prior-to" not in off_pip.pip_prereq
 
 
 def test_body_for_unknown_kind_raises() -> None:
@@ -112,7 +236,96 @@ def test_body_for_unknown_kind_raises() -> None:
     fake_scope = Scope(id="user", label="User", config_file="", note=None)
     fake = Client(id="x", label="X", kind="bogus", scopes=(fake_scope,))
     with pytest.raises(ValueError, match="unknown client kind"):
-        _body_for(fake, METHODS[0], fake_scope)
+        _body_for(fake, METHODS[0], fake_scope, _OFF)
+
+
+# ---------- unit: cooldown_days_slot Jinja filter ------------------------
+
+
+def test_cooldown_days_slot_filter_swaps_duration_sentinel() -> None:
+    """``&lt;COOLDOWN_DURATION&gt;`` becomes a ``data-cooldown-duration-slot`` span.
+
+    Pygments escapes the body's ``<COOLDOWN_DURATION>`` sentinel to
+    ``&lt;COOLDOWN_DURATION&gt;`` before the filter runs; the filter
+    swaps that for the slot span carrying ``P<N>D`` as default text.
+    """
+    filt = make_cooldown_days_slot_filter()
+    inp = "uvx --exclude-newer &lt;COOLDOWN_DURATION&gt; libtmux-mcp"
+    out = str(filt(inp))
+    assert "&lt;COOLDOWN_DURATION&gt;" not in out
+    assert 'class="lm-mcp-install__cooldown-days"' in out
+    assert "data-cooldown-duration-slot" in out
+    assert f">P{DEFAULT_COOLDOWN_DAYS}D</span>" in out
+
+
+def test_cooldown_days_slot_filter_swaps_date_sentinel() -> None:
+    """``&lt;COOLDOWN_DATE&gt;`` becomes a ``data-cooldown-date-slot`` span.
+
+    The default date is computed at filter construction time from
+    ``today (UTC) - DEFAULT_COOLDOWN_DAYS``; ``widget.js`` overwrites
+    the slot's textContent on every page load.
+    """
+    filt = make_cooldown_days_slot_filter()
+    inp = "pipx run --pip-args=--uploaded-prior-to=&lt;COOLDOWN_DATE&gt; libtmux-mcp"
+    out = str(filt(inp))
+    assert "&lt;COOLDOWN_DATE&gt;" not in out
+    assert "data-cooldown-date-slot" in out
+    assert re.search(r"data-cooldown-date-slot>\d{4}-\d{2}-\d{2}<", out)
+
+
+def test_cooldown_days_slot_filter_is_no_op_without_sentinels() -> None:
+    """Off and bypass bodies never carry a sentinel and pass through unchanged."""
+    filt = make_cooldown_days_slot_filter()
+    inp = "uvx libtmux-mcp"
+    assert str(filt(inp)) == inp
+
+
+def test_cooldown_days_slot_filter_swaps_both_sentinels_in_one_html() -> None:
+    """A single page renders both uvx (duration) and pipx (date) snippets.
+
+    The Jinja filter is called per body, but the safety net is that a
+    single string with both sentinels still gets both swapped — drift
+    here would silently leave raw sentinels in the rendered HTML.
+    """
+    filt = make_cooldown_days_slot_filter()
+    inp = "left &lt;COOLDOWN_DURATION&gt; middle &lt;COOLDOWN_DATE&gt; right"
+    out = str(filt(inp))
+    assert "data-cooldown-duration-slot" in out
+    assert "data-cooldown-date-slot" in out
+    assert "&lt;COOLDOWN_" not in out
+
+
+def test_cooldown_days_slot_filter_returns_markupsafe_markup() -> None:
+    """Output is ``markupsafe.Markup`` so autoescape doesn't re-escape the span."""
+    import markupsafe
+
+    filt = make_cooldown_days_slot_filter()
+    out = filt("&lt;COOLDOWN_DURATION&gt;")
+    assert isinstance(out, markupsafe.Markup)
+
+
+def test_cooldown_days_slot_filter_registered_on_widget_render(
+    make_app: MakeApp,
+    real_widget_srcdir: pathlib.Path,
+) -> None:
+    """End-to-end: a rendered days-mode panel emits both slot spans correctly.
+
+    Guards against regressing the filter wiring in
+    ``BaseWidget.render()`` (i.e. ``jenv.filters["cooldown_days_slot"]``).
+    """
+    (real_widget_srcdir / "index.md").write_text(
+        "# Home\n\n```{mcp-install}\n```\n",
+        encoding="utf-8",
+    )
+    app = _build(make_app, real_widget_srcdir)
+    html = (pathlib.Path(app.outdir) / "index.html").read_text(encoding="utf-8")
+    # uvx + pip days bodies emit the duration slot; pipx days bodies
+    # emit the date slot. Both kinds must appear in any complete build.
+    assert "data-cooldown-duration-slot" in html
+    assert "data-cooldown-date-slot" in html
+    # And no raw sentinel escapes to the rendered page.
+    assert "&lt;COOLDOWN_DURATION&gt;" not in html
+    assert "&lt;COOLDOWN_DATE&gt;" not in html
 
 
 # ---------- integration: Sphinx build -------------------------------------

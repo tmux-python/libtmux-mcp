@@ -127,3 +127,244 @@
 .lm-mcp-install--compact .lm-mcp-install__body {
   padding: 0.7rem 0.8rem;
 }
+
+/* Cooldown control: sits on the right edge of the method row. The
+ * ``margin-inline-start: auto`` is the modern flex-trick to push to
+ * the end without disturbing the preceding tabs. */
+.lm-mcp-install__cooldown-control {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-inline-start: auto;
+  padding: 0 0.7rem 0 0.5rem;
+  color: var(--color-foreground-secondary);
+  font-size: 0.9em;
+}
+
+/* The .lm-mcp-install__cooldown-toggle styling lives in
+ * docs/_ext/widgets/_prehydrate.py inside the @layer mcp-install-prehydrate
+ * block — the appearance reset + checked-state visual must paint from the
+ * inline <head> style so native unchecked → checked flicker disappears. */
+
+.lm-mcp-install__cooldown-label-text {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  margin: 0;
+}
+
+.lm-mcp-install__cooldown-label-text:hover {
+  color: var(--color-foreground-primary);
+  border-bottom-color: var(--color-foreground-muted);
+}
+
+.lm-mcp-install__cooldown-label-text:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+  border-radius: 0.15rem;
+}
+
+.lm-mcp-install__cooldown-help {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  border-radius: 999px;
+  width: 1.3em;
+  height: 1.3em;
+  padding: 0;
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--color-foreground-secondary);
+  cursor: help;
+  line-height: 1;
+}
+
+.lm-mcp-install__cooldown-help:hover {
+  color: var(--color-brand-primary);
+  border-color: var(--color-brand-primary);
+}
+
+.lm-mcp-install__cooldown-help:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+/* Cooldown days slot inside snippets: inherits Pygments color from
+ * the surrounding string-literal span. Two ``data-*-slot`` attributes
+ * act as the JS hook for updating textContent on every cooldown-days
+ * change: ``data-cooldown-duration-slot`` (uvx + pip days bodies,
+ * carries ``P<N>D``) and ``data-cooldown-date-slot`` (pipx days bodies,
+ * carries ``YYYY-MM-DD``). */
+.lm-mcp-install__cooldown-days {
+  /* No own styling — the wrapping Pygments span carries the color. */
+}
+
+/* Cooldown caveat note rendered after snippets where bypass is a no-op. */
+.lm-mcp-install__cooldown-note {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.85em;
+  font-style: italic;
+  color: var(--color-foreground-secondary);
+  border-left: 2px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  padding-left: 0.6rem;
+}
+
+.lm-mcp-install__cooldown-note code {
+  font-style: normal;
+}
+
+/* Settings sub-view: lives next to the install body and swaps in via
+ * the ``[data-mcp-install-view="settings"]`` attribute on ``<html>``.
+ * No transitions on the swap — same lesson as the tab rows (see commit
+ * f23d7d5: animations during theme resolve are visible flicker). */
+.lm-mcp-install__body--settings {
+  display: none;
+  padding: 1rem 1.2rem 1.2rem;
+}
+
+html[data-mcp-install-view="settings"] .lm-mcp-install__body--install {
+  display: none;
+}
+
+html[data-mcp-install-view="settings"] .lm-mcp-install__body--settings {
+  display: block;
+}
+
+/* Settings header: back button + title share one row, both flush to the
+ * top-left of the settings body's content area (the body's own padding
+ * supplies the gap to the widget edge). Sizes track the widget's base
+ * font scale (the host ``.lm-mcp-install`` is 0.95em). */
+.lm-mcp-install__settings-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.8rem 0;
+}
+
+.lm-mcp-install__back {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  border-radius: 0.25rem;
+  color: var(--color-foreground-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: 0.85em;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+}
+
+.lm-mcp-install__back:hover {
+  color: var(--color-foreground-primary);
+  border-color: var(--color-foreground-secondary);
+  background: var(--color-background-hover, rgba(0, 0, 0, 0.04));
+}
+
+.lm-mcp-install__back:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.lm-mcp-install__back-icon {
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.lm-mcp-install__settings-title {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--color-foreground-primary);
+}
+
+.lm-mcp-install__settings-help {
+  margin: 0 0 0.8rem 0;
+  font-size: 0.9em;
+  color: var(--color-foreground-secondary);
+}
+
+.lm-mcp-install__settings-help em {
+  font-style: italic;
+}
+
+.lm-mcp-install__settings-modes {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.lm-mcp-install__settings-mode {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.lm-mcp-install__settings-mode input[type="radio"] {
+  cursor: pointer;
+}
+
+.lm-mcp-install__cooldown-days-input {
+  width: 4.5em;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  border-radius: 0.2rem;
+  background: var(--color-background-primary);
+  color: var(--color-foreground-primary);
+  font: inherit;
+  font-size: 0.95em;
+}
+
+.lm-mcp-install__cooldown-explainer {
+  border-top: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  padding-top: 0.7rem;
+  margin-top: 0.5rem;
+  color: var(--color-foreground-secondary);
+  font-size: 0.9em;
+}
+
+.lm-mcp-install__cooldown-explainer summary {
+  cursor: pointer;
+  color: var(--color-brand-content, var(--color-brand-primary));
+  margin-bottom: 0.5rem;
+}
+
+.lm-mcp-install__cooldown-explainer p {
+  margin: 0 0 0.5rem 0;
+}
+
+.lm-mcp-install__cooldown-explainer a {
+  color: var(--color-brand-content, var(--color-brand-primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lm-mcp-install__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Compact variant tightens the cooldown control too. */
+.lm-mcp-install--compact .lm-mcp-install__cooldown-control {
+  font-size: 0.85em;
+  padding: 0 0.5rem 0 0.4rem;
+}
