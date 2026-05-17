@@ -167,16 +167,17 @@
 
   function onInput(e) {
     // ``input`` fires on every keystroke for number inputs. We mirror
-    // the value into the slot span so the snippet updates in real time
-    // even before the user blurs the field. localStorage write happens
-    // only on ``change`` (see onChange) to avoid hammering writes.
+    // the computed cutoff date into every slot span so the snippet
+    // updates in real time even before the user blurs the field.
+    // localStorage write happens only on ``change`` (see onChange) to
+    // avoid hammering writes.
     var el = e.target.closest('[data-action="cooldown-days"]');
     if (!el) return;
     var widget = el.closest(".lm-mcp-install");
     if (!widget) return;
     var n = parseInt(el.value, 10);
     if (!isNaN(n) && n >= 1) {
-      updateAllCooldownDaysSlots(n);
+      updateAllCooldownDateSlots(n);
       document.documentElement.setAttribute("data-mcp-install-cooldown-days", String(n));
     }
   }
@@ -380,7 +381,7 @@
     var n = clampDays(days);
     document.documentElement.setAttribute("data-mcp-install-cooldown-days", String(n));
     if (opts.persist) localStorage.setItem(STORAGE.cooldownDays, String(n));
-    updateAllCooldownDaysSlots(n);
+    updateAllCooldownDateSlots(n);
     // Sync the days input across every widget (multi-widget page).
     document.querySelectorAll('[data-action="cooldown-days"]').forEach(function (input) {
       if (document.activeElement !== input) input.value = String(n);
@@ -394,9 +395,19 @@
     }
   }
 
-  function updateAllCooldownDaysSlots(n) {
-    document.querySelectorAll("[data-cooldown-days-slot]").forEach(function (slot) {
-      slot.textContent = String(n);
+  function daysToIsoDate(n) {
+    // YYYY-MM-DD in UTC. We use an absolute date rather than ISO 8601
+    // duration (P<N>D) because pipx 1.8.0 bundles a pip older than 26.1,
+    // which rejects the duration syntax. Absolute dates work in uv,
+    // pip 26.0+, and pipx's bundled pip — portable across the matrix.
+    var ms = Date.now() - n * 86400000;
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+
+  function updateAllCooldownDateSlots(n) {
+    var iso = daysToIsoDate(n);
+    document.querySelectorAll("[data-cooldown-date-slot]").forEach(function (slot) {
+      slot.textContent = iso;
     });
   }
 
@@ -413,10 +424,12 @@
     if (daysInput && document.activeElement !== daysInput) {
       daysInput.value = String(days);
     }
-    // Days slots inside snippets (this widget's panels only — other widgets
-    // get updated by their own applyCooldownToWidget call in applySavedState).
-    widget.querySelectorAll("[data-cooldown-days-slot]").forEach(function (slot) {
-      slot.textContent = String(days);
+    // Cooldown date slots inside snippets (this widget's panels only —
+    // other widgets get updated by their own applyCooldownToWidget call in
+    // applySavedState).
+    var iso = daysToIsoDate(days);
+    widget.querySelectorAll("[data-cooldown-date-slot]").forEach(function (slot) {
+      slot.textContent = iso;
     });
   }
 

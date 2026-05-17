@@ -227,15 +227,33 @@ DEFAULT_COOLDOWN_DAYS: int = 7
 
 
 # Sentinel that ``cooldown_days_slot`` (in ``_base.py``) replaces with a
-# ``<span data-cooldown-days-slot>7</span>`` after Pygments has escaped it
-# to ``&lt;DAYS&gt;``. The default text node is ``7``; ``widget.js``
-# updates ``textContent`` when the user picks a different value.
-_DAYS_SENTINEL = "<DAYS>"
+# ``<span data-cooldown-date-slot>YYYY-MM-DD</span>`` after Pygments has
+# escaped it to ``&lt;COOLDOWN_DATE&gt;``. We emit an absolute date instead
+# of ISO 8601 duration (``P7D``) because pipx 1.8.0 bundles a pip older
+# than 26.1, which doesn't accept the duration form. Absolute dates have
+# worked across uv, pip 26.0+, and pipx's bundled pip — so this is the
+# portable form. ``widget.js`` rewrites the slot's ``textContent`` to
+# ``today - savedDays days`` whenever the user changes the days input.
+_DATE_SENTINEL = "<COOLDOWN_DATE>"
+
+
+def default_cooldown_date(days: int) -> str:
+    """Return the ISO date string for *today (UTC) - days*.
+
+    Used as the build-time default for the cooldown-date slot so the
+    server-rendered snippet shows a valid date before JS hydration.
+    """
+    import datetime as _datetime
+
+    cutoff = _datetime.datetime.now(_datetime.timezone.utc) - _datetime.timedelta(
+        days=days
+    )
+    return cutoff.date().isoformat()
 
 
 PIP_PREREQ_OFF: str = "pip install --user --upgrade libtmux libtmux-mcp"
 PIP_PREREQ_DAYS: str = (
-    f"pip install --user --upgrade --uploaded-prior-to P{_DAYS_SENTINEL}D"
+    f"pip install --user --upgrade --uploaded-prior-to {_DATE_SENTINEL}"
     " libtmux libtmux-mcp"
 )
 
@@ -262,16 +280,14 @@ def _tool_command(method: Method, cooldown: Cooldown) -> str:
     """
     if method.id == "uvx":
         if cooldown.id == "days":
-            return f"uvx --exclude-newer P{_DAYS_SENTINEL}D libtmux-mcp"
+            return f"uvx --exclude-newer {_DATE_SENTINEL} libtmux-mcp"
         if cooldown.id == "bypass":
             return "uvx --no-config libtmux-mcp"
         return "uvx libtmux-mcp"
     if method.id == "pipx":
         if cooldown.id == "days":
             return (
-                "pipx run"
-                f" --pip-args=--uploaded-prior-to=P{_DAYS_SENTINEL}D"
-                " libtmux-mcp"
+                f"pipx run --pip-args=--uploaded-prior-to={_DATE_SENTINEL} libtmux-mcp"
             )
         # off + bypass (pipx default backend has no global cooldown)
         return "pipx run libtmux-mcp"
@@ -313,7 +329,7 @@ def _json_body(method: Method, cooldown: Cooldown) -> str:
     if method.id == "uvx":
         command = "uvx"
         if cooldown.id == "days":
-            args = f'"--exclude-newer", "P{_DAYS_SENTINEL}D", "libtmux-mcp"'
+            args = f'"--exclude-newer", "{_DATE_SENTINEL}", "libtmux-mcp"'
         else:
             args = '"libtmux-mcp"'
     elif method.id == "pipx":
@@ -321,7 +337,7 @@ def _json_body(method: Method, cooldown: Cooldown) -> str:
         if cooldown.id == "days":
             args = (
                 '"run", "--pip-args=--uploaded-prior-to='
-                f'P{_DAYS_SENTINEL}D", "libtmux-mcp"'
+                f'{_DATE_SENTINEL}", "libtmux-mcp"'
             )
         else:
             args = '"run", "libtmux-mcp"'
@@ -357,12 +373,12 @@ def _toml_body(method: Method, cooldown: Cooldown) -> str:
     if method.id == "uvx":
         command, args_inner = "uvx", '"libtmux-mcp"'
         if cooldown.id == "days":
-            args_inner = f'"--exclude-newer", "P{_DAYS_SENTINEL}D", "libtmux-mcp"'
+            args_inner = f'"--exclude-newer", "{_DATE_SENTINEL}", "libtmux-mcp"'
     elif method.id == "pipx":
         command, args_inner = "pipx", '"run", "libtmux-mcp"'
         if cooldown.id == "days":
             args_inner = (
-                f'"run", "--pip-args=--uploaded-prior-to=P{_DAYS_SENTINEL}D",'
+                f'"run", "--pip-args=--uploaded-prior-to={_DATE_SENTINEL}",'
                 ' "libtmux-mcp"'
             )
     else:  # pip

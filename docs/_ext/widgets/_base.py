@@ -117,30 +117,46 @@ class BaseWidget(abc.ABC):
 
 
 def make_cooldown_days_slot_filter() -> CooldownDaysSlotFilter:
-    """Return a Jinja filter that injects a days-slot ``<span>`` into HTML.
+    """Return a Jinja filter that injects a cooldown-date slot ``<span>``.
 
-    The Pygments highlighter escapes the ``<DAYS>`` sentinel emitted in
-    days-mode bodies (see :mod:`docs._ext.widgets.mcp_install`) to
-    ``&lt;DAYS&gt;``. This filter walks the highlighted output and
-    swaps every occurrence with a span whose default text content is
-    ``7``:
+    The Pygments highlighter escapes the ``<COOLDOWN_DATE>`` sentinel
+    emitted in days-mode bodies (see :mod:`docs._ext.widgets.mcp_install`)
+    to ``&lt;COOLDOWN_DATE&gt;``. This filter walks the highlighted
+    output and swaps every occurrence with a span whose default text
+    content is the ISO-date string for *today - default-days*:
 
     .. code-block:: html
 
-        <span class="lm-mcp-install__cooldown-days" data-cooldown-days-slot>7</span>
+        <span class="lm-mcp-install__cooldown-days"
+              data-cooldown-date-slot>2026-05-10</span>
+
+    We pick the *absolute date* form rather than ISO 8601 duration
+    (``P7D``) because pipx 1.8.0 bundles a pip older than 26.1; the
+    duration syntax fails there with ``Invalid isoformat``. Absolute
+    dates have worked since pip 26.0 and across uv's
+    ``--exclude-newer``, so the resulting snippet is portable across
+    every tool in the matrix.
 
     The span lives inside a Pygments string-literal span, so it
-    inherits the parent's color but its ``textContent`` can be
-    rewritten by ``widget.js`` when the user picks a different cooldown
-    length. The filter is a no-op for outputs without the sentinel
-    (off and bypass cooldown modes never emit one).
+    inherits the parent's color but its ``textContent`` is rewritten
+    by ``widget.js`` whenever the user changes the days input. The
+    build-time default drifts by build cadence — JS picks up the
+    current ``today - savedDays`` value on every page load so the
+    rendered snippet stays accurate.
+
+    The filter is a no-op for outputs without the sentinel (off and
+    bypass cooldown modes never emit one).
     """
+    from .mcp_install import DEFAULT_COOLDOWN_DAYS, default_cooldown_date
+
+    default_date = default_cooldown_date(DEFAULT_COOLDOWN_DAYS)
     span = (
-        '<span class="lm-mcp-install__cooldown-days" data-cooldown-days-slot>7</span>'
+        '<span class="lm-mcp-install__cooldown-days" data-cooldown-date-slot>'
+        f"{default_date}</span>"
     )
 
     def _filter(html: object) -> markupsafe.Markup:
-        return markupsafe.Markup(str(html).replace("&lt;DAYS&gt;", span))
+        return markupsafe.Markup(str(html).replace("&lt;COOLDOWN_DATE&gt;", span))
 
     return _filter
 

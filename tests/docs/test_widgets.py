@@ -85,10 +85,18 @@ def test_body_for_cli_client_off_returns_clean_command() -> None:
 
 
 def test_body_for_uvx_days_inserts_exclude_newer_sentinel() -> None:
-    """Days mode adds ``--exclude-newer P<DAYS>D`` before ``libtmux-mcp``."""
+    """Days mode adds ``--exclude-newer <DATE>`` before ``libtmux-mcp``.
+
+    The widget emits an absolute-date sentinel (rather than ``P<N>D``
+    duration) because pipx 1.8.0 bundles a pip older than 26.1, which
+    only accepts absolute datetimes. Using the same sentinel across uv,
+    pip, and pipx keeps the rendered snippets portable.
+    """
     client = CLIENTS[0]
     body, language, note = _body_for(client, METHODS[0], client.scopes[0], _DAYS)
-    assert body == "claude mcp add tmux -- uvx --exclude-newer P<DAYS>D libtmux-mcp"
+    assert (
+        body == "claude mcp add tmux -- uvx --exclude-newer <COOLDOWN_DATE> libtmux-mcp"
+    )
     assert language == "console"
     assert note is None
 
@@ -131,7 +139,7 @@ def test_body_for_pipx_days_uses_pip_args_form() -> None:
     client = CLIENTS[0]
     pipx = next(m for m in METHODS if m.id == "pipx")
     body, language, _ = _body_for(client, pipx, client.scopes[0], _DAYS)
-    assert "--pip-args=--uploaded-prior-to=P<DAYS>D" in body
+    assert "--pip-args=--uploaded-prior-to=<COOLDOWN_DATE>" in body
     assert language == "console"
 
 
@@ -151,7 +159,7 @@ def test_body_for_json_uvx_days_includes_exclude_newer_arg() -> None:
     claude_desktop = CLIENTS[1]
     body, _, _ = _body_for(claude_desktop, METHODS[0], claude_desktop.scopes[0], _DAYS)
     assert '"--exclude-newer"' in body
-    assert '"P<DAYS>D"' in body
+    assert '"<COOLDOWN_DATE>"' in body
 
 
 def test_body_for_json_uvx_bypass_adds_env_block() -> None:
@@ -184,13 +192,13 @@ def test_body_for_codex_project_returns_toml() -> None:
 
 
 def test_body_for_codex_project_days_inlines_flag_in_toml_args() -> None:
-    """Codex project + days puts ``--exclude-newer P<DAYS>D`` in the args array."""
+    """Codex project + days puts ``--exclude-newer <DATE>`` in the args array."""
     codex = next(c for c in CLIENTS if c.id == "codex")
     project_scope = next(s for s in codex.scopes if s.id == "project")
     body, language, _ = _body_for(codex, METHODS[0], project_scope, _DAYS)
     assert language == "toml"
     assert '"--exclude-newer"' in body
-    assert '"P<DAYS>D"' in body
+    assert '"<COOLDOWN_DATE>"' in body
 
 
 def test_body_for_gemini_user_inserts_scope_flag() -> None:
@@ -213,7 +221,7 @@ def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
     off_pip = next(p for p in pip_panels if p.cooldown.id == "off")
     assert days_pip.pip_prereq is not None
     assert off_pip.pip_prereq is not None
-    assert "--uploaded-prior-to P<DAYS>D" in days_pip.pip_prereq
+    assert "--uploaded-prior-to <COOLDOWN_DATE>" in days_pip.pip_prereq
     assert "--uploaded-prior-to" not in off_pip.pip_prereq
 
 
