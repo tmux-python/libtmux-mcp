@@ -2,231 +2,19 @@
 
 # MCP Clients
 
-Copy-pasteable configuration for every supported MCP client. If your client isn't listed, any tool supporting MCP stdio transport will work with the JSON config pattern.
+Pick your client, install method, and config scope below — the snippet
+updates accordingly. The scope row appears only for clients with more
+than one scope (Claude Desktop is always user-level so it has no scope
+row). The full table of file locations is at the bottom of the page.
 
-See {ref}`migration` for the recommended `tmux` registration slug
-(existing `libtmux` registrations keep working).
-
-## Claude Code
-
-`````{tab} uvx
-With [uv](https://docs.astral.sh/uv/) installed:
-
-```console
-$ claude mcp add tmux -- uvx libtmux-mcp
-```
-`````
-
-`````{tab} pipx
-With [pipx](https://pipx.pypa.io/) installed:
-
-```console
-$ claude mcp add tmux -- pipx run libtmux-mcp
-```
-`````
-
-`````{tab} pip install
-Install the packages first:
-
-```console
-$ pip install --user --upgrade libtmux libtmux-mcp
+```{mcp-install}
+:variant: full
 ```
 
-Then register:
-
-```console
-$ claude mcp add tmux -- libtmux-mcp
-```
-`````
-
-Config file: `.mcp.json` (project) or `~/.claude.json` (global).
-
-## Claude Desktop
-
-Add to `claude_desktop_config.json`:
-
-`````{tab} uvx
-With [uv](https://docs.astral.sh/uv/) installed:
-
-```json
-{
-    "mcpServers": {
-        "tmux": {
-            "command": "uvx",
-            "args": ["libtmux-mcp"]
-        }
-    }
-}
-```
-`````
-
-`````{tab} pipx
-With [pipx](https://pipx.pypa.io/) installed:
-
-```json
-{
-    "mcpServers": {
-        "tmux": {
-            "command": "pipx",
-            "args": ["run", "libtmux-mcp"]
-        }
-    }
-}
-```
-`````
-
-`````{tab} pip install
-Install the packages first:
-
-```console
-$ pip install --user --upgrade libtmux libtmux-mcp
-```
-
-Then use this config:
-
-```json
-{
-    "mcpServers": {
-        "tmux": {
-            "command": "libtmux-mcp"
-        }
-    }
-}
-```
-`````
-
-## Codex CLI
-
-`````{tab} uvx
-With [uv](https://docs.astral.sh/uv/) installed:
-
-```console
-$ codex mcp add tmux -- uvx libtmux-mcp
-```
-`````
-
-`````{tab} pipx
-With [pipx](https://pipx.pypa.io/) installed:
-
-```console
-$ codex mcp add tmux -- pipx run libtmux-mcp
-```
-`````
-
-`````{tab} pip install
-Install the packages first:
-
-```console
-$ pip install --user --upgrade libtmux libtmux-mcp
-```
-
-Then register:
-
-```console
-$ codex mcp add tmux -- libtmux-mcp
-```
-`````
-
-<details>
-<summary>config.toml format</summary>
-
-Add to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.tmux]
-command = "uvx"
-args = ["libtmux-mcp"]
-```
-
-</details>
-
-## Gemini CLI
-
-`````{tab} uvx
-With [uv](https://docs.astral.sh/uv/) installed:
-
-```console
-$ gemini mcp add tmux uvx -- libtmux-mcp
-```
-`````
-
-`````{tab} pipx
-With [pipx](https://pipx.pypa.io/) installed:
-
-```console
-$ gemini mcp add tmux pipx -- run libtmux-mcp
-```
-`````
-
-`````{tab} pip install
-Install the packages first:
-
-```console
-$ pip install --user --upgrade libtmux libtmux-mcp
-```
-
-Then register:
-
-```console
-$ gemini mcp add tmux libtmux-mcp
-```
-`````
-
-Config file: `~/.gemini/settings.json` (JSON format, same schema as Claude Desktop).
-
-## Cursor
-
-Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
-
-`````{tab} uvx
-With [uv](https://docs.astral.sh/uv/) installed:
-
-```json
-{
-    "mcpServers": {
-        "tmux": {
-            "command": "uvx",
-            "args": ["libtmux-mcp"]
-        }
-    }
-}
-```
-`````
-
-`````{tab} pipx
-With [pipx](https://pipx.pypa.io/) installed:
-
-```json
-{
-    "mcpServers": {
-        "tmux": {
-            "command": "pipx",
-            "args": ["run", "libtmux-mcp"]
-        }
-    }
-}
-```
-`````
-
-`````{tab} pip install
-Install the packages first:
-
-```console
-$ pip install --user --upgrade libtmux libtmux-mcp
-```
-
-Then use this config:
-
-```json
-{
-    "mcpServers": {
-        "tmux": {
-            "command": "libtmux-mcp"
-        }
-    }
-}
-```
-`````
+If your client isn't listed, any tool supporting MCP stdio transport
+will work with the JSON config pattern shown for Claude Desktop or
+Cursor. See {ref}`migration` for the recommended `tmux` registration
+slug (existing `libtmux` registrations keep working).
 
 ## MCP Inspector
 
@@ -240,10 +28,10 @@ $ npx @modelcontextprotocol/inspector
 
 | Client | Config file | Format |
 |--------|-------------|--------|
-| Claude Code | `.mcp.json` (project) or `~/.claude.json` (global) | JSON |
+| Claude Code | `.mcp.json` (project) or `~/.claude.json` (local/user) | JSON |
 | Claude Desktop | `claude_desktop_config.json` | JSON |
-| Codex CLI | `~/.codex/config.toml` | TOML |
-| Gemini CLI | `~/.gemini/settings.json` | JSON |
+| Codex CLI | `~/.codex/config.toml` (user) or `.codex/config.toml` (project, manual) | TOML |
+| Gemini CLI | `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project) | JSON |
 | Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) | JSON |
 
 ## Local checkout (development)
