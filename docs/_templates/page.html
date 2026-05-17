@@ -11,13 +11,13 @@
 
 {% block logo_prefetch_links %}
 {%- if logo_url -%}
-<link rel="preload" href="{{ logo_url }}" as="image">
+<link rel="preload" href="{{ logo_url }}" as="image" fetchpriority="high">
 {%- elif theme_light_logo and theme_dark_logo -%}
 {%- set light_path = pathto('_static/' + theme_light_logo, 1) -%}
 {%- set dark_path = pathto('_static/' + theme_dark_logo, 1) -%}
-<link rel="preload" href="{{ light_path }}" as="image">
+<link rel="preload" href="{{ light_path }}" as="image" fetchpriority="high">
 {%- if dark_path != light_path %}
-<link rel="preload" href="{{ dark_path }}" as="image">
+<link rel="preload" href="{{ dark_path }}" as="image" fetchpriority="high">
 {%- endif -%}
 {%- endif -%}
 {% endblock %}
