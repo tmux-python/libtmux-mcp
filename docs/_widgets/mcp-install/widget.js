@@ -123,6 +123,11 @@
     var tabWidget = tab.closest(".lm-mcp-install");
     if (!tabWidget) return;
     select(tabWidget, tab.dataset.tabKind, tab.dataset.tabValue, { persist: true, broadcast: true });
+    // Tab clicks are an install-side action — if the user was mid-
+    // configuring cooldowns, the click implies they want to see the
+    // snippet for their new selection. Return to install view so the
+    // updated panel is visible.
+    setView("install");
   }
 
   function handleCooldownAction(widget, el, event) {
