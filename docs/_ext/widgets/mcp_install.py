@@ -29,7 +29,6 @@ in ``docs/_ext/widgets/_base.py``.
 from __future__ import annotations
 
 import collections.abc
-import textwrap
 import typing as t
 from dataclasses import dataclass
 
@@ -360,26 +359,31 @@ def _json_body(method: Method, cooldown: Cooldown) -> str:
         command = "libtmux-mcp"
         args = None
 
-    server_lines = [f'"command": "{command}"']
-    if args is not None:
-        server_lines.append(f'"args": [{args}]')
-    # Bypass via env block only applies to uvx (pipx + pip have no
-    # global uv cooldown to skip). The per-panel ``note`` field tells
-    # the reader so on non-applicable combos.
-    if cooldown.id == "bypass" and method.id == "uvx":
-        server_lines.append('"env": { "UV_NO_CONFIG": "1" }')
-
+    # Build server-object members at the 12-space indent (3 levels deep:
+    # top → mcpServers → tmux → here). Bypass via ``env`` only applies to
+    # uvx (pipx + pip have no global uv cooldown to skip); the per-panel
+    # ``note`` field surfaces the no-op caveat on those combos.
     server_indent = _JSON_INDENT * 3
-    inner = (",\n" + server_indent).join(server_lines)
-    return textwrap.dedent(
-        f"""\
-        {{
-            "mcpServers": {{
-                "tmux": {{
-                    {inner}
-                }}
-            }}
-        }}"""
+    server_lines = [server_indent + f'"command": "{command}"']
+    if args is not None:
+        server_lines.append(server_indent + f'"args": [{args}]')
+    if cooldown.id == "bypass" and method.id == "uvx":
+        server_lines.append(server_indent + '"env": { "UV_NO_CONFIG": "1" }')
+    server_block = ",\n".join(server_lines)
+    # Avoid ``textwrap.dedent`` here — the f-string-then-dedent pattern
+    # collapses when the substituted ``inner`` block lands lines at a
+    # smaller indent than the surrounding template, breaking the
+    # post-dedent alignment of every member except the first. Explicit
+    # per-line indents keep the output stable regardless of source
+    # whitespace.
+    return (
+        "{\n"
+        f'{_JSON_INDENT}"mcpServers": {{\n'
+        f'{_JSON_INDENT * 2}"tmux": {{\n'
+        f"{server_block}\n"
+        f"{_JSON_INDENT * 2}}}\n"
+        f"{_JSON_INDENT}}}\n"
+        "}"
     )
 
 
