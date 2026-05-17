@@ -80,6 +80,29 @@ def test_default_cooldown_constants() -> None:
     assert DEFAULT_COOLDOWN_DAYS > 0
 
 
+def test_prehydrate_script_defaults_client_and_method() -> None:
+    """Prehydrate script must hard-code first-visit defaults for every attr.
+
+    A missing default on any of (client, method, scope, cooldown-*) lets the
+    CSS panel-active selectors in ``_panel_active_selectors`` fall through —
+    no panel matches, every panel paints ``display:none``, and the widget
+    grows by the panel's height at DOMContentLoaded once ``widget.js`` fills
+    the missing attr. That growth shifts the cards row below it down, which
+    is a measurable layout shift on first visit (empty ``localStorage``).
+    Lock the ``||"<default>"`` fallback in for both ``client`` *and*
+    ``method`` so the next person can't drop one without the test catching it.
+    """
+    from docs._ext.widgets._prehydrate import _script
+
+    script = _script()
+    # The four legs of the CSS panel selector. ``scope`` falls back to the
+    # ``DEFAULT_SCOPES`` table keyed by client; cooldown attrs have inline
+    # string defaults. Method + client must hard-code the first registered
+    # value as their fallback.
+    assert f'"libtmux-mcp.mcp-install.client")||"{CLIENTS[0].id}"' in script
+    assert f'"libtmux-mcp.mcp-install.method")||"{METHODS[0].id}"' in script
+
+
 def test_body_for_cli_client_off_returns_clean_command() -> None:
     """Cooldown off leaves the existing CLI command intact (no extra flags)."""
     client = CLIENTS[0]  # claude-code

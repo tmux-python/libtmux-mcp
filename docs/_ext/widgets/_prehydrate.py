@@ -163,7 +163,9 @@ def _script() -> str:
         'var c=localStorage.getItem("libtmux-mcp.mcp-install.client")||"'
         + CLIENTS[0].id
         + '";'
-        'var m=localStorage.getItem("libtmux-mcp.mcp-install.method");'
+        'var m=localStorage.getItem("libtmux-mcp.mcp-install.method")||"'
+        + METHODS[0].id
+        + '";'
         'var s=localStorage.getItem("libtmux-mcp.mcp-install.scope."+c)||d[c];'
         'var ce=localStorage.getItem("libtmux-mcp.mcp-install.cooldown.enabled")||"'
         + enabled_default
