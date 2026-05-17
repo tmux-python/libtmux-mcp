@@ -11,10 +11,11 @@
  * keeps tab aria-selected and the <html> data-attrs in sync with the
  * current selection. The CSS handles the rest.
  *
- * Scope is per-client: the localStorage key is
- * libtmux-mcp.mcp-install.scope.<client_id>. Switching clients reads
- * that client's saved scope (or DEFAULT_SCOPES fallback) and re-applies
- * it; switching scope writes to the current client's slot only.
+ * Scope is per-client (storage key `libtmux-mcp.mcp-install.scope.<id>`).
+ * Cooldown is global (storage keys `libtmux-mcp.mcp-install.cooldown.mode`
+ * and `.cooldown.days`). The cooldown days value is also reflected into
+ * every `[data-cooldown-days-slot]` span's textContent on save so the
+ * rendered snippet stays copy-pasteable.
  *
  * Vanilla JS, no deps.
  */
@@ -25,6 +26,8 @@
     client: "libtmux-mcp.mcp-install.client",
     method: "libtmux-mcp.mcp-install.method",
     scope: function (client) { return "libtmux-mcp.mcp-install.scope." + client; },
+    cooldownMode: "libtmux-mcp.mcp-install.cooldown.mode",
+    cooldownDays: "libtmux-mcp.mcp-install.cooldown.days",
   };
 
   // Mirror of docs/_ext/widgets/mcp_install.py:DEFAULT_SCOPES. The prehydrate
@@ -39,10 +42,16 @@
     "cursor": "project",
   };
 
+  var DEFAULT_COOLDOWN_MODE = "off";
+  var DEFAULT_COOLDOWN_DAYS = 7;
+  var VALID_COOLDOWN_MODES = { off: 1, days: 1, bypass: 1 };
+
   var SYNC_EVENT = "lm-mcp-install:change";
 
   // Bind once on document/window — these listeners survive every SPA swap.
   document.addEventListener("click", onClick);
+  document.addEventListener("change", onChange);
+  document.addEventListener("input", onInput);
   document.addEventListener("keydown", onKeydown);
   window.addEventListener(SYNC_EVENT, onBroadcast);
 
@@ -59,6 +68,8 @@
     if (!widgets.length) return;
     var savedClient = localStorage.getItem(STORAGE.client);
     var savedMethod = localStorage.getItem(STORAGE.method);
+    var savedMode = readCooldownMode();
+    var savedDays = readCooldownDays();
     widgets.forEach(function (widget) {
       // Always re-select client (saved or server-default). Selecting the
       // client also restores that client's saved scope as a side effect
@@ -74,15 +85,100 @@
       // call that pushes the SSR defaults onto <html data-mcp-install-*>
       // so the prehydrate CSS rules have all three attrs to match against.
       syncHtmlAttrs(widget);
+      // Cooldown state: paint UI + slot text from the same saved values
+      // the prehydrate script already pushed onto <html>.
+      applyCooldownToWidget(widget, savedMode, savedDays);
     });
+    // Settings view is transient — always reset to install view on
+    // first load and every SPA nav. (The user wouldn't expect to land
+    // mid-form on a new page.)
+    setView("install");
   }
 
   function onClick(e) {
+    var action = e.target.closest("[data-action]");
+    if (action) {
+      var widget = action.closest(".lm-mcp-install");
+      if (widget) {
+        if (handleCooldownAction(widget, action, e)) return;
+      }
+    }
     var tab = e.target.closest(".lm-mcp-install__tab");
     if (!tab) return;
-    var widget = tab.closest(".lm-mcp-install");
+    var tabWidget = tab.closest(".lm-mcp-install");
+    if (!tabWidget) return;
+    select(tabWidget, tab.dataset.tabKind, tab.dataset.tabValue, { persist: true, broadcast: true });
+  }
+
+  function handleCooldownAction(widget, el, event) {
+    var action = el.dataset.action;
+    if (action === "cooldown-toggle") {
+      // Native checkbox change runs through onChange. Don't double-handle.
+      return false;
+    }
+    if (action === "cooldown-open") {
+      setView("settings");
+      event.preventDefault();
+      return true;
+    }
+    if (action === "cooldown-help") {
+      setView("settings");
+      var details = widget.querySelector(".lm-mcp-install__cooldown-explainer");
+      if (details) details.open = true;
+      event.preventDefault();
+      return true;
+    }
+    if (action === "cooldown-back") {
+      setView("install");
+      event.preventDefault();
+      return true;
+    }
+    return false;
+  }
+
+  function onChange(e) {
+    var el = e.target.closest("[data-action]");
+    if (!el) return;
+    var widget = el.closest(".lm-mcp-install");
     if (!widget) return;
-    select(widget, tab.dataset.tabKind, tab.dataset.tabValue, { persist: true, broadcast: true });
+    var action = el.dataset.action;
+    if (action === "cooldown-toggle") {
+      var nextMode = el.checked
+        ? (readCooldownMode() !== "off" ? readCooldownMode() : "days")
+        : "off";
+      setCooldownMode(nextMode, { persist: true, broadcast: true });
+      if (el.checked) setView("settings");
+      else setView("install");
+      return;
+    }
+    if (action === "cooldown-mode") {
+      setCooldownMode(el.value, { persist: true, broadcast: true });
+      return;
+    }
+    if (action === "cooldown-days") {
+      var n = clampDays(parseInt(el.value, 10));
+      setCooldownDays(n, { persist: true, broadcast: true });
+      // Also flip mode to "days" so the snippet reflects the input.
+      if (readCooldownMode() !== "days") {
+        setCooldownMode("days", { persist: true, broadcast: true });
+      }
+    }
+  }
+
+  function onInput(e) {
+    // ``input`` fires on every keystroke for number inputs. We mirror
+    // the value into the slot span so the snippet updates in real time
+    // even before the user blurs the field. localStorage write happens
+    // only on ``change`` (see onChange) to avoid hammering writes.
+    var el = e.target.closest('[data-action="cooldown-days"]');
+    if (!el) return;
+    var widget = el.closest(".lm-mcp-install");
+    if (!widget) return;
+    var n = parseInt(el.value, 10);
+    if (!isNaN(n) && n >= 1) {
+      updateAllCooldownDaysSlots(n);
+      document.documentElement.setAttribute("data-mcp-install-cooldown-days", String(n));
+    }
   }
 
   function onKeydown(e) {
@@ -96,6 +192,14 @@
   function onBroadcast(event) {
     document.querySelectorAll(".lm-mcp-install").forEach(function (widget) {
       if (widget === event.detail.origin) return;
+      if (event.detail.kind === "cooldown-mode") {
+        applyCooldownToWidget(widget, event.detail.value, readCooldownDays());
+        return;
+      }
+      if (event.detail.kind === "cooldown-days") {
+        applyCooldownToWidget(widget, readCooldownMode(), event.detail.value);
+        return;
+      }
       select(widget, event.detail.kind, event.detail.value, { persist: false, broadcast: false });
     });
   }
@@ -234,5 +338,91 @@
     event.preventDefault();
     tabs[next].focus();
     select(widget, kind, tabs[next].dataset.tabValue, { persist: true, broadcast: true });
+  }
+
+  // -------- cooldown helpers --------------------------------------------
+
+  function readCooldownMode() {
+    var m = localStorage.getItem(STORAGE.cooldownMode);
+    return VALID_COOLDOWN_MODES[m] ? m : DEFAULT_COOLDOWN_MODE;
+  }
+
+  function readCooldownDays() {
+    var d = parseInt(localStorage.getItem(STORAGE.cooldownDays), 10);
+    return clampDays(d);
+  }
+
+  function clampDays(n) {
+    if (isNaN(n)) return DEFAULT_COOLDOWN_DAYS;
+    if (n < 1) return 1;
+    if (n > 365) return 365;
+    return n;
+  }
+
+  function setCooldownMode(mode, opts) {
+    if (!VALID_COOLDOWN_MODES[mode]) return;
+    document.documentElement.setAttribute("data-mcp-install-cooldown-mode", mode);
+    if (opts.persist) localStorage.setItem(STORAGE.cooldownMode, mode);
+    // Sync every widget's UI: checkbox, radio, slot text contents.
+    document.querySelectorAll(".lm-mcp-install").forEach(function (widget) {
+      applyCooldownToWidget(widget, mode, readCooldownDays());
+    });
+    if (opts.broadcast) {
+      window.dispatchEvent(
+        new CustomEvent(SYNC_EVENT, {
+          detail: { origin: null, kind: "cooldown-mode", value: mode },
+        })
+      );
+    }
+  }
+
+  function setCooldownDays(days, opts) {
+    var n = clampDays(days);
+    document.documentElement.setAttribute("data-mcp-install-cooldown-days", String(n));
+    if (opts.persist) localStorage.setItem(STORAGE.cooldownDays, String(n));
+    updateAllCooldownDaysSlots(n);
+    // Sync the days input across every widget (multi-widget page).
+    document.querySelectorAll('[data-action="cooldown-days"]').forEach(function (input) {
+      if (document.activeElement !== input) input.value = String(n);
+    });
+    if (opts.broadcast) {
+      window.dispatchEvent(
+        new CustomEvent(SYNC_EVENT, {
+          detail: { origin: null, kind: "cooldown-days", value: n },
+        })
+      );
+    }
+  }
+
+  function updateAllCooldownDaysSlots(n) {
+    document.querySelectorAll("[data-cooldown-days-slot]").forEach(function (slot) {
+      slot.textContent = String(n);
+    });
+  }
+
+  function applyCooldownToWidget(widget, mode, days) {
+    // Checkbox: checked iff mode != "off".
+    var toggle = widget.querySelector(".lm-mcp-install__cooldown-toggle");
+    if (toggle) toggle.checked = mode !== "off";
+    // Radio: the matching radio in the settings form.
+    widget.querySelectorAll('[data-action="cooldown-mode"]').forEach(function (radio) {
+      radio.checked = radio.value === mode;
+    });
+    // Days input value (don't clobber while typing).
+    var daysInput = widget.querySelector('[data-action="cooldown-days"]');
+    if (daysInput && document.activeElement !== daysInput) {
+      daysInput.value = String(days);
+    }
+    // Days slots inside snippets (this widget's panels only — other widgets
+    // get updated by their own applyCooldownToWidget call in applySavedState).
+    widget.querySelectorAll("[data-cooldown-days-slot]").forEach(function (slot) {
+      slot.textContent = String(days);
+    });
+  }
+
+  function setView(view) {
+    var prev = document.documentElement.getAttribute("data-mcp-install-view");
+    if (prev === view) return;
+    document.documentElement.setAttribute("data-mcp-install-view", view);
   }
 })();

@@ -53,6 +53,23 @@
       {{ method.label }}
     </button>
     {% endfor %}
+
+    <div class="lm-mcp-install__cooldown-control">
+      <input type="checkbox"
+             id="lm-mcp-install__cooldown-toggle"
+             class="lm-mcp-install__cooldown-toggle"
+             data-action="cooldown-toggle"
+             aria-label="Apply a dependency cooldown">
+      <button type="button"
+              class="lm-mcp-install__cooldown-label-text"
+              data-action="cooldown-open"
+              aria-label="Open cooldown settings">Configure cooldowns</button>
+      <button type="button"
+              class="lm-mcp-install__cooldown-help"
+              data-action="cooldown-help"
+              aria-label="What are cooldowns?"
+              title="What are cooldowns?">?</button>
+    </div>
   </div>
 
   <div class="lm-mcp-install__tabs lm-mcp-install__tabs--scopes"
@@ -77,7 +94,7 @@
     {% endfor %}
   </div>
 
-  <div class="lm-mcp-install__body">
+  <div class="lm-mcp-install__body lm-mcp-install__body--install">
     {% for panel in panels %}
     <div class="lm-mcp-install__panel"
          role="tabpanel"
@@ -130,5 +147,58 @@
       {% endif %}
     </div>
     {% endfor %}
+  </div>
+
+  <div class="lm-mcp-install__body lm-mcp-install__body--settings"
+       role="dialog"
+       aria-label="Cooldown settings">
+    <button type="button"
+            class="lm-mcp-install__back"
+            data-action="cooldown-back">
+      &larr; Back to installer
+    </button>
+    <h3 class="lm-mcp-install__settings-title">Dependency cooldowns</h3>
+    <fieldset class="lm-mcp-install__settings-modes">
+      <legend class="lm-mcp-install__sr-only">Cooldown mode</legend>
+      <label class="lm-mcp-install__settings-mode">
+        <input type="radio" name="cooldown-mode" value="off"
+               data-action="cooldown-mode" checked>
+        <span>Off &mdash; install the latest version your tools resolve</span>
+      </label>
+      <label class="lm-mcp-install__settings-mode">
+        <input type="radio" name="cooldown-mode" value="days"
+               data-action="cooldown-mode">
+        <span>
+          Apply a cooldown of
+          <input type="number" min="1" max="365"
+                 value="{{ default_cooldown_days }}"
+                 class="lm-mcp-install__cooldown-days-input"
+                 data-action="cooldown-days"
+                 aria-label="Cooldown in days">
+          days
+        </span>
+      </label>
+      <label class="lm-mcp-install__settings-mode">
+        <input type="radio" name="cooldown-mode" value="bypass"
+               data-action="cooldown-mode">
+        <span>Bypass any global cooldown <small>(uv only)</small></span>
+      </label>
+    </fieldset>
+    <details class="lm-mcp-install__cooldown-explainer">
+      <summary>What are cooldowns?</summary>
+      <p>
+        Cooldowns delay picking up newly uploaded packages so the
+        community has time to spot supply-chain attacks before you
+        install. Most package managers don't apply one by default
+        &mdash; you opt in via a global setting in your tool's config.
+      </p>
+      <p>
+        Learn more at
+        <a href="https://cooldowns.dev/" target="_blank" rel="noopener">cooldowns.dev</a>
+        &middot;
+        <a href="https://securitylabs.datadoghq.com/articles/dependency-cooldowns/"
+           target="_blank" rel="noopener">Datadog Security Labs writeup</a>.
+      </p>
+    </details>
   </div>
 </div>

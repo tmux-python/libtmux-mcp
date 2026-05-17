@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
 import typing as t
 
 from sphinx.util import logging
-from sphinx.util.fileutil import copy_asset_file
 
 from ._base import BaseWidget
 
@@ -28,6 +28,13 @@ def install_widget_assets(
     every page includes them (same pattern as ``sphinx-copybutton``). This is
     intentionally simpler than per-page inclusion — the files are small and the
     docs are not bandwidth-constrained.
+
+    Uses :func:`shutil.copy2` directly. Recent Sphinx releases tightened
+    ``copy_asset_file`` to refuse overwriting (it emits a
+    ``misc.copy_overwrite`` warning and aborts), which leaves stale widget
+    JS/CSS on every incremental rebuild. The fix is to do the byte copy
+    ourselves: the cache-busting ``?v=<hash>`` querystring on the
+    ``add_*_file`` registration line keeps browser caches honest.
     """
     if app.builder.format != "html":
         return
@@ -47,5 +54,5 @@ def install_widget_assets(
             if not source.is_file():
                 continue
             dest.mkdir(parents=True, exist_ok=True)
-            copy_asset_file(str(source), str(dest))
+            shutil.copy2(str(source), str(dest / filename))
             register(f"{STATIC_SUBDIR}/{name}/{filename}")
