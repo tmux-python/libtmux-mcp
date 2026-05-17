@@ -141,10 +141,10 @@
   font-size: 0.9em;
 }
 
-.lm-mcp-install__cooldown-toggle {
-  margin: 0;
-  cursor: pointer;
-}
+/* The .lm-mcp-install__cooldown-toggle styling lives in
+ * docs/_ext/widgets/_prehydrate.py inside the @layer mcp-install-prehydrate
+ * block — the appearance reset + checked-state visual must paint from the
+ * inline <head> style so native unchecked → checked flicker disappears. */
 
 .lm-mcp-install__cooldown-label-text {
   appearance: none;

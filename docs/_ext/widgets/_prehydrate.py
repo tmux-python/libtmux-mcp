@@ -94,6 +94,57 @@ _PANEL_ACTIVE_DECL = "{display:block !important}"
 _SCOPE_GROUP_ACTIVE_DECL = "{display:flex !important}"
 
 
+# Native ``<input type="checkbox">`` doesn't react to a CSS attribute
+# selector — its rendered glyph follows the ``.checked`` property, which
+# only ``widget.js`` can set (and only after DOMContentLoaded). That
+# produced a visible unchecked → checked flicker on every reload when
+# ``cooldown.enabled = "1"`` was saved. Strip the native UI with
+# ``appearance: none`` and re-render the checkbox visual from CSS keyed
+# off ``html[data-mcp-install-cooldown-enabled="1"]`` so the prehydrate
+# ``<head>`` script (which sets that attribute before first paint) drives
+# the visual without waiting for JS. ``.checked`` is still synced on
+# DOMContentLoaded for accessibility and click-handler correctness — the
+# sync is invisible because CSS already shows the right state.
+_COOLDOWN_TOGGLE_RULES = (
+    # Reset native chrome and own the box.
+    ".lm-mcp-install__cooldown-toggle"
+    "{appearance:none !important;"
+    "-webkit-appearance:none !important;"
+    "width:0.95em !important;"
+    "height:0.95em !important;"
+    "margin:0 !important;"
+    "border:1.5px solid var(--color-foreground-muted) !important;"
+    "border-radius:0.2em !important;"
+    "background:var(--color-background-primary) !important;"
+    "cursor:pointer !important;"
+    "position:relative !important;"
+    "flex:0 0 auto !important}"
+    # Checked appearance (brand-coloured fill + border).
+    'html[data-mcp-install-cooldown-enabled="1"]'
+    " .lm-mcp-install__cooldown-toggle"
+    "{background:var(--color-brand-primary) !important;"
+    "border-color:var(--color-brand-primary) !important}"
+    # Check mark via a centred ``✓`` pseudo. White on brand blue is
+    # legible in both light and dark modes (brand-primary stays blue).
+    'html[data-mcp-install-cooldown-enabled="1"]'
+    " .lm-mcp-install__cooldown-toggle::after"
+    '{content:"✓" !important;'
+    "position:absolute !important;"
+    "inset:0 !important;"
+    "display:flex !important;"
+    "align-items:center !important;"
+    "justify-content:center !important;"
+    "color:#fff !important;"
+    "font-size:0.85em !important;"
+    "font-weight:700 !important;"
+    "line-height:1 !important}"
+    # Focus ring — accessibility unchanged from native.
+    ".lm-mcp-install__cooldown-toggle:focus-visible"
+    "{outline:2px solid var(--color-brand-primary) !important;"
+    "outline-offset:2px !important}"
+)
+
+
 def _script() -> str:
     """Inline ``<head>`` script that mirrors localStorage onto ``<html>``.
 
@@ -276,6 +327,7 @@ def _build_style() -> str:
         _scope_group_visible_selectors() + _SCOPE_GROUP_ACTIVE_DECL,
         _PANEL_HIDE_RULE,
         _panel_active_selectors() + _PANEL_ACTIVE_DECL,
+        _COOLDOWN_TOGGLE_RULES,
     ]
     return "<style>@layer mcp-install-prehydrate{" + "".join(rules) + "}</style>"
 
