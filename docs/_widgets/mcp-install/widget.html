@@ -152,12 +152,16 @@
   <div class="lm-mcp-install__body lm-mcp-install__body--settings"
        role="dialog"
        aria-label="Cooldown settings">
-    <button type="button"
-            class="lm-mcp-install__back"
-            data-action="cooldown-back">
-      &larr; Back to installer
-    </button>
-    <h3 class="lm-mcp-install__settings-title">Dependency cooldowns</h3>
+    <div class="lm-mcp-install__settings-header">
+      <button type="button"
+              class="lm-mcp-install__back"
+              data-action="cooldown-back"
+              aria-label="Back to installer">
+        <span class="lm-mcp-install__back-icon" aria-hidden="true">&larr;</span>
+        <span class="lm-mcp-install__back-text">Back</span>
+      </button>
+      <h3 class="lm-mcp-install__settings-title">Dependency cooldowns</h3>
+    </div>
     <fieldset class="lm-mcp-install__settings-modes">
       <legend class="lm-mcp-install__sr-only">Cooldown mode</legend>
       <label class="lm-mcp-install__settings-mode">

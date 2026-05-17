@@ -232,29 +232,54 @@ html[data-mcp-install-view="settings"] .lm-mcp-install__body--settings {
   display: block;
 }
 
+/* Settings header: back button + title share one row, both flush to the
+ * top-left of the settings body's content area (the body's own padding
+ * supplies the gap to the widget edge). Sizes track the widget's base
+ * font scale (the host ``.lm-mcp-install`` is 0.95em). */
+.lm-mcp-install__settings-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.8rem 0;
+}
+
 .lm-mcp-install__back {
   appearance: none;
   background: transparent;
-  border: 0;
-  color: var(--color-brand-content, var(--color-brand-primary));
+  border: 1px solid var(--color-background-border, var(--color-foreground-border, #ccc));
+  border-radius: 0.25rem;
+  color: var(--color-foreground-secondary);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font: inherit;
-  font-size: 0.9em;
-  padding: 0;
-  margin: 0 0 0.6rem 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  font-size: 0.85em;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+}
+
+.lm-mcp-install__back:hover {
+  color: var(--color-foreground-primary);
+  border-color: var(--color-foreground-secondary);
+  background: var(--color-background-hover, rgba(0, 0, 0, 0.04));
 }
 
 .lm-mcp-install__back:focus-visible {
   outline: 2px solid var(--color-brand-primary);
   outline-offset: 2px;
-  border-radius: 0.15rem;
+}
+
+.lm-mcp-install__back-icon {
+  font-size: 1.1em;
+  line-height: 1;
 }
 
 .lm-mcp-install__settings-title {
-  margin: 0 0 0.6rem 0;
-  font-size: 1.1em;
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--color-foreground-primary);
 }
 
 .lm-mcp-install__settings-modes {
