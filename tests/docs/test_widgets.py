@@ -117,12 +117,17 @@ def test_body_for_uvx_days_inserts_duration_sentinel() -> None:
 
     uv stores the value as ``ExcludeNewerValue::Relative(ExcludeNewerSpan)``
     and re-evaluates ``now - N days`` on every resolver call, so a saved
-    ``.mcp.json`` arg ``"P7D"`` stays fresh forever.
+    ``.mcp.json`` arg ``"P7D"`` stays fresh forever. The
+    ``--exclude-newer-package libtmux-mcp=2099-01-01`` exemption keeps
+    libtmux-mcp itself inside the resolver when the cutoff would
+    otherwise filter the package out (a fresh release vs a 7-day
+    cooldown window).
     """
     client = CLIENTS[0]
     body, language, note = _body_for(client, METHODS[0], client.scopes[0], _DAYS)
     assert body == (
-        "claude mcp add tmux -- uvx --exclude-newer <COOLDOWN_DURATION> libtmux-mcp"
+        "claude mcp add tmux -- uvx --exclude-newer <COOLDOWN_DURATION>"
+        " --exclude-newer-package libtmux-mcp=2099-01-01 libtmux-mcp"
     )
     assert language == "console"
     assert note is None

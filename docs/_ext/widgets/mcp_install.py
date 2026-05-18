@@ -291,7 +291,19 @@ def _tool_command(method: Method, cooldown: Cooldown) -> str:
     """
     if method.id == "uvx":
         if cooldown.id == "days":
-            return f"uvx --exclude-newer {_DURATION_SENTINEL} libtmux-mcp"
+            # ``--exclude-newer-package libtmux-mcp=2099-01-01`` exempts
+            # libtmux-mcp itself from the global cutoff so a recently-
+            # released libtmux-mcp stays inside the resolver. Without
+            # this, the snippet emits ``no versions of libtmux-mcp``
+            # whenever the latest libtmux-mcp release is newer than the
+            # cooldown window. pipx + pip have no per-package override,
+            # so their days panels carry a caveat note instead (see
+            # ``_cooldown_note``).
+            return (
+                f"uvx --exclude-newer {_DURATION_SENTINEL}"
+                " --exclude-newer-package libtmux-mcp=2099-01-01"
+                " libtmux-mcp"
+            )
         if cooldown.id == "bypass":
             return "uvx --no-config libtmux-mcp"
         return "uvx libtmux-mcp"
@@ -343,7 +355,13 @@ def _json_body(method: Method, cooldown: Cooldown) -> str:
     if method.id == "uvx":
         command = "uvx"
         if cooldown.id == "days":
-            args = f'"--exclude-newer", "{_DURATION_SENTINEL}", "libtmux-mcp"'
+            # See ``_tool_command`` for the rationale on the
+            # ``--exclude-newer-package libtmux-mcp=2099-01-01`` exempt.
+            args = (
+                f'"--exclude-newer", "{_DURATION_SENTINEL}",'
+                ' "--exclude-newer-package", "libtmux-mcp=2099-01-01",'
+                ' "libtmux-mcp"'
+            )
         else:
             args = '"libtmux-mcp"'
     elif method.id == "pipx":
@@ -392,7 +410,13 @@ def _toml_body(method: Method, cooldown: Cooldown) -> str:
     if method.id == "uvx":
         command, args_inner = "uvx", '"libtmux-mcp"'
         if cooldown.id == "days":
-            args_inner = f'"--exclude-newer", "{_DURATION_SENTINEL}", "libtmux-mcp"'
+            # See ``_tool_command`` for the rationale on the
+            # ``--exclude-newer-package libtmux-mcp=2099-01-01`` exempt.
+            args_inner = (
+                f'"--exclude-newer", "{_DURATION_SENTINEL}",'
+                ' "--exclude-newer-package", "libtmux-mcp=2099-01-01",'
+                ' "libtmux-mcp"'
+            )
     elif method.id == "pipx":
         command, args_inner = "pipx", '"run", "libtmux-mcp"'
         if cooldown.id == "days":
@@ -415,20 +439,31 @@ def _toml_body(method: Method, cooldown: Cooldown) -> str:
 
 
 def _cooldown_note(method: Method, cooldown: Cooldown) -> str | None:
-    """Return a one-line caveat for cells where cooldown is a no-op."""
-    if cooldown.id != "bypass":
-        return None
-    if method.id == "pip":
+    """Return a one-line caveat for cells where the snippet has caveats."""
+    if cooldown.id == "days" and method.id in {"pipx", "pip"}:
+        # pip's --uploaded-prior-to is a global cutoff with no
+        # per-package override, so a cooldown shorter than libtmux-mcp's
+        # most-recent-release age makes the install unresolvable. uv
+        # handles this via --exclude-newer-package on the uvx panels
+        # (see _tool_command / _json_body / _toml_body).
         return (
-            "pip has no global cooldown, so bypass is a no-op. Use this"
-            " when pairing the snippet with a uv-backed parent command."
+            "pip's `--uploaded-prior-to` is a global cutoff with no"
+            " per-package override. If the cooldown filters out a recent"
+            " release of libtmux-mcp itself, switch to the uvx snippet —"
+            " it exempts libtmux-mcp via `--exclude-newer-package`."
         )
-    if method.id == "pipx":
-        return (
-            "pipx's default backend (pip) has no global cooldown."
-            " For uv-style cooldown control, install `pipx[uv]` and set"
-            " `UV_NO_CONFIG=1` in your shell."
-        )
+    if cooldown.id == "bypass":
+        if method.id == "pip":
+            return (
+                "pip has no global cooldown, so bypass is a no-op. Use this"
+                " when pairing the snippet with a uv-backed parent command."
+            )
+        if method.id == "pipx":
+            return (
+                "pipx's default backend (pip) has no global cooldown."
+                " For uv-style cooldown control, install `pipx[uv]` and set"
+                " `UV_NO_CONFIG=1` in your shell."
+            )
     return None
 
 
