@@ -143,7 +143,7 @@ def test_body_for_uvx_bypass_inserts_no_config_flag() -> None:
 
 
 def test_body_for_pipx_bypass_returns_caveat_note() -> None:
-    """Pipx bypass renders identically to off and surfaces a no-op note."""
+    """Pipx bypass renders identically to off and surfaces a caveat note."""
     client = CLIENTS[0]
     pipx = next(m for m in METHODS if m.id == "pipx")
     body_off, _, note_off = _body_for(client, pipx, client.scopes[0], _OFF)
@@ -151,11 +151,12 @@ def test_body_for_pipx_bypass_returns_caveat_note() -> None:
     assert body_off == body_bp  # same command emitted
     assert note_off is None
     assert note_bp is not None
-    assert "pipx" in note_bp.lower()
+    # Note redirects users to the uvx tab for true cooldown support.
+    assert "uvx" in note_bp.lower()
 
 
 def test_body_for_pip_bypass_returns_caveat_note() -> None:
-    """Pip bypass renders identically to off and surfaces a no-op note."""
+    """Pip bypass renders identically to off and surfaces a caveat note."""
     client = CLIENTS[0]
     pip = next(m for m in METHODS if m.id == "pip")
     body_off, _, note_off = _body_for(client, pip, client.scopes[0], _OFF)
@@ -166,13 +167,37 @@ def test_body_for_pip_bypass_returns_caveat_note() -> None:
     assert "pip" in note_bp.lower()
 
 
-def test_body_for_pipx_days_uses_pip_args_form_with_absolute_date() -> None:
-    """Pipx days uses absolute date (pipx 1.8.0's bundled pip rejects P<N>D)."""
+def test_body_for_pipx_days_falls_back_to_bare_run() -> None:
+    """Pipx days renders identically to off (no per-package cooldown override).
+
+    pipx's pip backend has no per-package ``--uploaded-prior-to`` flag,
+    so a days-mode cutoff would filter fresh ``libtmux-mcp`` releases
+    out of the resolver. The caveat note redirects users to the uvx tab.
+    """
     client = CLIENTS[0]
     pipx = next(m for m in METHODS if m.id == "pipx")
-    body, language, _ = _body_for(client, pipx, client.scopes[0], _DAYS)
-    assert "--pip-args=--uploaded-prior-to=<COOLDOWN_DATE>" in body
+    body_off, _, _ = _body_for(client, pipx, client.scopes[0], _OFF)
+    body_days, language, note = _body_for(client, pipx, client.scopes[0], _DAYS)
+    assert body_days == body_off  # bare command, no cooldown flag
+    assert "--pip-args" not in body_days
+    assert "--uploaded-prior-to" not in body_days
+    assert "<COOLDOWN_DATE>" not in body_days
     assert language == "console"
+    assert note is not None
+    assert "uvx" in note.lower()
+
+
+def test_body_for_pip_days_falls_back_to_bare_install() -> None:
+    """Pip days renders identically to off (same per-package-override limit)."""
+    client = CLIENTS[0]
+    pip = next(m for m in METHODS if m.id == "pip")
+    body_off, _, _ = _body_for(client, pip, client.scopes[0], _OFF)
+    body_days, _, note = _body_for(client, pip, client.scopes[0], _DAYS)
+    assert body_days == body_off
+    assert "--uploaded-prior-to" not in body_days
+    assert "<COOLDOWN_DURATION>" not in body_days
+    assert note is not None
+    assert "uvx" in note.lower()
 
 
 def test_body_for_json_client_off_returns_config_snippet() -> None:
@@ -242,8 +267,14 @@ def test_body_for_gemini_user_inserts_scope_flag() -> None:
     assert language == "console"
 
 
-def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
-    """Panel.pip_prereq is set only for the pip method, with cooldown applied."""
+def test_pip_panel_has_bare_pip_prereq_across_modes() -> None:
+    """Pip panels emit the same bare ``pip install`` line across modes.
+
+    pip's ``--uploaded-prior-to`` has no per-package override (so a
+    days-mode cutoff would filter fresh ``libtmux-mcp`` releases out of
+    the resolver). All three modes fall back to the bare install line;
+    the per-panel cooldown note redirects users to the uvx snippet.
+    """
     panels = build_panels()
     pip_panels = [p for p in panels if p.method.id == "pip"]
     non_pip = [p for p in panels if p.method.id != "pip"]
@@ -251,10 +282,12 @@ def test_pip_panel_has_cooldown_aware_pip_prereq() -> None:
     assert all(p.pip_prereq is not None for p in pip_panels)
     days_pip = next(p for p in pip_panels if p.cooldown.id == "days")
     off_pip = next(p for p in pip_panels if p.cooldown.id == "off")
-    assert days_pip.pip_prereq is not None
-    assert off_pip.pip_prereq is not None
-    assert "--uploaded-prior-to <COOLDOWN_DURATION>" in days_pip.pip_prereq
-    assert "--uploaded-prior-to" not in off_pip.pip_prereq
+    bypass_pip = next(p for p in pip_panels if p.cooldown.id == "bypass")
+    days_prereq = days_pip.pip_prereq
+    assert days_prereq is not None
+    assert days_prereq == off_pip.pip_prereq == bypass_pip.pip_prereq
+    assert "--uploaded-prior-to" not in days_prereq
+    assert "<COOLDOWN_DURATION>" not in days_prereq
 
 
 def test_body_for_unknown_kind_raises() -> None:
@@ -347,10 +380,10 @@ def test_cooldown_days_slot_filter_registered_on_widget_render(
     )
     app = _build(make_app, real_widget_srcdir)
     html = (pathlib.Path(app.outdir) / "index.html").read_text(encoding="utf-8")
-    # uvx + pip days bodies emit the duration slot; pipx days bodies
-    # emit the date slot. Both kinds must appear in any complete build.
+    # uvx days bodies emit the duration slot. pipx and pip days bodies
+    # fall back to the bare command (pip has no per-package cooldown
+    # override) so no date slot appears in any rendered snippet.
     assert "data-cooldown-duration-slot" in html
-    assert "data-cooldown-date-slot" in html
     # And no raw sentinel escapes to the rendered page.
     assert "&lt;COOLDOWN_DURATION&gt;" not in html
     assert "&lt;COOLDOWN_DATE&gt;" not in html

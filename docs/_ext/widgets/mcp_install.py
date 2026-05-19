@@ -239,13 +239,10 @@ DEFAULT_COOLDOWN_DAYS: int = 7
 #   re-evaluates ``now - N days`` at every resolver call, so the saved
 #   ``.mcp.json`` arg ``"P7D"`` stays fresh forever. pip 26.1+ does the
 #   same at flag-parse time on every invocation.
-# * ``<COOLDOWN_DATE>`` is used by pipx days bodies because pipx 1.8.0
-#   bundles a pip older than 26.1, which rejects the duration form with
-#   ``Invalid isoformat``. The absolute date is computed in JS from
-#   ``today - savedDays``; the build-time default drifts daily but
-#   ``widget.js`` refreshes the slot on every page load.
+# pipx and pip days panels don't embed a sentinel — they fall back to
+# the bare command because pip has no per-package cooldown override
+# (see ``_tool_command`` / ``_pip_prereq_for`` / ``_cooldown_note``).
 _DURATION_SENTINEL = "<COOLDOWN_DURATION>"
-_DATE_SENTINEL = "<COOLDOWN_DATE>"
 
 
 def default_cooldown_date(days: int) -> str:
@@ -263,21 +260,18 @@ def default_cooldown_date(days: int) -> str:
 
 
 PIP_PREREQ_OFF: str = "pip install --user --upgrade libtmux libtmux-mcp"
-PIP_PREREQ_DAYS: str = (
-    f"pip install --user --upgrade --uploaded-prior-to {_DURATION_SENTINEL}"
-    " libtmux libtmux-mcp"
-)
 
 
 def _pip_prereq_for(cooldown: Cooldown) -> str:
     """Return the prereq ``pip install`` line for the given cooldown mode.
 
-    ``bypass`` falls through to the ``off`` form: pip has no global cooldown
-    config to bypass, so the prereq is identical and the cooldown note on
-    the panel explains the situation.
+    All three modes (off / days / bypass) emit the same bare install
+    line. pip's ``--uploaded-prior-to`` has no per-package override,
+    so a days-mode cutoff filters fresh libtmux-mcp releases out of
+    the resolver — the snippet would fail to install. The per-panel
+    ``_cooldown_note`` redirects users to the uvx snippet, which
+    carries ``--exclude-newer-package`` for true cooldown enforcement.
     """
-    if cooldown.id == "days":
-        return PIP_PREREQ_DAYS
     return PIP_PREREQ_OFF
 
 
@@ -308,17 +302,19 @@ def _tool_command(method: Method, cooldown: Cooldown) -> str:
             return "uvx --no-config libtmux-mcp"
         return "uvx libtmux-mcp"
     if method.id == "pipx":
-        if cooldown.id == "days":
-            # pipx 1.8.0 bundles pip <26.1, which doesn't accept the
-            # duration form — emit an absolute date instead. JS recomputes
-            # ``today - savedDays`` on every page load.
-            return (
-                f"pipx run --pip-args=--uploaded-prior-to={_DATE_SENTINEL} libtmux-mcp"
-            )
-        # off + bypass (pipx default backend has no global cooldown)
+        # pipx's pip backend has no per-package cooldown override, and
+        # pipx's uv backend doesn't translate ``--uploaded-prior-to`` or
+        # ``--exclude-newer`` from ``--pip-args`` (see pipx's
+        # ``commands/run_uv.py::_UV_TRANSLATABLE_VALUE_FLAGS``). Both
+        # paths fail on fresh libtmux-mcp releases when a days-mode
+        # cutoff filters the target package out. All three modes emit
+        # the bare ``pipx run`` command; the per-cell ``_cooldown_note``
+        # redirects users to the uvx snippet for true cooldown
+        # enforcement.
         return "pipx run libtmux-mcp"
-    # pip method: the cooldown applies on the prereq line above, not on
-    # the registered command. The register step is just ``libtmux-mcp``.
+    # pip method: same per-package-override limitation. The prereq line
+    # (``_pip_prereq_for``) emits the bare ``pip install``; the register
+    # step is just ``libtmux-mcp``.
     return "libtmux-mcp"
 
 
@@ -365,14 +361,10 @@ def _json_body(method: Method, cooldown: Cooldown) -> str:
         else:
             args = '"libtmux-mcp"'
     elif method.id == "pipx":
+        # All three modes emit the bare ``pipx run`` args (no
+        # ``--pip-args``) — see ``_tool_command`` for the reasoning.
         command = "pipx"
-        if cooldown.id == "days":
-            args = (
-                '"run", "--pip-args=--uploaded-prior-to='
-                f'{_DATE_SENTINEL}", "libtmux-mcp"'
-            )
-        else:
-            args = '"run", "libtmux-mcp"'
+        args = '"run", "libtmux-mcp"'
     else:  # pip
         command = "libtmux-mcp"
         args = None
@@ -418,12 +410,9 @@ def _toml_body(method: Method, cooldown: Cooldown) -> str:
                 ' "libtmux-mcp"'
             )
     elif method.id == "pipx":
+        # All three modes emit the same args — see ``_tool_command`` for
+        # the per-package-override rationale.
         command, args_inner = "pipx", '"run", "libtmux-mcp"'
-        if cooldown.id == "days":
-            args_inner = (
-                f'"run", "--pip-args=--uploaded-prior-to={_DATE_SENTINEL}",'
-                ' "libtmux-mcp"'
-            )
     else:  # pip
         command, args_inner = "libtmux-mcp", None
 
@@ -440,30 +429,21 @@ def _toml_body(method: Method, cooldown: Cooldown) -> str:
 
 def _cooldown_note(method: Method, cooldown: Cooldown) -> str | None:
     """Return a one-line caveat for cells where the snippet has caveats."""
-    if cooldown.id == "days" and method.id in {"pipx", "pip"}:
-        # pip's --uploaded-prior-to is a global cutoff with no
-        # per-package override, so a cooldown shorter than libtmux-mcp's
-        # most-recent-release age makes the install unresolvable. uv
-        # handles this via --exclude-newer-package on the uvx panels
-        # (see _tool_command / _json_body / _toml_body).
+    if method.id in {"pipx", "pip"} and cooldown.id in {"days", "bypass"}:
+        # pip's ``--uploaded-prior-to`` has no per-package override (so
+        # ``days`` mode would filter the target package out of the
+        # resolver for fresh releases) and there's no global cooldown
+        # for pip to bypass either. Both modes fall back to the bare
+        # command; the note redirects users to the uvx snippet, which
+        # carries ``--exclude-newer-package`` for true per-package
+        # cooldown enforcement.
         return (
-            "pip's `--uploaded-prior-to` is a global cutoff with no"
-            " per-package override. If the cooldown filters out a recent"
-            " release of libtmux-mcp itself, switch to the uvx snippet —"
-            " it exempts libtmux-mcp via `--exclude-newer-package`."
+            "pip has no per-package cooldown override, so this snippet"
+            " runs without cooldown enforcement. Switch to the uvx tab —"
+            " it applies the cooldown to transitive deps via"
+            " `--exclude-newer` while exempting libtmux-mcp itself via"
+            " `--exclude-newer-package`."
         )
-    if cooldown.id == "bypass":
-        if method.id == "pip":
-            return (
-                "pip has no global cooldown, so bypass is a no-op. Use this"
-                " when pairing the snippet with a uv-backed parent command."
-            )
-        if method.id == "pipx":
-            return (
-                "pipx's default backend (pip) has no global cooldown."
-                " For uv-style cooldown control, install `pipx[uv]` and set"
-                " `UV_NO_CONFIG=1` in your shell."
-            )
     return None
 
 

@@ -16,11 +16,11 @@ The MCP install widget on the front page, {doc}`/quickstart`, and {ref}`clients`
 
 A new *Configure cooldowns* control on the install widget lets you tack a cooldown onto the snippet without leaving the page. Pick a delay in days (uv's `--exclude-newer`, pip's `--uploaded-prior-to`, pipx's `--pip-args`) to wait out community vetting before pulling a fresh release, or pick *Bypass any global cooldown* to skip a `~/.config/uv/uv.toml` cutoff and grab the latest libtmux-mcp anyway. The setting persists across pages, and the embedded *What are cooldowns?* expander links to the [Datadog Security Labs writeup](https://securitylabs.datadoghq.com/articles/dependency-cooldowns/) and [cooldowns.dev](https://cooldowns.dev/) if you want the supply-chain context. (#31)
 
-### Fixes
+### Documentation
 
-**MCP install widget cooldown exempts libtmux-mcp**
+**MCP install widget ships working cooldown snippets**
 
-The mcp-install widget's `uvx`-flavored days-mode snippets now carry `--exclude-newer-package libtmux-mcp=2099-01-01` so a security-conscious cooldown stays applied to transitive deps without filtering libtmux-mcp itself out of the resolver. Without the override the snippet emitted `no versions of libtmux-mcp` whenever the latest libtmux-mcp release was newer than the cooldown window. The pipx and pip days panels also gain a caveat note pointing readers at the uvx snippet, since pip's `--uploaded-prior-to` is a global cutoff with no per-package override.
+The install widget on the front page, {doc}`/quickstart`, and {ref}`clients` now emits a runnable snippet in every method × cooldown cell. uvx days panels apply the cooldown to transitive dependencies while exempting libtmux-mcp itself, so a fresh release stays installable. pipx and pip days panels fall back to the bare install command — neither tool exposes a per-package cooldown override today — and their cooldown note redirects readers to the uvx tab when they want true cooldown enforcement. (#58)
 
 ## libtmux-mcp 0.1.0a7 (2026-05-16)
 
