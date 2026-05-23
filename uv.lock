@@ -1237,7 +1237,7 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.2.4,<4.0.0" },
-    { name = "libtmux", specifier = ">=0.56.0,<1.0" },
+    { name = "libtmux", specifier = ">=0.58.0,<1.0" },
 ]
 
 [package.metadata.requires-dev]
