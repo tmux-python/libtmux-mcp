@@ -6,6 +6,14 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a8 (2026-05-23)
+
+libtmux-mcp 0.1.0a8 bumps libtmux to 0.58.0, fixing session and window listing on systems whose locale is not UTF-8.
+
+### Dependencies
+
+**Minimum `libtmux>=0.58.0`** (was `>=0.56.0`). Picks up the 0.57.x command-coverage and client-awareness releases and the 0.58.0 non-UTF-8 locale fix — session and window listing could silently return empty results when the system locale was not UTF-8.
+
 ### What's new
 
 **Installer picker now covers config scope and file locations**
@@ -21,10 +29,6 @@ A new *Configure cooldowns* control on the install widget lets you tack a cooldo
 **MCP install widget ships working cooldown snippets**
 
 The install widget on the front page, {doc}`/quickstart`, and {ref}`clients` now emits a runnable snippet in every method × cooldown cell. uvx days panels apply the cooldown to transitive dependencies while exempting libtmux-mcp itself, so a fresh release stays installable. pipx and pip days panels fall back to the bare install command — neither tool exposes a per-package cooldown override today — and their cooldown note redirects readers to the uvx tab when they want true cooldown enforcement. (#58)
-
-### Dependencies
-
-**Minimum `libtmux>=0.58.0`** (was `>=0.56.0`). Picks up the 0.57.x command-coverage and client-awareness releases and the 0.58.0 non-UTF-8 locale fix — session and window listing could silently return empty results when the system locale was not UTF-8.
 
 ## libtmux-mcp 0.1.0a7 (2026-05-16)
 
