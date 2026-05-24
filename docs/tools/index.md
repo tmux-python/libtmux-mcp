@@ -103,7 +103,7 @@ Read visible content of a pane.
 :::{grid-item-card} capture_since
 :link: capture-since
 :link-type: ref
-Read pane output since a previous cursor.
+Start a cursor, then read only new pane output.
 :::
 
 :::{grid-item-card} get_pane_info

@@ -63,9 +63,18 @@ The cursor carries the original pane id, so the follow-up call does not need
 `pane_id`. If you pass both, they must match; a cursor for another pane raises a
 tool error instead of silently reading the wrong process.
 
+If nothing new was written after the cursor, `lines` is empty and the response
+still includes a fresh cursor for the same pane. If the cursor row scrolled into
+retained history, the tool can still return an exact delta; retained scrollback
+is not a loss condition.
+
 `lines_missed` becomes `true` when tmux has cleared or trimmed the history
 needed to compute an exact delta. In that case, `lines` is a conservative
 current visible capture and the response includes a fresh cursor.
+
+Pane lifecycle is part of the cursor contract. If the pane dies or is respawned,
+the call raises a tool error instead of reading from a different process that
+reused the same pane id.
 
 `truncated`, `truncated_lines`, and `truncated_bytes` are structured metadata.
 No truncation marker is injected into `lines`, so clients can display terminal

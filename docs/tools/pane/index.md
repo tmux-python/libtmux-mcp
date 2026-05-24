@@ -10,7 +10,7 @@ Read visible or scrollback text from a pane.
 :::
 
 :::{grid-item-card} {tooliconl}`capture-since`
-Read only pane output written since the last cursor.
+Start a cursor, then read only new pane output.
 :::
 
 :::{grid-item-card} {tooliconl}`search-panes`

@@ -18,31 +18,31 @@ Standalone badges via `{badge}`:
 
 ### `{tool}` — code-linked with badge
 
-{tool}`capture-pane` · {tool}`send-keys` · {tool}`search-panes` · {tool}`wait-for-text` · {tool}`kill-pane` · {tool}`create-session` · {tool}`split-window`
+{tool}`capture-pane` · {tool}`capture-since` · {tool}`send-keys` · {tool}`search-panes` · {tool}`wait-for-text` · {tool}`kill-pane` · {tool}`create-session` · {tool}`split-window`
 
 ### `{toolref}` — code-linked, no badge
 
-{toolref}`capture-pane` · {toolref}`send-keys` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`kill-pane` · {toolref}`create-session` · {toolref}`split-window`
+{toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`send-keys` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`kill-pane` · {toolref}`create-session` · {toolref}`split-window`
 
 ### `{tooliconl}` — icon left, outside code
 
-{tooliconl}`capture-pane` · {tooliconl}`send-keys` · {tooliconl}`search-panes` · {tooliconl}`wait-for-text` · {tooliconl}`kill-pane` · {tooliconl}`create-session` · {tooliconl}`split-window`
+{tooliconl}`capture-pane` · {tooliconl}`capture-since` · {tooliconl}`send-keys` · {tooliconl}`search-panes` · {tooliconl}`wait-for-text` · {tooliconl}`kill-pane` · {tooliconl}`create-session` · {tooliconl}`split-window`
 
 ### `{tooliconr}` — icon right, outside code
 
-{tooliconr}`capture-pane` · {tooliconr}`send-keys` · {tooliconr}`search-panes` · {tooliconr}`wait-for-text` · {tooliconr}`kill-pane` · {tooliconr}`create-session` · {tooliconr}`split-window`
+{tooliconr}`capture-pane` · {tooliconr}`capture-since` · {tooliconr}`send-keys` · {tooliconr}`search-panes` · {tooliconr}`wait-for-text` · {tooliconr}`kill-pane` · {tooliconr}`create-session` · {tooliconr}`split-window`
 
 ### `{tooliconil}` — icon inline-left, inside code
 
-{tooliconil}`capture-pane` · {tooliconil}`send-keys` · {tooliconil}`search-panes` · {tooliconil}`wait-for-text` · {tooliconil}`kill-pane` · {tooliconil}`create-session` · {tooliconil}`split-window`
+{tooliconil}`capture-pane` · {tooliconil}`capture-since` · {tooliconil}`send-keys` · {tooliconil}`search-panes` · {tooliconil}`wait-for-text` · {tooliconil}`kill-pane` · {tooliconil}`create-session` · {tooliconil}`split-window`
 
 ### `{tooliconir}` — icon inline-right, inside code
 
-{tooliconir}`capture-pane` · {tooliconir}`send-keys` · {tooliconir}`search-panes` · {tooliconir}`wait-for-text` · {tooliconir}`kill-pane` · {tooliconir}`create-session` · {tooliconir}`split-window`
+{tooliconir}`capture-pane` · {tooliconir}`capture-since` · {tooliconir}`send-keys` · {tooliconir}`search-panes` · {tooliconir}`wait-for-text` · {tooliconir}`kill-pane` · {tooliconir}`create-session` · {tooliconir}`split-window`
 
 ### `{ref}` — plain text link
 
-{ref}`capture-pane` · {ref}`send-keys` · {ref}`search-panes` · {ref}`wait-for-text` · {ref}`kill-pane` · {ref}`create-session` · {ref}`split-window`
+{ref}`capture-pane` · {ref}`capture-since` · {ref}`send-keys` · {ref}`search-panes` · {ref}`wait-for-text` · {ref}`kill-pane` · {ref}`create-session` · {ref}`split-window`
 
 ## Badges in context
 
@@ -66,7 +66,7 @@ These are the actual tool headings as they render on tool pages:
 
 ### In prose
 
-Use {tooliconl}`search-panes` to find text across all panes. If you know which pane, use {tooliconl}`capture-pane` instead. After running a command with {tooliconl}`send-keys`, compose `tmux wait-for -S` and call {tooliconl}`wait-for-channel` before capturing.
+Use {tooliconl}`search-panes` to find text across all panes. If you know which pane, use {tooliconl}`capture-pane` for one read or {tooliconl}`capture-since` for repeated observation. After running a command with {tooliconl}`send-keys`, compose `tmux wait-for -S` and call {tooliconl}`wait-for-channel` before capturing.
 
 ### Dense inline (toolref, no badges)
 
