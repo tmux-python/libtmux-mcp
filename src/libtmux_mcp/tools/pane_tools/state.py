@@ -1,0 +1,72 @@
+"""Shared tmux pane state helpers for read and wait tools."""
+
+from __future__ import annotations
+
+import typing as t
+
+from fastmcp.exceptions import ToolError
+
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+
+
+class _PaneState(t.NamedTuple):
+    """Per-read snapshot of tmux pane grid and lifecycle state.
+
+    Read in one ``display-message`` round-trip so callers avoid
+    growing subprocess cost linearly with every required format field.
+    ``history_size + cursor_y`` gives the absolute tmux grid row of
+    the current cursor.
+    """
+
+    history_size: int
+    cursor_y: int
+    pane_height: int
+    pane_pid: str
+    pane_dead: bool
+
+
+def _read_pane_state(pane: Pane) -> _PaneState:
+    """Return a :class:`_PaneState` snapshot for ``pane``.
+
+    Combines the tmux state reads needed by wait and incremental
+    capture tools into a single ``display-message`` call. ``pane_pid``
+    and ``pane_dead`` surface respawn-pane and pane-death events that
+    invalidate cursor or baseline anchors.
+    """
+    stdout = pane.display_message(
+        "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}",
+        get_text=True,
+    )
+    raw = stdout[0] if stdout else "0|0|0||0"
+    hs, cy, sy, pid, dead = raw.split("|", 4)
+    return _PaneState(
+        history_size=int(hs),
+        cursor_y=int(cy),
+        pane_height=int(sy),
+        pane_pid=pid,
+        pane_dead=dead == "1",
+    )
+
+
+def _raise_if_pane_lifecycle_changed(
+    pane: Pane, state: _PaneState, baseline_pid: str
+) -> None:
+    """Raise ``ToolError`` when a cursor or wait baseline is invalid."""
+    if state.pane_dead:
+        msg = f"pane {pane.pane_id} died during wait"
+        raise ToolError(msg)
+    if state.pane_pid != baseline_pid:
+        msg = (
+            f"pane {pane.pane_id} was respawned during wait "
+            f"(pid {baseline_pid} -> {state.pane_pid}); "
+            "baseline anchor no longer valid"
+        )
+        raise ToolError(msg)
+
+
+def _read_history_limit(pane: Pane) -> int:
+    """Read the pane's ``history-limit`` once."""
+    stdout = pane.display_message("#{history_limit}", get_text=True)
+    raw = stdout[0] if stdout else "0"
+    return int(raw)

@@ -353,6 +353,7 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     so callers can detect the cap fired.
 
     Used as a global backstop for :func:`libtmux_mcp.tools.pane_tools.io.capture_pane`,
+    :func:`libtmux_mcp.tools.pane_tools.capture_since.capture_since`,
     :func:`libtmux_mcp.tools.pane_tools.meta.snapshot_pane`, and
     :func:`libtmux_mcp.tools.pane_tools.search.search_panes`. Per-tool
     caps at the tool layer fire first under normal operation; this

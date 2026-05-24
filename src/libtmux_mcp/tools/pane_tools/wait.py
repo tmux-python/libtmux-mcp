@@ -21,9 +21,11 @@ from libtmux_mcp.models import (
     ContentChangeResult,
     WaitForTextResult,
 )
-
-if t.TYPE_CHECKING:
-    from libtmux.pane import Pane
+from libtmux_mcp.tools.pane_tools.state import (
+    _raise_if_pane_lifecycle_changed,
+    _read_history_limit,
+    _read_pane_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,76 +99,6 @@ async def _maybe_log(
         await method(message)
     except _TRANSPORT_CLOSED_EXCEPTIONS:
         return
-
-
-class _PaneState(t.NamedTuple):
-    """Per-tick snapshot of pane state used by wait tools.
-
-    Read in one ``display-message`` round-trip so the loop costs two
-    subprocesses per tick (state + capture) instead of growing
-    linearly with each new field. ``|`` is the field separator —
-    history/cursor/height are integers, ``pane_pid`` is a numeric PID
-    string, and ``pane_dead`` is the literal ``"0"``/``"1"`` flag.
-    """
-
-    history_size: int
-    cursor_y: int
-    pane_height: int
-    pane_pid: str
-    pane_dead: bool
-
-
-def _read_pane_state(pane: Pane) -> _PaneState:
-    """Return a :class:`_PaneState` snapshot for ``pane``.
-
-    Combines the per-tick reads ``wait_for_text`` needs into a single
-    ``display-message`` call. ``history_size + cursor_y`` gives the
-    absolute grid anchor at entry; ``pane_height`` gates the bottom-
-    row capture clip; ``pane_pid`` and ``pane_dead`` surface
-    respawn-pane and pane-death events that invalidate the baseline.
-    """
-    stdout = pane.display_message(
-        "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}",
-        get_text=True,
-    )
-    raw = stdout[0] if stdout else "0|0|0||0"
-    hs, cy, sy, pid, dead = raw.split("|", 4)
-    return _PaneState(
-        history_size=int(hs),
-        cursor_y=int(cy),
-        pane_height=int(sy),
-        pane_pid=pid,
-        pane_dead=dead == "1",
-    )
-
-
-def _raise_if_pane_lifecycle_changed(
-    pane: Pane, state: _PaneState, baseline_pid: str
-) -> None:
-    """Raise ``ToolError`` when a wait baseline no longer describes the pane."""
-    if state.pane_dead:
-        msg = f"pane {pane.pane_id} died during wait"
-        raise ToolError(msg)
-    if state.pane_pid != baseline_pid:
-        msg = (
-            f"pane {pane.pane_id} was respawned during wait "
-            f"(pid {baseline_pid} -> {state.pane_pid}); "
-            "baseline anchor no longer valid"
-        )
-        raise ToolError(msg)
-
-
-def _read_history_limit(pane: Pane) -> int:
-    """Read the pane's ``history-limit`` once.
-
-    Fixed at pane creation (retroactive change only lands in tmux 3.7+),
-    so the result is safe to cache for the lifetime of a wait. Kept out
-    of :func:`_read_pane_state` so the per-tick read doesn't pay for a
-    value that never changes between polls.
-    """
-    stdout = pane.display_message("#{history_limit}", get_text=True)
-    raw = stdout[0] if stdout else "0"
-    return int(raw)
 
 
 @handle_tool_errors_async

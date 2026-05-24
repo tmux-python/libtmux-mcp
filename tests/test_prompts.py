@@ -141,6 +141,16 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
     assert "do NOT escalate automatically" in text
 
 
+def test_diagnose_failing_pane_uses_capture_since_for_repeated_reads() -> None:
+    """Diagnosis recipe routes repeated observation to ``capture_since``."""
+    from libtmux_mcp.prompts.recipes import diagnose_failing_pane
+
+    text = diagnose_failing_pane(pane_id="%1")
+    assert "snapshot_pane" in text
+    assert "capture_since" in text
+    assert "cursor" in text
+
+
 def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     """``build_dev_workspace`` guides post-launch waits to content-change.
 

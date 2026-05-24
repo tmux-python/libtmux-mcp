@@ -7,9 +7,9 @@
 server to start, a build to complete, or a prompt to return.
 
 **Avoid when** the expected text may never appear — always set a reasonable
-`timeout`. For known output, {tooliconl}`capture-pane` after a known delay
-may suffice, but `wait_for_text` is preferred because it adapts to variable
-timing.
+`timeout`. For repeated observation or tailing, use
+{tooliconl}`capture-since`; for command completion you control, use
+{tooliconl}`wait-for-channel`.
 
 **Side effects:** None. Readonly. Blocks until text appears or timeout.
 

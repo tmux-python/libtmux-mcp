@@ -148,6 +148,7 @@ def test_base_instructions_surface_flagship_read_tools() -> None:
     """
     assert "display_message" in _BASE_INSTRUCTIONS
     assert "snapshot_pane" in _BASE_INSTRUCTIONS
+    assert "capture_since" in _BASE_INSTRUCTIONS
 
 
 def test_base_instructions_prefer_wait_over_poll() -> None:
@@ -161,6 +162,7 @@ def test_base_instructions_prefer_wait_over_poll() -> None:
     for command-completion synchronization.
     """
     assert "wait_for_channel" in _BASE_INSTRUCTIONS
+    assert "capture_since" in _BASE_INSTRUCTIONS
     assert "wait_for_text" in _BASE_INSTRUCTIONS
     assert "wait_for_content_change" in _BASE_INSTRUCTIONS
     # The channel primitive should be named before the fallbacks so an
@@ -487,7 +489,7 @@ _TMUX_QUALIFIED_TOOLS = frozenset(
 # Discovery anchors — BM25 lexicon and alwaysLoad meta hints
 # ---------------------------------------------------------------------------
 
-#: The six high-traffic discovery anchors. ToolSearch BM25-ranks
+#: The high-traffic discovery anchors. ToolSearch BM25-ranks
 #: against tool ``description`` (FastMCP's griffe parser hands the
 #: leading paragraph in), so the anchors carry a buried-synonym
 #: lexicon plus an inline anti-trigger to widen the indexed surface
@@ -500,6 +502,7 @@ _DISCOVERY_ANCHORS = frozenset(
         "snapshot_pane",
         "search_panes",
         "capture_pane",
+        "capture_since",
     ]
 )
 
@@ -519,6 +522,7 @@ _VERBS_OF_ART = frozenset(
     [
         "send_keys",
         "capture_pane",
+        "capture_since",
         "snapshot_pane",
         "paste_text",
         "get_pane_info",

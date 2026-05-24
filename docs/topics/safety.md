@@ -134,6 +134,7 @@ Each tool carries MCP tool annotations that hint at its behavior:
 | {ref}`list-windows` | {badge}`readonly` | true | false | true |
 | {ref}`list-panes` | {badge}`readonly` | true | false | true |
 | {ref}`capture-pane` | {badge}`readonly` | true | false | true |
+| {ref}`capture-since` | {badge}`readonly` | true | false | true |
 | {ref}`get-pane-info` | {badge}`readonly` | true | false | true |
 | {ref}`search-panes` | {badge}`readonly` | true | false | true |
 | {ref}`wait-for-text` | {badge}`readonly` | true | false | true |

@@ -111,7 +111,9 @@ prefers {tool}`snapshot-pane`, which returns content + cursor
 position + pane mode + scroll state in one call — saving a
 follow-up ``get_pane_info`` round-trip. It also explicitly forbids
 the agent from acting before it has a hypothesis, which prevents
-"fix the symptom" anti-patterns.
+"fix the symptom" anti-patterns. For repeated observation, it routes
+follow-up reads through {tool}`capture-since` cursors instead of full
+pane captures.
 
 ```{fastmcp-prompt-input} diagnose_failing_pane
 ```
@@ -124,9 +126,12 @@ Something went wrong in tmux pane %1. Diagnose it:
 1. Call `snapshot_pane(pane_id="%1")` to get content,
    cursor position, pane mode, and scroll state in one call.
 2. If the content looks truncated, re-call with `max_lines=None`.
-3. Identify the last command that ran (look at the prompt line and
+3. If you need to watch the pane across more than one turn, call
+   `capture_since(pane_id="%1")`, keep the returned cursor,
+   and pass it to later `capture_since(cursor=...)` calls.
+4. Identify the last command that ran (look at the prompt line and
    the line above it) and the last non-empty output line.
-4. Propose a root cause hypothesis and a minimal command to verify
+5. Propose a root cause hypothesis and a minimal command to verify
    it (do NOT execute anything yet — produce the plan first).
 ```
 

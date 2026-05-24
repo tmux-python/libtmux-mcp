@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Incremental pane observation with {tooliconl}`capture-since`**
+
+{tooliconl}`capture-since` gives agents a cursor-based way to observe a pane without re-reading the same terminal output on every turn. The first call returns the current visible screen and an opaque cursor; later calls return only rows written or rewritten after that cursor while tmux still retains the needed history. If scrollback was cleared or trimmed, the result sets `lines_missed=True`, returns a conservative current visible capture, and issues a fresh cursor. Malformed cursors, cross-pane replay, pane death, and pane respawn fail clearly instead of silently switching processes. (#60)
+
 ## libtmux-mcp 0.1.0a9 (2026-05-24)
 
 libtmux-mcp 0.1.0a9 tightens pane polling correctness for agents waiting on terminal output. Search and wait tools now handle wrapped content, history-limit risk reporting, and pane lifecycle changes with clearer results instead of silent false positives.

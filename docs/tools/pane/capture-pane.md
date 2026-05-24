@@ -7,8 +7,9 @@
 after running a command, checking output, or verifying state.
 
 **Avoid when** you need to search across multiple panes at once — use
-{tooliconl}`search-panes`. If you only need pane metadata (not content), use
-{tooliconl}`get-pane-info`.
+{tooliconl}`search-panes`. If you are repeatedly watching the same pane, use
+{tooliconl}`capture-since` with its cursor so unchanged scrollback is not sent
+again. If you only need pane metadata (not content), use {tooliconl}`get-pane-info`.
 
 **Side effects:** None. Readonly.
 

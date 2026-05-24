@@ -9,6 +9,10 @@ Pane-scoped tools — read and drive individual terminals, wait for output, copy
 Read visible or scrollback text from a pane.
 :::
 
+:::{grid-item-card} {tooliconl}`capture-since`
+Read only pane output written since the last cursor.
+:::
+
 :::{grid-item-card} {tooliconl}`search-panes`
 Search text across many panes in one call.
 :::
@@ -100,6 +104,7 @@ Terminate a pane. Destructive.
 :maxdepth: 1
 
 capture-pane
+capture-since
 search-panes
 snapshot-pane
 get-pane-info

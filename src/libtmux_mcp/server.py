@@ -83,20 +83,20 @@ _INSTR_SCOPE = (
 )
 
 _INSTR_METADATA_VS_CONTENT = (
-    "metadata vs content: list_windows, list_panes, list_sessions search "
-    "metadata only. Use search_panes or capture_pane to find text inside "
-    "terminals — what panes 'contain', 'mention', 'show'."
+    "metadata vs content: list_windows/list_panes/list_sessions search "
+    "metadata only. Use search_panes/capture_since/capture_pane for terminal "
+    "text — what panes 'contain', 'mention', 'show'."
 )
 
 _INSTR_READ_TOOLS = (
-    "Prefer snapshot_pane over capture_pane + get_pane_info. "
-    "display_message evaluates a tmux format string against a target."
+    "Prefer snapshot_pane over capture_pane + get_pane_info; capture_since "
+    "for repeated observation/tailing; display_message for tmux formats."
 )
 
 _INSTR_WAIT_NOT_POLL = (
     "WAIT, DON'T POLL: prefer wait_for_channel (compose `tmux wait-for -S`) "
-    "for command completion. Else wait_for_text / wait_for_content_change "
-    "for output you don't author."
+    "for command completion; capture_since for repeated observation. "
+    "Else wait_for_text/wait_for_content_change for output you don't author."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module
@@ -162,7 +162,7 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     # separate LIBTMUX_DISCOVERABILITY knob.
     if safety_level == TAG_READONLY:
         parts.append(
-            "\n\nReadonly mode: when uncertain about terminal state, prefer "
+            "\n\nReadonly mode: if uncertain, prefer "
             "one read-only probe (snapshot_pane, list_panes, search_panes)."
         )
 
@@ -179,8 +179,7 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
         if socket_name:
             context += f" (socket {socket_name})"
         context += (
-            ". Tool results mark the caller's own pane is_caller=true; "
-            "filter list_panes for is_caller=true to answer "
+            ". Tool results mark is_caller=true; filter list_panes for it to answer "
             "'which pane am I in?' (no whoami tool)."
         )
         parts.append(context)
@@ -202,6 +201,7 @@ if _safety_level not in VALID_SAFETY_LEVELS:
 #: structured responses from list/get tools stay under the cap naturally.
 _RESPONSE_LIMITED_TOOLS = [
     "capture_pane",
+    "capture_since",
     "search_panes",
     "snapshot_pane",
     "show_buffer",

@@ -71,7 +71,10 @@ def diagnose_failing_pane(pane_id: str) -> str:
 
     Uses ``snapshot_pane`` (content + cursor + mode + scroll state
     in one call) instead of ``capture_pane`` + ``get_pane_info`` so
-    the agent sees everything in a single protocol call.
+    the agent sees everything in a single protocol call. When the
+    diagnosis needs another read after waiting or observing, the
+    rendered recipe points agents at ``capture_since`` instead of a
+    repeated full capture.
 
     Parameters
     ----------
@@ -83,9 +86,12 @@ def diagnose_failing_pane(pane_id: str) -> str:
 1. Call `snapshot_pane(pane_id="{pane_id}")` to get content,
    cursor position, pane mode, and scroll state in one call.
 2. If the content looks truncated, re-call with `max_lines=None`.
-3. Identify the last command that ran (look at the prompt line and
+3. If you need to watch the pane across more than one turn, call
+   `capture_since(pane_id="{pane_id}")`, keep the returned cursor,
+   and pass it to later `capture_since(cursor=...)` calls.
+4. Identify the last command that ran (look at the prompt line and
    the line above it) and the last non-empty output line.
-4. Propose a root cause hypothesis and a minimal command to verify
+5. Propose a root cause hypothesis and a minimal command to verify
    it (do NOT execute anything yet — produce the plan first).
 """
 

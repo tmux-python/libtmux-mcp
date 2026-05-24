@@ -215,9 +215,9 @@ the ones above), use {toolref}`wait-for-text` instead.
 
 {toolref}`wait-for-text` replaces `sleep`. The server might start in 2
 seconds or 20 -- the agent adapts. The anti-pattern is polling with repeated
-{toolref}`capture-pane` calls or hardcoding a sleep duration. The MCP server
-handles the polling internally with configurable `timeout` (default 8s) and
-`interval` (default 50ms).
+{toolref}`capture-pane` calls or hardcoding a sleep duration. When the job is
+already running and the agent needs to keep observing it across turns, use
+{toolref}`capture-since` so each read returns only new pane output.
 
 ---
 
@@ -483,4 +483,3 @@ wait instead of polling, content vs. metadata, prefer IDs, escalate
 gracefully -- see the {ref}`prompting guide <prompting>`. For specific
 pitfalls like `enter: false` and the `send_keys`/`capture_pane` race
 condition, see {ref}`gotchas <gotchas>`.
-
