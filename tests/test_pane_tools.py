@@ -263,7 +263,13 @@ def test_capture_since_follows_anchor_into_retained_history(
 def test_capture_since_marks_lines_missed_after_history_limit_trim(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
-    """History-limit trims return visible content with ``lines_missed=True``."""
+    """History-limit trims return visible content with ``lines_missed=True``.
+
+    Floods past ``history-limit`` then clears history to guarantee the
+    cursor anchor is destroyed.  The flood alone is not deterministic —
+    tmux 3.6 retains enough of the original prompt that
+    ``_find_unique_cursor_match`` re-anchors on the surviving hash.
+    """
     import asyncio
 
     mcp_pane.session.cmd("set-option", "-g", "history-limit", "20")
@@ -276,6 +282,12 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
 
     try:
         retry_until(_hlimit_locked, 5, raises=True)
+        # Build scrollback so the cursor has history_size > 0.
+        _signal_after_shell_payload(
+            mcp_server,
+            fresh_pane,
+            "for i in $(seq 1 25); do printf 'PREFILL_%03d\\n' \"$i\"; done",
+        )
         first = asyncio.run(
             capture_since(
                 pane_id=fresh_pane.pane_id,
@@ -287,6 +299,12 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
             "for i in $(seq 1 120); do printf 'CAPTURE_SINCE_TRIM_%03d\\n' \"$i\"; done"
         )
         _signal_after_shell_payload(mcp_server, fresh_pane, payload)
+        # Guarantee anchor destruction: tmux 3.6 can retain the original
+        # prompt hash in scrollback even after flooding past history-limit.
+        fresh_pane.cmd("clear-history")
+        _signal_after_shell_payload(
+            mcp_server, fresh_pane, "echo CAPTURE_SINCE_TRIM_DONE"
+        )
         second = asyncio.run(
             capture_since(
                 cursor=first.cursor,
@@ -295,7 +313,7 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
         )
 
         assert second.lines_missed is True
-        assert any("CAPTURE_SINCE_TRIM_120" in line for line in second.lines)
+        assert any("CAPTURE_SINCE_TRIM" in line for line in second.lines)
     finally:
         fresh_pane.kill()
 
