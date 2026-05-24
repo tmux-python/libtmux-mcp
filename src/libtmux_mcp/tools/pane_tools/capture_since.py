@@ -23,6 +23,7 @@ from libtmux_mcp.tools.pane_tools.io import CAPTURE_DEFAULT_MAX_LINES
 from libtmux_mcp.tools.pane_tools.state import (
     _PaneState,
     _raise_if_pane_lifecycle_changed,
+    _read_history_limit,
     _read_pane_state,
 )
 
@@ -79,8 +80,8 @@ def _line_hash(line: str) -> str:
 def _capture_rows(
     pane: Pane,
     *,
-    start: int | None = None,
-    end: int | None = None,
+    start: t.Literal["-"] | int | None = None,
+    end: t.Literal["-"] | int | None = None,
 ) -> list[str]:
     """Return pane rows as a concrete list."""
     rows = pane.capture_pane(start=start, end=end)
@@ -149,7 +150,7 @@ def _read_stable_visible(
 
 
 def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
-    """Return True when tmux can no longer address the cursor anchor."""
+    """Return True when sampled state proves tmux lost the cursor anchor."""
     bottom_abs = state.history_size + state.pane_height - 1
     if cursor.anchor_abs > bottom_abs:
         return True
@@ -159,6 +160,40 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     return state.history_size < cursor.history_size and (
         state.pane_height <= cursor.pane_height
     )
+
+
+def _history_limit_trim_risk(
+    cursor: _CaptureCursor,
+    state: _PaneState,
+    history_limit: int,
+) -> bool:
+    """Return True when tmux may have rebased retained-history rows."""
+    if history_limit <= 0:
+        return True
+    trim_batch = max(history_limit // 10, 1)
+    risk_floor = history_limit - trim_batch
+    return cursor.history_size >= risk_floor or state.history_size >= risk_floor
+
+
+def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | None:
+    """Find one retained row sequence matching the cursor fingerprint."""
+    if cursor.anchor_hash is None:
+        return None
+
+    fingerprint = (cursor.anchor_hash, *cursor.below_hashes)
+    if len(rows) < len(fingerprint):
+        return None
+
+    match_index: int | None = None
+    for index in range(len(rows) - len(fingerprint) + 1):
+        candidate = rows[index : index + len(fingerprint)]
+        candidate_hashes = tuple(_line_hash(line) for line in candidate)
+        if candidate_hashes != fingerprint:
+            continue
+        if match_index is not None:
+            return None
+        match_index = index
+    return match_index
 
 
 def _drop_previously_seen_rows(
@@ -200,16 +235,33 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
                 lines_missed=True,
             )
 
+        history_limit = _read_history_limit(pane)
+        trim_risk = _history_limit_trim_risk(cursor, before, history_limit)
         start = cursor.anchor_abs - before.history_size
         rows = (
-            []
-            if start >= before.pane_height
-            else _capture_rows(pane, start=start, end=None)
+            _capture_rows(pane, start="-", end=None)
+            if trim_risk
+            else (
+                []
+                if start >= before.pane_height
+                else _capture_rows(pane, start=start, end=None)
+            )
         )
         cursor_rows = _capture_cursor_rows(pane, before)
         after = _read_pane_state(pane)
         _raise_if_pane_lifecycle_changed(pane, after, cursor.pane_pid)
         if _same_state(before, after):
+            if trim_risk:
+                match_index = _find_unique_cursor_match(rows, cursor)
+                if match_index is None:
+                    missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+                    return _PaneRead(
+                        state=missed.state,
+                        cursor_rows=missed.cursor_rows,
+                        lines=missed.lines,
+                        lines_missed=True,
+                    )
+                rows = rows[match_index:]
             return _PaneRead(
                 state=after,
                 cursor_rows=cursor_rows,

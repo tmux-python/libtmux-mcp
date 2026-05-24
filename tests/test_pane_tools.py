@@ -260,6 +260,46 @@ def test_capture_since_follows_anchor_into_retained_history(
     assert any(markers[-1] in line for line in second.lines)
 
 
+def test_capture_since_marks_lines_missed_after_history_limit_trim(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """History-limit trims return visible content with ``lines_missed=True``."""
+    import asyncio
+
+    mcp_pane.session.cmd("set-option", "-g", "history-limit", "20")
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    def _hlimit_locked() -> bool:
+        raw = fresh_pane.display_message("#{history_limit}", get_text=True)
+        return bool(raw) and int(raw[0]) == 20
+
+    try:
+        retry_until(_hlimit_locked, 5, raises=True)
+        first = asyncio.run(
+            capture_since(
+                pane_id=fresh_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        payload = (
+            "for i in $(seq 1 120); do printf 'CAPTURE_SINCE_TRIM_%03d\\n' \"$i\"; done"
+        )
+        _signal_after_shell_payload(mcp_server, fresh_pane, payload)
+        second = asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        assert second.lines_missed is True
+        assert any("CAPTURE_SINCE_TRIM_120" in line for line in second.lines)
+    finally:
+        fresh_pane.kill()
+
+
 def test_capture_since_reports_same_row_rewrite(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
