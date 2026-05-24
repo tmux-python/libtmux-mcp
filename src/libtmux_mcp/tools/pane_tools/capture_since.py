@@ -231,6 +231,7 @@ def _drop_previously_seen_rows(
 
 def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
     """Capture rows since ``cursor`` or fall back to visible content on loss."""
+    history_limit = _read_history_limit(pane)
     for _attempt in range(_STABLE_READ_ATTEMPTS):
         before = _read_pane_state(pane)
         _raise_if_pane_lifecycle_changed(pane, before, cursor.pane_pid)
@@ -243,7 +244,6 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
                 lines_missed=True,
             )
 
-        history_limit = _read_history_limit(pane)
         trim_risk = _history_limit_trim_risk(cursor, before, history_limit)
         start = cursor.anchor_abs - before.history_size
         rows = (
