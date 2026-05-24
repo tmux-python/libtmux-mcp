@@ -62,13 +62,13 @@ def _raise_if_pane_lifecycle_changed(
 ) -> None:
     """Raise ``ToolError`` when a cursor or wait baseline is invalid."""
     if state.pane_dead:
-        msg = f"pane {pane.pane_id} died during wait"
+        msg = f"pane {pane.pane_id} died; cursor/baseline anchor is no longer valid"
         raise ToolError(msg)
     if state.pane_pid != baseline_pid:
         msg = (
-            f"pane {pane.pane_id} was respawned during wait "
+            f"pane {pane.pane_id} was respawned "
             f"(pid {baseline_pid} -> {state.pane_pid}); "
-            "baseline anchor no longer valid"
+            "cursor/baseline anchor is no longer valid"
         )
         raise ToolError(msg)
 

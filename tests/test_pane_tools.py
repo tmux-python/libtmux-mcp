@@ -1995,7 +1995,7 @@ def test_wait_for_text_raises_on_pane_respawn(
         await respawn_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="respawned during wait"):
+    with pytest.raises(ToolError, match="respawned"):
         asyncio.run(run())
 
 
@@ -2018,7 +2018,7 @@ def test_wait_for_text_raises_on_pane_death(mcp_server: Server, mcp_pane: Pane) 
 
     retry_until(_is_dead, 3, raises=True)
 
-    with pytest.raises(ToolError, match="died during wait"):
+    with pytest.raises(ToolError, match="died"):
         asyncio.run(
             wait_for_text(
                 pattern="anything",
@@ -3122,7 +3122,7 @@ def test_wait_for_content_change_raises_on_pane_respawn(
         await respawn_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="respawned during wait"):
+    with pytest.raises(ToolError, match="respawned"):
         asyncio.run(run())
 
 
@@ -3156,7 +3156,7 @@ def test_wait_for_content_change_raises_on_pane_death(
         await exit_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="died during wait"):
+    with pytest.raises(ToolError, match="died"):
         asyncio.run(run())
 
 
