@@ -6,6 +6,8 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a10 (2026-05-24)
+
 ### What's new
 
 **Incremental pane observation with {tooliconl}`capture-since`**
