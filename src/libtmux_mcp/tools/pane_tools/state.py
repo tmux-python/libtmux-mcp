@@ -66,7 +66,15 @@ def _raise_if_pane_lifecycle_changed(
 
 
 def _read_history_limit(pane: Pane) -> int:
-    """Read the pane's ``history-limit`` once."""
+    """Read the pane's ``history-limit`` once.
+
+    Fixed at pane creation — a retroactive ``set-option history-limit``
+    only takes effect in tmux 3.7+ (commit ``e7b1575``); older versions
+    require a new pane.  Safe to cache for the lifetime of a single
+    wait or capture operation.  Kept separate from :func:`_read_pane_state`
+    so per-tick reads do not pay for a value that never changes between
+    ticks.
+    """
     stdout = pane.display_message("#{history_limit}", get_text=True)
     raw = stdout[0] if stdout else "0"
     return int(raw)
