@@ -17,6 +17,14 @@ class _PaneState(t.NamedTuple):
     growing subprocess cost linearly with every required format field.
     ``history_size + cursor_y`` gives the absolute tmux grid row of
     the current cursor.
+
+    Wire format parsed by :func:`_read_pane_state`::
+
+        #{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}
+
+    Fields are ``|``-separated: the first three are non-negative
+    integers, ``pane_pid`` is a decimal PID string, and ``pane_dead``
+    is the literal ``"0"`` or ``"1"``.
     """
 
     history_size: int
