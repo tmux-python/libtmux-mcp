@@ -16,6 +16,10 @@ _Notes on upcoming releases will be added here_
 
 {tooliconl}`wait-for-text` now returns `risk_band_warned=True` when polling enters tmux's history-limit trim-risk band. Clients that do not surface MCP warning notifications can still detect that matching was best-effort and switch to {tooliconl}`wait-for-channel` for deterministic command completion. (#54)
 
+**{tooliconl}`wait-for-content-change` fails on pane lifecycle changes**
+
+{tooliconl}`wait-for-content-change` now raises a tool error when the watched pane dies or is respawned during the wait. Those lifecycle changes invalidate the entry content baseline, so callers no longer receive a misleading `changed=True` result for a different pane process. (#53)
+
 ## libtmux-mcp 0.1.0a8 (2026-05-23)
 
 libtmux-mcp 0.1.0a8 bumps libtmux to 0.58.0, fixing session and window listing on systems whose locale is not UTF-8.

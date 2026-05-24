@@ -2626,6 +2626,75 @@ def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> 
     assert result.changed is False
 
 
+def test_wait_for_content_change_raises_on_pane_respawn(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Respawning the pane mid-wait invalidates the content baseline."""
+    import asyncio
+
+    original_pid = mcp_pane.display_message("#{pane_pid}", get_text=True)
+    assert original_pid
+
+    async def respawn_after_delay() -> None:
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="sleep 30")
+
+        def _pid_changed() -> bool:
+            current_pid = mcp_pane.display_message("#{pane_pid}", get_text=True)
+            return bool(current_pid) and current_pid[0] != original_pid[0]
+
+        await asyncio.to_thread(retry_until, _pid_changed, 3, raises=True)
+
+    async def run() -> ContentChangeResult:
+        wait_task = asyncio.create_task(
+            wait_for_content_change(
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                interval=0.25,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await respawn_after_delay()
+        return await wait_task
+
+    with pytest.raises(ToolError, match="respawned during wait"):
+        asyncio.run(run())
+
+
+def test_wait_for_content_change_raises_on_pane_death(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A pane whose process exits mid-wait invalidates the content baseline."""
+    import asyncio
+
+    mcp_pane.window.set_option("remain-on-exit", "on")
+
+    async def exit_after_delay() -> None:
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="true")
+
+        def _is_dead() -> bool:
+            flag = mcp_pane.display_message("#{pane_dead}", get_text=True)
+            return bool(flag) and flag[0] == "1"
+
+        await asyncio.to_thread(retry_until, _is_dead, 3, raises=True)
+
+    async def run() -> ContentChangeResult:
+        wait_task = asyncio.create_task(
+            wait_for_content_change(
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                interval=0.25,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await exit_after_delay()
+        return await wait_task
+
+    with pytest.raises(ToolError, match="died during wait"):
+        asyncio.run(run())
+
+
 # ---------------------------------------------------------------------------
 # select_pane tests
 # ---------------------------------------------------------------------------
