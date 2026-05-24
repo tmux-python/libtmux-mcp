@@ -30,6 +30,11 @@ Response is a `SearchPanesResult` wrapper: the matching panes live under
 result sets, iterate by re-calling with `offset += len(matches)`; stop when
 `truncated == false` and `truncated_panes == []`.
 
+Plain text searches with no content range use tmux's fast visual-row search.
+That path is quick, but it cannot match text split by terminal wrapping. Pass
+`regex=true` or a `content_start` / `content_end` range when long build,
+test, or log lines may cross the pane's wrap column.
+
 :::{note} Migrating from the flat-list shape
 Earlier alpha releases returned a bare `list[PaneContentMatch]`.
 Clients iterating the old shape directly (e.g. `for m in search_panes(...)`)

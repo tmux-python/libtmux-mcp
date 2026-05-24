@@ -1062,6 +1062,46 @@ def test_search_panes_per_pane_matched_lines_cap(
     assert result.truncated is True
 
 
+def test_search_panes_matches_pattern_across_wrap_slow_path(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Slow-path search joins wrapped visual rows before matching."""
+    import asyncio
+    import uuid
+
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    width_raw = mcp_pane.display_message("#{pane_width}", get_text=True)
+    assert width_raw is not None
+    pane_width = int(width_raw[0])
+
+    filler_len = max(1, pane_width - 5)
+    marker = "WRAPPED_MARKER_xyz"
+    channel = f"mcp_test_search_wrap_{uuid.uuid4().hex[:16]}"
+    payload = (
+        f"printf 'x%.0s' $(seq 1 {filler_len}); "
+        "printf 'WRA'; printf 'PPED_MARKER'; printf '_xyz'; echo; "
+        f"tmux wait-for -S {channel}"
+    )
+    mcp_pane.send_keys(payload, enter=True)
+    asyncio.run(
+        wait_for_channel(
+            channel=channel, timeout=5.0, socket_name=mcp_server.socket_name
+        )
+    )
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        content_start=-100,
+        socket_name=mcp_server.socket_name,
+    )
+
+    match = next((m for m in result.matches if m.pane_id == mcp_pane.pane_id), None)
+    assert match is not None
+    assert any(marker in line for line in match.matched_lines)
+
+
 # ---------------------------------------------------------------------------
 # search_panes is_caller annotation tests
 # ---------------------------------------------------------------------------
@@ -1994,6 +2034,7 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
     )
 
     assert result.found is False
+    assert result.risk_band_warned is False
     assert any(
         level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
     ), f"expected a timeout warning, got: {log_calls}"
@@ -2125,9 +2166,9 @@ def test_wait_for_text_warns_when_already_in_risk_band(
         async def warning(self, message: str) -> None:
             log_calls.append(("warning", message))
 
-    async def run() -> None:
+    async def run() -> WaitForTextResult:
         # Idle wait: no new output, no cursor movement.
-        await wait_for_text(
+        return await wait_for_text(
             pattern="NEVER_MATCH_idle_risk",
             pane_id=fresh_pane.pane_id,
             timeout=0.5,
@@ -2136,8 +2177,9 @@ def test_wait_for_text_warns_when_already_in_risk_band(
             ctx=t.cast("t.Any", _RecordingContext()),
         )
 
-    asyncio.run(run())
+    result = asyncio.run(run())
 
+    assert result.risk_band_warned is True
     assert any(
         level == "warning" and "trim-risk band" in msg for level, msg in log_calls
     ), f"expected a trim-risk-band warning during idle wait, got: {log_calls}"
@@ -2582,6 +2624,75 @@ def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> 
     )
     assert isinstance(result, ContentChangeResult)
     assert result.changed is False
+
+
+def test_wait_for_content_change_raises_on_pane_respawn(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Respawning the pane mid-wait invalidates the content baseline."""
+    import asyncio
+
+    original_pid = mcp_pane.display_message("#{pane_pid}", get_text=True)
+    assert original_pid
+
+    async def respawn_after_delay() -> None:
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="sleep 30")
+
+        def _pid_changed() -> bool:
+            current_pid = mcp_pane.display_message("#{pane_pid}", get_text=True)
+            return bool(current_pid) and current_pid[0] != original_pid[0]
+
+        await asyncio.to_thread(retry_until, _pid_changed, 3, raises=True)
+
+    async def run() -> ContentChangeResult:
+        wait_task = asyncio.create_task(
+            wait_for_content_change(
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                interval=0.25,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await respawn_after_delay()
+        return await wait_task
+
+    with pytest.raises(ToolError, match="respawned during wait"):
+        asyncio.run(run())
+
+
+def test_wait_for_content_change_raises_on_pane_death(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A pane whose process exits mid-wait invalidates the content baseline."""
+    import asyncio
+
+    mcp_pane.window.set_option("remain-on-exit", "on")
+
+    async def exit_after_delay() -> None:
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="true")
+
+        def _is_dead() -> bool:
+            flag = mcp_pane.display_message("#{pane_dead}", get_text=True)
+            return bool(flag) and flag[0] == "1"
+
+        await asyncio.to_thread(retry_until, _is_dead, 3, raises=True)
+
+    async def run() -> ContentChangeResult:
+        wait_task = asyncio.create_task(
+            wait_for_content_change(
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                interval=0.25,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await exit_after_delay()
+        return await wait_task
+
+    with pytest.raises(ToolError, match="died during wait"):
+        asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

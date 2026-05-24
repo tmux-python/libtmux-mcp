@@ -237,6 +237,10 @@ class WaitForTextResult(BaseModel):
     )
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+    risk_band_warned: bool = Field(
+        default=False,
+        description="Whether polling entered the history-limit trim-risk band",
+    )
 
 
 class PaneSnapshot(BaseModel):

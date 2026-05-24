@@ -100,7 +100,7 @@ async def _maybe_log(
 
 
 class _PaneState(t.NamedTuple):
-    """Per-tick snapshot of pane state used by :func:`wait_for_text`.
+    """Per-tick snapshot of pane state used by wait tools.
 
     Read in one ``display-message`` round-trip so the loop costs two
     subprocesses per tick (state + capture) instead of growing
@@ -138,6 +138,22 @@ def _read_pane_state(pane: Pane) -> _PaneState:
         pane_pid=pid,
         pane_dead=dead == "1",
     )
+
+
+def _raise_if_pane_lifecycle_changed(
+    pane: Pane, state: _PaneState, baseline_pid: str
+) -> None:
+    """Raise ``ToolError`` when a wait baseline no longer describes the pane."""
+    if state.pane_dead:
+        msg = f"pane {pane.pane_id} died during wait"
+        raise ToolError(msg)
+    if state.pane_pid != baseline_pid:
+        msg = (
+            f"pane {pane.pane_id} was respawned during wait "
+            f"(pid {baseline_pid} -> {state.pane_pid}); "
+            "baseline anchor no longer valid"
+        )
+        raise ToolError(msg)
 
 
 def _read_history_limit(pane: Pane) -> int:
@@ -407,16 +423,7 @@ async def wait_for_text(
             # blocking subprocess.run. Push to the default executor so
             # concurrent tool calls are not starved during long waits.
             state = await asyncio.to_thread(_read_pane_state, pane)
-            if state.pane_dead:
-                msg = f"pane {pane.pane_id} died during wait"
-                raise ToolError(msg)
-            if state.pane_pid != baseline_pid:
-                msg = (
-                    f"pane {pane.pane_id} was respawned during wait "
-                    f"(pid {baseline_pid} -> {state.pane_pid}); "
-                    "baseline anchor no longer valid"
-                )
-                raise ToolError(msg)
+            _raise_if_pane_lifecycle_changed(pane, state, baseline_pid)
             # When tmux's ``history-limit`` is reached, ``grid_collect_history``
             # (grid.c) frees the oldest scrollback rows and decrements
             # ``gd->hsize``, so absolute index math anchored on
@@ -534,6 +541,7 @@ async def wait_for_text(
         matched_lines=matched_lines,
         pane_id=pane.pane_id,
         elapsed_seconds=round(elapsed, 3),
+        risk_band_warned=warned_risk_band,
     )
 
 
@@ -555,10 +563,9 @@ async def wait_for_content_change(
     what the output will be — it waits for "something happened" rather than
     a specific pattern.
 
-    Unlike ``wait_for_text``, this tool does not raise ``ToolError`` on
-    pane respawn, pane death, or ``clear-history`` mid-wait — those events
-    surface as ``changed=True`` returns instead. For correctness-sensitive
-    flows prefer ``wait_for_channel`` composed with ``tmux wait-for -S``.
+    Raises ``ToolError`` when pane respawn or pane death invalidates the
+    baseline captured at entry. For correctness-sensitive flows prefer
+    ``wait_for_channel`` composed with ``tmux wait-for -S``.
 
     Emits :meth:`fastmcp.Context.report_progress` each tick when a
     Context is injected, so clients can render a progress indicator
@@ -610,6 +617,10 @@ async def wait_for_content_change(
     )
 
     assert pane.pane_id is not None
+    entry = await asyncio.to_thread(_read_pane_state, pane)
+    baseline_pid = entry.pane_pid
+    _raise_if_pane_lifecycle_changed(pane, entry, baseline_pid)
+
     # See comment in wait_for_text: push the blocking capture off the
     # main event loop via asyncio.to_thread.
     initial_content = await asyncio.to_thread(pane.capture_pane)
@@ -627,6 +638,8 @@ async def wait_for_content_change(
                 message=f"Watching pane {pane.pane_id} for change",
             )
 
+            state = await asyncio.to_thread(_read_pane_state, pane)
+            _raise_if_pane_lifecycle_changed(pane, state, baseline_pid)
             current = await asyncio.to_thread(pane.capture_pane)
             if current != initial_content:
                 changed = True
