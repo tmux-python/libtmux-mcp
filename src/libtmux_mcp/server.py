@@ -55,9 +55,9 @@ _ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 # only fall back to a server-level segment when the gap is *server-shaped*
 # (e.g. an entire tool family is intentionally missing).
 #
-# Output text is byte-identical to the previous monolith; tests assert on
-# substrings of ``_BASE_INSTRUCTIONS``, so keeping the join shape stable
-# matters.
+# Tests assert on substrings of ``_BASE_INSTRUCTIONS``, so the join
+# shape (segment count, ``"\n\n"`` separator) must stay stable even as
+# individual instruction strings evolve.
 # ---------------------------------------------------------------------------
 
 _INSTR_HIERARCHY = (
