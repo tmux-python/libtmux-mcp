@@ -8,7 +8,7 @@ Things that will bite you if you don't know about them in advance. For symptom-b
 
 {tooliconl}`list-panes` and {tooliconl}`list-windows` search **metadata** — names, IDs, current command. They do not search what is displayed in the terminal.
 
-To find text that is visible in terminals, use {tooliconl}`search-panes`. To read what a specific pane shows, use {tooliconl}`capture-pane`.
+To find text that is visible in terminals, use {tooliconl}`search-panes`. To read what a specific pane shows once, use {tooliconl}`capture-pane`; to keep watching that pane, use {tooliconl}`capture-since`.
 
 This is the most common source of agent confusion. The server instructions already warn about this, but it bears repeating: if a user asks "which pane mentions error", the answer is `search_panes`, not `list_panes`.
 
@@ -40,6 +40,15 @@ The capture above may return the terminal state **before** pytest runs. Compose 
 ```
 
 For output the agent does not author (third-party logs, daemon prompts, interactive supervisors), substitute {tooliconl}`wait-for-text` for `wait_for_channel`. See {ref}`recipes` for the complete pattern.
+
+## Repeated `capture_pane` calls resend old output
+
+If you are tailing a pane or checking a long-running process over several
+turns, repeated {tooliconl}`capture-pane` calls keep returning the same visible
+screen and scrollback. Use {tooliconl}`capture-since` instead: the first call
+returns a cursor, and follow-up calls return only output written or rewritten
+after that cursor. If tmux has already trimmed or cleared the needed history,
+the result marks `lines_missed=true` and gives you a fresh cursor.
 
 ## Window names are not unique across sessions
 

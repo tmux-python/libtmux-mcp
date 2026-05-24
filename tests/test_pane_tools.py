@@ -10,6 +10,7 @@ from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
 from libtmux_mcp.models import (
+    CaptureSinceResult,
     ContentChangeResult,
     PaneContentMatch,
     PaneSnapshot,
@@ -18,6 +19,7 @@ from libtmux_mcp.models import (
 )
 from libtmux_mcp.tools.pane_tools import (
     capture_pane,
+    capture_since,
     clear_pane,
     display_message,
     enter_copy_mode,
@@ -145,6 +147,469 @@ def test_capture_pane_max_lines_none_disables_truncation(
     )
     assert "[... truncated" not in result
     assert "untrunc_line_19" in result
+
+
+# ---------------------------------------------------------------------------
+# capture_since tests
+# ---------------------------------------------------------------------------
+
+
+def _signal_after_shell_payload(mcp_server: Server, pane: Pane, payload: str) -> None:
+    """Run ``payload`` in ``pane`` and wait for shell completion."""
+    import asyncio
+    import uuid
+
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    channel = f"mcp_test_capture_since_{uuid.uuid4().hex[:16]}"
+    pane.send_keys(f"{payload}; tmux wait-for -S {channel}", enter=True)
+    asyncio.run(
+        wait_for_channel(
+            channel=channel,
+            timeout=5.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+
+def test_capture_since_first_call_returns_visible_screen_and_cursor(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Initial ``capture_since`` call captures visible content and returns a cursor."""
+    import asyncio
+
+    marker = "CAPTURE_SINCE_INITIAL_4xz"
+    _signal_after_shell_payload(mcp_server, mcp_pane, f"echo {marker}")
+
+    result = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert isinstance(result, CaptureSinceResult)
+    assert result.pane_id == mcp_pane.pane_id
+    assert result.cursor
+    assert result.lines_missed is False
+    assert result.truncated is False
+    assert any(marker in line for line in result.lines)
+
+
+def test_capture_since_followup_returns_only_new_output(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Follow-up calls return content written after the previous cursor."""
+    import asyncio
+
+    old_marker = "CAPTURE_SINCE_OLD_71k"
+    new_marker = "CAPTURE_SINCE_NEW_71k"
+    _signal_after_shell_payload(mcp_server, mcp_pane, f"echo {old_marker}")
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    _signal_after_shell_payload(mcp_server, mcp_pane, f"echo {new_marker}")
+    second = asyncio.run(
+        capture_since(
+            cursor=first.cursor,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    third = asyncio.run(
+        capture_since(
+            cursor=second.cursor,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert any(new_marker in line for line in second.lines)
+    assert not any(old_marker in line for line in second.lines)
+    assert third.lines == []
+    assert second.pane_id == mcp_pane.pane_id
+
+
+def test_capture_since_follows_anchor_into_retained_history(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A cursor remains exact after its anchor scrolls into history."""
+    import asyncio
+
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    pane_height = int(mcp_pane.display_message("#{pane_height}", get_text=True)[0])
+    markers = [f"CAPTURE_SINCE_SCROLL_{index:02d}" for index in range(pane_height + 8)]
+    payload = "printf '%s\\n' " + " ".join(markers)
+
+    _signal_after_shell_payload(mcp_server, mcp_pane, payload)
+    second = asyncio.run(
+        capture_since(
+            cursor=first.cursor,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert second.lines_missed is False
+    assert any(markers[-1] in line for line in second.lines)
+
+
+def test_capture_since_marks_lines_missed_after_history_limit_trim(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """History-limit trims return visible content with ``lines_missed=True``.
+
+    Floods past ``history-limit`` then clears history to guarantee the
+    cursor anchor is destroyed.  The flood alone is not deterministic —
+    tmux 3.6 retains enough of the original prompt that
+    ``_find_unique_cursor_match`` re-anchors on the surviving hash.
+    """
+    import asyncio
+
+    mcp_pane.session.cmd("set-option", "-g", "history-limit", "20")
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    def _hlimit_locked() -> bool:
+        raw = fresh_pane.display_message("#{history_limit}", get_text=True)
+        return bool(raw) and int(raw[0]) == 20
+
+    try:
+        retry_until(_hlimit_locked, 5, raises=True)
+        # Build scrollback so the cursor has history_size > 0.
+        _signal_after_shell_payload(
+            mcp_server,
+            fresh_pane,
+            "for i in $(seq 1 25); do printf 'PREFILL_%03d\\n' \"$i\"; done",
+        )
+        first = asyncio.run(
+            capture_since(
+                pane_id=fresh_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        payload = (
+            "for i in $(seq 1 120); do printf 'CAPTURE_SINCE_TRIM_%03d\\n' \"$i\"; done"
+        )
+        _signal_after_shell_payload(mcp_server, fresh_pane, payload)
+        # Guarantee anchor destruction: tmux 3.6 can retain the original
+        # prompt hash in scrollback even after flooding past history-limit.
+        fresh_pane.cmd("clear-history")
+        _signal_after_shell_payload(
+            mcp_server, fresh_pane, "echo CAPTURE_SINCE_TRIM_DONE"
+        )
+        second = asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        assert second.lines_missed is True
+        assert any("CAPTURE_SINCE_TRIM" in line for line in second.lines)
+    finally:
+        fresh_pane.kill()
+
+
+def test_capture_since_reports_same_row_rewrite(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Carriage-return rewrites on the cursor row are reported as new content."""
+    import asyncio
+
+    script = (
+        "printf OLD_REWRITE_CAPTURE_SINCE; "
+        "IFS= read -r line; "
+        "printf '\\r%s' \"$line\"; "
+        "sleep 60"
+    )
+    mcp_pane.respawn(kill=True, shell=f"sh -c '{script}'")
+    retry_until(
+        lambda: any(
+            "OLD_REWRITE_CAPTURE_SINCE" in line for line in mcp_pane.capture_pane()
+        ),
+        5,
+        raises=True,
+    )
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    mcp_pane.send_keys("NEW_REWRITE_CAPTURE_SINCE", enter=True)
+    retry_until(
+        lambda: any(
+            "NEW_REWRITE_CAPTURE_SINCE" in line for line in mcp_pane.capture_pane()
+        ),
+        5,
+        raises=True,
+    )
+    second = asyncio.run(
+        capture_since(
+            cursor=first.cursor,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert any("NEW_REWRITE_CAPTURE_SINCE" in line for line in second.lines)
+
+
+def test_capture_since_truncates_with_structured_metadata(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Line and byte limits tail-preserve output without in-band markers."""
+    import asyncio
+
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    payload = "; ".join(f"echo CAPTURE_SINCE_TRUNC_{i}" for i in range(6))
+    _signal_after_shell_payload(mcp_server, mcp_pane, payload)
+
+    line_limited = asyncio.run(
+        capture_since(
+            cursor=first.cursor,
+            max_lines=2,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    byte_limited = asyncio.run(
+        capture_since(
+            cursor=first.cursor,
+            max_bytes=32,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert line_limited.truncated is True
+    assert line_limited.truncated_lines > 0
+    assert len(line_limited.lines) == 2
+    assert any("CAPTURE_SINCE_TRUNC_5" in line for line in line_limited.lines)
+    assert not line_limited.lines[0].startswith("[... truncated")
+
+    assert byte_limited.truncated is True
+    assert byte_limited.truncated_bytes > 0
+    assert len("\n".join(byte_limited.lines).encode()) <= 32
+
+
+def test_capture_since_rejects_malformed_cursor(mcp_server: Server) -> None:
+    """Malformed cursors fail clearly instead of falling back to another pane."""
+    import asyncio
+
+    with pytest.raises(ToolError, match="invalid capture_since cursor"):
+        asyncio.run(
+            capture_since(
+                cursor="not-a-valid-cursor",
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_capture_since_rejects_cursor_for_different_pane(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """A cursor cannot be replayed against a different pane."""
+    import asyncio
+
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    other_pane = mcp_session.active_window.split()
+    try:
+        with pytest.raises(ToolError, match="cursor pane"):
+            asyncio.run(
+                capture_since(
+                    cursor=first.cursor,
+                    pane_id=other_pane.pane_id,
+                    socket_name=mcp_server.socket_name,
+                )
+            )
+    finally:
+        other_pane.kill()
+
+
+def test_capture_since_marks_lines_missed_after_history_clear(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Lost history returns current visible content with ``lines_missed=True``."""
+    import asyncio
+
+    fill = "; ".join(f"echo CAPTURE_SINCE_HISTORY_{i}" for i in range(40))
+    _signal_after_shell_payload(mcp_server, mcp_pane, fill)
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    mcp_pane.cmd("clear-history")
+    _signal_after_shell_payload(mcp_server, mcp_pane, "echo CAPTURE_SINCE_AFTER_CLEAR")
+    second = asyncio.run(
+        capture_since(
+            cursor=first.cursor,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert second.lines_missed is True
+    assert any("CAPTURE_SINCE_AFTER_CLEAR" in line for line in second.lines)
+    assert second.cursor
+
+
+def test_capture_since_marks_lines_missed_after_clear_history_with_resize(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """clear-history + pane resize still detects anchor loss.
+
+    Regression: ``_cursor_anchor_lost`` used a ``pane_height`` guard
+    that returned False when the pane grew after ``clear-history``,
+    masking the complete history wipe.
+    """
+    import asyncio
+
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    try:
+        fill = "; ".join(f"echo RESIZE_CLEAR_{i}" for i in range(40))
+        _signal_after_shell_payload(mcp_server, fresh_pane, fill)
+        first = asyncio.run(
+            capture_since(
+                pane_id=fresh_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        fresh_pane.cmd("clear-history")
+        assert fresh_pane.pane_height is not None
+        fresh_pane.set_height(int(fresh_pane.pane_height) + 3)
+        _signal_after_shell_payload(mcp_server, fresh_pane, "echo AFTER_RESIZE_CLEAR")
+        second = asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        assert second.lines_missed is True
+        assert any("AFTER_RESIZE_CLEAR" in line for line in second.lines)
+    finally:
+        fresh_pane.kill()
+
+
+def test_capture_since_rejects_respawned_pane_cursor(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Pane respawn invalidates the cursor's process identity."""
+    import asyncio
+
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    mcp_pane.respawn(kill=True, shell="sleep 60")
+
+    with pytest.raises(ToolError, match="respawned"):
+        asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_capture_since_rejects_dead_pane_cursor(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Pane death invalidates the cursor instead of returning stale content."""
+    import asyncio
+
+    first = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    window = mcp_session.active_window
+    window.cmd("set-option", "-w", "remain-on-exit", "on")
+    try:
+        mcp_pane.respawn(kill=True, shell="true")
+
+        def _is_dead() -> bool:
+            out = mcp_pane.cmd("display-message", "-p", "#{pane_dead}").stdout
+            return bool(out) and out[0].strip() == "1"
+
+        retry_until(_is_dead, 5, raises=True)
+        with pytest.raises(ToolError, match="died"):
+            asyncio.run(
+                capture_since(
+                    cursor=first.cursor,
+                    socket_name=mcp_server.socket_name,
+                )
+            )
+    finally:
+        window.cmd("set-option", "-wu", "remain-on-exit")
+
+
+def test_capture_since_does_not_block_event_loop(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``capture_since`` runs blocking tmux captures off the event loop."""
+    import asyncio
+    import time as _time
+
+    from libtmux.pane import Pane as _LibtmuxPane
+
+    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
+        _time.sleep(0.15)
+        return []
+
+    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
+
+    async def _drive() -> int:
+        ticks = 0
+        stop = asyncio.Event()
+
+        async def _ticker() -> None:
+            nonlocal ticks
+            while not stop.is_set():
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        async def _capture() -> None:
+            try:
+                await capture_since(
+                    pane_id=mcp_pane.pane_id,
+                    socket_name=mcp_server.socket_name,
+                )
+            finally:
+                stop.set()
+
+        await asyncio.gather(_ticker(), _capture())
+        return ticks
+
+    ticks = asyncio.run(_drive())
+    assert ticks >= 8, (
+        f"ticker advanced only {ticks} times — capture_since is blocking the event loop"
+    )
 
 
 def test_get_pane_info(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -1530,7 +1995,7 @@ def test_wait_for_text_raises_on_pane_respawn(
         await respawn_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="respawned during wait"):
+    with pytest.raises(ToolError, match="respawned"):
         asyncio.run(run())
 
 
@@ -1553,7 +2018,7 @@ def test_wait_for_text_raises_on_pane_death(mcp_server: Server, mcp_pane: Pane) 
 
     retry_until(_is_dead, 3, raises=True)
 
-    with pytest.raises(ToolError, match="died during wait"):
+    with pytest.raises(ToolError, match="died"):
         asyncio.run(
             wait_for_text(
                 pattern="anything",
@@ -2657,7 +3122,7 @@ def test_wait_for_content_change_raises_on_pane_respawn(
         await respawn_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="respawned during wait"):
+    with pytest.raises(ToolError, match="respawned"):
         asyncio.run(run())
 
 
@@ -2691,7 +3156,7 @@ def test_wait_for_content_change_raises_on_pane_death(
         await exit_after_delay()
         return await wait_task
 
-    with pytest.raises(ToolError, match="died during wait"):
+    with pytest.raises(ToolError, match="died"):
         asyncio.run(run())
 
 
@@ -3157,6 +3622,7 @@ def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
         # agents don't have to re-parse strings. Regression guard:
         # any future change that flattens one of these back to ``str``
         # will break this test and force an explicit review.
+        ("capture_since", "CaptureSinceResult"),
         ("get_pane_info", "PaneInfo"),
         ("snapshot_pane", "PaneSnapshot"),
     ],
@@ -3166,12 +3632,19 @@ def test_pane_read_tools_return_pydantic_models(
 ) -> None:
     """Read-heavy pane tools return their Pydantic model, not ``str``."""
     tools: dict[str, t.Callable[..., t.Any]] = {
+        "capture_since": capture_since,
         "get_pane_info": get_pane_info,
         "snapshot_pane": snapshot_pane,
     }
-    result = tools[tool_name](
+    maybe_result = tools[tool_name](
         pane_id=mcp_pane.pane_id,
         socket_name=mcp_server.socket_name,
     )
+    if tool_name == "capture_since":
+        import asyncio
+
+        result = asyncio.run(t.cast(t.Coroutine[t.Any, t.Any, t.Any], maybe_result))
+    else:
+        result = maybe_result
     assert type(result).__name__ == expected_type
     assert hasattr(result, "model_dump"), "expected a Pydantic BaseModel instance"

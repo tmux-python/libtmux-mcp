@@ -7,7 +7,8 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 ## Which tool do I want?
 
 **Reading terminal content?**
-- Know which pane? → {tool}`capture-pane`
+- Re-reading the same pane while it changes? → {tool}`capture-since`
+- Need a one-shot read of a known pane? → {tool}`capture-pane`
 - Need text + cursor + mode in one call? → {tool}`snapshot-pane`
 - Don't know which pane? → {tool}`search-panes`
 - Need to wait for specific output? → {tool}`wait-for-text`
@@ -97,6 +98,12 @@ List panes in a window.
 :link: capture-pane
 :link-type: ref
 Read visible content of a pane.
+:::
+
+:::{grid-item-card} capture_since
+:link: capture-since
+:link-type: ref
+Start a cursor, then read only new pane output.
 :::
 
 :::{grid-item-card} get_pane_info

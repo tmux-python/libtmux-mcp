@@ -23,6 +23,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
 )
+from libtmux_mcp.tools.pane_tools.capture_since import capture_since
 from libtmux_mcp.tools.pane_tools.copy_mode import enter_copy_mode, exit_copy_mode
 from libtmux_mcp.tools.pane_tools.io import (
     capture_pane,
@@ -55,6 +56,7 @@ if t.TYPE_CHECKING:
 
 __all__ = [
     "capture_pane",
+    "capture_since",
     "clear_pane",
     "display_message",
     "enter_copy_mode",
@@ -85,6 +87,9 @@ def register(mcp: FastMCP) -> None:
     )
     mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         capture_pane
+    )
+    mcp.tool(title="Capture Since", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
+        capture_since
     )
     mcp.tool(
         title="Resize Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}

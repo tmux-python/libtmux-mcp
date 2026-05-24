@@ -14,16 +14,17 @@ Every MCP client receives these instructions when connecting to the libtmux-mcp 
 libtmux MCP server for programmatic tmux control. tmux hierarchy:
 Server > Session > Window > Pane. Use pane_id (e.g. '%1') as the
 preferred targeting method - it is globally unique within a tmux server.
-Use send_keys to execute commands and capture_pane to read output. All
-tools accept an optional socket_name parameter for multi-server support
-(defaults to LIBTMUX_SOCKET env var).
+Use send_keys to execute commands, capture_pane for one-shot reads, and
+capture_since for repeated observation. All tools accept an optional
+socket_name parameter for multi-server support (defaults to
+LIBTMUX_SOCKET env var).
 
 IMPORTANT — metadata vs content: list_windows, list_panes, and
 list_sessions only search metadata (names, IDs, current command). To
 find text that is actually visible in terminals — when users ask what
 panes 'contain', 'mention', 'show', or 'have' — use search_panes to
-search across all pane contents, or list_panes + capture_pane on each
-pane for manual inspection.
+search across all pane contents, capture_since for repeated reads of a
+known pane, or capture_pane for a one-shot manual inspection.
 ```
 
 The server also dynamically adds:
@@ -66,6 +67,7 @@ These natural-language prompts reliably trigger the right tool sequences:
 | [Start the dev server and wait until it's ready]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` (for "listening on" — third-party output the agent doesn't author) |
 | [Spin up the dev server in the bottom-right pane]{.prompt} | {toolref}`find-pane-by-position` (corner=bottom-right) → {toolref}`send-keys` → {toolref}`wait-for-text` (for the server's readiness banner) |
 | [Check if any pane has errors]{.prompt} | {toolref}`search-panes` with pattern "error" |
+| [Keep watching the server pane]{.prompt} | {toolref}`capture-since` with the previous cursor |
 | [Set up a workspace with editor, server, and tests]{.prompt} | {toolref}`create-session` → {toolref}`split-window` (x2) → {toolref}`set-pane-title` (x3) |
 | [What's running in my tmux sessions?]{.prompt} | {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`capture-pane` |
 | [Kill the old workspace session]{.prompt} | {toolref}`kill-session` (after confirming target) |
@@ -95,7 +97,8 @@ This keeps output accessible for later inspection.
 For command completion, compose `tmux wait-for -S <channel>` into the
 shell command and call wait_for_channel — deterministic, no polling.
 Use wait_for_text or wait_for_content_change for observation flows
-(third-party logs, daemon prompts). Never capture_pane immediately
+(third-party logs, daemon prompts), and use capture_since when you
+need to read the same pane repeatedly. Never capture_pane immediately
 after send_keys — the command may still be running.
 ```
 
@@ -139,6 +142,6 @@ When an agent is unsure which tool to use, these rules help:
 
 1. **Discovery first**: Call {toolref}`list-sessions` or {toolref}`list-panes` before acting on specific targets
 2. **Prefer IDs**: Once you have a `pane_id`, use it for all subsequent calls — it never changes during the pane's lifetime
-3. **Wait, don't poll**: For commands the agent authors, prefer {toolref}`wait-for-channel` with `tmux wait-for -S <channel>` composed into the command — deterministic and race-free. Fall back to {toolref}`wait-for-text` or {toolref}`wait-for-content-change` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
+3. **Wait, don't poll**: For commands the agent authors, prefer {toolref}`wait-for-channel` with `tmux wait-for -S <channel>` composed into the command — deterministic and race-free. Use {toolref}`capture-since` for repeated observation, and fall back to {toolref}`wait-for-text` or {toolref}`wait-for-content-change` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
 4. **Content vs. metadata**: If looking for text *in* a terminal, use {toolref}`search-panes`. If looking for pane *properties* (name, PID, path), use {toolref}`list-panes` or {toolref}`get-pane-info`
 5. **Destructive tools are opt-in**: Never kill sessions, windows, or panes unless the user explicitly asks

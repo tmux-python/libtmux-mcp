@@ -68,8 +68,8 @@ hierarchy.
 :::{grid-item-card} Pagination
 :link: pagination
 :link-type: doc
-Protocol-level cursors vs tool-level ``offset`` / ``limit`` (as in
-``search_panes``).
+Protocol cursors, ``search_panes`` paging, and ``capture_since``
+observation cursors.
 :::
 
 ::::

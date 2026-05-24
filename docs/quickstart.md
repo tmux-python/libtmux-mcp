@@ -57,6 +57,10 @@ When you say "run `make test` and show me the output", the agent executes a thre
 
 This **send → wait → capture** sequence is the fundamental workflow. For commands the agent authors, the channel pattern is deterministic; for output the agent does not author (third-party log lines, daemon prompts, interactive supervisors), substitute {tool}`wait-for-text` for step 2.
 
+When you need to keep checking the same pane after that first read, switch to
+{tool}`capture-since`: the first call returns a cursor, and follow-up calls
+return only new pane output.
+
 ## Next steps
 
 - {ref}`concepts` — Understand the tmux hierarchy and how tools target panes

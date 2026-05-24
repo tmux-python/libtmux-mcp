@@ -8,7 +8,7 @@ which pane has an error, finding a running process, or checking output
 without knowing which pane to look in.
 
 **Avoid when** you already know the target pane — use {tooliconl}`capture-pane`
-directly.
+for a one-shot read, or {tooliconl}`capture-since` for repeated observation.
 
 **Side effects:** None. Readonly.
 

@@ -243,6 +243,37 @@ class WaitForTextResult(BaseModel):
     )
 
 
+class CaptureSinceResult(BaseModel):
+    """Incremental pane capture result with an opaque resume cursor."""
+
+    pane_id: str = Field(description="Pane ID that was captured")
+    cursor: str = Field(description="Opaque cursor to pass back to ``capture_since``")
+    lines: list[str] = Field(
+        default_factory=list,
+        description="Captured lines, oldest first and tail-preserved if truncated",
+    )
+    elapsed_seconds: float = Field(description="Time spent capturing in seconds")
+    lines_missed: bool = Field(
+        default=False,
+        description=(
+            "True when prior history was no longer available, so ``lines`` "
+            "is a conservative current visible capture rather than a complete delta"
+        ),
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when ``lines`` was truncated by max_lines or max_bytes",
+    )
+    truncated_lines: int = Field(
+        default=0,
+        description="Number of lines dropped from the head when truncating",
+    )
+    truncated_bytes: int = Field(
+        default=0,
+        description="Approximate UTF-8 bytes dropped from the head when truncating",
+    )
+
+
 class PaneSnapshot(BaseModel):
     """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
 
