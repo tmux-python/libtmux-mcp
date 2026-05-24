@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a9 (2026-05-24)
+
+libtmux-mcp 0.1.0a9 tightens pane polling correctness for agents waiting on terminal output. Search and wait tools now handle wrapped content, history-limit risk reporting, and pane lifecycle changes with clearer results instead of silent false positives.
+
 ### Fixes
 
 **{tooliconl}`search-panes` matches wrap-spanning slow-path text**
