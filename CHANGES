@@ -12,6 +12,10 @@ _Notes on upcoming releases will be added here_
 
 {tooliconl}`search-panes` now joins tmux-wrapped visual rows when it uses the captured-content slow path, so long build, test, or log lines can match across the pane width. Plain fast-path searches still use tmux's native visual-row search; pass `regex=True` or a content range when exact text may span a wrap boundary. (#55)
 
+**{tooliconl}`wait-for-text` reports trim-risk warnings in results**
+
+{tooliconl}`wait-for-text` now returns `risk_band_warned=True` when polling enters tmux's history-limit trim-risk band. Clients that do not surface MCP warning notifications can still detect that matching was best-effort and switch to {tooliconl}`wait-for-channel` for deterministic command completion. (#54)
+
 ## libtmux-mcp 0.1.0a8 (2026-05-23)
 
 libtmux-mcp 0.1.0a8 bumps libtmux to 0.58.0, fixing session and window listing on systems whose locale is not UTF-8.

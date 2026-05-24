@@ -534,6 +534,7 @@ async def wait_for_text(
         matched_lines=matched_lines,
         pane_id=pane.pane_id,
         elapsed_seconds=round(elapsed, 3),
+        risk_band_warned=warned_risk_band,
     )
 
 

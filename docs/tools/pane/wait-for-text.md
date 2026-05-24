@@ -35,9 +35,15 @@ Response:
     "Server listening on port 8000"
   ],
   "pane_id": "%2",
-  "elapsed_seconds": 0.002
+  "elapsed_seconds": 0.002,
+  "risk_band_warned": false
 }
 ```
+
+`risk_band_warned` is `true` when polling entered tmux's history-limit
+trim-risk band. In that state, matching remains best-effort because older
+scrollback can be discarded while the wait is active; use
+{tooliconl}`wait-for-channel` for deterministic command completion.
 
 ```{fastmcp-tool-input} pane_tools.wait_for_text
 ```

@@ -2034,6 +2034,7 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
     )
 
     assert result.found is False
+    assert result.risk_band_warned is False
     assert any(
         level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
     ), f"expected a timeout warning, got: {log_calls}"
@@ -2165,9 +2166,9 @@ def test_wait_for_text_warns_when_already_in_risk_band(
         async def warning(self, message: str) -> None:
             log_calls.append(("warning", message))
 
-    async def run() -> None:
+    async def run() -> WaitForTextResult:
         # Idle wait: no new output, no cursor movement.
-        await wait_for_text(
+        return await wait_for_text(
             pattern="NEVER_MATCH_idle_risk",
             pane_id=fresh_pane.pane_id,
             timeout=0.5,
@@ -2176,8 +2177,9 @@ def test_wait_for_text_warns_when_already_in_risk_band(
             ctx=t.cast("t.Any", _RecordingContext()),
         )
 
-    asyncio.run(run())
+    result = asyncio.run(run())
 
+    assert result.risk_band_warned is True
     assert any(
         level == "warning" and "trim-risk band" in msg for level, msg in log_calls
     ), f"expected a trim-risk-band warning during idle wait, got: {log_calls}"
