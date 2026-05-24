@@ -100,9 +100,13 @@ def search_panes(
     ``limit``. Each matching pane's ``matched_lines`` is further
     tail-truncated to at most ``max_matched_lines_per_pane`` entries
     (most-recent lines preserved). Caps apply only to the slow path
-    (``pane.capture_pane()`` + Python regex); the tmux fast path at
-    ``#{C:pattern}`` returns pane IDs only and is already bounded by
-    tmux.
+    (``pane.capture_pane(join_wrapped=True)`` + Python regex); the tmux
+    fast path at ``#{C:pattern}`` returns pane IDs only and is already
+    bounded by tmux.
+    The slow path joins wrapped visual rows so long lines can match
+    across the pane's wrap column. The fast path remains tmux's native
+    visual-row search, so use ``regex=True`` or an explicit content
+    range to force the slow path when wrap-spanning text matters.
 
     Parameters
     ----------
@@ -231,7 +235,11 @@ def search_panes(
         if pane is None:
             continue
 
-        lines = pane.capture_pane(start=content_start, end=content_end)
+        lines = pane.capture_pane(
+            start=content_start,
+            end=content_end,
+            join_wrapped=True,
+        )
         matched_lines = [line for line in lines if compiled.search(line)]
 
         if not matched_lines:

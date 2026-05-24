@@ -1062,6 +1062,46 @@ def test_search_panes_per_pane_matched_lines_cap(
     assert result.truncated is True
 
 
+def test_search_panes_matches_pattern_across_wrap_slow_path(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Slow-path search joins wrapped visual rows before matching."""
+    import asyncio
+    import uuid
+
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    width_raw = mcp_pane.display_message("#{pane_width}", get_text=True)
+    assert width_raw is not None
+    pane_width = int(width_raw[0])
+
+    filler_len = max(1, pane_width - 5)
+    marker = "WRAPPED_MARKER_xyz"
+    channel = f"mcp_test_search_wrap_{uuid.uuid4().hex[:16]}"
+    payload = (
+        f"printf 'x%.0s' $(seq 1 {filler_len}); "
+        "printf 'WRA'; printf 'PPED_MARKER'; printf '_xyz'; echo; "
+        f"tmux wait-for -S {channel}"
+    )
+    mcp_pane.send_keys(payload, enter=True)
+    asyncio.run(
+        wait_for_channel(
+            channel=channel, timeout=5.0, socket_name=mcp_server.socket_name
+        )
+    )
+
+    result = search_panes(
+        pattern=marker,
+        session_name=mcp_session.session_name,
+        content_start=-100,
+        socket_name=mcp_server.socket_name,
+    )
+
+    match = next((m for m in result.matches if m.pane_id == mcp_pane.pane_id), None)
+    assert match is not None
+    assert any(marker in line for line in match.matched_lines)
+
+
 # ---------------------------------------------------------------------------
 # search_panes is_caller annotation tests
 # ---------------------------------------------------------------------------
