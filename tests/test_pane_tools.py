@@ -454,6 +454,47 @@ def test_capture_since_marks_lines_missed_after_history_clear(
     assert second.cursor
 
 
+def test_capture_since_marks_lines_missed_after_clear_history_with_resize(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """clear-history + pane resize still detects anchor loss.
+
+    Regression: ``_cursor_anchor_lost`` used a ``pane_height`` guard
+    that returned False when the pane grew after ``clear-history``,
+    masking the complete history wipe.
+    """
+    import asyncio
+
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    try:
+        fill = "; ".join(f"echo RESIZE_CLEAR_{i}" for i in range(40))
+        _signal_after_shell_payload(mcp_server, fresh_pane, fill)
+        first = asyncio.run(
+            capture_since(
+                pane_id=fresh_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        fresh_pane.cmd("clear-history")
+        assert fresh_pane.pane_height is not None
+        fresh_pane.set_height(int(fresh_pane.pane_height) + 3)
+        _signal_after_shell_payload(mcp_server, fresh_pane, "echo AFTER_RESIZE_CLEAR")
+        second = asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        assert second.lines_missed is True
+        assert any("AFTER_RESIZE_CLEAR" in line for line in second.lines)
+    finally:
+        fresh_pane.kill()
+
+
 def test_capture_since_rejects_respawned_pane_cursor(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

@@ -154,9 +154,17 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     bottom_abs = state.history_size + state.pane_height - 1
     if cursor.anchor_abs > bottom_abs:
         return True
+    # A complete history wipe (``clear-history``) always destroys the
+    # anchor regardless of pane height — the grid is reset to zero.
+    if state.history_size == 0 and cursor.history_size > 0:
+        return True
     # ``anchor_abs < history_size`` means the anchor has scrolled into
     # retained history, where ``capture-pane -S`` can still address it
     # with a negative start offset.
+    #
+    # The ``pane_height`` guard distinguishes resize-grow (which pulls
+    # rows from history back into the visible region without freeing
+    # data) from actual trim (where row data is destroyed).
     return state.history_size < cursor.history_size and (
         state.pane_height <= cursor.pane_height
     )
