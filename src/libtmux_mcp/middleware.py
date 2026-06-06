@@ -134,7 +134,63 @@ def _is_schema_validation_error(error: BaseException) -> bool:
     )
 
 
-def _error_tool_result(error: Exception) -> ToolResult:
+#: Scheduling flag some MCP clients (notably Gemini CLI when batching
+#: several tool calls in one turn) merge into the tool's arguments.
+#: Recognized only to *word the rejection helpfully* — the argument is
+#: still rejected, never silently stripped, so genuine argument typos
+#: from other clients stay loud. Contrast MemPalace/mempalace#322,
+#: which strips the key, and #647, which whitelists arguments against
+#: the schema — silent dropping would let a mis-named flag on a
+#: mutating tool (e.g. ``enter`` on send_keys) run with defaults.
+_CLIENT_SCHEDULING_FLAG = "wait_for_previous"
+
+
+def _unexpected_kwargs(error: BaseException) -> list[str]:
+    """Argument names rejected as unexpected by schema validation.
+
+    Reads pydantic's structured ``errors()`` from ``error`` or its
+    ``__cause__`` (same posture as :func:`_is_schema_validation_error`)
+    and returns the names flagged ``unexpected_keyword_argument``.
+    Empty list for every other failure shape.
+    """
+    err = error if isinstance(error, PydanticValidationError) else error.__cause__
+    if not isinstance(err, PydanticValidationError):
+        return []
+    return [
+        str(item["loc"][-1])
+        for item in err.errors()
+        if item.get("type") == "unexpected_keyword_argument" and item.get("loc")
+    ]
+
+
+def _client_label(context: MiddlewareContext | None) -> str | None:
+    """``"name version"`` of the connected client, when the handshake exposed it.
+
+    Walks ``fastmcp_context.session.client_params.clientInfo`` — the
+    MCP ``initialize`` handshake's client identity. Every hop can be
+    absent (unit-test contexts, background tasks, clients that omit
+    ``clientInfo``), so any failure resolves to ``None``. Used only to
+    word error suggestions; never gates behavior.
+    """
+    if context is None:
+        return None
+    try:
+        fastmcp_ctx = context.fastmcp_context
+        if fastmcp_ctx is None:
+            return None
+        params = fastmcp_ctx.session.client_params
+        if params is None:
+            return None
+        info = params.clientInfo
+        return f"{info.name} {info.version}".strip()
+    except (AttributeError, RuntimeError):
+        return None
+
+
+def _error_tool_result(
+    error: Exception,
+    context: MiddlewareContext | None = None,
+) -> ToolResult:
     """Build a rich ``ToolResult(is_error=True)`` from a tool failure.
 
     The text block carries the error message exactly as raised — no
@@ -149,7 +205,12 @@ def _error_tool_result(error: Exception) -> ToolResult:
       (:class:`~libtmux_mcp._utils.ExpectedToolError` and
       argument-schema validation errors), False for operator faults
       and potential server bugs.
-    * ``suggestion`` — recovery hint, only when present.
+    * ``suggestion`` — recovery hint. Carried by the error when the
+      raise site provided one; synthesized for schema-validation
+      failures that rejected unexpected arguments, so the agent knows
+      to drop or fix exactly those names (with a client-flag note for
+      :data:`_CLIENT_SCHEDULING_FLAG` leaks, naming the client via
+      ``context`` when the handshake exposed it).
 
     ``structured_content`` is deliberately left unset: tools declare
     output schemas for their success payloads, and clients validate
@@ -165,6 +226,24 @@ def _error_tool_result(error: Exception) -> ToolResult:
     }
     text = str(error)
     suggestion = getattr(error, "suggestion", None)
+    if suggestion is None:
+        unknown = _unexpected_kwargs(error)
+        if unknown:
+            suggestion = (
+                f"Remove or correct the unrecognized argument(s): {', '.join(unknown)}."
+            )
+            if _CLIENT_SCHEDULING_FLAG in unknown:
+                client = _client_label(context)
+                who = (
+                    f"your client ({client})"
+                    if client
+                    else "some clients (e.g. Gemini CLI)"
+                )
+                suggestion += (
+                    f" {_CLIENT_SCHEDULING_FLAG} is a scheduling flag "
+                    f"{who} can leak into batched tool calls; retry "
+                    f"the call without it."
+                )
     if suggestion:
         meta["suggestion"] = suggestion
         text = f"{text}\n{suggestion}"
@@ -196,7 +275,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     re-shouted at ERROR by the stock ``_log_error``. Argument-schema
     validation failures — raised by fastmcp before tool code can
     classify them — are treated as expected too (see
-    :func:`_is_schema_validation_error`).
+    :func:`_is_schema_validation_error`), and when the rejected
+    arguments include unexpected names the error result carries a
+    synthesized suggestion telling the agent which names to drop or
+    fix (see :func:`_error_tool_result`).
 
     Ordering invariant: must sit **outside** ``AuditMiddleware``,
     ``ReadonlyRetryMiddleware``, and ``SafetyMiddleware``. All three
@@ -258,7 +340,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
             return await call_next(context)
         except Exception as error:
             self._log_error(error, context)
-            return _error_tool_result(error)
+            return _error_tool_result(error, context)
 
 
 # ---------------------------------------------------------------------------

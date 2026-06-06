@@ -1036,3 +1036,139 @@ def test_response_limiter_preserves_error_results(
         meta = result.meta or {}
         assert meta["expected"] is True
         assert meta["error_type"] == "ExpectedToolError"
+
+
+class UnknownArgSuggestionFixture(t.NamedTuple):
+    """Test fixture for synthesized unexpected-argument suggestions."""
+
+    test_id: str
+    arguments: dict[str, t.Any]
+    client_name: str | None
+    expect_suggestion: bool
+    contains: tuple[str, ...]
+    not_contains: tuple[str, ...]
+
+
+UNKNOWN_ARG_SUGGESTION_FIXTURES: list[UnknownArgSuggestionFixture] = [
+    UnknownArgSuggestionFixture(
+        test_id="scheduling_flag_names_client",
+        arguments={"count": 1, "wait_for_previous": True},
+        client_name="gemini-test",
+        expect_suggestion=True,
+        contains=(
+            "Remove or correct the unrecognized argument(s): wait_for_previous.",
+            "your client (gemini-test 9.9)",
+            "retry the call without it",
+        ),
+        not_contains=("some clients",),
+    ),
+    UnknownArgSuggestionFixture(
+        test_id="scheduling_flag_default_client",
+        arguments={"count": 1, "wait_for_previous": True},
+        client_name=None,
+        expect_suggestion=True,
+        # The in-memory fastmcp Client always sends clientInfo, so the
+        # handshake-derived label is used; the no-handshake generic
+        # wording is covered by the unit test below.
+        contains=("wait_for_previous", "your client ("),
+        not_contains=("gemini-test",),
+    ),
+    UnknownArgSuggestionFixture(
+        test_id="typo_lists_names_without_client_note",
+        arguments={"count": 1, "bogus_flag": True},
+        client_name=None,
+        expect_suggestion=True,
+        contains=("Remove or correct the unrecognized argument(s): bogus_flag.",),
+        not_contains=("scheduling flag", "Gemini"),
+    ),
+    UnknownArgSuggestionFixture(
+        test_id="missing_required_arg_no_suggestion",
+        arguments={},
+        client_name=None,
+        expect_suggestion=False,
+        contains=(),
+        not_contains=(),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    UnknownArgSuggestionFixture._fields,
+    UNKNOWN_ARG_SUGGESTION_FIXTURES,
+    ids=[f.test_id for f in UNKNOWN_ARG_SUGGESTION_FIXTURES],
+)
+def test_unexpected_argument_suggestion(
+    test_id: str,
+    arguments: dict[str, t.Any],
+    client_name: str | None,
+    expect_suggestion: bool,
+    contains: tuple[str, ...],
+    not_contains: tuple[str, ...],
+) -> None:
+    """Schema rejections of unexpected arguments carry a recovery hint.
+
+    The rejection itself is unchanged — the argument is never silently
+    stripped (contrast MemPalace/mempalace#322's pop-the-key approach) —
+    but the suggestion names exactly which argument(s) to drop or fix,
+    and flags ``wait_for_previous`` as a client scheduling leak, naming
+    the client from the MCP initialize handshake when available.
+    """
+    import mcp.types
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    client_kwargs: dict[str, t.Any] = {}
+    if client_name is not None:
+        client_kwargs["client_info"] = mcp.types.Implementation(
+            name=client_name, version="9.9"
+        )
+
+    async def _call() -> t.Any:
+        async with Client(probe, **client_kwargs) as client:
+            return await client.call_tool("takes_int", arguments, raise_on_error=False)
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    meta = result.meta or {}
+    assert meta["expected"] is True
+    if not expect_suggestion:
+        assert "suggestion" not in meta
+        return
+    suggestion = meta["suggestion"]
+    text = result.content[0].text
+    assert suggestion in text  # appended to the agent-visible message
+    for fragment in contains:
+        assert fragment in suggestion
+    for fragment in not_contains:
+        assert fragment not in suggestion
+
+
+def test_unexpected_argument_suggestion_without_handshake() -> None:
+    """No client handshake -> the scheduling-flag note uses generic wording.
+
+    Real connections always carry ``clientInfo`` (required by the MCP
+    initialize handshake), so the generic branch is reachable only
+    where no context exists — exercised here by calling
+    ``_error_tool_result`` directly with a manufactured validation
+    error, the same shape fastmcp raises for tool arguments.
+    """
+    import pydantic
+
+    from libtmux_mcp.middleware import _error_tool_result
+
+    @pydantic.validate_call
+    def _probe_fn(count: int) -> int:
+        return count  # pragma: no cover - validation rejects the call
+
+    try:
+        _probe_fn(count=1, wait_for_previous=True)  # type: ignore[call-arg]
+    except pydantic.ValidationError as exc:
+        result = _error_tool_result(exc, None)
+    else:  # pragma: no cover - defends the test's own premise
+        pytest.fail("expected a ValidationError")
+
+    meta = result.meta or {}
+    assert meta["expected"] is True
+    assert "some clients (e.g. Gemini CLI)" in meta["suggestion"]
