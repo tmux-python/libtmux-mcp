@@ -71,7 +71,7 @@ Tools use resolver functions (`_resolve_session`, `_resolve_window`, `_resolve_p
 Two layers split the work:
 
 1. **Classification** — the `@handle_tool_errors` decorator wraps all tool functions, mapping libtmux exceptions to `ExpectedToolError` (agent-correctable: unknown ids, invalid arguments, transient tmux errors; logged at WARNING) or stock `ToolError` (operator faults and unexpected bugs; logged at ERROR). The raise chains the original exception via `from e`, which is what lets `ReadonlyRetryMiddleware` match transient `LibTmuxException` causes.
-2. **Conversion** — `ToolErrorResultMiddleware` catches the exception at the outer edge of the stack and returns `ToolResult(is_error=True)` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, optional `suggestion` pointing at discovery tools).
+2. **Conversion** — `ToolErrorResultMiddleware` catches the exception once it has cleared the audit/retry/safety trio and returns `ToolResult(is_error=True)` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, optional `suggestion` pointing at discovery tools).
 
 Errors must stay exceptions through the audit/retry/safety trio — audit detects failures by catching, retry matches via `__cause__` — so conversion happens only in the outermost error layer. Level policy lives in {doc}`/topics/logging`.
 
