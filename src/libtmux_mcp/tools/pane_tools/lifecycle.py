@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
@@ -56,7 +55,7 @@ def kill_pane(
             "Refusing to kill the pane running this MCP server. "
             "Use a manual tmux command if intended."
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     pane = _resolve_pane(server, pane_id=pane_id)
     pid = pane.pane_id
@@ -149,7 +148,7 @@ def respawn_pane(
             "Refusing to respawn the pane running this MCP server. "
             "Use a manual tmux command if intended."
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     pane.respawn(
         kill=kill,
         start_directory=start_directory,
@@ -316,7 +315,7 @@ def find_pane_by_position(
             f"{window.window_id}. This is unusual — built-in layouts "
             "always have a pane at every corner."
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     # When more than one pane qualifies (e.g. a single-pane window
     # touches all four edges, or an unusual layout), prefer the pane

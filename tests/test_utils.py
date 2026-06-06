@@ -862,3 +862,94 @@ def test_handle_tool_errors_async_wraps_unexpected_exception() -> None:
 
     with pytest.raises(ToolError, match=r"Unexpected error: RuntimeError: boom"):
         asyncio.run(_raiser())
+
+
+# ---------------------------------------------------------------------------
+# ExpectedToolError log-level tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        exc.TmuxSessionExists("session foo already exists"),
+        exc.BadSessionName("bad name"),
+        exc.TmuxObjectDoesNotExist("@99"),
+        exc.PaneNotFound("%99"),
+        exc.LibTmuxException("server gone"),
+    ],
+    ids=lambda e: type(e).__name__,
+)
+def test_map_exception_expected_failures_log_at_warning(
+    raised: Exception,
+) -> None:
+    """Agent-correctable libtmux failures map to WARNING-level errors."""
+    import logging
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    mapped = _map_exception_to_tool_error("some_tool", raised)
+    assert isinstance(mapped, ExpectedToolError)
+    assert mapped.log_level == logging.WARNING
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        exc.TmuxCommandNotFound("tmux missing"),
+        RuntimeError("boom"),
+    ],
+    ids=lambda e: type(e).__name__,
+)
+def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
+    """Environment faults and unexpected bugs keep the ERROR default."""
+    import logging
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    mapped = _map_exception_to_tool_error("some_tool", raised)
+    assert not isinstance(mapped, ExpectedToolError)
+    assert mapped.log_level == logging.ERROR
+
+
+def test_expected_tool_error_logs_warning_through_server(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fastmcp's server-layer error log honors ``ExpectedToolError.log_level``.
+
+    Uses a minimal FastMCP instance (no middleware stack) so the
+    assertion isolates fastmcp's own ``Error calling tool`` record —
+    the project middleware's log behavior is covered in
+    ``test_middleware.py``.
+
+    fastmcp sets ``propagate = False`` on its logger (it installs a
+    rich handler instead), which hides records from caplog's
+    root-logger handler — re-enable propagation for the test.
+    """
+    import asyncio
+    import logging
+
+    from fastmcp import Client, FastMCP
+
+    from libtmux_mcp._utils import ExpectedToolError
+
+    monkeypatch.setattr(logging.getLogger("fastmcp"), "propagate", True)
+
+    probe = FastMCP(name="probe")
+
+    @probe.tool
+    def fail_expected() -> str:
+        msg = "Pane not found: %99"
+        raise ExpectedToolError(msg)
+
+    async def _call() -> None:
+        async with Client(probe) as client:
+            await client.call_tool("fail_expected", raise_on_error=False)
+
+    with caplog.at_level(logging.DEBUG):
+        asyncio.run(_call())
+
+    records = [r for r in caplog.records if "Error calling tool" in r.message]
+    assert records, "expected fastmcp to log the tool failure"
+    assert all(r.levelno == logging.WARNING for r in records)

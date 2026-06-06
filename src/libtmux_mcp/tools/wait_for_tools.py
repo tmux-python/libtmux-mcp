@@ -35,11 +35,10 @@ import re
 import subprocess
 import typing as t
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING,
     TAG_MUTATING,
+    ExpectedToolError,
     _get_server,
     _tmux_argv,
     handle_tool_errors_async,
@@ -91,15 +90,15 @@ def _validate_channel_name(name: str) -> str:
     >>> _validate_channel_name("has space")
     Traceback (most recent call last):
     ...
-    fastmcp.exceptions.ToolError: Invalid channel name: 'has space'
+    libtmux_mcp._utils.ExpectedToolError: Invalid channel name: 'has space'
     >>> _validate_channel_name("")
     Traceback (most recent call last):
     ...
-    fastmcp.exceptions.ToolError: Invalid channel name: ''
+    libtmux_mcp._utils.ExpectedToolError: Invalid channel name: ''
     """
     if not _CHANNEL_NAME_RE.fullmatch(name):
         msg = f"Invalid channel name: {name!r}"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     return name
 
 
@@ -164,11 +163,11 @@ async def wait_for_channel(
         )
     except subprocess.TimeoutExpired as e:
         msg = f"wait-for timeout: channel {cname!r} was not signalled within {timeout}s"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"wait-for failed for channel {cname!r}: {stderr or e}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     return f"Channel {cname!r} was signalled"
 
 
@@ -210,11 +209,11 @@ async def signal_channel(
             f"signal-channel timeout after {_SIGNAL_TIMEOUT_SECONDS}s: "
             f"channel {cname!r}"
         )
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"signal-channel failed for channel {cname!r}: {stderr or e}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     return f"Channel {cname!r} signalled"
 
 

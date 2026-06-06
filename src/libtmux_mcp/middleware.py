@@ -24,7 +24,6 @@ import logging
 import time
 import typing as t
 
-from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import RetryMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
@@ -32,7 +31,12 @@ from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
 from mcp.types import TextContent
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
+from libtmux_mcp._utils import (
+    TAG_DESTRUCTIVE,
+    TAG_MUTATING,
+    TAG_READONLY,
+    ExpectedToolError,
+)
 
 _TIER_LEVELS: dict[str, int] = {
     TAG_READONLY: 0,
@@ -90,7 +94,7 @@ class SafetyMiddleware(Middleware):
                     f"current safety level. Set LIBTMUX_SAFETY=destructive "
                     f"to enable destructive tools."
                 )
-                raise ToolError(msg)
+                raise ExpectedToolError(msg)
         return await call_next(context)
 
 

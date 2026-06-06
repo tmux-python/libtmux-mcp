@@ -30,6 +30,38 @@ if t.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ExpectedToolError(ToolError):
+    """``ToolError`` for expected, agent-correctable failures.
+
+    Defaults the error's ``log_level`` to ``WARNING`` (honored by
+    fastmcp >= 3.3 when logging tool/resource failures) so routine
+    validation errors, missing objects, and tier denials do not surface
+    as ERROR records. Unexpected failures keep stock :class:`ToolError`
+    and its ERROR default — those are the ones operators must see.
+
+    Examples
+    --------
+    >>> import logging
+    >>> ExpectedToolError("Pane not found: %5").log_level == logging.WARNING
+    True
+
+    An explicit level still wins:
+
+    >>> err = ExpectedToolError("noisy", log_level=logging.INFO)
+    >>> err.log_level == logging.INFO
+    True
+
+    Catch sites that handle ``ToolError`` keep working — this is a
+    plain subclass:
+
+    >>> isinstance(ExpectedToolError("x"), ToolError)
+    True
+    """
+
+    def __init__(self, *args: object, log_level: int = logging.WARNING) -> None:
+        super().__init__(*args, log_level=log_level)
+
+
 @dataclasses.dataclass(frozen=True)
 class CallerIdentity:
     """Identity of the tmux pane hosting this MCP server process.
@@ -725,10 +757,10 @@ def _coerce_dict_arg(
             decoded = json.loads(value)
         except (json.JSONDecodeError, ValueError) as e:
             msg = f"Invalid {name} JSON: {e}"
-            raise ToolError(msg) from e
+            raise ExpectedToolError(msg) from e
         if not isinstance(decoded, dict):
             msg = f"{name} must be a JSON object, got {type(decoded).__name__}"
-            raise ToolError(msg) from None
+            raise ExpectedToolError(msg) from None
         return decoded
     return value
 
@@ -775,7 +807,7 @@ def _apply_filters(
                     f"Invalid filter operator '{op}' in '{key}'. "
                     f"Valid operators: {', '.join(valid_ops)}"
                 )
-                raise ToolError(msg)
+                raise ExpectedToolError(msg)
 
     filtered = items.filter(**filters)
     return [serializer(item) for item in filtered]
@@ -922,20 +954,26 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
 
     Shared between the sync and async ``handle_tool_errors*`` decorators
     so the two paths stay byte-for-byte identical in what agents see.
+
+    Expected, agent-correctable failures map to
+    :class:`ExpectedToolError` (logged at WARNING). Two cases stay at
+    ERROR: a missing tmux binary (operator-environment fault that must
+    be loud) and the unexpected catch-all (potential bug in this
+    server).
     """
     if isinstance(e, exc.TmuxCommandNotFound):
         msg = "tmux binary not found. Ensure tmux is installed and in PATH."
         return ToolError(msg)
     if isinstance(e, exc.TmuxSessionExists):
-        return ToolError(str(e))
+        return ExpectedToolError(str(e))
     if isinstance(e, exc.BadSessionName):
-        return ToolError(str(e))
+        return ExpectedToolError(str(e))
     if isinstance(e, exc.TmuxObjectDoesNotExist):
-        return ToolError(f"Object not found: {e}")
+        return ExpectedToolError(f"Object not found: {e}")
     if isinstance(e, exc.PaneNotFound):
-        return ToolError(f"Pane not found: {e}")
+        return ExpectedToolError(f"Pane not found: {e}")
     if isinstance(e, exc.LibTmuxException):
-        return ToolError(f"tmux error: {e}")
+        return ExpectedToolError(f"tmux error: {e}")
     logger.exception("unexpected error in MCP tool %s", fn_name)
     return ToolError(f"Unexpected error: {type(e).__name__}: {e}")
 

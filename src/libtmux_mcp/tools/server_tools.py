@@ -18,6 +18,7 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
     _coerce_dict_arg,
@@ -150,7 +151,7 @@ def kill_server(socket_name: str | None = None) -> str:
             "Refusing to kill the tmux server while this MCP server is running "
             "inside it. Use a manual tmux command if intended."
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     server.kill()
     _invalidate_server(socket_name=socket_name)

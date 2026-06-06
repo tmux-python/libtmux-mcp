@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     _resolve_window,
@@ -59,7 +58,7 @@ def resize_pane(
     """
     if zoom is not None and (height is not None or width is not None):
         msg = "Cannot combine zoom with height/width"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -126,7 +125,7 @@ def select_pane(
     """
     if pane_id is None and direction is None:
         msg = "Provide either pane_id or direction."
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)
 

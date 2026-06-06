@@ -10,6 +10,12 @@ _Notes on upcoming releases will be added here_
 
 **Minimum `fastmcp>=3.4.0`** (was `>=3.2.4`). Picks up the 3.3.x/3.4.0 releases. Visible effects of the bump alone: resource titles on the `tmux://` hierarchy are now preserved when a template materializes a resource (fastmcp#4061), expected tool failures are no longer logged with a traceback by fastmcp's server layer (fastmcp#4029), and OTEL spans follow the MCP semantic conventions — `gen_ai.tool.name` / `gen_ai.prompt.name` instead of the deprecated `rpc.*` attributes (fastmcp#3889, fastmcp#3890).
 
+### What's new
+
+**Expected tool failures log at WARNING, not ERROR**
+
+Agent-correctable failures — unknown pane/window/session ids, invalid arguments, safety-tier denials, transient tmux errors — now log at WARNING instead of ERROR in the server's log stream. Two cases stay at ERROR so operators see them loudly: a missing tmux binary and unexpected exceptions that may indicate a bug in this server. Built on fastmcp 3.3's `ToolError(log_level=...)` support.
+
 ## libtmux-mcp 0.1.0a10 (2026-05-24)
 
 ### What's new
