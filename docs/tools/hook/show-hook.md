@@ -4,7 +4,8 @@
 ```
 
 **Use when** you know which hook you want to inspect by name. Returns
-empty when the hook is unset; raises an expected tool error for
+empty when the hook is unset; raises an
+{exc}`~libtmux_mcp._utils.ExpectedToolError` for
 unknown hook names (typos, wrong scope) so input mistakes don't
 masquerade as "nothing configured".
 

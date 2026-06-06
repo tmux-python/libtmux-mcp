@@ -12,7 +12,7 @@ specific pattern.
 precise and avoids false positives from unrelated output.
 
 **Side effects:** None. Readonly. Blocks until content changes or timeout.
-Raises a tool error if the pane dies or is respawned while waiting, because the
+Raises an {exc}`~libtmux_mcp._utils.ExpectedToolError` if the pane dies or is respawned while waiting, because the
 entry content baseline no longer describes the same pane process.
 
 **Example:**
