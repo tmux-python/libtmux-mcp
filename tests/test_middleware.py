@@ -356,7 +356,7 @@ def test_server_middleware_stack_order() -> None:
     The ordering is load-bearing (see server.py comment):
     TimingMiddleware must be outermost so it observes total wall
     time; AuditMiddleware must sit *outside* SafetyMiddleware so
-    tier-denial events (which raise ``ToolError`` before
+    tier-denial events (which raise ``ExpectedToolError`` before
     ``call_next``) are still recorded — without this ordering,
     forbidden-access attempts silently bypass the audit log. A
     refactor that swaps Audit and Safety would degrade
@@ -420,12 +420,12 @@ def test_audit_records_safety_denial(
     Composes Audit and Safety in the production order (Audit outside
     Safety) by manually nesting their ``on_call_tool`` handlers: the
     inner ``call_next`` from Audit dispatches to Safety, which raises
-    ``ToolError`` for an over-tier tool. Audit should record that as
-    ``outcome=error error_type=ToolError`` rather than skipping the
-    record. Without this ordering, denied access attempts would
-    silently bypass forensic logging.
+    ``ExpectedToolError`` for an over-tier tool. Audit should record
+    that as ``outcome=error error_type=ExpectedToolError`` rather
+    than skipping the record. Without this ordering, denied access
+    attempts would silently bypass forensic logging.
     """
-    from fastmcp.exceptions import ToolError
+    from libtmux_mcp._utils import ExpectedToolError
 
     audit = AuditMiddleware()
     ctx = _fake_context(name="kill_server", arguments={})
@@ -434,25 +434,25 @@ def test_audit_records_safety_denial(
     # context.fastmcp_context.fastmcp.get_tool(...). With
     # fastmcp_context=None the safety check short-circuits, so we
     # simulate the denial more directly: ``call_next`` is a coroutine
-    # that raises the same ``ToolError`` SafetyMiddleware would when
-    # blocking an over-tier call. The test's invariant is that the
-    # AuditMiddleware sitting *outside* Safety still records the
-    # attempt with outcome=error.
+    # that raises the same ``ExpectedToolError`` SafetyMiddleware
+    # would when blocking an over-tier call. The test's invariant is
+    # that the AuditMiddleware sitting *outside* Safety still records
+    # the attempt with outcome=error.
     msg = "Tool 'kill_server' is not available at the current safety level."
 
     async def _safety_denial(_ctx: t.Any) -> None:
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     with (
         caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"),
-        pytest.raises(ToolError, match="not available"),
+        pytest.raises(ExpectedToolError, match="not available"),
     ):
         asyncio.run(audit.on_call_tool(ctx, _safety_denial))
 
     rendered = "\n".join(rec.getMessage() for rec in caplog.records)
     assert "tool=kill_server" in rendered
     assert "outcome=error" in rendered
-    assert "error_type=ToolError" in rendered
+    assert "error_type=ExpectedToolError" in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +515,7 @@ def test_readonly_retry_recovers_from_libtmux_exception() -> None:
     Models the production scenario the middleware exists to fix: a
     transient socket error from libtmux on the first call, then a
     successful call after the cache evicts the dead Server. Without
-    the retry the agent would see a ``ToolError`` on the first
+    the retry the agent would see an expected tool error on the first
     ``list_sessions``-style call.
     """
     from libtmux import exc as libtmux_exc
@@ -585,11 +585,11 @@ def test_readonly_retry_recovers_on_decorated_tool(
     Regression guard for the fastmcp <3.2.4 production no-op where
     ``RetryMiddleware._should_retry`` did not walk ``__cause__``.
     Every libtmux-mcp tool is wrapped by ``handle_tool_errors`` /
-    ``handle_tool_errors_async`` (``_utils.py:842-850``), which
-    converts ``LibTmuxException`` to ``ToolError(...) from
-    LibTmuxException``. At the middleware layer the exception type
-    is ``ToolError``, not ``LibTmuxException`` — so the retry
-    decision must walk ``__cause__`` to see the real failure type.
+    ``handle_tool_errors_async``, which converts ``LibTmuxException``
+    to ``ExpectedToolError(...) from LibTmuxException``. At the
+    middleware layer the exception type is ``ExpectedToolError``, not
+    ``LibTmuxException`` — so the retry decision must walk
+    ``__cause__`` to see the real failure type.
 
     The unit tests above use ``_FlakyCallNext`` which raises
     ``LibTmuxException`` directly, bypassing the decorator. They
@@ -681,7 +681,7 @@ def _error_probe_server() -> t.Any:
     @probe.tool
     def fail_expected_chained() -> str:
         # Mirror the ``handle_tool_errors`` decorator's mapping shape:
-        # ``raise <mapped ToolError> from <libtmux exception>``.
+        # ``raise <mapped ExpectedToolError> from <libtmux exception>``.
         cause = libtmux_exc.PaneNotFound("%99")
         mapped = _map_exception_to_tool_error("fail_expected_chained", cause)
         raise mapped from cause
@@ -736,7 +736,8 @@ def test_tool_error_result_meta_carries_error_details() -> None:
     """``meta`` reports the originating exception class and expectedness.
 
     ``error_type`` names the ``__cause__`` when the raise site chained
-    one — agents see ``PaneNotFound``, not the ``ToolError`` wrapper.
+    one — agents see ``PaneNotFound``, not the mapped
+    ``ExpectedToolError`` wrapper.
     """
     from fastmcp import Client
 
