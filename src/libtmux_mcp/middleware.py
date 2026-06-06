@@ -40,7 +40,7 @@ from fastmcp.server.middleware.error_handling import (
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
-from mcp.types import TextContent
+from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
 from libtmux_mcp._utils import (
@@ -546,10 +546,14 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
         """Apply the size cap without dropping ``is_error``."""
         inner: t.Any = None
 
-        async def _capture(ctx: t.Any) -> t.Any:
+        async def _capture(
+            context: MiddlewareContext[CallToolRequestParams],
+        ) -> ToolResult:
+            # ``context`` (not ``ctx``): fastmcp's CallNext protocol
+            # matches the parameter name, not just the shape.
             nonlocal inner
-            inner = await call_next(ctx)
-            return inner
+            inner = await call_next(context)
+            return t.cast("ToolResult", inner)
 
         result = await super().on_call_tool(context, _capture)
         if result is not inner and isinstance(inner, ToolResult) and inner.is_error:
