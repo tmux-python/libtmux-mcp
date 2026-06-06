@@ -283,9 +283,10 @@ mcp = FastMCP(
     #      resource errors to MCP code -32002. Must stay OUTSIDE the
     #      audit + retry + safety trio: all three depend on exception
     #      semantics (audit catches to record outcome=error, retry
-    #      matches LibTmuxException via __cause__), so converting the
-    #      exception to a result any deeper would silently disable
-    #      both.
+    #      matches LibTmuxException via __cause__, and safety's tier
+    #      denials must propagate as exceptions for audit to record
+    #      them), so converting the exception to a result any deeper
+    #      would silently break all three.
     #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
     #      events (which raise ToolError before call_next inside
     #      Safety) are still logged with outcome=error. Without this

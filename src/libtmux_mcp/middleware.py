@@ -176,9 +176,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     Ordering invariant: must sit **outside** ``AuditMiddleware``,
     ``ReadonlyRetryMiddleware``, and ``SafetyMiddleware``. All three
     depend on exception semantics — audit detects failures by catching,
-    retry matches ``LibTmuxException`` via ``__cause__`` — so
-    converting the exception to a result any deeper in the stack would
-    silently disable both.
+    retry matches ``LibTmuxException`` via ``__cause__``, and safety's
+    tier denials must propagate as exceptions for audit to record them
+    — so converting the exception to a result any deeper in the stack
+    would silently break all three.
     """
 
     def _log_error(self, error: Exception, context: MiddlewareContext) -> None:
