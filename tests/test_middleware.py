@@ -773,7 +773,41 @@ def test_tool_error_result_appends_suggestion() -> None:
     assert meta["suggestion"] == "Call list_panes to discover valid pane ids."
 
 
+class ErrorLogLevelFixture(t.NamedTuple):
+    """Test fixture for ToolErrorResultMiddleware._log_error levels."""
+
+    test_id: str
+    tool_name: str
+    expected_level: int
+    message_fragment: str
+
+
+ERROR_LOG_LEVEL_FIXTURES: list[ErrorLogLevelFixture] = [
+    ErrorLogLevelFixture(
+        test_id="expected_failure_logs_warning",
+        tool_name="fail_expected_chained",
+        expected_level=logging.WARNING,
+        message_fragment="Pane not found",
+    ),
+    ErrorLogLevelFixture(
+        test_id="unexpected_failure_logs_error",
+        tool_name="fail_unexpected",
+        expected_level=logging.ERROR,
+        message_fragment="boom",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ErrorLogLevelFixture._fields,
+    ERROR_LOG_LEVEL_FIXTURES,
+    ids=[f.test_id for f in ERROR_LOG_LEVEL_FIXTURES],
+)
 def test_tool_error_result_logs_at_error_log_level(
+    test_id: str,
+    tool_name: str,
+    expected_level: int,
+    message_fragment: str,
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -783,6 +817,11 @@ def test_tool_error_result_logs_at_error_log_level(
     ``logger.error`` — without the override, every failure demoted to
     WARNING by ``ExpectedToolError`` would be re-shouted at ERROR on
     the ``fastmcp.errors`` channel.
+
+    Assertions go through ``record.getMessage()`` so the lazy
+    %-formatting args are interpolated regardless of whether a handler
+    formatted the record — and a literal ``%s`` leaking into the
+    message would fail the fragment match.
     """
     from fastmcp import Client
 
@@ -792,20 +831,18 @@ def test_tool_error_result_logs_at_error_log_level(
 
     probe = _error_probe_server()
 
-    async def _call(name: str) -> None:
+    async def _call() -> None:
         async with Client(probe) as client:
-            await client.call_tool(name, raise_on_error=False)
+            await client.call_tool(tool_name, raise_on_error=False)
 
     with caplog.at_level(logging.DEBUG, logger="fastmcp.errors"):
-        asyncio.run(_call("fail_expected_chained"))
-        asyncio.run(_call("fail_unexpected"))
+        asyncio.run(_call())
 
-    records = {
-        r.message: r.levelno
+    levels = [
+        r.levelno
         for r in caplog.records
-        if r.name == "fastmcp.errors" and "Error in tools/call" in r.message
-    }
-    expected_records = [v for k, v in records.items() if "Pane not found" in k]
-    unexpected_records = [v for k, v in records.items() if "boom" in k]
-    assert expected_records == [logging.WARNING]
-    assert unexpected_records == [logging.ERROR]
+        if r.name == "fastmcp.errors"
+        and "Error in tools/call" in r.getMessage()
+        and message_fragment in r.getMessage()
+    ]
+    assert levels == [expected_level]

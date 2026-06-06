@@ -197,12 +197,17 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
         error_key = f"{error_type}:{method}"
         self.error_counts[error_key] = self.error_counts.get(error_key, 0) + 1
 
-        base_message = f"Error in {method}: {error_type}: {error!s}"
-
-        if self.include_traceback:
-            self.logger.log(level, base_message, exc_info=True)
-        else:
-            self.logger.log(level, base_message)
+        # Lazy %-formatting (project logging standard) — also collapses
+        # the stock implementation's include_traceback branch, since
+        # ``exc_info`` accepts a bool.
+        self.logger.log(
+            level,
+            "Error in %s: %s: %s",
+            method,
+            error_type,
+            error,
+            exc_info=self.include_traceback,
+        )
 
         if self.error_callback:
             try:
