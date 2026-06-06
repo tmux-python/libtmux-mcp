@@ -60,7 +60,7 @@ def _read_pane_state(pane: Pane) -> _PaneState:
 def _raise_if_pane_lifecycle_changed(
     pane: Pane, state: _PaneState, baseline_pid: str
 ) -> None:
-    """Raise ``ToolError`` when a cursor or wait baseline is invalid."""
+    """Raise ``ExpectedToolError`` when a cursor or wait baseline is invalid."""
     if state.pane_dead:
         msg = f"pane {pane.pane_id} died; cursor/baseline anchor is no longer valid"
         raise ExpectedToolError(msg)

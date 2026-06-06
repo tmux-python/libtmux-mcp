@@ -495,7 +495,7 @@ async def wait_for_content_change(
     what the output will be — it waits for "something happened" rather than
     a specific pattern.
 
-    Raises ``ToolError`` when pane respawn or pane death invalidates the
+    Raises ``ExpectedToolError`` when pane respawn or pane death invalidates the
     baseline captured at entry. For correctness-sensitive flows prefer
     ``wait_for_channel`` composed with ``tmux wait-for -S``.
 

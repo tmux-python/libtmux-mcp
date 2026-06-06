@@ -75,7 +75,7 @@ def _validate_channel_name(name: str) -> str:
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         When ``name`` is empty, too long, or contains disallowed
         characters.
 
@@ -145,7 +145,7 @@ async def wait_for_channel(
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         On timeout, invalid channel name, or tmux error.
     """
     server = _get_server(socket_name=socket_name)

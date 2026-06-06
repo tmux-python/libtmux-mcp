@@ -288,7 +288,7 @@ def find_pane_by_position(
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         If no pane satisfies both edge predicates for that corner — in
         practice only possible for layouts tmux itself produced via
         custom layout strings; the built-in layouts always have a pane

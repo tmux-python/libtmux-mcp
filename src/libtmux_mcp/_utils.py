@@ -763,7 +763,7 @@ def _coerce_dict_arg(
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         If ``value`` is a string that is not valid JSON, or decodes to
         a JSON value that is not an object.
     """
@@ -807,7 +807,7 @@ def _apply_filters(
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         If a filter key uses an invalid lookup operator.
     """
     coerced = _coerce_dict_arg("filters", filters)
