@@ -698,6 +698,12 @@ def _error_probe_server() -> t.Any:
         msg = "boom"
         raise RuntimeError(msg)
 
+    @probe.tool
+    def takes_int(count: int) -> str:
+        # Never reached when the argument fails schema validation —
+        # fastmcp raises pydantic.ValidationError before tool code runs.
+        return str(count)
+
     return probe
 
 
@@ -778,6 +784,7 @@ class ErrorLogLevelFixture(t.NamedTuple):
 
     test_id: str
     tool_name: str
+    arguments: dict[str, t.Any] | None
     expected_level: int
     message_fragment: str
 
@@ -786,14 +793,23 @@ ERROR_LOG_LEVEL_FIXTURES: list[ErrorLogLevelFixture] = [
     ErrorLogLevelFixture(
         test_id="expected_failure_logs_warning",
         tool_name="fail_expected_chained",
+        arguments=None,
         expected_level=logging.WARNING,
         message_fragment="Pane not found",
     ),
     ErrorLogLevelFixture(
         test_id="unexpected_failure_logs_error",
         tool_name="fail_unexpected",
+        arguments=None,
         expected_level=logging.ERROR,
         message_fragment="boom",
+    ),
+    ErrorLogLevelFixture(
+        test_id="schema_validation_logs_warning",
+        tool_name="takes_int",
+        arguments={"count": "not-an-int"},
+        expected_level=logging.WARNING,
+        message_fragment="validation error",
     ),
 ]
 
@@ -806,6 +822,7 @@ ERROR_LOG_LEVEL_FIXTURES: list[ErrorLogLevelFixture] = [
 def test_tool_error_result_logs_at_error_log_level(
     test_id: str,
     tool_name: str,
+    arguments: dict[str, t.Any] | None,
     expected_level: int,
     message_fragment: str,
     caplog: pytest.LogCaptureFixture,
@@ -816,7 +833,9 @@ def test_tool_error_result_logs_at_error_log_level(
     The stock ``ErrorHandlingMiddleware._log_error`` hardcodes
     ``logger.error`` — without the override, every failure demoted to
     WARNING by ``ExpectedToolError`` would be re-shouted at ERROR on
-    the ``fastmcp.errors`` channel.
+    the ``fastmcp.errors`` channel. Argument-schema validation
+    failures carry no ``log_level`` at all; the middleware classifies
+    them as agent-correctable WARNINGs.
 
     Assertions go through ``record.getMessage()`` so the lazy
     %-formatting args are interpolated regardless of whether a handler
@@ -833,7 +852,7 @@ def test_tool_error_result_logs_at_error_log_level(
 
     async def _call() -> None:
         async with Client(probe) as client:
-            await client.call_tool(tool_name, raise_on_error=False)
+            await client.call_tool(tool_name, arguments, raise_on_error=False)
 
     with caplog.at_level(logging.DEBUG, logger="fastmcp.errors"):
         asyncio.run(_call())
@@ -846,3 +865,30 @@ def test_tool_error_result_logs_at_error_log_level(
         and message_fragment in r.getMessage()
     ]
     assert levels == [expected_level]
+
+
+def test_schema_validation_failure_marked_expected_in_meta() -> None:
+    """Argument-schema failures report ``expected=True`` in result meta.
+
+    fastmcp validates arguments before tool code runs, so the
+    ``handle_tool_errors`` decorators never get the chance to classify
+    these as ``ExpectedToolError`` — the middleware must recognize the
+    bare ``pydantic.ValidationError`` itself. Bad arguments are
+    agent-correctable, same as a bad pane id.
+    """
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(
+                "takes_int", {"count": "not-an-int"}, raise_on_error=False
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    meta = result.meta or {}
+    assert meta["expected"] is True
+    assert meta["error_type"] == "ValidationError"

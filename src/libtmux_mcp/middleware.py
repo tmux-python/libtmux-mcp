@@ -41,6 +41,7 @@ from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddlewa
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
 from mcp.types import TextContent
+from pydantic import ValidationError as PydanticValidationError
 
 from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
@@ -114,6 +115,25 @@ class SafetyMiddleware(Middleware):
 # ---------------------------------------------------------------------------
 
 
+def _is_schema_validation_error(error: BaseException) -> bool:
+    """Return True for fastmcp argument-schema validation failures.
+
+    fastmcp validates tool arguments against the input schema *before*
+    tool code runs, raising a bare :exc:`pydantic.ValidationError` —
+    too early for the ``handle_tool_errors`` decorators to classify.
+    Bad arguments are agent-correctable (fix the call and retry), so
+    they get the same expected/WARNING treatment as
+    :class:`~libtmux_mcp._utils.ExpectedToolError`.
+
+    Output validation cannot be mistaken for this case: fastmcp's tool
+    layer converts output-shape failures into error results itself, so
+    they never reach the middleware as exceptions.
+    """
+    return isinstance(error, PydanticValidationError) or isinstance(
+        error.__cause__, PydanticValidationError
+    )
+
+
 def _error_tool_result(error: Exception) -> ToolResult:
     """Build a rich ``ToolResult(is_error=True)`` from a tool failure.
 
@@ -126,8 +146,9 @@ def _error_tool_result(error: Exception) -> ToolResult:
       (``__cause__`` when the raise site chained one, so agents see
       ``PaneNotFound`` rather than the ``ToolError`` wrapper).
     * ``expected`` — True for agent-correctable failures
-      (:class:`~libtmux_mcp._utils.ExpectedToolError`), False for
-      operator faults and potential server bugs.
+      (:class:`~libtmux_mcp._utils.ExpectedToolError` and
+      argument-schema validation errors), False for operator faults
+      and potential server bugs.
     * ``suggestion`` — recovery hint, only when present.
 
     ``structured_content`` is deliberately left unset: tools declare
@@ -139,7 +160,8 @@ def _error_tool_result(error: Exception) -> ToolResult:
     origin = cause if cause is not None else error
     meta: dict[str, t.Any] = {
         "error_type": type(origin).__name__,
-        "expected": isinstance(error, ExpectedToolError),
+        "expected": isinstance(error, ExpectedToolError)
+        or _is_schema_validation_error(error),
     }
     text = str(error)
     suggestion = getattr(error, "suggestion", None)
@@ -171,7 +193,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     Logging honors ``FastMCPError.log_level`` (fastmcp >= 3.3): the
     expected failures demoted to WARNING by
     :class:`~libtmux_mcp._utils.ExpectedToolError` no longer get
-    re-shouted at ERROR by the stock ``_log_error``.
+    re-shouted at ERROR by the stock ``_log_error``. Argument-schema
+    validation failures — raised by fastmcp before tool code can
+    classify them — are treated as expected too (see
+    :func:`_is_schema_validation_error`).
 
     Ordering invariant: must sit **outside** ``AuditMiddleware``,
     ``ReadonlyRetryMiddleware``, and ``SafetyMiddleware``. All three
@@ -187,10 +212,17 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 
         Mirrors the stock implementation (error-count tracking,
         optional traceback, error callback) but routes the record
-        through ``logger.log`` with ``FastMCPError.log_level`` —
-        defaulting to ERROR for exceptions that don't carry one.
+        through ``logger.log`` with ``FastMCPError.log_level``.
+        Exceptions that don't carry one default to ERROR — except
+        argument-schema validation failures, which are
+        agent-correctable and log at WARNING like every other invalid
+        argument (see :func:`_is_schema_validation_error`).
         """
-        level = getattr(error, "log_level", logging.ERROR)
+        level: int | None = getattr(error, "log_level", None)
+        if level is None:
+            level = (
+                logging.WARNING if _is_schema_validation_error(error) else logging.ERROR
+            )
 
         error_type = type(error).__name__
         method = context.method or "unknown"
