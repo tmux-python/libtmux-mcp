@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a11 (2026-06-06)
+
+libtmux-mcp 0.1.0a11 redesigns how tool failures reach agents. Error messages now arrive exactly as raised — no more `Internal error:` mangling — with structured detail and recovery hints that tell agents what to do next, from stale pane ids to stray arguments leaked by client schedulers. Expected, agent-correctable failures log at WARNING so ERROR records always mean an operator should look. The fastmcp floor rises to 3.4.0 to build on its error-result and log-level support.
+
 ### Dependencies
 
 **Minimum `fastmcp>=3.4.0`** (was `>=3.2.4`). Enables the error-result and log-level improvements below; the bump alone also restores resource titles on the `tmux://` hierarchy and brings MCP-compliant telemetry span attributes.
