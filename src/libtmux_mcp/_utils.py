@@ -1008,8 +1008,19 @@ def handle_tool_errors(
 ) -> t.Callable[P, R]:
     """Decorate synchronous MCP tool functions with standardized error handling.
 
-    Catches libtmux exceptions and re-raises as ``ToolError`` so that
-    MCP responses have ``isError=True`` with a descriptive message.
+    Catches libtmux exceptions and re-raises them through
+    :func:`_map_exception_to_tool_error` so MCP responses have
+    ``isError=True`` with a descriptive message — expected,
+    agent-correctable failures as :class:`ExpectedToolError` (logged
+    at WARNING), the unexpected catch-all as stock ``ToolError``
+    (logged at ERROR).
+
+    The re-raise chains the original exception via ``from e``. Keep it
+    single-level: :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware`
+    matches :exc:`libtmux.exc.LibTmuxException` by inspecting exactly
+    one ``__cause__`` hop, so wrapping the mapped error again would
+    silently disable readonly retries.
+
     Use :func:`handle_tool_errors_async` for ``async def`` tools — this
     wrapper only supports plain sync callables.
     """
@@ -1036,8 +1047,12 @@ def handle_tool_errors_async(
     ``report_progress``/``elicit``/``read_resource`` methods are
     coroutines that only run inside ``async def`` tools.
 
-    Maps the same libtmux exception set to the same ``ToolError``
-    messages as the sync decorator by delegating to a shared helper.
+    Maps the same libtmux exception set to the same messages and
+    error classes as the sync decorator (expected failures as
+    :class:`ExpectedToolError` at WARNING, the unexpected catch-all as
+    stock ``ToolError`` at ERROR) by delegating to a shared helper,
+    and chains the original exception via the same single-level
+    ``from e`` that readonly retries depend on.
     """
 
     @functools.wraps(fn)
