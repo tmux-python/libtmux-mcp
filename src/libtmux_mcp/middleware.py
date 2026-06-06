@@ -1,10 +1,15 @@
 """Middleware for libtmux MCP server.
 
-Provides the project's middleware infrastructure:
+Provides the project's middleware infrastructure, in definition order:
 
 * :class:`SafetyMiddleware` gates tools by safety tier based on the
   ``LIBTMUX_SAFETY`` environment variable. Tools tagged above the
   configured tier are hidden from listing and blocked from execution.
+* :class:`ToolErrorResultMiddleware` converts tool-call failures into
+  ``ToolResult(is_error=True)`` results that carry the clean error
+  message plus a structured ``meta`` payload, instead of fastmcp's
+  stock ``-32603`` catch-all that prefixed every expected failure
+  with ``"Internal error: "``.
 * :class:`AuditMiddleware` emits a structured log record for each tool
   invocation (name, duration, outcome, client/request ids, and a
   summary of arguments with payload-bearing fields redacted to a
@@ -12,11 +17,6 @@ Provides the project's middleware infrastructure:
 * :class:`ReadonlyRetryMiddleware` retries transient libtmux failures,
   but only for readonly tools — re-running a mutating tool would
   silently double side effects.
-* :class:`ToolErrorResultMiddleware` converts tool-call failures into
-  ``ToolResult(is_error=True)`` results that carry the clean error
-  message plus a structured ``meta`` payload, instead of fastmcp's
-  stock ``-32603`` catch-all that prefixed every expected failure
-  with ``"Internal error: "``.
 * :class:`TailPreservingResponseLimitingMiddleware` is a backstop cap
   for oversized tool output. Unlike FastMCP's stock
   ``ResponseLimitingMiddleware`` it preserves the **tail** of the
