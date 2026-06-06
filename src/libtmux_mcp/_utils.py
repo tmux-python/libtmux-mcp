@@ -39,6 +39,20 @@ class ExpectedToolError(ToolError):
     as ERROR records. Unexpected failures keep stock :class:`ToolError`
     and its ERROR default — those are the ones operators must see.
 
+    Parameters
+    ----------
+    *args : object
+        Positional arguments forwarded to :class:`ToolError`
+        (typically the error message).
+    log_level : int
+        Level fastmcp's server layer logs this failure at. Defaults
+        to ``logging.WARNING``.
+    suggestion : str, optional
+        Agent-facing recovery hint.
+        :class:`~libtmux_mcp.middleware.ToolErrorResultMiddleware`
+        appends it to the error result's text and mirrors it into the
+        result's ``meta``.
+
     Examples
     --------
     >>> import logging
