@@ -30,6 +30,69 @@ if t.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ExpectedToolError(ToolError):
+    """``ToolError`` for expected, agent-correctable failures.
+
+    Defaults the error's ``log_level`` to ``WARNING`` (honored by
+    fastmcp >= 3.3 when logging tool/resource failures) so routine
+    validation errors, missing objects, and tier denials do not surface
+    as ERROR records. Unexpected failures keep stock :class:`ToolError`
+    and its ERROR default — those are the ones operators must see.
+
+    Parameters
+    ----------
+    *args : object
+        Positional arguments forwarded to :class:`ToolError`
+        (typically the error message).
+    log_level : int
+        Level fastmcp's server layer logs this failure at. Defaults
+        to ``logging.WARNING``.
+    suggestion : str, optional
+        Agent-facing recovery hint.
+        :class:`~libtmux_mcp.middleware.ToolErrorResultMiddleware`
+        appends it to the error result's text and mirrors it into the
+        result's ``meta``.
+
+    Examples
+    --------
+    >>> import logging
+    >>> ExpectedToolError("Pane not found: %5").log_level == logging.WARNING
+    True
+
+    An explicit level still wins:
+
+    >>> err = ExpectedToolError("noisy", log_level=logging.INFO)
+    >>> err.log_level == logging.INFO
+    True
+
+    Catch sites that handle ``ToolError`` keep working — this is a
+    plain subclass:
+
+    >>> isinstance(ExpectedToolError("x"), ToolError)
+    True
+
+    An optional ``suggestion`` carries an agent-facing recovery hint;
+    :class:`libtmux_mcp.middleware.ToolErrorResultMiddleware` surfaces
+    it in the error result's text and ``meta``:
+
+    >>> err = ExpectedToolError("Pane not found: %5",
+    ...     suggestion="Call list_panes to discover valid pane ids.")
+    >>> err.suggestion
+    'Call list_panes to discover valid pane ids.'
+    >>> ExpectedToolError("no hint").suggestion is None
+    True
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        log_level: int = logging.WARNING,
+        suggestion: str | None = None,
+    ) -> None:
+        super().__init__(*args, log_level=log_level)
+        self.suggestion = suggestion
+
+
 @dataclasses.dataclass(frozen=True)
 class CallerIdentity:
     """Identity of the tmux pane hosting this MCP server process.
@@ -714,7 +777,7 @@ def _coerce_dict_arg(
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         If ``value`` is a string that is not valid JSON, or decodes to
         a JSON value that is not an object.
     """
@@ -725,10 +788,10 @@ def _coerce_dict_arg(
             decoded = json.loads(value)
         except (json.JSONDecodeError, ValueError) as e:
             msg = f"Invalid {name} JSON: {e}"
-            raise ToolError(msg) from e
+            raise ExpectedToolError(msg) from e
         if not isinstance(decoded, dict):
             msg = f"{name} must be a JSON object, got {type(decoded).__name__}"
-            raise ToolError(msg) from None
+            raise ExpectedToolError(msg) from None
         return decoded
     return value
 
@@ -758,7 +821,7 @@ def _apply_filters(
 
     Raises
     ------
-    ToolError
+    ExpectedToolError
         If a filter key uses an invalid lookup operator.
     """
     coerced = _coerce_dict_arg("filters", filters)
@@ -775,7 +838,7 @@ def _apply_filters(
                     f"Invalid filter operator '{op}' in '{key}'. "
                     f"Valid operators: {', '.join(valid_ops)}"
                 )
-                raise ToolError(msg)
+                raise ExpectedToolError(msg)
 
     filtered = items.filter(**filters)
     return [serializer(item) for item in filtered]
@@ -922,20 +985,34 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
 
     Shared between the sync and async ``handle_tool_errors*`` decorators
     so the two paths stay byte-for-byte identical in what agents see.
+
+    Expected, agent-correctable failures map to
+    :class:`ExpectedToolError` (logged at WARNING). Two cases stay at
+    ERROR: a missing tmux binary (operator-environment fault that must
+    be loud) and the unexpected catch-all (potential bug in this
+    server).
     """
     if isinstance(e, exc.TmuxCommandNotFound):
         msg = "tmux binary not found. Ensure tmux is installed and in PATH."
         return ToolError(msg)
     if isinstance(e, exc.TmuxSessionExists):
-        return ToolError(str(e))
+        return ExpectedToolError(str(e))
     if isinstance(e, exc.BadSessionName):
-        return ToolError(str(e))
+        return ExpectedToolError(str(e))
     if isinstance(e, exc.TmuxObjectDoesNotExist):
-        return ToolError(f"Object not found: {e}")
+        return ExpectedToolError(
+            f"Object not found: {e}",
+            suggestion=(
+                "Call list_sessions / list_windows / list_panes to discover valid ids."
+            ),
+        )
     if isinstance(e, exc.PaneNotFound):
-        return ToolError(f"Pane not found: {e}")
+        return ExpectedToolError(
+            f"Pane not found: {e}",
+            suggestion="Call list_panes to discover valid pane ids.",
+        )
     if isinstance(e, exc.LibTmuxException):
-        return ToolError(f"tmux error: {e}")
+        return ExpectedToolError(f"tmux error: {e}")
     logger.exception("unexpected error in MCP tool %s", fn_name)
     return ToolError(f"Unexpected error: {type(e).__name__}: {e}")
 
@@ -945,8 +1022,19 @@ def handle_tool_errors(
 ) -> t.Callable[P, R]:
     """Decorate synchronous MCP tool functions with standardized error handling.
 
-    Catches libtmux exceptions and re-raises as ``ToolError`` so that
-    MCP responses have ``isError=True`` with a descriptive message.
+    Catches libtmux exceptions and re-raises them through
+    :func:`_map_exception_to_tool_error` so MCP responses have
+    ``isError=True`` with a descriptive message — expected,
+    agent-correctable failures as :class:`ExpectedToolError` (logged
+    at WARNING), the unexpected catch-all as stock ``ToolError``
+    (logged at ERROR).
+
+    The re-raise chains the original exception via ``from e``. Keep it
+    single-level: :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware`
+    matches :exc:`libtmux.exc.LibTmuxException` by inspecting exactly
+    one ``__cause__`` hop, so wrapping the mapped error again would
+    silently disable readonly retries.
+
     Use :func:`handle_tool_errors_async` for ``async def`` tools — this
     wrapper only supports plain sync callables.
     """
@@ -973,8 +1061,12 @@ def handle_tool_errors_async(
     ``report_progress``/``elicit``/``read_resource`` methods are
     coroutines that only run inside ``async def`` tools.
 
-    Maps the same libtmux exception set to the same ``ToolError``
-    messages as the sync decorator by delegating to a shared helper.
+    Maps the same libtmux exception set to the same messages and
+    error classes as the sync decorator (expected failures as
+    :class:`ExpectedToolError` at WARNING, the unexpected catch-all as
+    stock ``ToolError`` at ERROR) by delegating to a shared helper,
+    and chains the original exception via the same single-level
+    ``from e`` that readonly retries depend on.
     """
 
     @functools.wraps(fn)

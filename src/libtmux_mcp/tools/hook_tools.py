@@ -30,13 +30,13 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_RO,
     TAG_READONLY,
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     _resolve_session,
@@ -86,11 +86,11 @@ def _resolve_hook_target(
     if scope is not None and opt_scope is None:
         valid = ", ".join(sorted(_SCOPE_MAP))
         msg = f"Invalid scope: {scope!r}. Valid: {valid}"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is None:
         msg = "scope is required when target is specified"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is not None:
         # Let the resolved object carry its own scope — passing scope

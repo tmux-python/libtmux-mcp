@@ -12,7 +12,6 @@ import shutil
 import typing as t
 
 from fastmcp import FastMCP
-from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.timing import TimingMiddleware
 
 if t.TYPE_CHECKING:
@@ -32,6 +31,7 @@ from libtmux_mcp.middleware import (
     ReadonlyRetryMiddleware,
     SafetyMiddleware,
     TailPreservingResponseLimitingMiddleware,
+    ToolErrorResultMiddleware,
 )
 from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
 
@@ -275,14 +275,21 @@ mcp = FastMCP(
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early
     #      as possible so timing captures middleware cost too.
-    #   2. TailPreservingResponseLimitingMiddleware — bound the
-    #      response *before* ErrorHandlingMiddleware can transform
-    #      exceptions; keeps the size cap independent of error path.
-    #   3. ErrorHandlingMiddleware — transforms resource errors to
-    #      MCP code -32002; sits inside so it wraps the audit + safety
-    #      pair.
+    #   2. TailPreservingResponseLimitingMiddleware — bounds the final
+    #      tool result on the way back out. Tool errors may already be
+    #      ToolResult(is_error=True) here, so truncation preserves that
+    #      flag instead of turning expected failures into schema errors.
+    #   3. ToolErrorResultMiddleware — converts tool-call failures to
+    #      rich ToolResult(is_error=True) results and transforms
+    #      resource errors to MCP code -32002. Must stay OUTSIDE the
+    #      audit + retry + safety trio: all three depend on exception
+    #      semantics (audit catches to record outcome=error, retry
+    #      matches LibTmuxException via __cause__, and safety's tier
+    #      denials must propagate as exceptions for audit to record
+    #      them), so converting the exception to a result any deeper
+    #      would silently break all three.
     #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
-    #      events (which raise ToolError before call_next inside
+    #      events (which raise ExpectedToolError before call_next inside
     #      Safety) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.
@@ -299,7 +306,7 @@ mcp = FastMCP(
             max_size=DEFAULT_RESPONSE_LIMIT_BYTES,
             tools=_RESPONSE_LIMITED_TOOLS,
         ),
-        ErrorHandlingMiddleware(transform_errors=True),
+        ToolErrorResultMiddleware(transform_errors=True),
         AuditMiddleware(),
         ReadonlyRetryMiddleware(),
         SafetyMiddleware(max_tier=_safety_level),

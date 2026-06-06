@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
+from libtmux_mcp._utils import ExpectedToolError
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -60,17 +60,17 @@ def _read_pane_state(pane: Pane) -> _PaneState:
 def _raise_if_pane_lifecycle_changed(
     pane: Pane, state: _PaneState, baseline_pid: str
 ) -> None:
-    """Raise ``ToolError`` when a cursor or wait baseline is invalid."""
+    """Raise ``ExpectedToolError`` when a cursor or wait baseline is invalid."""
     if state.pane_dead:
         msg = f"pane {pane.pane_id} died; cursor/baseline anchor is no longer valid"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     if state.pane_pid != baseline_pid:
         msg = (
             f"pane {pane.pane_id} was respawned "
             f"(pid {baseline_pid} -> {state.pane_pid}); "
             "cursor/baseline anchor is no longer valid"
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
 
 def _read_history_limit(pane: Pane) -> int:

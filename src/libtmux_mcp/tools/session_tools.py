@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
 from libtmux.constants import WindowDirection
 
 from libtmux_mcp._utils import (
@@ -16,6 +15,7 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
     _get_caller_identity,
@@ -161,7 +161,7 @@ def create_window(
         if resolved is None:
             valid = ", ".join(sorted(direction_map))
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
-            raise ToolError(msg)
+            raise ExpectedToolError(msg)
         kwargs["direction"] = resolved
     window = session.new_window(**kwargs)
     return _serialize_window(window)
@@ -232,7 +232,7 @@ def kill_session(
             "Refusing to kill without an explicit target. "
             "Provide session_name or session_id."
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
@@ -245,7 +245,7 @@ def kill_session(
                 "Refusing to kill the session containing this MCP server's pane. "
                 "Use a manual tmux command if intended."
             )
-            raise ToolError(msg)
+            raise ExpectedToolError(msg)
 
     name = session.session_name or session.session_id
     session.kill()
@@ -288,7 +288,7 @@ def select_window(
     """
     if window_id is None and window_index is None and direction is None:
         msg = "Provide window_id, window_index, or direction."
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)
 
@@ -319,7 +319,7 @@ def select_window(
     fn = _NAV.get(direction)
     if fn is None:
         msg = f"Invalid direction: {direction!r}. Valid: next, previous, last"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     active_window = fn()
     return _serialize_window(active_window)
 

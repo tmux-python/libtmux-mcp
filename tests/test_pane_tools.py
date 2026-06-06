@@ -2906,12 +2906,10 @@ def test_snapshot_pane_truncates_content(mcp_server: Server, mcp_pane: Pane) -> 
     ``content_truncated`` and ``content_truncated_lines``. ``content``
     itself is the kept tail with no marker.
     """
-    for i in range(20):
-        mcp_pane.send_keys(f"echo snap_line_{i}", enter=True)
-    retry_until(
-        lambda: "snap_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
-        raises=True,
+    _signal_after_shell_payload(
+        mcp_server,
+        mcp_pane,
+        "; ".join(f"echo snap_line_{i}" for i in range(20)),
     )
 
     result = snapshot_pane(
@@ -2930,12 +2928,10 @@ def test_snapshot_pane_max_lines_none_keeps_full_content(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """``max_lines=None`` returns the full content with no truncation flag."""
-    for i in range(20):
-        mcp_pane.send_keys(f"echo snapnone_{i}", enter=True)
-    retry_until(
-        lambda: "snapnone_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
-        raises=True,
+    _signal_after_shell_payload(
+        mcp_server,
+        mcp_pane,
+        "; ".join(f"echo snapnone_{i}" for i in range(20)),
     )
 
     result = snapshot_pane(

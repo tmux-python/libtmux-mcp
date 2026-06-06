@@ -71,3 +71,17 @@ The `suppress_history` parameter on `send_keys` prepends a space before the comm
 `clear_pane` runs two tmux commands in sequence: `send-keys -R` (reset terminal) then `clear-history` (clear scrollback). There is a brief gap between them where partial content may be visible.
 
 For most use cases this is not a problem. If you need guaranteed clean state, add a small delay before the next `capture_pane`.
+
+## Gemini CLI injects `wait_for_previous` into tool arguments
+
+When Gemini CLI batches several tool calls in one turn, its scheduler merges the internal sequencing flag of the later calls into the MCP tool's arguments:
+
+```json
+{"tool": "get_pane_info", "arguments": {"wait_for_previous": true, "pane_id": "%0"}}
+```
+
+This has been observed with stock Gemini CLI behavior (no extensions involved). In local non-interactive `gemini -p` harness runs, batching can front-load the topic tool and the first MCP calls into one parallel turn, which is where the leaked flag usually appears; interactive sessions tend to schedule more sequentially and trigger it less often.
+
+Tool schemas are strict (`additionalProperties: false`), so the call is rejected with a validation error — classified as expected (WARNING log, `expected: true` in the result's `_meta`) and carrying a suggestion that names the rejected argument and identifies `wait_for_previous` as a client scheduling flag to retry without. Gemini's model reads it, drops the flag, and retries successfully on its own.
+
+The visible symptom is harmless noise: `Error executing tool mcp_tmux_<name>: ... reported an error` lines in Gemini's output for calls that then succeed on retry, and matching WARNING records in the server log. Similar reports in other MCP servers have handled this injected key by stripping it or whitelisting arguments against the schema ([MemPalace/mempalace#816](https://github.com/MemPalace/mempalace/issues/816)). This server deliberately keeps the rejection: silently dropping unknown arguments would also swallow genuine argument typos from every client — on a server with mutating and destructive tools, a mis-named flag (`enter` on `send_keys`, say) must fail loudly, not run with defaults.

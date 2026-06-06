@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
@@ -12,6 +11,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_RO,
     TAG_MUTATING,
     TAG_READONLY,
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     _resolve_session,
@@ -44,11 +44,11 @@ def _resolve_option_target(
     if scope is not None and opt_scope is None:
         valid = ", ".join(sorted(_SCOPE_MAP))
         msg = f"Invalid scope: {scope!r}. Valid: {valid}"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is None:
         msg = "scope is required when target is specified"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is not None:
         if opt_scope == OptionScope.Session:

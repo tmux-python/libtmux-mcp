@@ -11,9 +11,8 @@ import time
 import typing as t
 from dataclasses import dataclass
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     handle_tool_errors_async,
@@ -106,7 +105,7 @@ def _raise_if_dead_without_baseline(pane: Pane, state: _PaneState) -> None:
     """Raise a tool error for a dead pane before a cursor exists."""
     if state.pane_dead:
         msg = f"pane {pane.pane_id} died during pane read"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
 
 def _read_stable_visible(
@@ -306,7 +305,7 @@ def _build_cursor(pane_id: str, state: _PaneState, cursor_rows: list[str]) -> st
 def _raise_invalid_cursor(reason: str) -> t.NoReturn:
     """Raise a consistently worded invalid-cursor error."""
     msg = f"invalid capture_since cursor: {reason}"
-    raise ToolError(msg)
+    raise ExpectedToolError(msg)
 
 
 def _cursor_str(payload: t.Mapping[str, t.Any], key: str) -> str:
@@ -340,7 +339,7 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
     except (binascii.Error, json.JSONDecodeError, UnicodeDecodeError) as err:
         reason = "could not decode payload"
         msg = f"invalid capture_since cursor: {reason}"
-        raise ToolError(msg) from err
+        raise ExpectedToolError(msg) from err
 
     if not isinstance(payload, dict):
         reason = "payload is not an object"
@@ -375,10 +374,10 @@ def _validate_limits(max_lines: int | None, max_bytes: int | None) -> None:
     """Validate caller-supplied truncation limits."""
     if max_lines is not None and max_lines <= 0:
         msg = f"max_lines must be positive or None (received {max_lines})"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     if max_bytes is not None and max_bytes <= 0:
         msg = f"max_bytes must be positive or None (received {max_bytes})"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
 
 def _encoded_size(lines: list[str]) -> int:
@@ -450,7 +449,7 @@ async def capture_since(
     If tmux history was cleared or trimmed before the cursor anchor,
     the tool returns the current visible pane with ``lines_missed=True``
     and a fresh cursor. Malformed cursors, cursors for a different
-    pane, pane death, and pane respawn fail with ``ToolError`` so
+    pane, pane death, and pane respawn fail with ``ExpectedToolError`` so
     agents do not accidentally observe the wrong process.
 
     Parameters
@@ -507,7 +506,7 @@ async def capture_since(
             f"cursor pane {decoded.pane_id} does not match requested pane "
             f"{pane.pane_id}"
         )
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     start_time = time.monotonic()
     if decoded is None:

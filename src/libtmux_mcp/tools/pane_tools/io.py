@@ -8,9 +8,8 @@ import subprocess
 import tempfile
 import uuid
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     _tmux_argv,
@@ -336,11 +335,11 @@ def paste_text(
             subprocess.run(load_args, check=True, capture_output=True, timeout=5.0)
         except subprocess.TimeoutExpired as e:
             msg = f"load-buffer timeout after 5s for {buffer_name!r}"
-            raise ToolError(msg) from e
+            raise ExpectedToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
             msg = f"load-buffer failed: {stderr or e}"
-            raise ToolError(msg) from e
+            raise ExpectedToolError(msg) from e
 
         # Paste from the named buffer. ``delete_after=True`` (``-d``)
         # deletes only that named buffer, leaving any unnamed user

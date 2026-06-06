@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.exceptions import ToolError
 from libtmux.constants import PaneDirection
 
 from libtmux_mcp._utils import (
@@ -16,6 +15,7 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
     _get_caller_identity,
@@ -205,7 +205,7 @@ def split_window(
         if pane_dir is None:
             valid = ", ".join(sorted(_DIRECTION_MAP))
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
-            raise ToolError(msg)
+            raise ExpectedToolError(msg)
 
     if pane_id is not None:
         pane = _resolve_pane(server, pane_id=pane_id)
@@ -312,7 +312,7 @@ def kill_window(
                 "Refusing to kill the window containing this MCP server's pane. "
                 "Use a manual tmux command if intended."
             )
-            raise ToolError(msg)
+            raise ExpectedToolError(msg)
 
     wid = window.window_id
     window.kill()

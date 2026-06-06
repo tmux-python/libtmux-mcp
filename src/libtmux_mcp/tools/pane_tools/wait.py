@@ -10,9 +10,9 @@ import typing as t
 
 import anyio
 from fastmcp import Context
-from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     handle_tool_errors_async,
@@ -211,7 +211,7 @@ async def wait_for_text(
     Notes
     -----
     **Scrollback rollover detection is partial.** The tool raises
-    ``ToolError`` when ``hsize`` shrinks below the entry value — which
+    ``ExpectedToolError`` when ``hsize`` shrinks below the entry value — which
     catches ``clear-history`` and any rollover where the dip is
     observable between polls. It does **not** reliably detect
     ``grid_collect_history`` trim that fires during continuous output:
@@ -269,13 +269,13 @@ async def wait_for_text(
     """
     if not pattern:
         msg = "pattern must be a non-empty string"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     if interval < 0.01:
         msg = f"interval must be at least 0.01 s (received {interval})"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     if timeout <= 0:
         msg = f"timeout must be positive (received {timeout})"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     search_pattern = pattern if regex else re.escape(pattern)
     flags = 0 if match_case else re.IGNORECASE
@@ -284,7 +284,7 @@ async def wait_for_text(
     except re.error as e:
         msg = f"Invalid regex pattern: {e}"
         await _maybe_log(ctx, level="warning", message=msg)
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
 
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -381,7 +381,7 @@ async def wait_for_text(
                     "re-arm wait_for_text or use wait_for_channel for "
                     "deterministic synchronization"
                 )
-                raise ToolError(msg)
+                raise ExpectedToolError(msg)
             # The shrink guard above catches clear-history and the
             # entry-at-cap rollover edge. It does NOT catch
             # grid_collect_history trim during continuous output, where
@@ -495,7 +495,7 @@ async def wait_for_content_change(
     what the output will be — it waits for "something happened" rather than
     a specific pattern.
 
-    Raises ``ToolError`` when pane respawn or pane death invalidates the
+    Raises ``ExpectedToolError`` when pane respawn or pane death invalidates the
     baseline captured at entry. For correctness-sensitive flows prefer
     ``wait_for_channel`` composed with ``tmux wait-for -S``.
 

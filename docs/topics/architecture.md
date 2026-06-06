@@ -13,7 +13,7 @@ src/libtmux_mcp/
     server.py             # FastMCP instance and configuration
     _utils.py             # Server caching, resolvers, serializers, error handling
     models.py             # Pydantic output models
-    middleware.py         # Safety tier middleware
+    middleware.py         # Safety, audit, retry, and error-result middleware
     tools/
         server_tools.py   # list_sessions, create_session, kill_server, get_server_info
         session_tools.py  # list_windows, create_window, rename_session, kill_session
@@ -27,14 +27,22 @@ src/libtmux_mcp/
 
 ## Request flow
 
+Middleware wraps tool calls outermost-first (full ordering rationale in
+the `server.py` stack comment):
+
 ```
 MCP Client (Claude, Cursor, etc.)
   → stdio transport
     → FastMCP server (server.py)
-      → SafetyMiddleware (middleware.py)
-        → Tool function (tools/*.py)
-          → libtmux Server/Session/Window/Pane
-            → tmux binary (via subprocess)
+      → TimingMiddleware (wall-time observer)
+        → TailPreservingResponseLimitingMiddleware (response size backstop)
+          → ToolErrorResultMiddleware (exceptions → is_error results)
+            → AuditMiddleware (one log record per call)
+              → ReadonlyRetryMiddleware (retries readonly tools only)
+                → SafetyMiddleware (tier gate, fail-closed)
+                  → Tool function (tools/*.py)
+                    → libtmux Server/Session/Window/Pane
+                      → tmux binary (via subprocess)
 ```
 
 ## Key design decisions
@@ -60,7 +68,13 @@ Tools use resolver functions (`_resolve_session`, `_resolve_window`, `_resolve_p
 
 ### Error handling
 
-The `@handle_tool_errors` decorator wraps all tool functions, catching libtmux exceptions and converting them to `ToolError` with descriptive messages.
+Three boundaries split the work:
+
+1. **Tool classification** — the {func}`~libtmux_mcp._utils.handle_tool_errors` decorator wraps tool functions, mapping libtmux exceptions to {exc}`~libtmux_mcp._utils.ExpectedToolError` (agent-correctable: unknown ids, invalid arguments, transient tmux errors; logged at WARNING) or stock `ToolError` (operator faults and unexpected bugs; logged at ERROR). The raise chains the original exception via `from e`, which is what lets {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` match transient `LibTmuxException` causes.
+2. **Schema classification** — FastMCP validates tool arguments before tool code runs, so Pydantic validation failures never reach the decorator. {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` classifies those schema-validation errors as expected, agent-correctable WARNINGs before converting them.
+3. **Conversion** — {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` catches the exception once it has cleared the audit/retry/safety trio and returns `ToolResult(is_error=True)` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, and an optional agent-facing `suggestion` for recovery hints such as discovery tools or rejected-argument fixes).
+
+Errors must stay exceptions through the audit/retry/safety trio — audit detects failures by catching, retry matches via `__cause__` — so conversion happens only in the outermost error layer. The response limiter sits outside conversion and may truncate large success or error results on the return path; its truncation path preserves `is_error` and `_meta` so oversized expected failures stay tool errors. Level policy lives in {doc}`/topics/logging`.
 
 ## References
 

@@ -29,8 +29,9 @@ to poll for an output marker instead; state-polling is structurally
 safer than edge-triggered signalling for fragile commands.
 
 **Side effects:** Blocks the call up to `timeout` seconds (default 30).
-Mandatory subprocess timeout — a crashed signaller raises `ToolError`
-rather than blocking indefinitely.
+Mandatory subprocess timeout — a crashed signaller raises an
+{exc}`~libtmux_mcp._utils.ExpectedToolError` rather than blocking
+indefinitely.
 
 ```{fastmcp-tool-input} wait_for_tools.wait_for_channel
 ```

@@ -7,6 +7,7 @@ import hashlib
 import logging
 import typing as t
 
+import pydantic
 import pytest
 from fastmcp.server.middleware import MiddlewareContext
 from mcp.types import CallToolRequestParams
@@ -355,7 +356,7 @@ def test_server_middleware_stack_order() -> None:
     The ordering is load-bearing (see server.py comment):
     TimingMiddleware must be outermost so it observes total wall
     time; AuditMiddleware must sit *outside* SafetyMiddleware so
-    tier-denial events (which raise ``ToolError`` before
+    tier-denial events (which raise ``ExpectedToolError`` before
     ``call_next``) are still recorded — without this ordering,
     forbidden-access attempts silently bypass the audit log. A
     refactor that swaps Audit and Safety would degrade
@@ -366,7 +367,6 @@ def test_server_middleware_stack_order() -> None:
     calls are audited once each (Audit wraps the retry loop) and
     tier-denied tools never reach retry (Safety stops them first).
     """
-    from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
     from fastmcp.server.middleware.timing import TimingMiddleware
 
     from libtmux_mcp.middleware import (
@@ -374,6 +374,7 @@ def test_server_middleware_stack_order() -> None:
         ReadonlyRetryMiddleware,
         SafetyMiddleware,
         TailPreservingResponseLimitingMiddleware,
+        ToolErrorResultMiddleware,
     )
     from libtmux_mcp.server import mcp
 
@@ -384,7 +385,7 @@ def test_server_middleware_stack_order() -> None:
     assert types[:6] == [
         TimingMiddleware,
         TailPreservingResponseLimitingMiddleware,
-        ErrorHandlingMiddleware,
+        ToolErrorResultMiddleware,
         AuditMiddleware,
         ReadonlyRetryMiddleware,
         SafetyMiddleware,
@@ -392,12 +393,14 @@ def test_server_middleware_stack_order() -> None:
 
 
 def test_error_handling_middleware_transforms_errors() -> None:
-    """ErrorHandlingMiddleware is configured with transform_errors=True.
+    """ToolErrorResultMiddleware is configured with transform_errors=True.
 
-    Regression guard: without ``transform_errors=True`` the middleware
-    would still log but not map resource errors to MCP error code
-    ``-32002``, which is the protocol-correctness point of adopting
-    this middleware in the first place.
+    Regression guard: without ``transform_errors=True`` the inherited
+    ``on_message`` would still log but not map resource errors to MCP
+    error code ``-32002``, which is the protocol-correctness point of
+    keeping the ErrorHandlingMiddleware base for non-tool messages
+    (tool-call errors are converted to ``is_error`` results before
+    they reach ``on_message``).
     """
     from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 
@@ -417,12 +420,12 @@ def test_audit_records_safety_denial(
     Composes Audit and Safety in the production order (Audit outside
     Safety) by manually nesting their ``on_call_tool`` handlers: the
     inner ``call_next`` from Audit dispatches to Safety, which raises
-    ``ToolError`` for an over-tier tool. Audit should record that as
-    ``outcome=error error_type=ToolError`` rather than skipping the
-    record. Without this ordering, denied access attempts would
-    silently bypass forensic logging.
+    ``ExpectedToolError`` for an over-tier tool. Audit should record
+    that as ``outcome=error error_type=ExpectedToolError`` rather
+    than skipping the record. Without this ordering, denied access
+    attempts would silently bypass forensic logging.
     """
-    from fastmcp.exceptions import ToolError
+    from libtmux_mcp._utils import ExpectedToolError
 
     audit = AuditMiddleware()
     ctx = _fake_context(name="kill_server", arguments={})
@@ -431,25 +434,25 @@ def test_audit_records_safety_denial(
     # context.fastmcp_context.fastmcp.get_tool(...). With
     # fastmcp_context=None the safety check short-circuits, so we
     # simulate the denial more directly: ``call_next`` is a coroutine
-    # that raises the same ``ToolError`` SafetyMiddleware would when
-    # blocking an over-tier call. The test's invariant is that the
-    # AuditMiddleware sitting *outside* Safety still records the
-    # attempt with outcome=error.
+    # that raises the same ``ExpectedToolError`` SafetyMiddleware
+    # would when blocking an over-tier call. The test's invariant is
+    # that the AuditMiddleware sitting *outside* Safety still records
+    # the attempt with outcome=error.
     msg = "Tool 'kill_server' is not available at the current safety level."
 
     async def _safety_denial(_ctx: t.Any) -> None:
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     with (
         caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"),
-        pytest.raises(ToolError, match="not available"),
+        pytest.raises(ExpectedToolError, match="not available"),
     ):
         asyncio.run(audit.on_call_tool(ctx, _safety_denial))
 
     rendered = "\n".join(rec.getMessage() for rec in caplog.records)
     assert "tool=kill_server" in rendered
     assert "outcome=error" in rendered
-    assert "error_type=ToolError" in rendered
+    assert "error_type=ExpectedToolError" in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +515,7 @@ def test_readonly_retry_recovers_from_libtmux_exception() -> None:
     Models the production scenario the middleware exists to fix: a
     transient socket error from libtmux on the first call, then a
     successful call after the cache evicts the dead Server. Without
-    the retry the agent would see a ``ToolError`` on the first
+    the retry the agent would see an expected tool error on the first
     ``list_sessions``-style call.
     """
     from libtmux import exc as libtmux_exc
@@ -582,11 +585,11 @@ def test_readonly_retry_recovers_on_decorated_tool(
     Regression guard for the fastmcp <3.2.4 production no-op where
     ``RetryMiddleware._should_retry`` did not walk ``__cause__``.
     Every libtmux-mcp tool is wrapped by ``handle_tool_errors`` /
-    ``handle_tool_errors_async`` (``_utils.py:842-850``), which
-    converts ``LibTmuxException`` to ``ToolError(...) from
-    LibTmuxException``. At the middleware layer the exception type
-    is ``ToolError``, not ``LibTmuxException`` — so the retry
-    decision must walk ``__cause__`` to see the real failure type.
+    ``handle_tool_errors_async``, which converts ``LibTmuxException``
+    to ``ExpectedToolError(...) from LibTmuxException``. At the
+    middleware layer the exception type is ``ExpectedToolError``, not
+    ``LibTmuxException`` — so the retry decision must walk
+    ``__cause__`` to see the real failure type.
 
     The unit tests above use ``_FlakyCallNext`` which raises
     ``LibTmuxException`` directly, bypassing the decorator. They
@@ -647,3 +650,526 @@ def test_readonly_retry_logger_uses_project_namespace() -> None:
     """
     middleware = ReadonlyRetryMiddleware()
     assert middleware._retry.logger.name == "libtmux_mcp.retry"
+
+
+# ---------------------------------------------------------------------------
+# ToolErrorResultMiddleware tests
+# ---------------------------------------------------------------------------
+
+
+def _error_probe_server() -> t.Any:
+    """Build a minimal FastMCP instance wired like the production stack.
+
+    Only ``ToolErrorResultMiddleware`` is installed — the assertions
+    target error-result conversion, not the audit/retry/safety trio.
+    Tools mirror the three production raise shapes: an expected
+    failure with a chained cause (decorator-mapped libtmux error), an
+    expected failure with a recovery suggestion, and an unexpected
+    crash.
+    """
+    from fastmcp import FastMCP
+    from libtmux import exc as libtmux_exc
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp.middleware import ToolErrorResultMiddleware
+
+    probe = FastMCP(
+        name="error-probe",
+        middleware=[ToolErrorResultMiddleware(transform_errors=True)],
+    )
+
+    @probe.tool
+    def fail_expected_chained() -> str:
+        # Mirror the ``handle_tool_errors`` decorator's mapping shape:
+        # ``raise <mapped ExpectedToolError> from <libtmux exception>``.
+        cause = libtmux_exc.PaneNotFound("%99")
+        mapped = _map_exception_to_tool_error("fail_expected_chained", cause)
+        raise mapped from cause
+
+    @probe.tool
+    def fail_expected_with_suggestion() -> str:
+        msg = "Pane not found: %99"
+        raise ExpectedToolError(
+            msg,
+            suggestion="Call list_panes to discover valid pane ids.",
+        )
+
+    @probe.tool
+    def fail_unexpected() -> str:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    @probe.tool
+    def takes_int(count: int) -> str:
+        # Never reached when the argument fails schema validation —
+        # fastmcp raises pydantic.ValidationError before tool code runs.
+        return str(count)
+
+    return probe
+
+
+def test_tool_error_result_expected_failure_is_clean() -> None:
+    """Expected failures surface verbatim — no transform-layer prefix.
+
+    Regression guard for the stock ``ErrorHandlingMiddleware``
+    behavior this middleware replaces: its ``-32603`` catch-all
+    rewrote every tool failure to ``"Internal error: <message>"``,
+    mangling the agent-facing text.
+    """
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool("fail_expected_chained", raise_on_error=False)
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    text = result.content[0].text
+    assert text.startswith("Pane not found:")
+    assert "Internal error" not in text
+
+
+def test_tool_error_result_meta_carries_error_details() -> None:
+    """``meta`` reports the originating exception class and expectedness.
+
+    ``error_type`` names the ``__cause__`` when the raise site chained
+    one — agents see ``PaneNotFound``, not the mapped
+    ``ExpectedToolError`` wrapper.
+    """
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call(name: str) -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(name, raise_on_error=False)
+
+    chained = asyncio.run(_call("fail_expected_chained"))
+    assert chained.is_error is True
+    meta = chained.meta or {}
+    assert meta["error_type"] == "PaneNotFound"
+    assert meta["expected"] is True
+
+    crashed = asyncio.run(_call("fail_unexpected"))
+    assert crashed.is_error is True
+    crash_meta = crashed.meta or {}
+    assert crash_meta["error_type"] == "RuntimeError"
+    assert crash_meta["expected"] is False
+
+
+def test_tool_error_result_appends_suggestion() -> None:
+    """A ``suggestion`` lands in both the text block and ``meta``."""
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(
+                "fail_expected_with_suggestion", raise_on_error=False
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    text = result.content[0].text
+    assert text == ("Pane not found: %99\nCall list_panes to discover valid pane ids.")
+    meta = getattr(result, "meta", None) or {}
+    assert meta["suggestion"] == "Call list_panes to discover valid pane ids."
+
+
+class ErrorLogLevelFixture(t.NamedTuple):
+    """Test fixture for ToolErrorResultMiddleware._log_error levels."""
+
+    test_id: str
+    tool_name: str
+    arguments: dict[str, t.Any] | None
+    expected_level: int
+    message_fragment: str
+
+
+ERROR_LOG_LEVEL_FIXTURES: list[ErrorLogLevelFixture] = [
+    ErrorLogLevelFixture(
+        test_id="expected_failure_logs_warning",
+        tool_name="fail_expected_chained",
+        arguments=None,
+        expected_level=logging.WARNING,
+        message_fragment="Pane not found",
+    ),
+    ErrorLogLevelFixture(
+        test_id="unexpected_failure_logs_error",
+        tool_name="fail_unexpected",
+        arguments=None,
+        expected_level=logging.ERROR,
+        message_fragment="boom",
+    ),
+    ErrorLogLevelFixture(
+        test_id="schema_validation_logs_warning",
+        tool_name="takes_int",
+        arguments={"count": "not-an-int"},
+        expected_level=logging.WARNING,
+        message_fragment="validation error",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ErrorLogLevelFixture._fields,
+    ERROR_LOG_LEVEL_FIXTURES,
+    ids=[f.test_id for f in ERROR_LOG_LEVEL_FIXTURES],
+)
+def test_tool_error_result_logs_at_error_log_level(
+    test_id: str,
+    tool_name: str,
+    arguments: dict[str, t.Any] | None,
+    expected_level: int,
+    message_fragment: str,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_log_error`` honors ``log_level``: WARNING expected, ERROR not.
+
+    The stock ``ErrorHandlingMiddleware._log_error`` hardcodes
+    ``logger.error`` — without the override, every failure demoted to
+    WARNING by ``ExpectedToolError`` would be re-shouted at ERROR on
+    the ``fastmcp.errors`` channel. Argument-schema validation
+    failures carry no ``log_level`` at all; the middleware classifies
+    them as agent-correctable WARNINGs.
+
+    Assertions go through ``record.getMessage()`` so the lazy
+    %-formatting args are interpolated regardless of whether a handler
+    formatted the record — and a literal ``%s`` leaking into the
+    message would fail the fragment match.
+    """
+    from fastmcp import Client
+
+    # fastmcp's logger doesn't propagate to root (rich handler);
+    # re-enable propagation so caplog sees the records.
+    monkeypatch.setattr(logging.getLogger("fastmcp"), "propagate", True)
+
+    probe = _error_probe_server()
+
+    async def _call() -> None:
+        async with Client(probe) as client:
+            await client.call_tool(tool_name, arguments, raise_on_error=False)
+
+    with caplog.at_level(logging.DEBUG, logger="fastmcp.errors"):
+        asyncio.run(_call())
+
+    levels = [
+        r.levelno
+        for r in caplog.records
+        if r.name == "fastmcp.errors"
+        and "Error in tools/call" in r.getMessage()
+        and message_fragment in r.getMessage()
+    ]
+    assert levels == [expected_level]
+
+
+def test_schema_validation_failure_marked_expected_in_meta() -> None:
+    """Argument-schema failures report ``expected=True`` in result meta.
+
+    fastmcp validates arguments before tool code runs, so the
+    ``handle_tool_errors`` decorators never get the chance to classify
+    these as ``ExpectedToolError`` — the middleware must recognize the
+    bare ``pydantic.ValidationError`` itself. Bad arguments are
+    agent-correctable, same as a bad pane id.
+    """
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(
+                "takes_int", {"count": "not-an-int"}, raise_on_error=False
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    meta = result.meta or {}
+    assert meta["expected"] is True
+    assert meta["error_type"] == "ValidationError"
+
+
+class LimiterErrorFixture(t.NamedTuple):
+    """Test fixture for error-result preservation through the limiter."""
+
+    test_id: str
+    tool_name: str
+    arguments: dict[str, t.Any] | None
+    expect_is_error: bool
+    expect_header: bool
+    text_must_contain: str | None
+
+
+LIMITER_ERROR_FIXTURES: list[LimiterErrorFixture] = [
+    LimiterErrorFixture(
+        test_id="oversized_error_keeps_flag",
+        tool_name="limited_fail",
+        arguments={"payload": "x" * 5000},
+        expect_is_error=True,
+        expect_header=True,
+        # Tail-preservation keeps the suggestion line at the end.
+        text_must_contain="Call list_panes to discover valid pane ids.",
+    ),
+    LimiterErrorFixture(
+        test_id="small_error_untouched",
+        tool_name="limited_fail",
+        arguments={"payload": "x"},
+        expect_is_error=True,
+        expect_header=False,
+        text_must_contain="Invalid name: 'x'",
+    ),
+    LimiterErrorFixture(
+        test_id="oversized_success_not_marked_error",
+        tool_name="limited_ok",
+        arguments=None,
+        expect_is_error=False,
+        expect_header=True,
+        text_must_contain=None,
+    ),
+]
+
+
+class _LimiterOut(pydantic.BaseModel):
+    """Output model giving the ``limited_fail`` probe an output schema.
+
+    Module-level (not test-local) because ``from __future__ import
+    annotations`` stringifies the return annotation and pydantic
+    resolves it against module globals when fastmcp builds the schema.
+    """
+
+    value: str
+
+
+def _limiter_probe_server() -> t.Any:
+    """Build a FastMCP instance with the limiter wrapping error conversion.
+
+    Mirrors the production ordering (limiter outside
+    ``ToolErrorResultMiddleware``) with a small ``max_size`` so the
+    truncation path fires. ``limited_fail`` returns a Pydantic model
+    so the MCP SDK client's output-schema validation is in play.
+    """
+    from fastmcp import FastMCP
+
+    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp.middleware import (
+        TailPreservingResponseLimitingMiddleware,
+        ToolErrorResultMiddleware,
+    )
+
+    probe = FastMCP(
+        name="limiter-probe",
+        middleware=[
+            TailPreservingResponseLimitingMiddleware(
+                max_size=300,
+                tools=["limited_fail", "limited_ok"],
+            ),
+            ToolErrorResultMiddleware(transform_errors=True),
+        ],
+    )
+
+    @probe.tool
+    def limited_fail(payload: str) -> _LimiterOut:
+        msg = f"Invalid name: {payload!r}"
+        raise ExpectedToolError(
+            msg,
+            suggestion="Call list_panes to discover valid pane ids.",
+        )
+
+    # output_schema=None: fastmcp wraps even plain-str returns in a
+    # result schema, and the stock truncation path drops structured
+    # content — the MCP SDK client then rejects ANY truncated success
+    # from a schema'd tool. That pre-existing upstream gap is not what
+    # this probe tests; disable the schema so the success case
+    # exercises only the is_error handling.
+    @probe.tool(output_schema=None)
+    def limited_ok() -> str:
+        return "y" * 5000
+
+    return probe
+
+
+@pytest.mark.parametrize(
+    LimiterErrorFixture._fields,
+    LIMITER_ERROR_FIXTURES,
+    ids=[f.test_id for f in LIMITER_ERROR_FIXTURES],
+)
+def test_response_limiter_preserves_error_results(
+    test_id: str,
+    tool_name: str,
+    arguments: dict[str, t.Any] | None,
+    expect_is_error: bool,
+    expect_header: bool,
+    text_must_contain: str | None,
+) -> None:
+    """Truncation keeps ``is_error``; successes never gain it.
+
+    Regression guard: the stock truncation path rebuilds the result
+    without the error flag, so an oversized error from a tool with an
+    output schema became an apparent success — and the MCP SDK client
+    raised ``RuntimeError: ... has an output schema but did not return
+    structured content`` instead of delivering the tool error. The
+    ``limited_fail`` probe returns a Pydantic model precisely so this
+    test exercises that client-side validation path.
+    """
+    from fastmcp import Client
+
+    probe = _limiter_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(tool_name, arguments, raise_on_error=False)
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is expect_is_error
+    text = result.content[0].text
+    assert ("[... truncated" in text) is expect_header
+    if text_must_contain is not None:
+        assert text_must_contain in text
+    if expect_is_error:
+        meta = result.meta or {}
+        assert meta["expected"] is True
+        assert meta["error_type"] == "ExpectedToolError"
+
+
+class UnknownArgSuggestionFixture(t.NamedTuple):
+    """Test fixture for synthesized unexpected-argument suggestions."""
+
+    test_id: str
+    arguments: dict[str, t.Any]
+    client_name: str | None
+    expect_suggestion: bool
+    contains: tuple[str, ...]
+    not_contains: tuple[str, ...]
+
+
+UNKNOWN_ARG_SUGGESTION_FIXTURES: list[UnknownArgSuggestionFixture] = [
+    UnknownArgSuggestionFixture(
+        test_id="scheduling_flag_names_client",
+        arguments={"count": 1, "wait_for_previous": True},
+        client_name="gemini-test",
+        expect_suggestion=True,
+        contains=(
+            "Remove or correct the unrecognized argument(s): wait_for_previous.",
+            "your client (gemini-test 9.9)",
+            "retry the call without it",
+        ),
+        not_contains=("some clients",),
+    ),
+    UnknownArgSuggestionFixture(
+        test_id="scheduling_flag_default_client",
+        arguments={"count": 1, "wait_for_previous": True},
+        client_name=None,
+        expect_suggestion=True,
+        # The in-memory fastmcp Client always sends clientInfo, so the
+        # handshake-derived label is used; the no-handshake generic
+        # wording is covered by the unit test below.
+        contains=("wait_for_previous", "your client ("),
+        not_contains=("gemini-test",),
+    ),
+    UnknownArgSuggestionFixture(
+        test_id="typo_lists_names_without_client_note",
+        arguments={"count": 1, "bogus_flag": True},
+        client_name=None,
+        expect_suggestion=True,
+        contains=("Remove or correct the unrecognized argument(s): bogus_flag.",),
+        not_contains=("scheduling flag", "Gemini"),
+    ),
+    UnknownArgSuggestionFixture(
+        test_id="missing_required_arg_no_suggestion",
+        arguments={},
+        client_name=None,
+        expect_suggestion=False,
+        contains=(),
+        not_contains=(),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    UnknownArgSuggestionFixture._fields,
+    UNKNOWN_ARG_SUGGESTION_FIXTURES,
+    ids=[f.test_id for f in UNKNOWN_ARG_SUGGESTION_FIXTURES],
+)
+def test_unexpected_argument_suggestion(
+    test_id: str,
+    arguments: dict[str, t.Any],
+    client_name: str | None,
+    expect_suggestion: bool,
+    contains: tuple[str, ...],
+    not_contains: tuple[str, ...],
+) -> None:
+    """Schema rejections of unexpected arguments carry a recovery hint.
+
+    The rejection itself is unchanged — the argument is never silently
+    stripped (contrast MemPalace/mempalace#322's pop-the-key approach) —
+    but the suggestion names exactly which argument(s) to drop or fix,
+    and flags ``wait_for_previous`` as a client scheduling leak, naming
+    the client from the MCP initialize handshake when available.
+    """
+    import mcp.types
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    client_kwargs: dict[str, t.Any] = {}
+    if client_name is not None:
+        client_kwargs["client_info"] = mcp.types.Implementation(
+            name=client_name, version="9.9"
+        )
+
+    async def _call() -> t.Any:
+        async with Client(probe, **client_kwargs) as client:
+            return await client.call_tool("takes_int", arguments, raise_on_error=False)
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    meta = result.meta or {}
+    assert meta["expected"] is True
+    if not expect_suggestion:
+        assert "suggestion" not in meta
+        return
+    suggestion = meta["suggestion"]
+    text = result.content[0].text
+    assert suggestion in text  # appended to the agent-visible message
+    for fragment in contains:
+        assert fragment in suggestion
+    for fragment in not_contains:
+        assert fragment not in suggestion
+
+
+def test_unexpected_argument_suggestion_without_handshake() -> None:
+    """No client handshake -> the scheduling-flag note uses generic wording.
+
+    Real connections always carry ``clientInfo`` (required by the MCP
+    initialize handshake), so the generic branch is reachable only
+    where no context exists — exercised here by calling
+    ``_error_tool_result`` directly with a manufactured validation
+    error, the same shape fastmcp raises for tool arguments.
+    """
+    import pydantic
+
+    from libtmux_mcp.middleware import _error_tool_result
+
+    @pydantic.validate_call
+    def _probe_fn(count: int) -> int:
+        return count  # pragma: no cover - validation rejects the call
+
+    try:
+        _probe_fn(count=1, wait_for_previous=True)  # type: ignore[call-arg]
+    except pydantic.ValidationError as exc:
+        result = _error_tool_result(exc, None)
+    else:  # pragma: no cover - defends the test's own premise
+        pytest.fail("expected a ValidationError")
+
+    meta = result.meta or {}
+    assert meta["expected"] is True
+    assert "some clients (e.g. Gemini CLI)" in meta["suggestion"]

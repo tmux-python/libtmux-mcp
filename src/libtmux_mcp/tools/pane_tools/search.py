@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import re
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _coerce_bool,
     _coerce_int,
     _compute_is_caller,
@@ -150,7 +149,7 @@ def search_panes(
         compiled = re.compile(search_pattern, flags)
     except re.error as e:
         msg = f"Invalid regex pattern: {e}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
 
     server = _get_server(socket_name=socket_name)
 

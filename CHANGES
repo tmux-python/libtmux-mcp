@@ -6,6 +6,24 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `fastmcp>=3.4.0`** (was `>=3.2.4`). Enables the error-result and log-level improvements below; the bump alone also restores resource titles on the `tmux://` hierarchy and brings MCP-compliant telemetry span attributes.
+
+### What's new
+
+**Tool errors arrive clean, with structured detail and recovery hints**
+
+Failed tool calls now return their message exactly as raised — previously every failure was prefixed with `Internal error:`. Error results carry a structured `_meta` payload (`error_type`, `expected`, `suggestion`), and not-found errors point at {tooliconl}`list-sessions` / {tooliconl}`list-windows` / {tooliconl}`list-panes` to resolve stale or guessed ids. (#64)
+
+**Unknown tool arguments get a do-this-next hint**
+
+When a call includes arguments a tool doesn't accept, the error result now names exactly which argument(s) to remove or fix. When the stray key is `wait_for_previous` — a scheduling flag Gemini CLI can leak into batched tool calls — the hint says so and names the connected client, so agents recover in one read instead of re-deriving the problem from a validation traceback. (#64)
+
+**Expected tool failures log at WARNING, not ERROR**
+
+Agent-correctable failures — unknown ids, invalid arguments, safety-tier denials, transient tmux errors — now log at WARNING in the server's log stream. A missing tmux binary and unexpected exceptions stay at ERROR, so ERROR records are always worth attention. (#64)
+
 ## libtmux-mcp 0.1.0a10 (2026-05-24)
 
 ### What's new

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import shlex
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     handle_tool_errors,
@@ -80,7 +79,7 @@ def pipe_pane(
 
     if not output_path.strip():
         msg = "output_path must be a non-empty path, or None to stop piping."
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
 
     redirect = ">>" if append else ">"
     pane.pipe(f"cat {redirect} {shlex.quote(output_path)}")

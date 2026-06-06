@@ -31,14 +31,13 @@ import tempfile
 import typing as t
 import uuid
 
-from fastmcp.exceptions import ToolError
-
 from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
     TAG_MUTATING,
     TAG_READONLY,
+    ExpectedToolError,
     _get_server,
     _resolve_pane,
     _tmux_argv,
@@ -93,17 +92,17 @@ def _validate_logical_name(name: str) -> str:
     >>> _validate_logical_name("has space")
     Traceback (most recent call last):
     ...
-    fastmcp.exceptions.ToolError: Invalid logical buffer name: 'has space'
+    libtmux_mcp._utils.ExpectedToolError: Invalid logical buffer name: 'has space'
     >>> _validate_logical_name("with/slash")
     Traceback (most recent call last):
     ...
-    fastmcp.exceptions.ToolError: Invalid logical buffer name: 'with/slash'
+    libtmux_mcp._utils.ExpectedToolError: Invalid logical buffer name: 'with/slash'
     """
     if name == "":
         return "buf"
     if not _LOGICAL_NAME_RE.fullmatch(name):
         msg = f"Invalid logical buffer name: {name!r}"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     return name
 
 
@@ -122,15 +121,15 @@ def _validate_buffer_name(name: str) -> str:
     >>> _validate_buffer_name("clipboard")
     Traceback (most recent call last):
     ...
-    fastmcp.exceptions.ToolError: Invalid buffer name: 'clipboard'
+    libtmux_mcp._utils.ExpectedToolError: Invalid buffer name: 'clipboard'
     >>> _validate_buffer_name("libtmux_mcp_shortuuid_buf")
     Traceback (most recent call last):
     ...
-    fastmcp.exceptions.ToolError: Invalid buffer name: 'libtmux_mcp_shortuuid_buf'
+    libtmux_mcp._utils.ExpectedToolError: Invalid buffer name: 'libtmux_mcp_...'
     """
     if not _BUFFER_NAME_RE.fullmatch(name):
         msg = f"Invalid buffer name: {name!r}"
-        raise ToolError(msg)
+        raise ExpectedToolError(msg)
     return name
 
 
@@ -216,11 +215,11 @@ def load_buffer(
             subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
         except subprocess.TimeoutExpired as e:
             msg = f"load-buffer timeout after 5s for {buffer_name!r}"
-            raise ToolError(msg) from e
+            raise ExpectedToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
             msg = f"load-buffer failed: {stderr or e}"
-            raise ToolError(msg) from e
+            raise ExpectedToolError(msg) from e
     finally:
         if tmppath is not None:
             pathlib.Path(tmppath).unlink(missing_ok=True)
@@ -317,11 +316,11 @@ def show_buffer(
         )
     except subprocess.TimeoutExpired as e:
         msg = f"show-buffer timeout after 5s for {cname!r}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"show-buffer failed for {cname!r}: {stderr or e}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     raw = completed.stdout.decode(errors="replace")
     # Preserve a possible trailing newline so round-tripping through
     # load_buffer/show_buffer stays byte-identical when truncation
@@ -363,11 +362,11 @@ def delete_buffer(
         subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
     except subprocess.TimeoutExpired as e:
         msg = f"delete-buffer timeout after 5s for {cname!r}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"delete-buffer failed for {cname!r}: {stderr or e}"
-        raise ToolError(msg) from e
+        raise ExpectedToolError(msg) from e
     return f"Buffer {cname!r} deleted"
 
 
