@@ -4,9 +4,9 @@
 ```
 
 **Use when** you know which hook you want to inspect by name. Returns
-empty when the hook is unset; raises `ToolError` for unknown hook
-names (typos, wrong scope) so input mistakes don't masquerade as
-"nothing configured".
+empty when the hook is unset; raises an expected tool error for
+unknown hook names (typos, wrong scope) so input mistakes don't
+masquerade as "nothing configured".
 
 **Side effects:** None. Readonly.
 

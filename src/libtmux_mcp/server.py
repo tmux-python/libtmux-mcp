@@ -289,7 +289,7 @@ mcp = FastMCP(
     #      them), so converting the exception to a result any deeper
     #      would silently break all three.
     #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
-    #      events (which raise ToolError before call_next inside
+    #      events (which raise ExpectedToolError before call_next inside
     #      Safety) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.

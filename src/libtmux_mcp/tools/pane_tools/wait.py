@@ -211,7 +211,7 @@ async def wait_for_text(
     Notes
     -----
     **Scrollback rollover detection is partial.** The tool raises
-    ``ToolError`` when ``hsize`` shrinks below the entry value — which
+    ``ExpectedToolError`` when ``hsize`` shrinks below the entry value — which
     catches ``clear-history`` and any rollover where the dip is
     observable between polls. It does **not** reliably detect
     ``grid_collect_history`` trim that fires during continuous output:

@@ -449,7 +449,7 @@ async def capture_since(
     If tmux history was cleared or trimmed before the cursor anchor,
     the tool returns the current visible pane with ``lines_missed=True``
     and a fresh cursor. Malformed cursors, cursors for a different
-    pane, pane death, and pane respawn fail with ``ToolError`` so
+    pane, pane death, and pane respawn fail with ``ExpectedToolError`` so
     agents do not accidentally observe the wrong process.
 
     Parameters
