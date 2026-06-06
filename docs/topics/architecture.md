@@ -68,12 +68,13 @@ Tools use resolver functions (`_resolve_session`, `_resolve_window`, `_resolve_p
 
 ### Error handling
 
-Two layers split the work:
+Three boundaries split the work:
 
-1. **Classification** — the `@handle_tool_errors` decorator wraps all tool functions, mapping libtmux exceptions to `ExpectedToolError` (agent-correctable: unknown ids, invalid arguments, transient tmux errors; logged at WARNING) or stock `ToolError` (operator faults and unexpected bugs; logged at ERROR). The raise chains the original exception via `from e`, which is what lets `ReadonlyRetryMiddleware` match transient `LibTmuxException` causes.
-2. **Conversion** — `ToolErrorResultMiddleware` catches the exception once it has cleared the audit/retry/safety trio and returns `ToolResult(is_error=True)` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, optional `suggestion` pointing at discovery tools).
+1. **Tool classification** — the {func}`~libtmux_mcp._utils.handle_tool_errors` decorator wraps tool functions, mapping libtmux exceptions to {class}`~libtmux_mcp._utils.ExpectedToolError` (agent-correctable: unknown ids, invalid arguments, transient tmux errors; logged at WARNING) or stock `ToolError` (operator faults and unexpected bugs; logged at ERROR). The raise chains the original exception via `from e`, which is what lets {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` match transient `LibTmuxException` causes.
+2. **Schema classification** — FastMCP validates tool arguments before tool code runs, so Pydantic validation failures never reach the decorator. {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` classifies those schema-validation errors as expected, agent-correctable WARNINGs before converting them.
+3. **Conversion** — {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` catches the exception once it has cleared the audit/retry/safety trio and returns `ToolResult(is_error=True)` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, optional `suggestion` pointing at discovery tools).
 
-Errors must stay exceptions through the audit/retry/safety trio — audit detects failures by catching, retry matches via `__cause__` — so conversion happens only in the outermost error layer. Level policy lives in {doc}`/topics/logging`.
+Errors must stay exceptions through the audit/retry/safety trio — audit detects failures by catching, retry matches via `__cause__` — so conversion happens only in the outermost error layer. The response limiter sits outside conversion and may truncate large success or error results on the return path; its truncation path preserves `is_error` and `_meta` so oversized expected failures stay tool errors. Level policy lives in {doc}`/topics/logging`.
 
 ## References
 

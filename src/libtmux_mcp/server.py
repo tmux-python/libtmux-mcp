@@ -275,9 +275,10 @@ mcp = FastMCP(
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early
     #      as possible so timing captures middleware cost too.
-    #   2. TailPreservingResponseLimitingMiddleware — bound the
-    #      response *before* ToolErrorResultMiddleware can convert
-    #      exceptions; keeps the size cap independent of error path.
+    #   2. TailPreservingResponseLimitingMiddleware — bounds the final
+    #      tool result on the way back out. Tool errors may already be
+    #      ToolResult(is_error=True) here, so truncation preserves that
+    #      flag instead of turning expected failures into schema errors.
     #   3. ToolErrorResultMiddleware — converts tool-call failures to
     #      rich ToolResult(is_error=True) results and transforms
     #      resource errors to MCP code -32002. Must stay OUTSIDE the
