@@ -7,6 +7,7 @@ import hashlib
 import logging
 import typing as t
 
+import pydantic
 import pytest
 from fastmcp.server.middleware import MiddlewareContext
 from mcp.types import CallToolRequestParams
@@ -892,3 +893,146 @@ def test_schema_validation_failure_marked_expected_in_meta() -> None:
     meta = result.meta or {}
     assert meta["expected"] is True
     assert meta["error_type"] == "ValidationError"
+
+
+class LimiterErrorFixture(t.NamedTuple):
+    """Test fixture for error-result preservation through the limiter."""
+
+    test_id: str
+    tool_name: str
+    arguments: dict[str, t.Any] | None
+    expect_is_error: bool
+    expect_header: bool
+    text_must_contain: str | None
+
+
+LIMITER_ERROR_FIXTURES: list[LimiterErrorFixture] = [
+    LimiterErrorFixture(
+        test_id="oversized_error_keeps_flag",
+        tool_name="limited_fail",
+        arguments={"payload": "x" * 5000},
+        expect_is_error=True,
+        expect_header=True,
+        # Tail-preservation keeps the suggestion line at the end.
+        text_must_contain="Call list_panes to discover valid pane ids.",
+    ),
+    LimiterErrorFixture(
+        test_id="small_error_untouched",
+        tool_name="limited_fail",
+        arguments={"payload": "x"},
+        expect_is_error=True,
+        expect_header=False,
+        text_must_contain="Invalid name: 'x'",
+    ),
+    LimiterErrorFixture(
+        test_id="oversized_success_not_marked_error",
+        tool_name="limited_ok",
+        arguments=None,
+        expect_is_error=False,
+        expect_header=True,
+        text_must_contain=None,
+    ),
+]
+
+
+class _LimiterOut(pydantic.BaseModel):
+    """Output model giving the ``limited_fail`` probe an output schema.
+
+    Module-level (not test-local) because ``from __future__ import
+    annotations`` stringifies the return annotation and pydantic
+    resolves it against module globals when fastmcp builds the schema.
+    """
+
+    value: str
+
+
+def _limiter_probe_server() -> t.Any:
+    """Build a FastMCP instance with the limiter wrapping error conversion.
+
+    Mirrors the production ordering (limiter outside
+    ``ToolErrorResultMiddleware``) with a small ``max_size`` so the
+    truncation path fires. ``limited_fail`` returns a Pydantic model
+    so the MCP SDK client's output-schema validation is in play.
+    """
+    from fastmcp import FastMCP
+
+    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp.middleware import (
+        TailPreservingResponseLimitingMiddleware,
+        ToolErrorResultMiddleware,
+    )
+
+    probe = FastMCP(
+        name="limiter-probe",
+        middleware=[
+            TailPreservingResponseLimitingMiddleware(
+                max_size=300,
+                tools=["limited_fail", "limited_ok"],
+            ),
+            ToolErrorResultMiddleware(transform_errors=True),
+        ],
+    )
+
+    @probe.tool
+    def limited_fail(payload: str) -> _LimiterOut:
+        msg = f"Invalid name: {payload!r}"
+        raise ExpectedToolError(
+            msg,
+            suggestion="Call list_panes to discover valid pane ids.",
+        )
+
+    # output_schema=None: fastmcp wraps even plain-str returns in a
+    # result schema, and the stock truncation path drops structured
+    # content — the MCP SDK client then rejects ANY truncated success
+    # from a schema'd tool. That pre-existing upstream gap is not what
+    # this probe tests; disable the schema so the success case
+    # exercises only the is_error handling.
+    @probe.tool(output_schema=None)
+    def limited_ok() -> str:
+        return "y" * 5000
+
+    return probe
+
+
+@pytest.mark.parametrize(
+    LimiterErrorFixture._fields,
+    LIMITER_ERROR_FIXTURES,
+    ids=[f.test_id for f in LIMITER_ERROR_FIXTURES],
+)
+def test_response_limiter_preserves_error_results(
+    test_id: str,
+    tool_name: str,
+    arguments: dict[str, t.Any] | None,
+    expect_is_error: bool,
+    expect_header: bool,
+    text_must_contain: str | None,
+) -> None:
+    """Truncation keeps ``is_error``; successes never gain it.
+
+    Regression guard: the stock truncation path rebuilds the result
+    without the error flag, so an oversized error from a tool with an
+    output schema became an apparent success — and the MCP SDK client
+    raised ``RuntimeError: ... has an output schema but did not return
+    structured content`` instead of delivering the tool error. The
+    ``limited_fail`` probe returns a Pydantic model precisely so this
+    test exercises that client-side validation path.
+    """
+    from fastmcp import Client
+
+    probe = _limiter_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(tool_name, arguments, raise_on_error=False)
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is expect_is_error
+    text = result.content[0].text
+    assert ("[... truncated" in text) is expect_header
+    if text_must_contain is not None:
+        assert text_must_contain in text
+    if expect_is_error:
+        meta = result.meta or {}
+        assert meta["expected"] is True
+        assert meta["error_type"] == "ExpectedToolError"

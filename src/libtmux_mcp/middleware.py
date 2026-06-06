@@ -526,7 +526,41 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     caps at the tool layer fire first under normal operation; this
     middleware catches pathological output from future tools that
     forget to declare their own bounds.
+
+    Error results keep their ``is_error`` flag through truncation.
+    The stock truncation path rebuilds the result without it, which
+    turns an oversized error (e.g. a validation message echoing a
+    huge argument) into an apparent success — MCP clients then
+    validate the truncated text against the tool's output schema and
+    fail with a transport-level error instead of delivering the tool
+    error. ``meta`` (``error_type`` / ``expected`` / ``suggestion``)
+    already survives via the base class, and tail-preservation keeps
+    the suggestion line, which sits at the end of the text.
     """
+
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext,
+        call_next: t.Any,
+    ) -> t.Any:
+        """Apply the size cap without dropping ``is_error``."""
+        inner: t.Any = None
+
+        async def _capture(ctx: t.Any) -> t.Any:
+            nonlocal inner
+            inner = await call_next(ctx)
+            return inner
+
+        result = await super().on_call_tool(context, _capture)
+        if result is not inner and isinstance(inner, ToolResult) and inner.is_error:
+            # The base class truncated and rebuilt the result; restore
+            # the error flag it dropped.
+            return ToolResult(
+                content=result.content,
+                meta=result.meta,
+                is_error=True,
+            )
+        return result
 
     def _truncate_to_result(
         self,
