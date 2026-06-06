@@ -16,6 +16,10 @@ _Notes on upcoming releases will be added here_
 
 Agent-correctable failures — unknown pane/window/session ids, invalid arguments, safety-tier denials, transient tmux errors — now log at WARNING instead of ERROR in the server's log stream. Two cases stay at ERROR so operators see them loudly: a missing tmux binary and unexpected exceptions that may indicate a bug in this server. Built on fastmcp 3.3's `ToolError(log_level=...)` support.
 
+**Tool errors arrive clean, with structured detail and recovery hints**
+
+Failed tool calls now return their error message exactly as raised — previously every failure passed through fastmcp's stock error transform, which prefixed it with `Internal error:` (so agents saw `Internal error: Pane not found: %5`). Error results also carry a structured `_meta` payload: `error_type` names the originating exception class (`PaneNotFound`, not the wrapper), `expected` distinguishes agent-correctable failures from potential server bugs, and not-found errors include a `suggestion` pointing at the discovery tools (`list_sessions` / `list_windows` / `list_panes`) that resolve stale or guessed ids. Built on fastmcp 3.4's `ToolResult(is_error=True)` support.
+
 ## libtmux-mcp 0.1.0a10 (2026-05-24)
 
 ### What's new

@@ -56,10 +56,27 @@ class ExpectedToolError(ToolError):
 
     >>> isinstance(ExpectedToolError("x"), ToolError)
     True
+
+    An optional ``suggestion`` carries an agent-facing recovery hint;
+    :class:`libtmux_mcp.middleware.ToolErrorResultMiddleware` surfaces
+    it in the error result's text and ``meta``:
+
+    >>> err = ExpectedToolError("Pane not found: %5",
+    ...     suggestion="Call list_panes to discover valid pane ids.")
+    >>> err.suggestion
+    'Call list_panes to discover valid pane ids.'
+    >>> ExpectedToolError("no hint").suggestion is None
+    True
     """
 
-    def __init__(self, *args: object, log_level: int = logging.WARNING) -> None:
+    def __init__(
+        self,
+        *args: object,
+        log_level: int = logging.WARNING,
+        suggestion: str | None = None,
+    ) -> None:
         super().__init__(*args, log_level=log_level)
+        self.suggestion = suggestion
 
 
 @dataclasses.dataclass(frozen=True)
@@ -969,9 +986,17 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
     if isinstance(e, exc.BadSessionName):
         return ExpectedToolError(str(e))
     if isinstance(e, exc.TmuxObjectDoesNotExist):
-        return ExpectedToolError(f"Object not found: {e}")
+        return ExpectedToolError(
+            f"Object not found: {e}",
+            suggestion=(
+                "Call list_sessions / list_windows / list_panes to discover valid ids."
+            ),
+        )
     if isinstance(e, exc.PaneNotFound):
-        return ExpectedToolError(f"Pane not found: {e}")
+        return ExpectedToolError(
+            f"Pane not found: {e}",
+            suggestion="Call list_panes to discover valid pane ids.",
+        )
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")
     logger.exception("unexpected error in MCP tool %s", fn_name)

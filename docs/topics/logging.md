@@ -23,6 +23,23 @@ are:
   {exc}`libtmux.exc.LibTmuxException`.
 - ``libtmux_mcp.server`` / ``libtmux_mcp.tools.*`` / etc. — ad-hoc
   warnings and debug messages from the codebase.
+- ``fastmcp.errors`` — one record per failed tool call, emitted by
+  {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware`.
+
+## Error levels
+
+Tool failures are logged at a level matching who needs to act:
+
+- **WARNING** — expected, agent-correctable failures: unknown
+  pane/window/session ids, invalid arguments, safety-tier denials,
+  transient tmux errors. The calling agent receives the message and
+  can correct course; operators don't need to.
+- **ERROR** — operator faults and potential bugs: a missing ``tmux``
+  binary, or any unexpected exception escaping a tool.
+
+A WARNING-heavy, ERROR-quiet log stream is therefore healthy — it
+means agents are probing and recovering. ERROR records are the ones
+worth alerting on.
 
 ## Level control
 

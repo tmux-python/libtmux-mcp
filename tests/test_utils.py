@@ -953,3 +953,35 @@ def test_expected_tool_error_logs_warning_through_server(
     records = [r for r in caplog.records if "Error calling tool" in r.message]
     assert records, "expected fastmcp to log the tool failure"
     assert all(r.levelno == logging.WARNING for r in records)
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected_suggestion_fragment"),
+    [
+        (exc.TmuxObjectDoesNotExist("@99"), "list_sessions / list_windows"),
+        (exc.PaneNotFound("%99"), "list_panes"),
+        (exc.TmuxSessionExists("dup"), None),
+        (exc.BadSessionName("bad:name"), None),
+        (exc.LibTmuxException("transient"), None),
+    ],
+    ids=lambda v: type(v).__name__ if isinstance(v, Exception) else str(v),
+)
+def test_map_exception_suggestion_policy(
+    raised: Exception,
+    expected_suggestion_fragment: str | None,
+) -> None:
+    """Only the not-found branches carry agent-facing recovery hints.
+
+    Discovery tools are the canonical fix for stale/guessed ids — the
+    most common agent mistake. The other expected branches stay
+    hint-free until real transcripts show agents flailing on them.
+    """
+    from libtmux_mcp._utils import _map_exception_to_tool_error
+
+    mapped = _map_exception_to_tool_error("some_tool", raised)
+    suggestion = getattr(mapped, "suggestion", None)
+    if expected_suggestion_fragment is None:
+        assert suggestion is None
+    else:
+        assert suggestion is not None
+        assert expected_suggestion_fragment in suggestion

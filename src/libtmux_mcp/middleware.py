@@ -1,6 +1,6 @@
 """Middleware for libtmux MCP server.
 
-Provides three pieces of infrastructure:
+Provides the project's middleware infrastructure:
 
 * :class:`SafetyMiddleware` gates tools by safety tier based on the
   ``LIBTMUX_SAFETY`` environment variable. Tools tagged above the
@@ -9,6 +9,14 @@ Provides three pieces of infrastructure:
   invocation (name, duration, outcome, client/request ids, and a
   summary of arguments with payload-bearing fields redacted to a
   length + SHA-256 prefix).
+* :class:`ReadonlyRetryMiddleware` retries transient libtmux failures,
+  but only for readonly tools — re-running a mutating tool would
+  silently double side effects.
+* :class:`ToolErrorResultMiddleware` converts tool-call failures into
+  ``ToolResult(is_error=True)`` results that carry the clean error
+  message plus a structured ``meta`` payload, instead of fastmcp's
+  stock ``-32603`` catch-all that prefixed every expected failure
+  with ``"Internal error: "``.
 * :class:`TailPreservingResponseLimitingMiddleware` is a backstop cap
   for oversized tool output. Unlike FastMCP's stock
   ``ResponseLimitingMiddleware`` it preserves the **tail** of the
@@ -25,7 +33,10 @@ import time
 import typing as t
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.middleware.error_handling import RetryMiddleware
+from fastmcp.server.middleware.error_handling import (
+    ErrorHandlingMiddleware,
+    RetryMiddleware,
+)
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
@@ -96,6 +107,120 @@ class SafetyMiddleware(Middleware):
                 )
                 raise ExpectedToolError(msg)
         return await call_next(context)
+
+
+# ---------------------------------------------------------------------------
+# Tool-error result conversion
+# ---------------------------------------------------------------------------
+
+
+def _error_tool_result(error: Exception) -> ToolResult:
+    """Build a rich ``ToolResult(is_error=True)`` from a tool failure.
+
+    The text block carries the error message exactly as raised — no
+    transform-layer prefix — with the recovery ``suggestion`` appended
+    when the error provides one. ``meta`` mirrors the details in
+    machine-readable form:
+
+    * ``error_type`` — class name of the originating exception
+      (``__cause__`` when the raise site chained one, so agents see
+      ``PaneNotFound`` rather than the ``ToolError`` wrapper).
+    * ``expected`` — True for agent-correctable failures
+      (:class:`~libtmux_mcp._utils.ExpectedToolError`), False for
+      operator faults and potential server bugs.
+    * ``suggestion`` — recovery hint, only when present.
+
+    ``structured_content`` is deliberately left unset: tools declare
+    output schemas for their success payloads, and clients validate
+    ``structuredContent`` against them — an error-shaped payload there
+    would fail validation on strict clients.
+    """
+    cause = error.__cause__
+    origin = cause if cause is not None else error
+    meta: dict[str, t.Any] = {
+        "error_type": type(origin).__name__,
+        "expected": isinstance(error, ExpectedToolError),
+    }
+    text = str(error)
+    suggestion = getattr(error, "suggestion", None)
+    if suggestion:
+        meta["suggestion"] = suggestion
+        text = f"{text}\n{suggestion}"
+    return ToolResult(
+        content=[TextContent(type="text", text=text)],
+        meta=meta,
+        is_error=True,
+    )
+
+
+class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
+    """Convert tool-call failures into rich ``ToolResult`` errors.
+
+    Replaces the stock :class:`ErrorHandlingMiddleware` behavior for
+    ``tools/call`` only. The stock ``transform_errors=True`` path
+    funnels every non-MCP exception through a ``-32603`` catch-all, so
+    agents received ``"Internal error: Pane not found: %5"`` — the
+    transform mangled every expected failure message. This subclass
+    intercepts tool-call exceptions first (``on_call_tool`` is the
+    innermost hook of a middleware's chain) and returns
+    :func:`_error_tool_result` instead; non-tool messages fall through
+    to the inherited ``on_message``, preserving the MCP ``-32002``
+    resource-not-found transform this middleware was originally
+    adopted for.
+
+    Logging honors ``FastMCPError.log_level`` (fastmcp >= 3.3): the
+    expected failures demoted to WARNING by
+    :class:`~libtmux_mcp._utils.ExpectedToolError` no longer get
+    re-shouted at ERROR by the stock ``_log_error``.
+
+    Ordering invariant: must sit **outside** ``AuditMiddleware``,
+    ``ReadonlyRetryMiddleware``, and ``SafetyMiddleware``. All three
+    depend on exception semantics — audit detects failures by catching,
+    retry matches ``LibTmuxException`` via ``__cause__`` — so
+    converting the exception to a result any deeper in the stack would
+    silently disable both.
+    """
+
+    def _log_error(self, error: Exception, context: MiddlewareContext) -> None:
+        """Log at the error's own ``log_level`` instead of a flat ERROR.
+
+        Mirrors the stock implementation (error-count tracking,
+        optional traceback, error callback) but routes the record
+        through ``logger.log`` with ``FastMCPError.log_level`` —
+        defaulting to ERROR for exceptions that don't carry one.
+        """
+        level = getattr(error, "log_level", logging.ERROR)
+
+        error_type = type(error).__name__
+        method = context.method or "unknown"
+
+        error_key = f"{error_type}:{method}"
+        self.error_counts[error_key] = self.error_counts.get(error_key, 0) + 1
+
+        base_message = f"Error in {method}: {error_type}: {error!s}"
+
+        if self.include_traceback:
+            self.logger.log(level, base_message, exc_info=True)
+        else:
+            self.logger.log(level, base_message)
+
+        if self.error_callback:
+            try:
+                self.error_callback(error, context)
+            except Exception:
+                self.logger.exception("Error in error callback")
+
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext,
+        call_next: t.Any,
+    ) -> t.Any:
+        """Convert tool-call exceptions into ``is_error`` results."""
+        try:
+            return await call_next(context)
+        except Exception as error:
+            self._log_error(error, context)
+            return _error_tool_result(error)
 
 
 # ---------------------------------------------------------------------------

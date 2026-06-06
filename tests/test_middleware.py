@@ -366,7 +366,6 @@ def test_server_middleware_stack_order() -> None:
     calls are audited once each (Audit wraps the retry loop) and
     tier-denied tools never reach retry (Safety stops them first).
     """
-    from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
     from fastmcp.server.middleware.timing import TimingMiddleware
 
     from libtmux_mcp.middleware import (
@@ -374,6 +373,7 @@ def test_server_middleware_stack_order() -> None:
         ReadonlyRetryMiddleware,
         SafetyMiddleware,
         TailPreservingResponseLimitingMiddleware,
+        ToolErrorResultMiddleware,
     )
     from libtmux_mcp.server import mcp
 
@@ -384,7 +384,7 @@ def test_server_middleware_stack_order() -> None:
     assert types[:6] == [
         TimingMiddleware,
         TailPreservingResponseLimitingMiddleware,
-        ErrorHandlingMiddleware,
+        ToolErrorResultMiddleware,
         AuditMiddleware,
         ReadonlyRetryMiddleware,
         SafetyMiddleware,
@@ -392,12 +392,14 @@ def test_server_middleware_stack_order() -> None:
 
 
 def test_error_handling_middleware_transforms_errors() -> None:
-    """ErrorHandlingMiddleware is configured with transform_errors=True.
+    """ToolErrorResultMiddleware is configured with transform_errors=True.
 
-    Regression guard: without ``transform_errors=True`` the middleware
-    would still log but not map resource errors to MCP error code
-    ``-32002``, which is the protocol-correctness point of adopting
-    this middleware in the first place.
+    Regression guard: without ``transform_errors=True`` the inherited
+    ``on_message`` would still log but not map resource errors to MCP
+    error code ``-32002``, which is the protocol-correctness point of
+    keeping the ErrorHandlingMiddleware base for non-tool messages
+    (tool-call errors are converted to ``is_error`` results before
+    they reach ``on_message``).
     """
     from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 
@@ -647,3 +649,163 @@ def test_readonly_retry_logger_uses_project_namespace() -> None:
     """
     middleware = ReadonlyRetryMiddleware()
     assert middleware._retry.logger.name == "libtmux_mcp.retry"
+
+
+# ---------------------------------------------------------------------------
+# ToolErrorResultMiddleware tests
+# ---------------------------------------------------------------------------
+
+
+def _error_probe_server() -> t.Any:
+    """Build a minimal FastMCP instance wired like the production stack.
+
+    Only ``ToolErrorResultMiddleware`` is installed — the assertions
+    target error-result conversion, not the audit/retry/safety trio.
+    Tools mirror the three production raise shapes: an expected
+    failure with a chained cause (decorator-mapped libtmux error), an
+    expected failure with a recovery suggestion, and an unexpected
+    crash.
+    """
+    from fastmcp import FastMCP
+    from libtmux import exc as libtmux_exc
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp.middleware import ToolErrorResultMiddleware
+
+    probe = FastMCP(
+        name="error-probe",
+        middleware=[ToolErrorResultMiddleware(transform_errors=True)],
+    )
+
+    @probe.tool
+    def fail_expected_chained() -> str:
+        # Mirror the ``handle_tool_errors`` decorator's mapping shape:
+        # ``raise <mapped ToolError> from <libtmux exception>``.
+        cause = libtmux_exc.PaneNotFound("%99")
+        mapped = _map_exception_to_tool_error("fail_expected_chained", cause)
+        raise mapped from cause
+
+    @probe.tool
+    def fail_expected_with_suggestion() -> str:
+        msg = "Pane not found: %99"
+        raise ExpectedToolError(
+            msg,
+            suggestion="Call list_panes to discover valid pane ids.",
+        )
+
+    @probe.tool
+    def fail_unexpected() -> str:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    return probe
+
+
+def test_tool_error_result_expected_failure_is_clean() -> None:
+    """Expected failures surface verbatim — no transform-layer prefix.
+
+    Regression guard for the stock ``ErrorHandlingMiddleware``
+    behavior this middleware replaces: its ``-32603`` catch-all
+    rewrote every tool failure to ``"Internal error: <message>"``,
+    mangling the agent-facing text.
+    """
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool("fail_expected_chained", raise_on_error=False)
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    text = result.content[0].text
+    assert text.startswith("Pane not found:")
+    assert "Internal error" not in text
+
+
+def test_tool_error_result_meta_carries_error_details() -> None:
+    """``meta`` reports the originating exception class and expectedness.
+
+    ``error_type`` names the ``__cause__`` when the raise site chained
+    one — agents see ``PaneNotFound``, not the ``ToolError`` wrapper.
+    """
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call(name: str) -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(name, raise_on_error=False)
+
+    chained = asyncio.run(_call("fail_expected_chained"))
+    assert chained.is_error is True
+    meta = chained.meta or {}
+    assert meta["error_type"] == "PaneNotFound"
+    assert meta["expected"] is True
+
+    crashed = asyncio.run(_call("fail_unexpected"))
+    assert crashed.is_error is True
+    crash_meta = crashed.meta or {}
+    assert crash_meta["error_type"] == "RuntimeError"
+    assert crash_meta["expected"] is False
+
+
+def test_tool_error_result_appends_suggestion() -> None:
+    """A ``suggestion`` lands in both the text block and ``meta``."""
+    from fastmcp import Client
+
+    probe = _error_probe_server()
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(
+                "fail_expected_with_suggestion", raise_on_error=False
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    text = result.content[0].text
+    assert text == ("Pane not found: %99\nCall list_panes to discover valid pane ids.")
+    meta = getattr(result, "meta", None) or {}
+    assert meta["suggestion"] == "Call list_panes to discover valid pane ids."
+
+
+def test_tool_error_result_logs_at_error_log_level(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_log_error`` honors ``log_level``: WARNING expected, ERROR not.
+
+    The stock ``ErrorHandlingMiddleware._log_error`` hardcodes
+    ``logger.error`` — without the override, every failure demoted to
+    WARNING by ``ExpectedToolError`` would be re-shouted at ERROR on
+    the ``fastmcp.errors`` channel.
+    """
+    from fastmcp import Client
+
+    # fastmcp's logger doesn't propagate to root (rich handler);
+    # re-enable propagation so caplog sees the records.
+    monkeypatch.setattr(logging.getLogger("fastmcp"), "propagate", True)
+
+    probe = _error_probe_server()
+
+    async def _call(name: str) -> None:
+        async with Client(probe) as client:
+            await client.call_tool(name, raise_on_error=False)
+
+    with caplog.at_level(logging.DEBUG, logger="fastmcp.errors"):
+        asyncio.run(_call("fail_expected_chained"))
+        asyncio.run(_call("fail_unexpected"))
+
+    records = {
+        r.message: r.levelno
+        for r in caplog.records
+        if r.name == "fastmcp.errors" and "Error in tools/call" in r.message
+    }
+    expected_records = [v for k, v in records.items() if "Pane not found" in k]
+    unexpected_records = [v for k, v in records.items() if "boom" in k]
+    assert expected_records == [logging.WARNING]
+    assert unexpected_records == [logging.ERROR]
