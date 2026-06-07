@@ -869,6 +869,68 @@ def test_tool_error_result_logs_at_error_log_level(
     assert levels == [expected_level]
 
 
+class LogMaskingCase(t.NamedTuple):
+    """One ``on_call_tool`` scenario for the logging-masks-result guard."""
+
+    test_id: str
+    logger_raises: bool
+
+
+LOG_MASKING_CASES: tuple[LogMaskingCase, ...] = (
+    LogMaskingCase(test_id="logging-ok", logger_raises=False),
+    LogMaskingCase(test_id="logging-raises", logger_raises=True),
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    LOG_MASKING_CASES,
+    ids=[case.test_id for case in LOG_MASKING_CASES],
+)
+def test_error_logging_never_masks_tool_result(
+    case: LogMaskingCase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failing logging handler must not replace the real tool error.
+
+    Regression guard for #66: when the active logging handler raised
+    while formatting the error record (e.g. a stale ``rich.traceback``
+    import after the venv was rebuilt under a long-lived server),
+    ``_log_error`` escaped ``on_call_tool``'s ``except`` and the stock
+    transform surfaced a misleading ``Internal error`` in place of the
+    real failure. The call site now suppresses logging exceptions so
+    the original error always reaches ``_error_tool_result``.
+    """
+    from libtmux_mcp.middleware import ToolErrorResultMiddleware
+
+    middleware = ToolErrorResultMiddleware(transform_errors=True)
+    if case.logger_raises:
+
+        def _boom(*_args: t.Any, **_kwargs: t.Any) -> None:
+            msg = "No module named 'rich.traceback'"
+            raise ModuleNotFoundError(msg)
+
+        monkeypatch.setattr(middleware.logger, "log", _boom)
+
+    async def _call_next(_context: t.Any) -> str:
+        msg = "real tool failure"
+        raise RuntimeError(msg)
+
+    ctx: MiddlewareContext[CallToolRequestParams] = MiddlewareContext(
+        message=CallToolRequestParams(name="boom_tool", arguments={}),
+    )
+
+    result = asyncio.run(middleware.on_call_tool(ctx, _call_next))
+
+    assert result.is_error is True
+    text = result.content[0].text
+    assert "real tool failure" in text
+    assert "rich.traceback" not in text
+    # ``_log_error`` bumps the counter before it reaches the log call,
+    # so the counter advances whether or not logging then fails.
+    assert sum(middleware.error_counts.values()) == 1
+
+
 def test_schema_validation_failure_marked_expected_in_meta() -> None:
     """Argument-schema failures report ``expected=True`` in result meta.
 
