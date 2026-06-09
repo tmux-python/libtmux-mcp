@@ -557,6 +557,52 @@ def test_server_advertised_as_tmux() -> None:
     assert mcp.name == "tmux"
 
 
+def test_build_mcp_server_registers_catalog_idempotently() -> None:
+    """The FastMCP factory returns a populated server every time."""
+    import asyncio
+
+    from libtmux_mcp.server import build_mcp_server
+
+    first = build_mcp_server()
+    second = build_mcp_server()
+
+    assert second is first
+
+    tools = {tool.name for tool in asyncio.run(first.list_tools())}
+    prompts = {prompt.name for prompt in asyncio.run(first.list_prompts())}
+    templates = {
+        template.name for template in asyncio.run(first.list_resource_templates())
+    }
+
+    assert "list_sessions" in tools
+    assert "snapshot_pane" in tools
+    assert "run_and_wait" in prompts
+    assert "get_sessions" in templates
+
+
+def test_fastmcp_json_loads_registered_server() -> None:
+    """The repo FastMCP manifest points at the populated server factory."""
+    import asyncio
+    import pathlib
+
+    from fastmcp.utilities.inspect import inspect_fastmcp
+    from fastmcp.utilities.mcp_server_config import MCPServerConfig
+
+    config_path = pathlib.Path("fastmcp.json")
+    assert config_path.is_file()
+
+    config = MCPServerConfig.from_file(config_path)
+    server = asyncio.run(config.source.load_server())
+    info = asyncio.run(inspect_fastmcp(server))
+
+    assert config.source.path == "src/libtmux_mcp/server.py"
+    assert config.source.entrypoint == "build_mcp_server"
+    assert config.deployment.transport == "stdio"
+    assert {tool.name for tool in info.tools} >= {"list_sessions", "snapshot_pane"}
+    assert {prompt.name for prompt in info.prompts} >= {"run_and_wait"}
+    assert {template.name for template in info.templates} >= {"get_sessions"}
+
+
 def test_discovery_anchor_descriptions_carry_tmux_and_synonyms() -> None:
     """The six discovery anchors carry tmux + a buried synonym in BM25 corpus.
 

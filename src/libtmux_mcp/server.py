@@ -315,8 +315,16 @@ mcp = FastMCP(
 )
 
 
+_mcp_registered = False
+_mcp_visibility_configured = False
+
+
 def _register_all() -> None:
     """Register all tools, resources, and prompts with the MCP server."""
+    global _mcp_registered
+    if _mcp_registered:
+        return
+
     from libtmux_mcp.prompts import register_prompts
     from libtmux_mcp.resources import register_resources
     from libtmux_mcp.tools import register_tools
@@ -324,11 +332,14 @@ def _register_all() -> None:
     register_tools(mcp)
     register_resources(mcp)
     register_prompts(mcp)
+    _mcp_registered = True
 
 
-def run_server() -> None:
-    """Run the MCP server."""
-    _register_all()
+def _enable_allowed_tools() -> None:
+    """Apply the native FastMCP visibility gate for the active safety tier."""
+    global _mcp_visibility_configured
+    if _mcp_visibility_configured:
+        return
 
     # Use FastMCP's native visibility system as primary gate,
     # with the SafetyMiddleware as a secondary layer for clear error messages.
@@ -337,6 +348,24 @@ def run_server() -> None:
         allowed_tags.add(TAG_MUTATING)
     if _safety_level == TAG_DESTRUCTIVE:
         allowed_tags.add(TAG_DESTRUCTIVE)
-    mcp.enable(tags=allowed_tags, only=True)
+    mcp.disable(components={"tool"})
+    mcp.enable(tags=allowed_tags, components={"tool"})
+    _mcp_visibility_configured = True
 
-    mcp.run()
+
+def build_mcp_server() -> FastMCP:
+    """Build and return the registered production FastMCP server.
+
+    This factory is used by ``fastmcp.json`` so FastMCP's CLI can inspect
+    or run the same populated server that the ``libtmux-mcp`` console
+    script starts.
+    """
+    _register_all()
+    _enable_allowed_tools()
+    return mcp
+
+
+def run_server() -> None:
+    """Run the MCP server."""
+    server = build_mcp_server()
+    server.run()
