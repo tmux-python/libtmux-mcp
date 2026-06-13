@@ -441,7 +441,9 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
         elif key in _NESTED_ARG_LIST_NAMES and isinstance(value, list):
             summary[key] = [
-                _summarize_args(item) if isinstance(item, dict) else item
+                _summarize_args(item)
+                if isinstance(item, dict)
+                else {"type": type(item).__name__, "redacted": True}
                 for item in value
             ]
         elif isinstance(value, str) and len(value) > _MAX_LOGGED_STR_LEN:

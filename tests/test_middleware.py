@@ -176,6 +176,15 @@ class CommandRedactionFixture(t.NamedTuple):
     command: str
 
 
+class MalformedOperationAuditFixture(t.NamedTuple):
+    """Test fixture for malformed send_keys_batch audit entries."""
+
+    test_id: str
+    operation: object
+    forbidden_text: str
+    expected_type: str
+
+
 COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
     CommandRedactionFixture(
         test_id="credential_bearing",
@@ -184,6 +193,22 @@ COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
     CommandRedactionFixture(
         test_id="plain",
         command="ls -la /tmp",
+    ),
+]
+
+
+MALFORMED_OPERATION_AUDIT_FIXTURES: list[MalformedOperationAuditFixture] = [
+    MalformedOperationAuditFixture(
+        test_id="string_operation",
+        operation="keys=printf SECRET_COMMAND",
+        forbidden_text="SECRET_COMMAND",
+        expected_type="str",
+    ),
+    MalformedOperationAuditFixture(
+        test_id="list_operation",
+        operation=["keys=printf SECRET_COMMAND"],
+        forbidden_text="SECRET_COMMAND",
+        expected_type="list",
     ),
 ]
 
@@ -258,6 +283,29 @@ def test_summarize_args_redacts_send_keys_batch_operations() -> None:
         assert isinstance(operation["keys"], dict)
         assert "len" in operation["keys"]
         assert "sha256_prefix" in operation["keys"]
+
+
+@pytest.mark.parametrize(
+    MalformedOperationAuditFixture._fields,
+    MALFORMED_OPERATION_AUDIT_FIXTURES,
+    ids=[fixture.test_id for fixture in MALFORMED_OPERATION_AUDIT_FIXTURES],
+)
+def test_summarize_args_redacts_malformed_send_keys_batch_operation_entries(
+    test_id: str,
+    operation: object,
+    forbidden_text: str,
+    expected_type: str,
+) -> None:
+    """Malformed send_keys_batch operation entries do not leak raw payloads."""
+    assert test_id
+    summary = _summarize_args({"operations": [operation]})
+    rendered = str(summary)
+
+    assert forbidden_text not in rendered
+    item = summary["operations"][0]
+    assert isinstance(item, dict)
+    assert item["type"] == expected_type
+    assert item["redacted"] is True
 
 
 def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
