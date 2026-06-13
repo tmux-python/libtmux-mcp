@@ -59,6 +59,15 @@ class RunCommandFixture(t.NamedTuple):
     expected_output: str
 
 
+class RunCommandStatusIsolationFixture(t.NamedTuple):
+    """Test fixture for shell-state changes before run_command's trailer."""
+
+    test_id: str
+    command: str
+    expected_status: int
+    expected_output: str | None
+
+
 RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
     RunCommandFixture("success", "printf 'RUN_COMMAND_OK\\n'", 0, "RUN_COMMAND_OK"),
     RunCommandFixture(
@@ -67,6 +76,17 @@ RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
         1,
         "RUN_COMMAND_FAIL",
     ),
+]
+
+
+RUN_COMMAND_STATUS_ISOLATION_FIXTURES: list[RunCommandStatusIsolationFixture] = [
+    RunCommandStatusIsolationFixture(
+        "path_mutation",
+        "PATH=/tmp; printf 'RUN_COMMAND_PATH_OK\\n'",
+        0,
+        "RUN_COMMAND_PATH_OK",
+    ),
+    RunCommandStatusIsolationFixture("errexit_false", "set -e; false", 1, None),
 ]
 
 
@@ -159,6 +179,44 @@ def test_run_command_timeout_reports_without_killing_shell(
         2,
         raises=True,
     )
+
+
+@pytest.mark.xfail(
+    reason="run_command trailer shares user shell state",
+    strict=True,
+)
+@pytest.mark.parametrize(
+    RunCommandStatusIsolationFixture._fields,
+    RUN_COMMAND_STATUS_ISOLATION_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_STATUS_ISOLATION_FIXTURES],
+)
+def test_run_command_reports_status_after_shell_state_change(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    test_id: str,
+    command: str,
+    expected_status: int,
+    expected_output: str | None,
+) -> None:
+    """run_command reports status after user commands mutate shell state."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+    result = asyncio.run(
+        run_command(
+            command=command,
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.exit_status == expected_status
+    assert result.timed_out is False
+    if expected_output is not None:
+        assert any(expected_output in line for line in result.output)
 
 
 def test_run_command_tail_preserves_output(mcp_server: Server, mcp_pane: Pane) -> None:
