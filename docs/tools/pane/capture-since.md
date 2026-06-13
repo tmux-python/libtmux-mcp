@@ -9,11 +9,11 @@ without paying to re-read the same scrollback every turn. The first call returns
 the current visible screen plus a cursor; later calls pass that cursor back and
 receive only rows written or rewritten after it.
 
-**Avoid when** you control the command and only need completion — compose
-`tmux wait-for -S <channel>` into the command and call
-{tooliconl}`wait-for-channel`. If you need a one-shot content + metadata view,
-use {tooliconl}`snapshot-pane`; if you do not know which pane contains text,
-use {tooliconl}`search-panes`.
+**Avoid when** you control the command and only need completion — use
+{tooliconl}`run-command`, which waits and returns exit status plus
+output in one typed result. If you need a one-shot content + metadata
+view, use {tooliconl}`snapshot-pane`; if you do not know which pane
+contains text, use {tooliconl}`search-panes`.
 
 **Side effects:** None. Readonly.
 

@@ -9,7 +9,7 @@ libtmux-mcp uses a three-tier safety system to control which tools are available
 | Tier | Label | Access | Use case |
 |------|-------|--------|----------|
 | `readonly` | {badge}`readonly` | List, capture, search, info | Monitoring, browsing |
-| `mutating` (default) | {badge}`mutating` | + create, send_keys, rename, resize | Normal agent workflow |
+| `mutating` (default) | {badge}`mutating` | + create, send_keys, send_keys_batch, rename, resize | Normal agent workflow |
 | `destructive` | {badge}`destructive` | + kill_server, kill_session, kill_window, kill_pane | Full control |
 
 ## Configuration
@@ -107,9 +107,9 @@ Mitigations:
 - The optional `environment` argument (`dict[str, str]`) maps to one tmux `-e KEY=VALUE` flag per item. The audit log redacts each *value* via a `{len, sha256_prefix}` digest while keeping the *keys* visible — env var names like `DATABASE_URL` are usually operator-debug-useful, but their values are the secret. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
-### `send_keys` / `paste_text`
+### `send_keys` / `send_keys_batch` / `paste_text`
 
-These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via `send_keys` does not land in logs.
+These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via `send_keys` or `send_keys_batch` does not land in logs.
 
 ## Audit log
 

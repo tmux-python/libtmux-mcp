@@ -50,83 +50,40 @@ def test_prompts_as_tools_enabled_by_env(
 
 
 def test_run_and_wait_returns_string_template() -> None:
-    """``run_and_wait`` prompt produces a string with the safe idiom.
-
-    The rendered payload must NOT contain ``exit`` in the shell command
-    portion: an interactive-shell ``exit`` after the signal kills the
-    parent shell, which destroys single-pane tmux sessions. The signal
-    fires unconditionally via shell ``;`` semantics whether the command
-    succeeds or fails — the wait-for primitive doesn't need an exit to
-    preserve safety.
-    """
+    """``run_and_wait`` prompt teaches the typed command primitive."""
     from libtmux_mcp.prompts.recipes import run_and_wait
 
     text = run_and_wait(command="pytest", pane_id="%1", timeout=30.0)
-    assert "tmux wait-for -S libtmux_mcp_wait_" in text
-    assert "wait_for_channel" in text
-    # The shell payload (between `keys=` and the closing quote) must
-    # not append ``exit`` after the wait-for — that would kill the
-    # parent shell in an interactive pane. Check the rendered keys=
-    # line for the absence of the exit suffix.
-    keys_line = next(
-        line for line in text.splitlines() if line.strip().startswith("keys=")
-    )
-    assert "; exit" not in keys_line
-    assert "exit $" not in keys_line
+    assert "run_command" in text
+    assert "exit_status" in text
+    assert "timed_out" in text
+    assert "output" in text
+    assert "wait_for_channel" not in text
+    assert "tmux wait-for -S" not in text
+    assert "send_keys(" not in text
+    assert "capture_pane(" not in text
 
 
-def test_run_and_wait_channel_is_uuid_scoped() -> None:
-    """Each ``run_and_wait`` call embeds a unique wait-for channel.
-
-    Regression guard for the critical bug where every call hardcoded
-    ``mcp_done``, so concurrent agents racing on tmux's server-global
-    channel namespace would cross-signal each other. Now the channel
-    is ``libtmux_mcp_wait_<uuid4hex>`` (full 128-bit UUID, fresh per
-    invocation) and consistent within one invocation — the name that
-    appears in the ``send_keys`` payload must match the
-    ``wait_for_channel`` call.
-    """
-    import re
-
+def test_run_and_wait_does_not_render_manual_channel_recipe() -> None:
+    """``run_and_wait`` leaves channel plumbing to ``run_command``."""
     from libtmux_mcp.prompts.recipes import run_and_wait
 
-    first = run_and_wait(command="pytest", pane_id="%1")
-    second = run_and_wait(command="pytest", pane_id="%1")
-
-    pattern = re.compile(r"libtmux_mcp_wait_[0-9a-f]{32}")
-    first_matches = pattern.findall(first)
-    second_matches = pattern.findall(second)
-
-    # Two occurrences per rendering: one inside send_keys, one in
-    # wait_for_channel. Both must be the SAME channel name within a
-    # single rendering (consistency).
-    assert len(first_matches) == 2
-    assert first_matches[0] == first_matches[1]
-    assert len(second_matches) == 2
-    assert second_matches[0] == second_matches[1]
-
-    # And the two renderings must differ from each other (uniqueness).
-    assert first_matches[0] != second_matches[0]
+    text = run_and_wait(command="pytest", pane_id="%1")
+    assert "libtmux_mcp_wait_" not in text
+    assert "result = run_command(" in text
 
 
 def test_run_and_wait_handles_quoted_commands() -> None:
-    """Single quotes in the command don't corrupt the rendered keys=...
-
-    Regression guard for the fragile ``keys='{command}; ...'`` wrap —
-    a command like ``python -c 'print(1)'`` closed the surrounding
-    single-quote prematurely, producing a syntactically invalid
-    ``send_keys`` call in the prompt output. The fix uses ``repr()``
-    so Python picks a quote style that round-trips safely.
-    """
+    """Single quotes in the command don't corrupt the rendered call."""
     import ast
 
     from libtmux_mcp.prompts.recipes import run_and_wait
 
     text = run_and_wait(command="python -c 'print(1)'", pane_id="%1")
-    # Extract the ``keys=`` argument as a Python literal and confirm
+    # Extract the ``command=`` argument as a Python literal and confirm
     # it parses back to a string containing the original command.
-    keys_line = next(line for line in text.splitlines() if "keys=" in line)
-    _, _, payload = keys_line.partition("keys=")
+    command_line = next(line for line in text.splitlines() if "command=" in line)
+    _, _, payload = command_line.partition("command=")
     payload = payload.rstrip(",").strip()
     parsed = ast.literal_eval(payload)
     assert isinstance(parsed, str)

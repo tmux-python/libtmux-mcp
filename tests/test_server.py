@@ -183,6 +183,7 @@ def test_invalid_safety_env_hides_mutating_tools() -> None:
             print(json.dumps({
                 "list_sessions": "list_sessions" in names,
                 "send_keys": "send_keys" in names,
+                "send_keys_batch": "send_keys_batch" in names,
                 "kill_pane": "kill_pane" in names,
             }))
 
@@ -202,6 +203,7 @@ def test_invalid_safety_env_hides_mutating_tools() -> None:
     assert result == {
         "list_sessions": True,
         "send_keys": False,
+        "send_keys_batch": False,
         "kill_pane": False,
     }
 
@@ -247,21 +249,17 @@ def test_base_instructions_surface_flagship_read_tools() -> None:
     assert "capture_since" in _BASE_INSTRUCTIONS
 
 
-def test_base_instructions_prefer_wait_over_poll() -> None:
-    """_BASE_INSTRUCTIONS names the wait family with the right primacy.
-
-    ``wait_for_channel`` is the deterministic primitive (composes
-    ``tmux wait-for -S``) and should appear first; ``wait_for_text``
-    and ``wait_for_content_change`` are the fallbacks for output the
-    agent doesn't author. Making the channel primitive discoverable
-    from the instructions steers agents off the polling-scraper path
-    for command-completion synchronization.
-    """
+def test_base_instructions_prefer_typed_completion_over_polling() -> None:
+    """_BASE_INSTRUCTIONS names typed completion and observation primitives."""
     assert "run_command" in _BASE_INSTRUCTIONS
     assert "wait_for_channel" in _BASE_INSTRUCTIONS
     assert "capture_since" in _BASE_INSTRUCTIONS
     assert "wait_for_text" in _BASE_INSTRUCTIONS
     assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+    assert "send_keys_batch" in _BASE_INSTRUCTIONS
+    assert _BASE_INSTRUCTIONS.index("run_command") < _BASE_INSTRUCTIONS.index(
+        "wait_for_channel"
+    )
     # The channel primitive should be named before the fallbacks so an
     # agent that scans top-to-bottom encounters the cheaper option first.
     assert _BASE_INSTRUCTIONS.index("wait_for_channel") < _BASE_INSTRUCTIONS.index(
@@ -618,6 +616,7 @@ _ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"]
 _VERBS_OF_ART = frozenset(
     [
         "send_keys",
+        "send_keys_batch",
         "capture_pane",
         "capture_since",
         "snapshot_pane",

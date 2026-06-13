@@ -3,14 +3,16 @@
 ```{fastmcp-tool} pane_tools.send_keys
 ```
 
-**Use when** you need to type commands, press keys, or interact with a
-terminal. This is the primary way to execute commands in tmux panes.
+**Use when** you need to type raw input, press keys, or interact with
+a terminal program. For several ordered raw-input operations, use
+{tooliconl}`send-keys-batch`.
 
-**Avoid when** you need to run something and immediately capture the result —
-compose `tmux wait-for -S <channel>` into the keys and call
-{tooliconl}`wait-for-channel` for deterministic completion, or fall back to
-{tooliconl}`wait-for-text` / {tooliconl}`wait-for-content-change` when you
-must observe output the agent does not author.
+**Avoid when** you need to run one authored shell command and
+immediately capture its result — use {tooliconl}`run-command` so exit
+status, timeout state, and output come back as one typed result. For
+output the agent does not author, use {tooliconl}`wait-for-text` /
+{tooliconl}`wait-for-content-change` or observe with
+{tooliconl}`capture-since`.
 
 **Side effects:** Sends keystrokes to the pane. If `enter` is true (default),
 the command executes.

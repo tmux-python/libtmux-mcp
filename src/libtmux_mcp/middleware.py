@@ -369,6 +369,25 @@ _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {"keys", "text", "command", "value", "content", "shell", "environment"}
 )
 
+#: Nested argument containers that may contain sensitive argument names.
+#: ``operations`` is used by ``send_keys_batch``; preserving pane ids and
+#: booleans is useful for audit trails, but each nested ``keys`` payload
+#: must be digested the same way top-level ``send_keys(keys=...)`` is.
+_NESTED_ARG_LIST_NAMES: frozenset[str] = frozenset({"operations"})
+
+_NONE_TYPE = type(None)
+
+_SEND_KEYS_OPERATION_ARG_TYPES: dict[str, tuple[type[t.Any], ...]] = {
+    "keys": (str,),
+    "pane_id": (str, _NONE_TYPE),
+    "session_name": (str, _NONE_TYPE),
+    "session_id": (str, _NONE_TYPE),
+    "window_id": (str, _NONE_TYPE),
+    "enter": (bool,),
+    "literal": (bool,),
+    "suppress_history": (bool,),
+}
+
 #: String arguments longer than this get truncated in the log summary to
 #: keep records bounded. Non-sensitive strings only — sensitive ones are
 #: replaced entirely by their digest.
@@ -395,6 +414,23 @@ def _redact_digest(value: str) -> dict[str, t.Any]:
     }
 
 
+def _redacted_value_shape(value: t.Any) -> dict[str, t.Any]:
+    """Return non-payload metadata for a value that cannot be logged."""
+    return {"type": type(value).__name__, "redacted": True}
+
+
+def _summarize_send_keys_operation_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Summarize one ``send_keys_batch`` operation for audit logging."""
+    summary: dict[str, t.Any] = {}
+    for key, value in args.items():
+        expected_types = _SEND_KEYS_OPERATION_ARG_TYPES.get(key)
+        if expected_types is None or not isinstance(value, expected_types):
+            summary[key] = _redacted_value_shape(value)
+        else:
+            summary[key] = _summarize_args({key: value})[key]
+    return summary
+
+
 def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     """Summarize tool arguments for audit logging.
 
@@ -404,6 +440,8 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     ``respawn_pane``) have each *value* digested while keys remain
     visible — env-var-name-like keys are operator-debug-useful and
     rarely sensitive, while their values usually are.
+    Known nested operation lists are summarized recursively so batched
+    tool calls keep target metadata while redacting inner payloads.
 
     Examples
     --------
@@ -431,6 +469,16 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
+        elif key in _NESTED_ARG_LIST_NAMES:
+            if isinstance(value, list):
+                summary[key] = [
+                    _summarize_send_keys_operation_args(item)
+                    if isinstance(item, dict)
+                    else _redacted_value_shape(item)
+                    for item in value
+                ]
+            else:
+                summary[key] = _redacted_value_shape(value)
         elif isinstance(value, str) and len(value) > _MAX_LOGGED_STR_LEN:
             summary[key] = value[:_MAX_LOGGED_STR_LEN] + "...<truncated>"
         else:

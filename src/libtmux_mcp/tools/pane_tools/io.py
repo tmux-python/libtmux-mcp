@@ -10,17 +10,26 @@ import shlex
 import subprocess
 import tempfile
 import time
+import typing as t
 import uuid
+
+from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
+    _map_exception_to_tool_error,
     _resolve_pane,
     _tmux_argv,
     handle_tool_errors,
     handle_tool_errors_async,
 )
-from libtmux_mcp.models import RunCommandResult
+from libtmux_mcp.models import (
+    RunCommandResult,
+    SendKeysBatchResult,
+    SendKeysOperation,
+    SendKeysOperationResult,
+)
 
 
 @handle_tool_errors
@@ -37,20 +46,16 @@ def send_keys(
 ) -> str:
     """Send keys (commands or text) to a tmux pane.
 
-    After sending, choose your synchronization primitive based on what you
-    control:
+    Use this for raw interactive input: TUI keys, control sequences,
+    partial shell input, or persistent shell state. Use ``send_keys_batch``
+    when you need several ordered raw-input operations.
 
-    - **Deterministic (preferred):** compose ``tmux wait-for -S <channel>``
-      into the shell command and call ``wait_for_channel``. See the
-      ``run_and_wait`` prompt for the canonical safe-completion pattern.
-      Cheaper in agent turns and immune to baseline races.
-    - **Pattern-match:** call ``wait_for_text`` when the output you await
-      is yours to author and won't appear before the wait locks its
-      baseline (e.g. a sentinel ``echo`` after a long command). Fast
-      ``echo`` statements can race the baseline read; reserve this for
-      output the agent does not control.
-    - **Any change:** call ``wait_for_content_change`` when you don't know
-      the output shape.
+    For authored shell commands that need completion, exit status, or
+    captured output, use ``run_command`` instead. For custom completion
+    outside that shape, compose ``tmux wait-for -S <channel>`` into the
+    shell command and call ``wait_for_channel``. For repeated observation
+    after input, prefer ``capture_since``; reserve ``wait_for_text`` and
+    ``wait_for_content_change`` for output the agent does not author.
 
     Do NOT call ``capture_pane`` immediately — both the read and the
     pattern-match paths race the pane's PTY draw.
@@ -97,6 +102,146 @@ def send_keys(
         literal=literal,
     )
     return f"Keys sent to pane {pane.pane_id}"
+
+
+@handle_tool_errors
+def send_keys_batch(
+    operations: list[SendKeysOperation],
+    on_error: t.Literal["stop", "continue"] = "stop",
+    timeout: float | None = None,
+    socket_name: str | None = None,
+) -> SendKeysBatchResult:
+    """Send an ordered batch of raw key/text operations to tmux panes.
+
+    Use this for bulk TUI or persistent-shell input where each item is the
+    same kind of low-level terminal interaction as :func:`send_keys`. For
+    authored shell commands that need exit status and captured output, use
+    :func:`run_command` instead. For repeated observation after sending input,
+    use :func:`capture_since` with its returned cursor.
+
+    This tool intentionally does not compose heterogeneous operations such
+    as send → wait → capture. Keeping the batch homogeneous preserves clear
+    per-operation error attribution and avoids embedding a workflow DSL in
+    the MCP tool surface.
+
+    Parameters
+    ----------
+    operations : list of SendKeysOperation
+        Ordered raw-input operations to send.
+    on_error : {"stop", "continue"}
+        Whether to stop at the first failed operation or keep attempting
+        later operations. Default "stop".
+    timeout : float, optional
+        Maximum time in seconds to allow the batch to run before aborting.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    SendKeysBatchResult
+        Per-operation results with success/error counts and stop index.
+    """
+    if not operations:
+        msg = "operations must not be empty"
+        raise ExpectedToolError(msg)
+    if on_error not in {"stop", "continue"}:
+        msg = "on_error must be 'stop' or 'continue'"
+        raise ExpectedToolError(msg)
+
+    server = _get_server(socket_name=socket_name)
+    results: list[SendKeysOperationResult] = []
+    stopped_at: int | None = None
+    batch_started = time.monotonic()
+
+    for index, operation in enumerate(operations):
+        if timeout is not None and (time.monotonic() - batch_started) > timeout:
+            results.append(
+                SendKeysOperationResult(
+                    index=index,
+                    pane_id=operation.pane_id,
+                    success=False,
+                    error=f"batch execution exceeded timeout of {timeout}s",
+                    elapsed_seconds=0.0,
+                )
+            )
+            if on_error == "stop":
+                stopped_at = index
+                break
+            continue
+
+        started = time.monotonic()
+        pane_id: str | None = None
+        try:
+            pane = _resolve_pane(
+                server,
+                pane_id=operation.pane_id,
+                session_name=operation.session_name,
+                session_id=operation.session_id,
+                window_id=operation.window_id,
+            )
+            pane_id = pane.pane_id
+            if pane_id is None:
+                results.append(
+                    SendKeysOperationResult(
+                        index=index,
+                        pane_id=None,
+                        success=False,
+                        error="resolved pane has no pane_id",
+                        elapsed_seconds=time.monotonic() - started,
+                    )
+                )
+                if on_error == "stop":
+                    stopped_at = index
+                    break
+                continue
+            pane.send_keys(
+                operation.keys,
+                enter=operation.enter,
+                suppress_history=operation.suppress_history,
+                literal=operation.literal,
+            )
+        except Exception as e:
+            elapsed = time.monotonic() - started
+            tool_err = (
+                e
+                if isinstance(e, ToolError)
+                else _map_exception_to_tool_error("send_keys_batch", e)
+            )
+            error = str(tool_err)
+            suggestion = getattr(tool_err, "suggestion", None)
+            if suggestion:
+                error = f"{error}\n{suggestion}"
+            results.append(
+                SendKeysOperationResult(
+                    index=index,
+                    pane_id=pane_id,
+                    success=False,
+                    error=error,
+                    elapsed_seconds=elapsed,
+                )
+            )
+            if on_error == "stop":
+                stopped_at = index
+                break
+            continue
+
+        results.append(
+            SendKeysOperationResult(
+                index=index,
+                pane_id=pane_id,
+                success=True,
+                elapsed_seconds=time.monotonic() - started,
+            )
+        )
+
+    succeeded = sum(result.success for result in results)
+    failed = len(results) - succeeded
+    return SendKeysBatchResult(
+        results=results,
+        succeeded=succeeded,
+        failed=failed,
+        stopped_at=stopped_at,
+    )
 
 
 @handle_tool_errors_async
@@ -431,7 +576,8 @@ def clear_pane(
 ) -> str:
     """Clear the contents of a tmux pane.
 
-    Use before send_keys + capture_pane to get a clean capture without prior output.
+    Use before a fresh run_command call or raw-input observation workflow
+    when prior scrollback would make the result harder to inspect.
 
     Parameters
     ----------
