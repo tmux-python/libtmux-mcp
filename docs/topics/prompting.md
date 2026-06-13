@@ -94,12 +94,13 @@ When executing long-running commands (servers, builds, test suites),
 use tmux via the libtmux MCP server rather than running them directly.
 This keeps output accessible for later inspection.
 
-For command completion, compose `tmux wait-for -S <channel>` into the
-shell command and call wait_for_channel — deterministic, no polling.
-Use wait_for_text or wait_for_content_change for observation flows
-(third-party logs, daemon prompts), and use capture_since when you
-need to read the same pane repeatedly. Never capture_pane immediately
-after send_keys — the command may still be running.
+For authored shell commands that need status, use run_command. For
+custom command completion, compose `tmux wait-for -S <channel>` into
+the shell command and call wait_for_channel — deterministic, no
+polling. Use wait_for_text or wait_for_content_change for observation
+flows (third-party logs, daemon prompts), and use capture_since when
+you need to read the same pane repeatedly. Never capture_pane
+immediately after send_keys — the command may still be running.
 ```
 
 ### For safe agent behavior

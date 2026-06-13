@@ -891,6 +891,9 @@ def _serialize_window(window: Window) -> WindowInfo:
     from libtmux_mcp.models import WindowInfo
 
     assert window.window_id is not None
+    active_pane = getattr(window, "active_pane", None)
+    active_pane_id = active_pane.pane_id if active_pane is not None else None
+
     return WindowInfo(
         window_id=window.window_id,
         window_name=window.window_name,
@@ -902,6 +905,7 @@ def _serialize_window(window: Window) -> WindowInfo:
         window_active=getattr(window, "window_active", None),
         window_width=getattr(window, "window_width", None),
         window_height=getattr(window, "window_height", None),
+        active_pane_id=active_pane_id,
     )
 
 

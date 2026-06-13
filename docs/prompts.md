@@ -16,7 +16,8 @@ counterpart to the longer narrative recipes in {doc}`/recipes`.
 :::{grid-item-card} `run_and_wait`
 :link: fastmcp-prompt-run-and-wait
 :link-type: ref
-Execute a shell command and block until it finishes, preserving exit status.
+Execute a shell command and block until it finishes. Use
+{tooliconl}`run-command` when exit status matters.
 :::
 
 :::{grid-item-card} `diagnose_failing_pane`
@@ -53,7 +54,7 @@ tools instead.
 ```
 
 **Use when** the agent needs to execute a single shell command and
-must know whether it succeeded before deciding the next step.
+wait for completion through an explicit tmux signal.
 
 **Why use this instead of `send_keys` + `capture_pane` polling?**
 Each rendered call embeds a UUID-scoped ``tmux wait-for`` channel,
@@ -84,18 +85,15 @@ After the channel signals, read the last ~100 lines to verify the
 command's behaviour. Do NOT use a `capture_pane` retry loop —
 `wait_for_channel` is strictly cheaper in agent turns.
 
-The payload does not preserve the command's exit status: doing so
-in an interactive shell would require exiting the shell (which kills
-the pane) or routing through an out-of-band file or tmux variable.
-If you need the status, inspect the captured output for
-command-specific success markers.
+The payload does not preserve the command's exit status. Use
+{tooliconl}`run-command` instead when exit status must be returned as
+structured data.
 ````
 
 Shell ``;`` semantics fire the ``wait-for -S`` whether ``pytest``
 succeeded or failed, so the edge-triggered signal never deadlocks the
 agent on a crashed command. Status preservation is intentionally
-omitted: chaining ``exit $status`` after the signal would exit the
-interactive shell itself, destroying single-pane sessions.
+omitted from this prompt recipe.
 
 ---
 

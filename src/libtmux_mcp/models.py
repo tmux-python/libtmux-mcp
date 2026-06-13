@@ -44,6 +44,10 @@ class WindowInfo(BaseModel):
     )
     window_width: str | None = Field(default=None, description="Width in columns")
     window_height: str | None = Field(default=None, description="Height in rows")
+    active_pane_id: str | None = Field(
+        default=None,
+        description="Pane id (``%N``) of the window's active pane.",
+    )
 
 
 class PaneInfo(BaseModel):
@@ -345,6 +349,15 @@ class PaneSnapshot(BaseModel):
     pane_tty: str | None = Field(
         default=None,
         description="TTY device path of the pane (e.g. '/dev/pts/5').",
+    )
+    pane_pid: str | None = Field(default=None, description="Process ID")
+    pane_dead: bool | None = Field(
+        default=None,
+        description="True when tmux reports the pane process has exited.",
+    )
+    alternate_on: bool | None = Field(
+        default=None,
+        description="True when the pane is using the alternate screen.",
     )
     pane_in_mode: bool = Field(description="True if pane is in copy-mode or view-mode")
     pane_mode: str | None = Field(

@@ -2,11 +2,10 @@
 
 # Completion
 
-libtmux-mcp inherits FastMCP's built-in
+The
 [MCP completion](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/completion)
-behaviour. We don't hand-author completion providers — the argument
-shapes on our prompts and resource templates are what the client
-sees.
+protocol lets clients ask a server for argument suggestions. libtmux-mcp
+does not currently register custom completion handlers.
 
 ## What the spec does
 
@@ -19,22 +18,16 @@ session picker popup when filling ``session_name=`` on
 ## What libtmux-mcp currently exposes
 
 - **Prompt arguments** — the four recipes ({doc}`/prompts`)
-  advertise their argument names and types. FastMCP derives a default
-  completion shape from the Python signatures:
-  ``str`` arguments accept free text, ``float`` arguments accept
-  numeric strings, no enum / list suggestions.
+  advertise their argument names and types through their schemas.
 - **Resource template parameters** —
   {doc}`/resources` URIs carry ``{session_name}``,
   ``{window_index}``, ``{pane_id}``, and ``{?socket_name}``
-  placeholders. Completion suggestions are again derived from the
-  function signatures' types, not from live tmux state.
+  placeholders.
 
 ```{warning}
-libtmux-mcp does **not** currently wire completion back to live
-tmux enumeration — i.e. the completion for ``session_name`` will not
-return the names of sessions that exist on the server right now.
-Adding that requires a dedicated FastMCP completion handler;
-tracked as a potential enhancement.
+Clients should not rely on ``completion/complete`` returning live tmux
+suggestions, schema-derived examples, or enum-like values today.
+Adding live suggestions requires dedicated completion handlers.
 ```
 
 ## Workarounds for clients that need live enumeration

@@ -3069,6 +3069,21 @@ def test_snapshot_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     assert result.content_truncated_lines == 0
 
 
+def test_snapshot_pane_returns_liveness_metadata(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """snapshot_pane returns process, dead-pane, and alternate-screen metadata."""
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.pane_pid is not None
+    assert result.pane_pid.isdigit()
+    assert result.pane_dead is False
+    assert isinstance(result.alternate_on, bool)
+
+
 def test_snapshot_pane_truncates_content(mcp_server: Server, mcp_pane: Pane) -> None:
     """snapshot_pane reports truncation via model fields, not in-band header.
 

@@ -58,11 +58,9 @@ After the channel signals, read the last ~100 lines to verify the
 command's behaviour. Do NOT use a `capture_pane` retry loop —
 `wait_for_channel` is strictly cheaper in agent turns.
 
-The payload does not preserve the command's exit status: doing so
-in an interactive shell would require exiting the shell (which kills
-the pane) or routing through an out-of-band file or tmux variable.
-If you need the status, inspect the captured output for
-command-specific success markers.
+The payload does not preserve the command's exit status. Use
+`run_command` instead when exit status must be returned as structured
+data.
 """
 
 

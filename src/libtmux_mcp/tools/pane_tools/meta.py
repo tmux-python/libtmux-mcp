@@ -162,6 +162,9 @@ def snapshot_pane(
         "#{pane_at_top}",
         "#{pane_at_bottom}",
         "#{pane_tty}",
+        "#{pane_pid}",
+        "#{pane_dead}",
+        "#{alternate_on}",
     ]
     fmt = _SEP.join(_FMT_VARS)
     stdout = pane.display_message(fmt, get_text=True)
@@ -201,6 +204,9 @@ def snapshot_pane(
         pane_at_top=_coerce_bool(parts[17]),
         pane_at_bottom=_coerce_bool(parts[18]),
         pane_tty=parts[19] if parts[19] else None,
+        pane_pid=parts[20] if parts[20] else None,
+        pane_dead=_coerce_bool(parts[21]),
+        alternate_on=_coerce_bool(parts[22]),
         is_caller=_compute_is_caller(pane),
         content_truncated=truncated,
         content_truncated_lines=dropped,

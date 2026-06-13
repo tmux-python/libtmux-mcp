@@ -66,12 +66,6 @@ However, they reset when the tmux **server** restarts. Do not cache pane IDs acr
 
 The `suppress_history` parameter on `send_keys` prepends a space before the command, which prevents it from being saved in shell history. This only works if the shell's `HISTCONTROL` variable includes `ignorespace` (the default for bash, but not universal across all shells).
 
-## `clear_pane` is not fully atomic
-
-`clear_pane` runs two tmux commands in sequence: `send-keys -R` (reset terminal) then `clear-history` (clear scrollback). There is a brief gap between them where partial content may be visible.
-
-For most use cases this is not a problem. If you need guaranteed clean state, add a small delay before the next `capture_pane`.
-
 ## Gemini CLI injects `wait_for_previous` into tool arguments
 
 When Gemini CLI batches several tool calls in one turn, its scheduler merges the internal sequencing flag of the later calls into the MCP tool's arguments:
