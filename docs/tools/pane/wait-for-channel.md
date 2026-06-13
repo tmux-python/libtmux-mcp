@@ -7,7 +7,7 @@ synchronization primitive for custom shell composition. For the common
 {tooliconl}`run-command`, which wraps this pattern and returns exit
 status plus output.
 
-The composition pattern: {tooliconl}`send-keys` a command followed by `; tmux wait-for -S NAME`, then call `wait_for_channel`. Shell `;` semantics fire the second statement whether the first succeeds or fails, so the edge-triggered signal never deadlocks the agent on a crashed command.
+The composition pattern: {tooliconl}`send-keys` a command followed by `; tmux wait-for -S NAME`, then call {tooliconl}`wait-for-channel`. Shell `;` semantics fire the second statement whether the first succeeds or fails, so the edge-triggered signal never deadlocks the agent on a crashed command.
 
 ```python
 send_keys(

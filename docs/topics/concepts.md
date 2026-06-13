@@ -46,7 +46,7 @@ For pane tools, you can combine parameters to narrow the search: `session_name` 
 Tools fall into three categories:
 
 - **Discovery** — Read-only operations: `list_sessions`, `list_windows`, `list_panes`, `capture_pane`, `capture_since`, `get_pane_info`, `find_pane_by_position`, `search_panes`, `wait_for_text`, `show_option`, `show_environment`
-- **Mutation** — Create, modify, or send input: `create_session`, `create_window`, `split_window`, `send_keys`, `send_keys_batch`, `rename_*`, `resize_*`, `set_pane_title`, `clear_pane`, `select_layout`, `set_option`, `set_environment`
+- **Mutation** — Create, modify, or send input: `create_session`, `create_window`, `split_window`, `send_keys`, {tooliconl}`send-keys-batch`, `rename_*`, `resize_*`, `set_pane_title`, `clear_pane`, `select_layout`, `set_option`, `set_environment`
 - **Destruction** — Remove tmux objects: `kill_server`, `kill_session`, `kill_window`, `kill_pane`
 
 These map to {ref}`safety tiers <safety>`.

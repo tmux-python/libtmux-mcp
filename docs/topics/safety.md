@@ -109,7 +109,7 @@ Mitigations:
 
 ### `send_keys` / `send_keys_batch` / `paste_text`
 
-These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via `send_keys` or `send_keys_batch` does not land in logs.
+These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in logs.
 
 ## Audit log
 
