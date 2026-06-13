@@ -936,6 +936,21 @@ LIMITER_ERROR_FIXTURES: list[LimiterErrorFixture] = [
 ]
 
 
+class LimiterSuccessFixture(t.NamedTuple):
+    """Test fixture for schema-bearing successful limiter responses."""
+
+    test_id: str
+    payload_size: int
+
+
+LIMITER_SUCCESS_FIXTURES: list[LimiterSuccessFixture] = [
+    LimiterSuccessFixture(
+        test_id="schema_success_above_old_backstop",
+        payload_size=30_000,
+    ),
+]
+
+
 class _LimiterOut(pydantic.BaseModel):
     """Output model giving the ``limited_fail`` probe an output schema.
 
@@ -947,7 +962,9 @@ class _LimiterOut(pydantic.BaseModel):
     value: str
 
 
-def _limiter_probe_server() -> t.Any:
+def _limiter_probe_server(
+    *, max_size: int = 300, schema_success_payload_size: int = 0
+) -> t.Any:
     """Build a FastMCP instance with the limiter wrapping error conversion.
 
     Mirrors the production ordering (limiter outside
@@ -967,8 +984,8 @@ def _limiter_probe_server() -> t.Any:
         name="limiter-probe",
         middleware=[
             TailPreservingResponseLimitingMiddleware(
-                max_size=300,
-                tools=["limited_fail", "limited_ok"],
+                max_size=max_size,
+                tools=["limited_fail", "limited_ok", "limited_model_ok"],
             ),
             ToolErrorResultMiddleware(transform_errors=True),
         ],
@@ -991,6 +1008,10 @@ def _limiter_probe_server() -> t.Any:
     @probe.tool(output_schema=None)
     def limited_ok() -> str:
         return "y" * 5000
+
+    @probe.tool
+    def limited_model_ok() -> _LimiterOut:
+        return _LimiterOut(value="y" * schema_success_payload_size)
 
     return probe
 
@@ -1037,6 +1058,38 @@ def test_response_limiter_preserves_error_results(
         meta = result.meta or {}
         assert meta["expected"] is True
         assert meta["error_type"] == "ExpectedToolError"
+
+
+@pytest.mark.parametrize(
+    LimiterSuccessFixture._fields,
+    LIMITER_SUCCESS_FIXTURES,
+    ids=[f.test_id for f in LIMITER_SUCCESS_FIXTURES],
+)
+def test_response_limiter_preserves_schema_success_below_default_backstop(
+    test_id: str,
+    payload_size: int,
+) -> None:
+    """Schema-bearing successes below the global backstop stay structured."""
+    from fastmcp import Client
+
+    from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
+
+    probe = _limiter_probe_server(
+        max_size=DEFAULT_RESPONSE_LIMIT_BYTES,
+        schema_success_payload_size=payload_size,
+    )
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(
+                "limited_model_ok",
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert test_id
+    assert result.structured_content == {"value": "y" * payload_size}
 
 
 class UnknownArgSuggestionFixture(t.NamedTuple):

@@ -506,11 +506,10 @@ class AuditMiddleware(Middleware):
 # ---------------------------------------------------------------------------
 
 #: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`.
-#: Chosen strictly above the per-tool ``max_lines`` caps (500 lines x
-#: ~100 bytes/line) so normal operation does not trip the middleware —
-#: it only fires when a tool forgot to declare its own cap or the user
-#: opted out via ``max_lines=None``.
-DEFAULT_RESPONSE_LIMIT_BYTES = 50_000
+#: Matches FastMCP's stock 1 MB default so normal schema-bearing tool
+#: responses stay below this global backstop. Tool-level caps remain
+#: responsible for terminal-specific truncation metadata.
+DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 
 
 class ReadonlyRetryMiddleware(Middleware):
