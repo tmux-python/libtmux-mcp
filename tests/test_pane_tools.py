@@ -3437,6 +3437,23 @@ def test_display_message_zoomed_flag(mcp_server: Server, mcp_session: Session) -
     assert result in ("0", "1")
 
 
+def test_display_message_rejects_format_jobs(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: pathlib.Path
+) -> None:
+    """display_message rejects tmux format jobs before tmux evaluates them."""
+    marker = tmp_path / "display_message_format_job_marker"
+
+    with pytest.raises(ToolError, match=r"#\("):
+        display_message(
+            format_string=f"#(printf ok > {shlex.quote(str(marker))})",
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+
+    time.sleep(0.5)
+    assert not marker.exists()
+
+
 # ---------------------------------------------------------------------------
 # enter_copy_mode / exit_copy_mode tests
 # ---------------------------------------------------------------------------

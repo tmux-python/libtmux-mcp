@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from libtmux_mcp._utils import (
+    ExpectedToolError,
     _coerce_bool,
     _coerce_int,
     _compute_is_caller,
@@ -55,6 +56,10 @@ def display_message(
     str
         Expanded format string result.
     """
+    if "#(" in format_string:
+        msg = "tmux format jobs (#(...)) are not allowed in display_message"
+        raise ExpectedToolError(msg)
+
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,
