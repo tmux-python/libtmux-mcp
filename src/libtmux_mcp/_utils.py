@@ -410,13 +410,10 @@ DISCOVERY_META: dict[str, t.Any] = {
 #: visible to default-profile agents) but whose default behaviour can
 #: terminate processes or otherwise lose state.
 #:
-#: ``respawn_pane`` is the canonical user: tier=mutating because shell
-#: recovery is part of the normal agent workflow; ``destructiveHint=True``
-#: because ``kill=True`` (the default) sends ``SPAWN_KILL`` to the existing
-#: process (`cmd-respawn-pane.c:78-79`); ``idempotentHint=False`` because
-#: repeated calls kill repeated processes — the MCP spec defines idempotent
-#: as "calling repeatedly with the same arguments will have no additional
-#: effect" (`mcp/types.py:1276-1282`).
+#: Canonical users include ``respawn_pane`` and ``clear_pane``:
+#: tier=mutating because shell recovery and scrollback cleanup are part
+#: of normal agent workflows, while the hints still disclose process
+#: termination or state loss.
 #:
 #: Distinct from :data:`ANNOTATIONS_DESTRUCTIVE` (same hint values) because
 #: the tier tag differs: ``ANNOTATIONS_DESTRUCTIVE`` is paired with

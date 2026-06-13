@@ -855,6 +855,33 @@ def test_clear_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     )
 
 
+def test_clear_pane_uses_libtmux_reset(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """clear_pane delegates to libtmux's atomic Pane.reset path.
+
+    This test uses monkeypatch because the visible terminal state can
+    look identical for the old two-IPC implementation and the fixed
+    one-call libtmux reset; the regression is the call boundary.
+    """
+    from libtmux.pane import Pane as LibtmuxPane
+
+    reset_calls: list[str | None] = []
+
+    def fake_reset(self: LibtmuxPane) -> LibtmuxPane:
+        reset_calls.append(self.pane_id)
+        return self
+
+    monkeypatch.setattr(LibtmuxPane, "reset", fake_reset)
+
+    clear_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert reset_calls == [mcp_pane.pane_id]
+
+
 def test_resize_pane_dimensions(mcp_server: Server, mcp_pane: Pane) -> None:
     """resize_pane resizes a pane with height/width."""
     result = resize_pane(
@@ -3763,6 +3790,25 @@ def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
     assert tool.annotations is not None, (
         "respawn_pane registration should carry annotations"
     )
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.idempotentHint is False
+    assert tool.annotations.readOnlyHint is False
+
+
+def test_clear_pane_advertises_destructive_non_idempotent() -> None:
+    """``clear_pane`` registers as mutating-tier with destructive hints."""
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-clear-pane-annotations")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool("clear_pane"))
+    assert tool is not None, "clear_pane should be registered"
+    assert tool.annotations is not None, "clear_pane should carry annotations"
     assert tool.annotations.destructiveHint is True
     assert tool.annotations.idempotentHint is False
     assert tool.annotations.readOnlyHint is False

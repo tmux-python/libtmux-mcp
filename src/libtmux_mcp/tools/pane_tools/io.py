@@ -362,7 +362,6 @@ def clear_pane(
     """Clear the contents of a tmux pane.
 
     Use before send_keys + capture_pane to get a clean capture without prior output.
-    Note: this is two tmux commands with a brief gap — not fully atomic.
 
     Parameters
     ----------
@@ -390,15 +389,7 @@ def clear_pane(
         session_id=session_id,
         window_id=window_id,
     )
-    # Two separate calls — pane.reset() in libtmux 0.56.0 still sends
-    # `send-keys -R \; clear-history` as one call but subprocess doesn't
-    # interpret \; as a tmux command separator, so clear-history never
-    # runs. The bare `-R` send is left as a raw cmd() because
-    # Pane.send_keys requires a cmd string and would emit an extra
-    # empty key alongside the reset flag.
-    # See: https://github.com/tmux-python/libtmux/issues/650
-    pane.cmd("send-keys", "-R")
-    pane.clear_history()
+    pane.reset()
     return f"Pane cleared: {pane.pane_id}"
 
 

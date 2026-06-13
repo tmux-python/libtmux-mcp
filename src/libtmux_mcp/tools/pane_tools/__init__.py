@@ -120,9 +120,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY},
     )(find_pane_by_position)
-    mcp.tool(title="Clear Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING})(
-        clear_pane
-    )
+    mcp.tool(
+        title="Clear Pane",
+        annotations=ANNOTATIONS_MUTATING_DESTRUCTIVE,
+        tags={TAG_MUTATING},
+    )(clear_pane)
     mcp.tool(title="Search Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         search_panes
     )
