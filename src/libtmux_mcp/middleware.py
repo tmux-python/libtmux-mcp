@@ -27,6 +27,7 @@ Provides the project's middleware infrastructure, in definition order:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import time
@@ -339,7 +340,15 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
         try:
             return await call_next(context)
         except Exception as error:
-            self._log_error(error, context)
+            # Invariant: error logging must never mask the tool result. A
+            # broken logging handler (e.g. a stale rich.traceback import
+            # after the venv was rebuilt under a long-lived server) would
+            # otherwise raise out of ``_log_error`` and replace the real
+            # failure with a misleading ``Internal error``. Suppress
+            # silently — logging the failure here would re-enter the same
+            # broken handler. See #66.
+            with contextlib.suppress(Exception):
+                self._log_error(error, context)
             return _error_tool_result(error, context)
 
 
