@@ -348,9 +348,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 # ---------------------------------------------------------------------------
 
 #: Argument names that carry user-supplied payloads we never want in logs.
-#: ``keys`` (send_keys), ``text`` (paste_text), ``value`` (set_environment),
-#: ``content`` (load_buffer), ``shell`` (respawn_pane), and ``environment``
-#: (respawn_pane) can contain commands, secrets, or arbitrary large strings.
+#: ``keys`` (send_keys), ``text`` (paste_text), ``command`` (run_command),
+#: ``value`` (set_environment), ``content`` (load_buffer), ``shell``
+#: (respawn_pane), and ``environment`` (respawn_pane) can contain commands,
+#: secrets, or arbitrary large strings.
 #: Matched by exact name, case-sensitive, to mirror the tool signatures.
 #:
 #: ``environment`` is dict-shaped (``dict[str, str]``); the redaction logic
@@ -365,7 +366,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: via the OS process table and tmux's ``pane_current_command`` metadata
 #: until the spawned shell takes over — see ``docs/topics/safety.md``.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
-    {"keys", "text", "value", "content", "shell", "environment"}
+    {"keys", "text", "command", "value", "content", "shell", "environment"}
 )
 
 #: String arguments longer than this get truncated in the log summary to

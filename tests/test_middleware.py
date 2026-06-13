@@ -149,6 +149,7 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
     args: dict[str, t.Any] = {
         "keys": "rm -rf /",
         "text": "hello world",
+        "command": "psql -U user -W secret123 mydb",
         "value": "supersecret",
         "content": "buffer payload",
         "shell": "psql -U user -W secret123 mydb",
@@ -156,7 +157,7 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
         "bracket": True,
     }
     summary = _summarize_args(args)
-    for sensitive in ("keys", "text", "value", "content", "shell"):
+    for sensitive in ("keys", "text", "command", "value", "content", "shell"):
         assert isinstance(summary[sensitive], dict)
         assert "len" in summary[sensitive]
         assert "sha256_prefix" in summary[sensitive]
@@ -187,10 +188,6 @@ COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
 ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#76: run_command's command arg is not yet in _SENSITIVE_ARG_NAMES",
-)
 @pytest.mark.parametrize(
     CommandRedactionFixture._fields,
     COMMAND_REDACTION_FIXTURES,
