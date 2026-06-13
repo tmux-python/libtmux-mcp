@@ -31,6 +31,7 @@ from libtmux_mcp.tools.pane_tools.io import (
     paste_text,
     run_command,
     send_keys,
+    send_keys_batch,
 )
 from libtmux_mcp.tools.pane_tools.layout import (
     resize_pane,
@@ -74,6 +75,7 @@ __all__ = [
     "search_panes",
     "select_pane",
     "send_keys",
+    "send_keys_batch",
     "set_pane_title",
     "snapshot_pane",
     "swap_pane",
@@ -87,6 +89,11 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Send Keys", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         send_keys
     )
+    mcp.tool(
+        title="Send Keys Batch",
+        annotations=ANNOTATIONS_SHELL,
+        tags={TAG_MUTATING},
+    )(send_keys_batch)
     mcp.tool(title="Run Command", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         run_command
     )

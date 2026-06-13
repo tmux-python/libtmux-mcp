@@ -369,6 +369,12 @@ _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {"keys", "text", "command", "value", "content", "shell", "environment"}
 )
 
+#: Nested argument containers that may contain sensitive argument names.
+#: ``operations`` is used by ``send_keys_batch``; preserving pane ids and
+#: booleans is useful for audit trails, but each nested ``keys`` payload
+#: must be digested the same way top-level ``send_keys(keys=...)`` is.
+_NESTED_ARG_LIST_NAMES: frozenset[str] = frozenset({"operations"})
+
 #: String arguments longer than this get truncated in the log summary to
 #: keep records bounded. Non-sensitive strings only — sensitive ones are
 #: replaced entirely by their digest.
@@ -404,6 +410,8 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     ``respawn_pane``) have each *value* digested while keys remain
     visible — env-var-name-like keys are operator-debug-useful and
     rarely sensitive, while their values usually are.
+    Known nested operation lists are summarized recursively so batched
+    tool calls keep target metadata while redacting inner payloads.
 
     Examples
     --------
@@ -431,6 +439,11 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
+        elif key in _NESTED_ARG_LIST_NAMES and isinstance(value, list):
+            summary[key] = [
+                _summarize_args(item) if isinstance(item, dict) else item
+                for item in value
+            ]
         elif isinstance(value, str) and len(value) > _MAX_LOGGED_STR_LEN:
             summary[key] = value[:_MAX_LOGGED_STR_LEN] + "...<truncated>"
         else:

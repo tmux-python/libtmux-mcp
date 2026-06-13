@@ -10,8 +10,6 @@ recipes. Keep the set small and deliberate.
 
 from __future__ import annotations
 
-import uuid
-
 
 def run_and_wait(
     command: str,
@@ -20,16 +18,12 @@ def run_and_wait(
 ) -> str:
     """Run a shell command in a tmux pane and wait for completion.
 
-    The returned template teaches the model the safe composition
-    pattern: shell ``;`` semantics fire ``tmux wait-for -S`` whether
-    the command succeeds or fails, so the edge-triggered signal
-    never deadlocks an agent waiting on a crashed command. See
-    ``docs/topics/prompting.md``.
-
-    Each invocation embeds a fresh UUID-scoped channel name so
-    concurrent agents (or parallel prompt calls from a single agent)
-    cannot cross-signal each other on tmux's server-global channel
-    namespace — the channel is unique to this one prompt rendering.
+    The returned template teaches the high-level authored-command
+    primitive: ``run_command`` sends the command, waits through a
+    private tmux signal, captures output, and reports exit status in
+    one typed result. Use lower-level ``send_keys`` +
+    ``wait_for_channel`` only when the caller needs custom shell
+    composition outside this common command-completion shape.
 
     Parameters
     ----------
@@ -38,29 +32,28 @@ def run_and_wait(
     pane_id : str
         Target pane (e.g. ``%1``).
     timeout : float
-        Maximum seconds to wait for the signal. Default 60.
+        Maximum seconds to wait for command completion. Default 60.
     """
-    channel = f"libtmux_mcp_wait_{uuid.uuid4().hex}"
-    shell_payload = f"{command}; tmux wait-for -S {channel}"
-    return f"""Run this shell command in tmux pane {pane_id} and block
-until it finishes:
+    return f"""Run this shell command in tmux pane {pane_id}, wait until it
+finishes, and inspect the typed result:
 
 ```python
-send_keys(
+result = run_command(
     pane_id={pane_id!r},
-    keys={shell_payload!r},
+    command={command!r},
+    timeout={timeout},
+    max_lines=100,
 )
-wait_for_channel(channel={channel!r}, timeout={timeout})
-capture_pane(pane_id={pane_id!r}, max_lines=100)
 ```
 
-After the channel signals, read the last ~100 lines to verify the
-command's behaviour. Do NOT use a `capture_pane` retry loop —
-`wait_for_channel` is strictly cheaper in agent turns.
+Use `result.exit_status`, `result.timed_out`, and `result.output`
+to decide what happened. Do NOT use a `send_keys` + `capture_pane`
+retry loop for authored commands — `run_command` already performs
+deterministic completion and returns tail-preserved output.
 
-The payload does not preserve the command's exit status. Use
-`run_command` instead when exit status must be returned as structured
-data.
+If the task needs persistent shell state or TUI keystrokes instead of
+a one-shot shell command, use `send_keys` or `send_keys_batch`, then
+observe later output with `capture_since`.
 """
 
 
