@@ -229,7 +229,7 @@ async def run_command(
     )
     kept_lines, truncated, dropped = _truncate_lines_tail(visible_lines, max_lines)
     return RunCommandResult(
-        pane_id=pane.pane_id or "",
+        pane_id=target_pane_id,
         exit_status=exit_status,
         timed_out=timed_out,
         elapsed_seconds=elapsed,
