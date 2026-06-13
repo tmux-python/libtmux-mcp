@@ -373,6 +373,18 @@ FILTER_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
 ]
 
 
+FILTER_KEEP_XFAIL_FIXTURES: list[FilterInternalLinesFixture] = [
+    FilterInternalLinesFixture(
+        "tmux_script_status_option",
+        "s=$?; tmux set-option -p @s_myapp_status 1",
+    ),
+    FilterInternalLinesFixture(
+        "empty_short_status_prefix",
+        "s=$?; tmux set-option -p @s_ 1",
+    ),
+]
+
+
 class FilterDropFixture(t.NamedTuple):
     """Fixture for private run_command synchronisation fragments."""
 
@@ -380,6 +392,13 @@ class FilterDropFixture(t.NamedTuple):
     lines: list[str]
     channel: str
     status_option: str
+
+
+class FilterCurrentSyncLineFixture(t.NamedTuple):
+    """Fixture for output after the current run_command sync line."""
+
+    test_id: str
+    output_lines: list[str]
 
 
 _CURRENT_ID = "deadbeefdeadbeefdeadbeefdeadbeef"
@@ -438,6 +457,15 @@ FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
 ]
 
 
+FILTER_CURRENT_SYNC_XFAIL_FIXTURES: list[FilterCurrentSyncLineFixture] = [
+    FilterCurrentSyncLineFixture("single_hex_output", ["abcdef1234", "DONE"]),
+    FilterCurrentSyncLineFixture(
+        "consecutive_hex_output",
+        ["abcdef1234", "feedface99", "DONE"],
+    ),
+]
+
+
 @pytest.mark.parametrize(
     FilterInternalLinesFixture._fields,
     FILTER_KEEP_FIXTURES,
@@ -458,6 +486,28 @@ def test_filter_run_command_keeps_legitimate_output(test_id: str, line: str) -> 
     assert kept == [line]
 
 
+@pytest.mark.xfail(
+    reason="run_command filter overmatches wrapper-shaped user output",
+    strict=True,
+)
+@pytest.mark.parametrize(
+    FilterInternalLinesFixture._fields,
+    FILTER_KEEP_XFAIL_FIXTURES,
+    ids=[f.test_id for f in FILTER_KEEP_XFAIL_FIXTURES],
+)
+def test_filter_run_command_keeps_wrapper_like_output(test_id: str, line: str) -> None:
+    """Legitimate tmux-looking command output survives filtering."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    assert test_id
+    kept = _filter_run_command_internal_lines(
+        [line],
+        channel=f"r_{_SHORT_CURRENT_ID}",
+        status_option=f"@s_{_SHORT_CURRENT_ID}",
+    )
+    assert kept == [line]
+
+
 def test_filter_run_command_drops_sync_line() -> None:
     """The joined private synchronisation line is removed from output."""
     from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
@@ -473,6 +523,35 @@ def test_filter_run_command_drops_sync_line() -> None:
         ["RUN_OK", sync_line], channel=channel, status_option=status_option
     )
     assert kept == ["RUN_OK"]
+
+
+@pytest.mark.xfail(
+    reason="run_command filter drops hex output after the current sync line",
+    strict=True,
+)
+@pytest.mark.parametrize(
+    FilterCurrentSyncLineFixture._fields,
+    FILTER_CURRENT_SYNC_XFAIL_FIXTURES,
+    ids=[f.test_id for f in FILTER_CURRENT_SYNC_XFAIL_FIXTURES],
+)
+def test_filter_run_command_keeps_hex_output_after_current_sync_line(
+    test_id: str, output_lines: list[str]
+) -> None:
+    """Hex-like output after the current sync line survives filtering."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    channel = f"r_{_SHORT_CURRENT_ID}"
+    status_option = f"@s_{_SHORT_CURRENT_ID}"
+    sync_line = (
+        f'); s=$?; tmux set-option -p {status_option} "$s"; tmux wait-for -S {channel}'
+    )
+    kept = _filter_run_command_internal_lines(
+        [sync_line, *output_lines],
+        channel=channel,
+        status_option=status_option,
+    )
+    assert test_id
+    assert kept == output_lines
 
 
 @pytest.mark.parametrize(
