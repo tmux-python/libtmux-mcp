@@ -37,6 +37,10 @@ Evaluate a tmux format string against a target.
 Send keystrokes or commands to a pane.
 :::
 
+:::{grid-item-card} {tooliconl}`send-keys-batch`
+Send several ordered raw-input operations.
+:::
+
 :::{grid-item-card} {tooliconl}`run-command`
 Run a shell command, wait, and capture output.
 :::
@@ -115,6 +119,7 @@ get-pane-info
 find-pane-by-position
 display-message
 send-keys
+send-keys-batch
 run-command
 paste-text
 pipe-pane

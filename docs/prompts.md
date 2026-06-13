@@ -16,8 +16,8 @@ counterpart to the longer narrative recipes in {doc}`/recipes`.
 :::{grid-item-card} `run_and_wait`
 :link: fastmcp-prompt-run-and-wait
 :link-type: ref
-Execute a shell command and block until it finishes. Use
-{tooliconl}`run-command` when exit status matters.
+Execute a shell command through {tooliconl}`run-command` and inspect
+its typed result.
 :::
 
 :::{grid-item-card} `diagnose_failing_pane`
@@ -53,15 +53,14 @@ tools instead.
 ```{fastmcp-prompt} run_and_wait
 ```
 
-**Use when** the agent needs to execute a single shell command and
-wait for completion through an explicit tmux signal.
+**Use when** the agent needs to execute a single shell command, wait
+for completion, and inspect exit status plus output.
 
 **Why use this instead of `send_keys` + `capture_pane` polling?**
-Each rendered call embeds a UUID-scoped ``tmux wait-for`` channel,
-so concurrent agents (or parallel prompt calls from one agent) can
-never cross-signal each other. The server side blocks until the
-channel is signalled — strictly cheaper in agent turns than a
-``capture_pane`` retry loop.
+{tooliconl}`run-command` sends the command, waits through a private
+tmux signal, captures tail-preserved output, and returns exit status
+in one typed result. That removes the manual channel plumbing from
+the common authored-command workflow.
 
 ```{fastmcp-prompt-input} run_and_wait
 ```
@@ -69,31 +68,32 @@ channel is signalled — strictly cheaper in agent turns than a
 **Sample render** (``command="pytest"``, ``pane_id="%1"``):
 
 ````markdown
-Run this shell command in tmux pane %1 and block
-until it finishes:
+Run this shell command in tmux pane %1, wait until it
+finishes, and inspect the typed result:
 
 ```python
-send_keys(
+result = run_command(
     pane_id='%1',
-    keys='pytest; tmux wait-for -S libtmux_mcp_wait_<uuid>',
+    command='pytest',
+    timeout=60.0,
+    max_lines=100,
 )
-wait_for_channel(channel='libtmux_mcp_wait_<uuid>', timeout=60.0)
-capture_pane(pane_id='%1', max_lines=100)
 ```
 
-After the channel signals, read the last ~100 lines to verify the
-command's behaviour. Do NOT use a `capture_pane` retry loop —
-`wait_for_channel` is strictly cheaper in agent turns.
+Use `result.exit_status`, `result.timed_out`, and `result.output`
+to decide what happened. Do NOT use a `send_keys` + `capture_pane`
+retry loop for authored commands — `run_command` already performs
+deterministic completion and returns tail-preserved output.
 
-The payload does not preserve the command's exit status. Use
-{tooliconl}`run-command` instead when exit status must be returned as
-structured data.
+If the task needs persistent shell state or TUI keystrokes instead of
+a one-shot shell command, use `send_keys` or `send_keys_batch`, then
+observe later output with `capture_since`.
 ````
 
-Shell ``;`` semantics fire the ``wait-for -S`` whether ``pytest``
-succeeded or failed, so the edge-triggered signal never deadlocks the
-agent on a crashed command. Status preservation is intentionally
-omitted from this prompt recipe.
+For custom shell composition that falls outside {tooliconl}`run-command`,
+compose ``tmux wait-for -S <channel>`` yourself and call
+{tooliconl}`wait-for-channel`. Keep that as the low-level escape hatch,
+not the default command-running recipe.
 
 ---
 

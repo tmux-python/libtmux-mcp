@@ -75,7 +75,7 @@ Symptom-based guide. Find your problem, follow the steps.
 
 2. **Special characters**: tmux interprets some key names (e.g. `C-c`, `Enter`). If sending literal text, use `literal=true`.
 
-3. **Timing**: After {toolref}`send-keys`, prefer composing `tmux wait-for -S <channel>` into the shell command and calling {toolref}`wait-for-channel` for deterministic completion. Use {toolref}`capture-since` for repeated observation, and use {toolref}`wait-for-text` or {toolref}`wait-for-content-change` only when waiting on output you do not author. Don't call {toolref}`capture-pane` immediately — the command may still be running.
+3. **Timing**: For authored shell commands, prefer {toolref}`run-command`; it waits for completion and returns exit status plus output. Use {toolref}`send-keys` or {toolref}`send-keys-batch` for raw interactive input, {toolref}`capture-since` for repeated observation, and {toolref}`wait-for-text` or {toolref}`wait-for-content-change` only when waiting on output you do not author. Don't call {toolref}`capture-pane` immediately after raw input — the command may still be running.
 
 ## Silent startup failure
 

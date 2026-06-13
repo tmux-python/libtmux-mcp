@@ -22,8 +22,9 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 
 **Running a command?**
 - {tool}`run-command` — one call to run a shell command, wait for completion, capture output, and return exit status
-- {tool}`send-keys` (with `tmux wait-for -S <channel>` composed into the keys) → {tool}`wait-for-channel` → {tool}`capture-pane` — the deterministic path for commands the agent authors
-- For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text` or {tool}`wait-for-content-change` between `send-keys` and `capture-pane`
+- {tool}`send-keys` / {tool}`send-keys-batch` — raw interactive input for TUIs, control keys, and persistent shell state
+- {tool}`wait-for-channel` — low-level custom completion when `run-command` does not fit the shell composition
+- For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text`, {tool}`wait-for-content-change`, or {tool}`capture-since`
 - Pasting multi-line text? → {tool}`paste-text`
 
 **Creating workspace structure?**
@@ -221,7 +222,13 @@ Split a window into panes.
 :::{grid-item-card} send_keys
 :link: send-keys
 :link-type: ref
-Send commands or keystrokes to a pane.
+Send raw keystrokes to a pane.
+:::
+
+:::{grid-item-card} send_keys_batch
+:link: send-keys-batch
+:link-type: ref
+Send several ordered raw-input operations.
 :::
 
 :::{grid-item-card} run_command

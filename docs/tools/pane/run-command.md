@@ -7,7 +7,8 @@
 result with exit status, timeout state, and captured pane output.
 
 **Avoid when** you need raw interactive key driving — use
-{tooliconl}`send-keys` for TUIs, key names, and partial commands.
+{tooliconl}`send-keys` or {tooliconl}`send-keys-batch` for TUIs, key
+names, and partial commands.
 
 **Side effects:** Sends a command to the pane's interactive shell. The
 command may read or write files, start processes, or access the network
