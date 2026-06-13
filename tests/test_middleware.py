@@ -168,6 +168,43 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
     assert summary["bracket"] is True
 
 
+class CommandRedactionFixture(t.NamedTuple):
+    """Test fixture for _summarize_args redaction of run_command's command."""
+
+    test_id: str
+    command: str
+
+
+COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
+    CommandRedactionFixture(
+        test_id="credential_bearing",
+        command="psql -U admin -W supersecret mydb",
+    ),
+    CommandRedactionFixture(
+        test_id="plain",
+        command="ls -la /tmp",
+    ),
+]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#76: run_command's command arg is not yet in _SENSITIVE_ARG_NAMES",
+)
+@pytest.mark.parametrize(
+    CommandRedactionFixture._fields,
+    COMMAND_REDACTION_FIXTURES,
+    ids=[f.test_id for f in COMMAND_REDACTION_FIXTURES],
+)
+def test_summarize_args_redacts_command(test_id: str, command: str) -> None:
+    """run_command's command payload is digested, not logged in cleartext."""
+    summary = _summarize_args({"command": command})
+    assert isinstance(summary["command"], dict)
+    assert "len" in summary["command"]
+    assert "sha256_prefix" in summary["command"]
+    assert command not in str(summary["command"])
+
+
 def test_summarize_args_redacts_sensitive_dict_values() -> None:
     """Dict-shaped sensitive args keep keys but digest values per-entry.
 
