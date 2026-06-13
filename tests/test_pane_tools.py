@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pathlib
+import shlex
+import time
 import typing as t
 
 import pytest
@@ -1298,35 +1301,47 @@ def test_search_panes_literal_input_skips_slow_path_probe(
     assert any(m.pane_id == mcp_pane.pane_id for m in result.matches)
 
 
+class SearchFastPathFixture(t.NamedTuple):
+    """Fixture for ``search_panes`` fast-path eligibility cases."""
+
+    test_id: str
+    pattern: str
+    regex: bool
+    expected_fast_path: bool
+
+
+SEARCH_FAST_PATH_FIXTURES: list[SearchFastPathFixture] = [
+    # Literal input with regex metacharacters — the earlier bug's
+    # target case. Raw input is glob-safe for tmux, fast path.
+    SearchFastPathFixture("literal_regex_chars", "192.168.1.1", False, True),
+    # Literal with no metacharacters — always fast path.
+    SearchFastPathFixture("plain_literal", "plain_marker", False, True),
+    # Regex with no metacharacters — fast path still fine.
+    SearchFastPathFixture("plain_regex", "plain_marker", True, True),
+    # Regex with metacharacters — legitimately slow path.
+    SearchFastPathFixture("regex_group", r"err(or|no)", True, False),
+    # Regex dot-star — slow path.
+    SearchFastPathFixture("regex_dot_star", r".*", True, False),
+    # tmux format-injection bytes in a literal — MUST fall to slow
+    # path regardless of regex flag, because tmux's #{C:...} format
+    # block has no escape for `}` (premature close), `#{` (nested
+    # format-variable evaluation), or `#(` (format job execution).
+    SearchFastPathFixture("literal_close_brace", "foo}", False, False),
+    SearchFastPathFixture("literal_nested_format", "log #{err}", False, False),
+    SearchFastPathFixture("literal_format_job", "#(printf ok)", False, False),
+    # Same hazards with regex=True — still slow path; tmux sees the
+    # raw pattern either way.
+    SearchFastPathFixture("regex_close_brace", "x}y", True, False),
+    SearchFastPathFixture("regex_nested_format", "a#{b}", True, False),
+]
+
+
 @pytest.mark.parametrize(
-    ("pattern", "regex", "expected_fast_path"),
-    [
-        # Literal input with regex metacharacters — the earlier bug's
-        # target case. Raw input is glob-safe for tmux, fast path.
-        ("192.168.1.1", False, True),
-        # Literal with no metacharacters — always fast path.
-        ("plain_marker", False, True),
-        # Regex with no metacharacters — fast path still fine.
-        ("plain_marker", True, True),
-        # Regex with metacharacters — legitimately slow path.
-        (r"err(or|no)", True, False),
-        # Regex dot-star — slow path.
-        (r".*", True, False),
-        # tmux format-injection bytes in a literal — MUST fall to slow
-        # path regardless of regex flag, because tmux's #{C:...} format
-        # block has no escape for `}` (premature close) or `#{` (nested
-        # format-variable evaluation).
-        ("foo}", False, False),
-        ("log #{err}", False, False),
-        # Same hazards with regex=True — still slow path; tmux sees the
-        # raw pattern either way.
-        ("x}y", True, False),
-        ("a#{b}", True, False),
-    ],
+    "fixture",
+    SEARCH_FAST_PATH_FIXTURES,
+    ids=lambda fixture: fixture.test_id,
 )
-def test_search_panes_fast_path_decision(
-    pattern: str, regex: bool, expected_fast_path: bool
-) -> None:
+def test_search_panes_fast_path_decision(fixture: SearchFastPathFixture) -> None:
     """Unit-test the ``is_plain_text`` decision on pattern + regex flag.
 
     Mirrors the exact expression in ``search_panes`` so a future
@@ -1337,14 +1352,16 @@ def test_search_panes_fast_path_decision(
     """
     import re as _re
 
+    test_id, pattern, regex, expected_fast_path = fixture
     _regex_meta = _re.compile(r"[\\.*+?{}()\[\]|^$]")
-    _tmux_format_injection = _re.compile(r"\}|#\{")
+    _tmux_format_injection = _re.compile(r"\}|#\{|#\(")
     if _tmux_format_injection.search(pattern):
         is_plain_text = False
     elif regex:
         is_plain_text = not _regex_meta.search(pattern)
     else:
         is_plain_text = True
+    assert test_id
     assert is_plain_text is expected_fast_path
 
 
@@ -1423,6 +1440,25 @@ def test_search_panes_nested_format_variable_is_neutralized(
     # other pane's content contains NEST_ at all.
     for m in result.matches:
         assert m.pane_id == mcp_pane.pane_id
+
+
+def test_search_panes_hash_paren_format_job_is_neutralized(
+    mcp_server: Server, mcp_session: Session, tmp_path: pathlib.Path
+) -> None:
+    """Literal patterns containing ``#(`` do not start tmux format jobs."""
+    marker = tmp_path / "search_panes_format_job_marker"
+    pattern = f"#(printf ok > {shlex.quote(str(marker))})"
+
+    result = search_panes(
+        pattern=pattern,
+        regex=False,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert isinstance(result.matches, list)
+    time.sleep(0.5)
+    assert not marker.exists()
 
 
 def test_search_panes_numeric_pane_id_ordering(

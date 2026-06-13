@@ -178,7 +178,7 @@ def search_panes(
     #    or not ``regex`` is True — the injection risk is tmux-side,
     #    not regex-side.
     _REGEX_META = re.compile(r"[\\.*+?{}()\[\]|^$]")
-    _TMUX_FORMAT_INJECTION = re.compile(r"\}|#\{")
+    _TMUX_FORMAT_INJECTION = re.compile(r"\}|#\{|#\(")
     if _TMUX_FORMAT_INJECTION.search(pattern):
         is_plain_text = False
     elif regex:
