@@ -364,11 +364,12 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "openWorldHint": False,
 }
 #: Annotations for tools that move user-supplied payloads into a shell
-#: context. Five consumers today:
+#: context. Six consumers today:
 #:
-#: * ``send_keys``, ``paste_text``, ``pipe_pane`` — the canonical
-#:   shell-driving tools; caller's keys/text/stream reaches the shell
-#:   prompt or pipes into an external command respectively.
+#: * ``send_keys``, ``run_command``, ``paste_text``, ``pipe_pane`` — the
+#:   canonical shell-driving tools; caller's keys/command/text/stream
+#:   reaches the shell prompt or pipes into an external command
+#:   respectively.
 #: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
 #:   into a tmux paste buffer; ``paste_buffer`` pushes that content
 #:   into a target pane where the shell receives it as input. The two
