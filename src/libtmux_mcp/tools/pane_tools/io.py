@@ -183,10 +183,15 @@ def send_keys_batch(
             )
         except Exception as e:
             elapsed = time.monotonic() - started
-            if isinstance(e, ToolError):
-                error = str(e)
-            else:
-                error = str(_map_exception_to_tool_error("send_keys_batch", e))
+            tool_err = (
+                e
+                if isinstance(e, ToolError)
+                else _map_exception_to_tool_error("send_keys_batch", e)
+            )
+            error = str(tool_err)
+            suggestion = getattr(tool_err, "suggestion", None)
+            if suggestion:
+                error = f"{error}\n{suggestion}"
             results.append(
                 SendKeysOperationResult(
                     index=index,

@@ -147,6 +147,23 @@ SEND_KEYS_OPERATION_VALIDATION_FIXTURES: list[SendKeysOperationValidationFixture
 ]
 
 
+class SendKeysBatchSuggestionFixture(t.NamedTuple):
+    """Test fixture for send_keys_batch suggestion preservation."""
+
+    test_id: str
+    operations: list[SendKeysOperation]
+    expected_error_snippet: str
+
+
+SEND_KEYS_BATCH_SUGGESTION_FIXTURES: list[SendKeysBatchSuggestionFixture] = [
+    SendKeysBatchSuggestionFixture(
+        test_id="missing_pane_id",
+        operations=[SendKeysOperation(keys="echo", pane_id="%invalid_pane")],
+        expected_error_snippet="Call list_panes to discover valid pane ids.",
+    ),
+]
+
+
 def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
     """send_keys sends keys to a pane."""
     result = send_keys(
@@ -277,6 +294,31 @@ def test_send_keys_batch_rejects_empty_operations(mcp_server: Server) -> None:
 
     with pytest.raises(ToolError, match="operations must not be empty"):
         send_keys_batch(operations=[], socket_name=mcp_server.socket_name)
+
+
+@pytest.mark.parametrize(
+    SendKeysBatchSuggestionFixture._fields,
+    SEND_KEYS_BATCH_SUGGESTION_FIXTURES,
+    ids=[fixture.test_id for fixture in SEND_KEYS_BATCH_SUGGESTION_FIXTURES],
+)
+def test_send_keys_batch_preserves_error_suggestions(
+    test_id: str,
+    operations: list[SendKeysOperation],
+    expected_error_snippet: str,
+    mcp_server: Server,
+) -> None:
+    """send_keys_batch preserves exception suggestions in the error string."""
+    assert test_id
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+
+    result = send_keys_batch(
+        operations=operations,
+        socket_name=mcp_server.socket_name,
+    )
+    assert len(result.results) == 1
+    error_msg = result.results[0].error
+    assert error_msg is not None
+    assert expected_error_snippet in error_msg
 
 
 @pytest.mark.parametrize(
