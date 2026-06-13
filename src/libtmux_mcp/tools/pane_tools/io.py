@@ -72,8 +72,8 @@ def send_keys(
     literal : bool
         Whether to send keys literally (no tmux interpretation). Default False.
     suppress_history : bool
-        Whether to suppress shell history by prepending a space.
-        Only works in shells that support HISTCONTROL. Default False.
+        Suppress shell history by prepending a space; only effective where
+        the shell ignores space-prefixed commands. Default False.
     socket_name : str, optional
         tmux socket name.
 
@@ -136,8 +136,8 @@ async def run_command(
         Maximum pane output lines to return. Defaults to all captured
         visible output; pass a small value for a tail-only summary.
     suppress_history : bool
-        Whether to suppress shell history by prepending a space.
-        Only works in shells that support HISTCONTROL. Default False.
+        Suppress shell history by prepending a space; only effective where
+        the shell ignores space-prefixed commands. Default False.
     socket_name : str, optional
         tmux socket name.
 
