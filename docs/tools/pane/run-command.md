@@ -11,7 +11,8 @@ result with exit status, timeout state, and captured pane output.
 
 **Side effects:** Sends a command to the pane's interactive shell. The
 command may read or write files, start processes, or access the network
-depending on what the shell command does.
+depending on what the shell command does. Each command runs in a subshell,
+so directory or environment changes do not persist across calls.
 Set `suppress_history=true` for secret-bearing commands on shells that
 honor leading-space history suppression.
 

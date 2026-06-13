@@ -118,6 +118,9 @@ async def run_command(
     the pane's interactive shell, followed by a private ``tmux wait-for``
     signal and a private pane option carrying the shell exit status.
 
+    The command runs in a subshell, so ``cd``, ``export`` and other shell
+    state changes do not persist to later calls.
+
     Parameters
     ----------
     command : str
