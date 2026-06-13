@@ -209,8 +209,9 @@ async def run_command(
         with contextlib.suppress(Exception):
             pane.cmd("set-option", "-p", "-u", status_option)
 
-    # join_wrapped reduces prompt wrapping; the filter also handles private
-    # sync fragments that shells still echo across rows.
+    # join_wrapped keeps the per-call markers on one logical row so the
+    # filter's exact-marker match survives a wide prompt; it also strips
+    # sync fragments that still wrap across rows.
     raw_lines = await asyncio.to_thread(pane.capture_pane, join_wrapped=True)
     visible_lines = _filter_run_command_internal_lines(
         raw_lines,
