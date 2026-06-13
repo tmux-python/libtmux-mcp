@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a12 (2026-06-13)
+
+libtmux-mcp 0.1.0a12 hardens the MCP server's read-only and safety surface and adds a one-call `run_command` tool. Read-only tools can no longer trigger tmux format-job shell evaluation, an invalid safety tier fails closed instead of exposing write tools, and large successful results keep their structured payload. Panes and windows also gain liveness and active-pane metadata, and the package ships a `py.typed` marker. The fastmcp floor rises to 3.4.2 to pick up its explicit `starlette>=1.0.1` floor (CVE-2026-48710).
+
 ### Dependencies
 
 **Minimum `fastmcp>=3.4.2`** (was `>=3.4.0`). Picks up fastmcp 3.4.1's explicit `starlette>=1.0.1` floor, so installs can no longer resolve to a Starlette version affected by CVE-2026-48710 — previously this was constrained only transitively through `mcp`. (#77)
