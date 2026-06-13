@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `fastmcp>=3.4.2`** (was `>=3.4.0`). Picks up fastmcp 3.4.1's explicit `starlette>=1.0.1` floor, so installs can no longer resolve to a Starlette version affected by CVE-2026-48710 — previously this was constrained only transitively through `mcp`. (#77)
+
 ### What's new
 
 **One-call command completion with {tooliconl}`run-command`**
