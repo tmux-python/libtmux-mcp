@@ -108,6 +108,7 @@ async def run_command(
     window_id: str | None = None,
     timeout: float = 30.0,
     max_lines: int | None = None,
+    suppress_history: bool = False,
     socket_name: str | None = None,
 ) -> RunCommandResult:
     """Run a shell command in a pane, wait for completion, and capture output.
@@ -134,6 +135,9 @@ async def run_command(
     max_lines : int or None
         Maximum pane output lines to return. Defaults to all captured
         visible output; pass a small value for a tail-only summary.
+    suppress_history : bool
+        Whether to suppress shell history by prepending a space.
+        Only works in shells that support HISTCONTROL. Default False.
     socket_name : str, optional
         tmux socket name.
 
@@ -163,9 +167,10 @@ async def run_command(
     status_option = f"@s_{command_id}"
     status_cmd = shlex.join(_tmux_argv(server, "set-option", "-p", status_option))
     signal_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", channel))
+    history_prefix = " " if suppress_history else ""
     payload = "\n".join(
         (
-            "(",
+            f"{history_prefix}(",
             command.rstrip(),
             (f'); s=$?; {status_cmd} "$s"; {signal_cmd}'),
         )

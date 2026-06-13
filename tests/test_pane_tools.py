@@ -227,10 +227,6 @@ def test_run_command_reports_status_after_shell_state_change(
         assert any(expected_output in line for line in result.output)
 
 
-@pytest.mark.xfail(
-    reason="run_command has no shell history suppression option",
-    strict=True,
-)
 @pytest.mark.parametrize(
     RunCommandHistoryFixture._fields,
     RUN_COMMAND_HISTORY_FIXTURES,
@@ -267,7 +263,7 @@ def test_run_command_suppress_history(
             command=setup,
             pane_id=mcp_pane.pane_id,
             timeout=2.0,
-            suppress_history=True,  # type: ignore[call-arg]
+            suppress_history=True,
             socket_name=mcp_server.socket_name,
         )
     )
@@ -276,7 +272,7 @@ def test_run_command_suppress_history(
             command=f"printf '{secret}\\n'",
             pane_id=mcp_pane.pane_id,
             timeout=2.0,
-            suppress_history=True,  # type: ignore[call-arg]
+            suppress_history=True,
             socket_name=mcp_server.socket_name,
         )
     )
@@ -285,7 +281,7 @@ def test_run_command_suppress_history(
             command="history -w",
             pane_id=mcp_pane.pane_id,
             timeout=2.0,
-            suppress_history=True,  # type: ignore[call-arg]
+            suppress_history=True,
             socket_name=mcp_server.socket_name,
         )
     )

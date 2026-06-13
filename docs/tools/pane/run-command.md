@@ -12,6 +12,8 @@ result with exit status, timeout state, and captured pane output.
 **Side effects:** Sends a command to the pane's interactive shell. The
 command may read or write files, start processes, or access the network
 depending on what the shell command does.
+Set `suppress_history=true` for secret-bearing commands on shells that
+honor leading-space history suppression.
 
 **Example:**
 
