@@ -68,6 +68,13 @@ class RunCommandStatusIsolationFixture(t.NamedTuple):
     expected_output: str | None
 
 
+class RunCommandHistoryFixture(t.NamedTuple):
+    """Test fixture for run_command shell history suppression."""
+
+    test_id: str
+    secret: str
+
+
 RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
     RunCommandFixture("success", "printf 'RUN_COMMAND_OK\\n'", 0, "RUN_COMMAND_OK"),
     RunCommandFixture(
@@ -87,6 +94,11 @@ RUN_COMMAND_STATUS_ISOLATION_FIXTURES: list[RunCommandStatusIsolationFixture] = 
         "RUN_COMMAND_PATH_OK",
     ),
     RunCommandStatusIsolationFixture("errexit_false", "set -e; false", 1, None),
+]
+
+
+RUN_COMMAND_HISTORY_FIXTURES: list[RunCommandHistoryFixture] = [
+    RunCommandHistoryFixture("bash_ignorespace", "RUN_COMMAND_HISTORY_SECRET"),
 ]
 
 
@@ -213,6 +225,72 @@ def test_run_command_reports_status_after_shell_state_change(
     assert result.timed_out is False
     if expected_output is not None:
         assert any(expected_output in line for line in result.output)
+
+
+@pytest.mark.xfail(
+    reason="run_command has no shell history suppression option",
+    strict=True,
+)
+@pytest.mark.parametrize(
+    RunCommandHistoryFixture._fields,
+    RUN_COMMAND_HISTORY_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_HISTORY_FIXTURES],
+)
+def test_run_command_suppress_history(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    tmp_path: pathlib.Path,
+    test_id: str,
+    secret: str,
+) -> None:
+    """run_command suppresses shell history for secret-bearing commands."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+    histfile = tmp_path / "bash_history"
+    mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
+    retry_until(
+        lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    setup = (
+        f"HISTFILE={shlex.quote(str(histfile))}; "
+        "HISTCONTROL=ignorespace; set -o history; "
+        "history -c; history -w"
+    )
+    asyncio.run(
+        run_command(
+            command=setup,
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            suppress_history=True,  # type: ignore[call-arg]
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    asyncio.run(
+        run_command(
+            command=f"printf '{secret}\\n'",
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            suppress_history=True,  # type: ignore[call-arg]
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    asyncio.run(
+        run_command(
+            command="history -w",
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            suppress_history=True,  # type: ignore[call-arg]
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert secret not in histfile.read_text()
 
 
 def test_run_command_tail_preserves_output(mcp_server: Server, mcp_pane: Pane) -> None:
