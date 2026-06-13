@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import pathlib
 import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -160,15 +161,13 @@ async def run_command(
     command_id = uuid.uuid4().hex[:10]
     channel = f"r_{command_id}"
     status_option = f"@s_{command_id}"
+    status_cmd = shlex.join(_tmux_argv(server, "set-option", "-p", status_option))
+    signal_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", channel))
     payload = "\n".join(
         (
-            "{",
+            "(",
             command.rstrip(),
-            (
-                f"}}; s=$?; "
-                f'tmux set-option -p {status_option} "$s"; '
-                f"tmux wait-for -S {channel}"
-            ),
+            (f'); s=$?; {status_cmd} "$s"; {signal_cmd}'),
         )
     )
 

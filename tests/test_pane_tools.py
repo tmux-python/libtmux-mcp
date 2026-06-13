@@ -181,10 +181,6 @@ def test_run_command_timeout_reports_without_killing_shell(
     )
 
 
-@pytest.mark.xfail(
-    reason="run_command trailer shares user shell state",
-    strict=True,
-)
 @pytest.mark.parametrize(
     RunCommandStatusIsolationFixture._fields,
     RUN_COMMAND_STATUS_ISOLATION_FIXTURES,
