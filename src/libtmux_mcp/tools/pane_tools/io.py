@@ -161,10 +161,13 @@ async def run_command(
     status_option = f"@libtmux_mcp_status_{command_id}"
     payload = "\n".join(
         (
+            "{",
             command.rstrip(),
-            "__libtmux_mcp_status=$?",
-            f'tmux set-option -p {status_option} "$__libtmux_mcp_status"',
-            f"tmux wait-for -S {channel}",
+            (
+                f"}}; __libtmux_mcp_status=$?; "
+                f'tmux set-option -p {status_option} "$__libtmux_mcp_status"; '
+                f"tmux wait-for -S {channel}"
+            ),
         )
     )
 

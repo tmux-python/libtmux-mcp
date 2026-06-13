@@ -185,6 +185,46 @@ def test_run_command_tail_preserves_output(mcp_server: Server, mcp_pane: Pane) -
     assert any("RUN_COMMAND_TRUNC_6" in line for line in result.output)
 
 
+def test_run_command_tail_preserves_output_with_wrapped_private_prompt(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """run_command keeps command output when a long shell prompt wraps internals."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    long_prompt = "runner@runnervm123456:/home/runner/work/libtmux-mcp/libtmux-mcp$ "
+    mcp_pane.cmd("resize-pane", "-x", "80")
+    mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
+    retry_until(
+        lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+    mcp_pane.send_keys(f"PS1={shlex.quote(long_prompt)}", enter=True)
+    retry_until(
+        lambda: any(long_prompt.rstrip() in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = asyncio.run(
+        run_command(
+            command=(
+                "for i in $(seq 1 6); do printf 'RUN_COMMAND_WRAP_%s\\n' \"$i\"; done"
+            ),
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            max_lines=2,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.output_truncated is True
+    assert len(result.output) == 2
+    assert any("RUN_COMMAND_WRAP_6" in line for line in result.output)
+
+
 def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     """capture_pane returns pane content."""
     result = capture_pane(
