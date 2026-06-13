@@ -225,6 +225,50 @@ def test_run_command_tail_preserves_output_with_wrapped_private_prompt(
     assert any("RUN_COMMAND_WRAP_6" in line for line in result.output)
 
 
+class FilterInternalLinesFixture(t.NamedTuple):
+    """Fixture for _filter_run_command_internal_lines false-drop cases.
+
+    Each line contains a substring the over-broad markers matched but
+    not the per-call channel or status option, so it is legitimate
+    command output that must survive filtering.
+    """
+
+    test_id: str
+    line: str
+
+
+FILTER_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
+    FilterInternalLinesFixture("mentions_mcp_status", "grep -n mcp_status app.log"),
+    FilterInternalLinesFixture("mentions_set_option", 'echo "tmux set-option -p x"'),
+    FilterInternalLinesFixture("mentions_wait_for", "run tmux wait-for -S done first"),
+    FilterInternalLinesFixture("mentions_prefix", "ns=libtmux_mcp_ is reserved"),
+]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#76: over-broad markers drop legitimate run_command output",
+)
+@pytest.mark.parametrize(
+    FilterInternalLinesFixture._fields,
+    FILTER_KEEP_FIXTURES,
+    ids=[f.test_id for f in FILTER_KEEP_FIXTURES],
+)
+def test_filter_run_command_keeps_legitimate_output(test_id: str, line: str) -> None:
+    """Output matching old markers but not the per-call UUID survives."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    command_id = "deadbeefdeadbeefdeadbeefdeadbeef"
+    channel = f"libtmux_mcp_run_{command_id}"
+    status_option = f"@libtmux_mcp_status_{command_id}"
+
+    assert test_id
+    kept = _filter_run_command_internal_lines(
+        [line], channel=channel, status_option=status_option
+    )
+    assert kept == [line]
+
+
 def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     """capture_pane returns pane content."""
     result = capture_pane(
