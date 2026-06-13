@@ -245,6 +245,71 @@ FILTER_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
 ]
 
 
+class FilterDropFixture(t.NamedTuple):
+    """Fixture for private run_command synchronisation fragments."""
+
+    test_id: str
+    lines: list[str]
+    channel: str
+    status_option: str
+
+
+_CURRENT_ID = "deadbeefdeadbeefdeadbeefdeadbeef"
+_PREVIOUS_ID = "feedfacefeedfacefeedfacefeedface"
+_SHORT_CURRENT_ID = "e743e5084b"
+_SHORT_PREVIOUS_ID = "f00dbeef12"
+
+
+FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
+    FilterDropFixture(
+        "current_wrapped_long_marker",
+        [
+            "RUN_OK",
+            "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
+            f"@libtmux_mcp_status_{_CURRENT_ID[:10]}",
+            f'{_CURRENT_ID[10:]} "$__libtmux_mcp_status"; '
+            "tmux wait-for -S libtmux_mcp_run_",
+            _CURRENT_ID,
+        ],
+        f"libtmux_mcp_run_{_CURRENT_ID}",
+        f"@libtmux_mcp_status_{_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "previous_wrapped_long_marker",
+        [
+            "RUN_OK",
+            "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
+            f"@libtmux_mcp_status_{_PREVIOUS_ID[:10]}",
+            f'{_PREVIOUS_ID[10:]} "$__libtmux_mcp_status"; '
+            "tmux wait-for -S libtmux_mcp_run_",
+            _PREVIOUS_ID,
+        ],
+        f"libtmux_mcp_run_{_CURRENT_ID}",
+        f"@libtmux_mcp_status_{_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "current_short_marker",
+        [
+            "RUN_OK",
+            f'∙ }}; s=$?; tmux set-option -p @s_{_SHORT_CURRENT_ID} "$s"; '
+            f"tmux wait-for -S r_{_SHORT_CURRENT_ID}",
+        ],
+        f"r_{_SHORT_CURRENT_ID}",
+        f"@s_{_SHORT_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "previous_wrapped_short_marker",
+        [
+            "RUN_OK",
+            f"∙ }}; s=$?; tmux set-option -p @s_{_SHORT_PREVIOUS_ID[:6]}",
+            f'{_SHORT_PREVIOUS_ID[6:]} "$s"; tmux wait-for -S r_{_SHORT_PREVIOUS_ID}',
+        ],
+        f"r_{_SHORT_CURRENT_ID}",
+        f"@s_{_SHORT_CURRENT_ID}",
+    ),
+]
+
+
 @pytest.mark.parametrize(
     FilterInternalLinesFixture._fields,
     FILTER_KEEP_FIXTURES,
@@ -279,6 +344,26 @@ def test_filter_run_command_drops_sync_line() -> None:
     kept = _filter_run_command_internal_lines(
         ["RUN_OK", sync_line], channel=channel, status_option=status_option
     )
+    assert kept == ["RUN_OK"]
+
+
+@pytest.mark.parametrize(
+    FilterDropFixture._fields,
+    FILTER_DROP_FIXTURES,
+    ids=[f.test_id for f in FILTER_DROP_FIXTURES],
+)
+def test_filter_run_command_drops_sync_fragments(
+    test_id: str, lines: list[str], channel: str, status_option: str
+) -> None:
+    """Private synchronisation fragments are removed from output."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    kept = _filter_run_command_internal_lines(
+        lines,
+        channel=channel,
+        status_option=status_option,
+    )
+    assert test_id
     assert kept == ["RUN_OK"]
 
 

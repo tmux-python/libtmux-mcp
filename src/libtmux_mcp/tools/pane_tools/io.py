@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import pathlib
+import re
 import subprocess
 import tempfile
 import time
@@ -156,16 +157,16 @@ async def run_command(
         session_id=session_id,
         window_id=window_id,
     )
-    command_id = uuid.uuid4().hex
-    channel = f"libtmux_mcp_run_{command_id}"
-    status_option = f"@libtmux_mcp_status_{command_id}"
+    command_id = uuid.uuid4().hex[:10]
+    channel = f"r_{command_id}"
+    status_option = f"@s_{command_id}"
     payload = "\n".join(
         (
             "{",
             command.rstrip(),
             (
-                f"}}; __libtmux_mcp_status=$?; "
-                f'tmux set-option -p {status_option} "$__libtmux_mcp_status"; '
+                f"}}; s=$?; "
+                f'tmux set-option -p {status_option} "$s"; '
                 f"tmux wait-for -S {channel}"
             ),
         )
@@ -276,15 +277,41 @@ def _filter_run_command_internal_lines(
 ) -> list[str]:
     """Drop the private synchronisation line from captured output.
 
-    Matches only the per-call ``channel`` and ``status_option`` (random
-    hex that never collides with real output). ``run_command`` captures
-    with ``join_wrapped`` so the line stays one logical row even under a
-    wide prompt, keeping both markers intact.
+    Matches only the exact private wrapper shape and per-call markers,
+    including UUID continuations produced when a shell prompt wraps the
+    synchronisation line.
     """
+    status_line_re = re.compile(
+        r"(?:__libtmux_mcp_status|s)=\$\?;\s*tmux set-option -p "
+        r"(?:@libtmux_mcp_status_|@s_)[0-9a-fA-F]*"
+    )
+    wait_line_re = re.compile(
+        r'[0-9a-fA-F]*\s*"\$(?:__libtmux_mcp_status|s)";\s*'
+        r"tmux wait-for -S (?:libtmux_mcp_run_|r_)[0-9a-fA-F]*"
+    )
     internal_markers = (channel, status_option)
-    return [
-        line for line in lines if not any(marker in line for marker in internal_markers)
-    ]
+    hex_chars = frozenset("0123456789abcdefABCDEF")
+    kept: list[str] = []
+    drop_hex_continuation = False
+
+    for line in lines:
+        stripped = line.strip()
+        if (
+            any(marker in line for marker in internal_markers)
+            or status_line_re.search(line)
+            or wait_line_re.search(line)
+        ):
+            drop_hex_continuation = True
+            continue
+        if (
+            drop_hex_continuation
+            and 8 <= len(stripped) <= 32
+            and all(char in hex_chars for char in stripped)
+        ):
+            continue
+        drop_hex_continuation = False
+        kept.append(line)
+    return kept
 
 
 @handle_tool_errors
