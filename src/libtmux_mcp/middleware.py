@@ -375,6 +375,19 @@ _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
 #: must be digested the same way top-level ``send_keys(keys=...)`` is.
 _NESTED_ARG_LIST_NAMES: frozenset[str] = frozenset({"operations"})
 
+_NONE_TYPE = type(None)
+
+_SEND_KEYS_OPERATION_ARG_TYPES: dict[str, tuple[type[t.Any], ...]] = {
+    "keys": (str,),
+    "pane_id": (str, _NONE_TYPE),
+    "session_name": (str, _NONE_TYPE),
+    "session_id": (str, _NONE_TYPE),
+    "window_id": (str, _NONE_TYPE),
+    "enter": (bool,),
+    "literal": (bool,),
+    "suppress_history": (bool,),
+}
+
 #: String arguments longer than this get truncated in the log summary to
 #: keep records bounded. Non-sensitive strings only — sensitive ones are
 #: replaced entirely by their digest.
@@ -399,6 +412,23 @@ def _redact_digest(value: str) -> dict[str, t.Any]:
         "len": len(value),
         "sha256_prefix": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12],
     }
+
+
+def _redacted_value_shape(value: t.Any) -> dict[str, t.Any]:
+    """Return non-payload metadata for a value that cannot be logged."""
+    return {"type": type(value).__name__, "redacted": True}
+
+
+def _summarize_send_keys_operation_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Summarize one ``send_keys_batch`` operation for audit logging."""
+    summary: dict[str, t.Any] = {}
+    for key, value in args.items():
+        expected_types = _SEND_KEYS_OPERATION_ARG_TYPES.get(key)
+        if expected_types is None or not isinstance(value, expected_types):
+            summary[key] = _redacted_value_shape(value)
+        else:
+            summary[key] = _summarize_args({key: value})[key]
+    return summary
 
 
 def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
@@ -439,13 +469,16 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
-        elif key in _NESTED_ARG_LIST_NAMES and isinstance(value, list):
-            summary[key] = [
-                _summarize_args(item)
-                if isinstance(item, dict)
-                else {"type": type(item).__name__, "redacted": True}
-                for item in value
-            ]
+        elif key in _NESTED_ARG_LIST_NAMES:
+            if isinstance(value, list):
+                summary[key] = [
+                    _summarize_send_keys_operation_args(item)
+                    if isinstance(item, dict)
+                    else _redacted_value_shape(item)
+                    for item in value
+                ]
+            else:
+                summary[key] = _redacted_value_shape(value)
         elif isinstance(value, str) and len(value) > _MAX_LOGGED_STR_LEN:
             summary[key] = value[:_MAX_LOGGED_STR_LEN] + "...<truncated>"
         else:

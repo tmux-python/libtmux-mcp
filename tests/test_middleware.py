@@ -185,6 +185,15 @@ class MalformedOperationAuditFixture(t.NamedTuple):
     expected_type: str
 
 
+class MalformedOperationsPayloadAuditFixture(t.NamedTuple):
+    """Test fixture for malformed send_keys_batch audit payloads."""
+
+    test_id: str
+    args: dict[str, object]
+    forbidden_text: str
+    expected_shape: t.Literal["redacted_container", "redacted_unknown_field"]
+
+
 COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
     CommandRedactionFixture(
         test_id="credential_bearing",
@@ -209,6 +218,24 @@ MALFORMED_OPERATION_AUDIT_FIXTURES: list[MalformedOperationAuditFixture] = [
         operation=["keys=printf SECRET_COMMAND"],
         forbidden_text="SECRET_COMMAND",
         expected_type="list",
+    ),
+]
+
+
+MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES: list[
+    MalformedOperationsPayloadAuditFixture
+] = [
+    MalformedOperationsPayloadAuditFixture(
+        test_id="operations_object",
+        args={"operations": {"keys": "printf SECRET_OBJECT", "pane_id": "%1"}},
+        forbidden_text="SECRET_OBJECT",
+        expected_shape="redacted_container",
+    ),
+    MalformedOperationsPayloadAuditFixture(
+        test_id="unknown_operation_field",
+        args={"operations": [{"key": "printf SECRET_KEY", "pane_id": "%1"}]},
+        forbidden_text="SECRET_KEY",
+        expected_shape="redacted_unknown_field",
     ),
 ]
 
@@ -306,6 +333,34 @@ def test_summarize_args_redacts_malformed_send_keys_batch_operation_entries(
     assert isinstance(item, dict)
     assert item["type"] == expected_type
     assert item["redacted"] is True
+
+
+@pytest.mark.parametrize(
+    MalformedOperationsPayloadAuditFixture._fields,
+    MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES,
+    ids=[fixture.test_id for fixture in MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES],
+)
+def test_summarize_args_redacts_malformed_send_keys_batch_operation_payloads(
+    test_id: str,
+    args: dict[str, object],
+    forbidden_text: str,
+    expected_shape: t.Literal["redacted_container", "redacted_unknown_field"],
+) -> None:
+    """Malformed send_keys_batch operation payloads do not leak raw values."""
+    assert test_id
+    summary = _summarize_args(args)
+    rendered = str(summary)
+
+    assert forbidden_text not in rendered
+    operations = summary["operations"]
+    if expected_shape == "redacted_container":
+        assert operations == {"type": "dict", "redacted": True}
+    else:
+        assert isinstance(operations, list)
+        item = operations[0]
+        assert isinstance(item, dict)
+        assert item["pane_id"] == "%1"
+        assert item["key"] == {"type": "str", "redacted": True}
 
 
 def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
