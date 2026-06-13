@@ -108,6 +108,7 @@ def send_keys(
 def send_keys_batch(
     operations: list[SendKeysOperation],
     on_error: t.Literal["stop", "continue"] = "stop",
+    timeout: float | None = None,
     socket_name: str | None = None,
 ) -> SendKeysBatchResult:
     """Send an ordered batch of raw key/text operations to tmux panes.
@@ -130,6 +131,8 @@ def send_keys_batch(
     on_error : {"stop", "continue"}
         Whether to stop at the first failed operation or keep attempting
         later operations. Default "stop".
+    timeout : float, optional
+        Maximum time in seconds to allow the batch to run before aborting.
     socket_name : str, optional
         tmux socket name.
 
@@ -148,8 +151,24 @@ def send_keys_batch(
     server = _get_server(socket_name=socket_name)
     results: list[SendKeysOperationResult] = []
     stopped_at: int | None = None
+    batch_started = time.monotonic()
 
     for index, operation in enumerate(operations):
+        if timeout is not None and (time.monotonic() - batch_started) > timeout:
+            results.append(
+                SendKeysOperationResult(
+                    index=index,
+                    pane_id=operation.pane_id,
+                    success=False,
+                    error=f"batch execution exceeded timeout of {timeout}s",
+                    elapsed_seconds=0.0,
+                )
+            )
+            if on_error == "stop":
+                stopped_at = index
+                break
+            continue
+
         started = time.monotonic()
         pane_id: str | None = None
         try:

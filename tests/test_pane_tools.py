@@ -164,6 +164,32 @@ SEND_KEYS_BATCH_SUGGESTION_FIXTURES: list[SendKeysBatchSuggestionFixture] = [
 ]
 
 
+class SendKeysBatchTimeoutFixture(t.NamedTuple):
+    """Test fixture for send_keys_batch timeout."""
+
+    test_id: str
+    operations: list[dict[str, t.Any]]
+    timeout: float
+    expected_succeeded: int
+    expected_failed: int
+    expected_error_snippet: str
+
+
+SEND_KEYS_BATCH_TIMEOUT_FIXTURES: list[SendKeysBatchTimeoutFixture] = [
+    SendKeysBatchTimeoutFixture(
+        test_id="timeout_second_operation",
+        operations=[
+            {"keys": "echo 1"},
+            {"keys": "echo 2"},
+        ],
+        timeout=0.05,
+        expected_succeeded=1,
+        expected_failed=1,
+        expected_error_snippet="timeout",
+    ),
+]
+
+
 def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
     """send_keys sends keys to a pane."""
     result = send_keys(
@@ -319,6 +345,54 @@ def test_send_keys_batch_preserves_error_suggestions(
     error_msg = result.results[0].error
     assert error_msg is not None
     assert expected_error_snippet in error_msg
+
+
+@pytest.mark.parametrize(
+    SendKeysBatchTimeoutFixture._fields,
+    SEND_KEYS_BATCH_TIMEOUT_FIXTURES,
+    ids=[fixture.test_id for fixture in SEND_KEYS_BATCH_TIMEOUT_FIXTURES],
+)
+def test_send_keys_batch_timeout(
+    test_id: str,
+    operations: list[dict[str, t.Any]],
+    timeout: float,
+    expected_succeeded: int,
+    expected_failed: int,
+    expected_error_snippet: str,
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_keys_batch aborts if execution exceeds timeout."""
+    assert test_id
+    import time
+
+    from libtmux import Pane
+
+    from libtmux_mcp.models import SendKeysOperation
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+
+    original_send_keys = Pane.send_keys
+
+    def slow_send_keys(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        time.sleep(0.1)
+        return original_send_keys(*args, **kwargs)
+
+    monkeypatch.setattr(Pane, "send_keys", slow_send_keys)
+
+    op_models = []
+    for op in operations:
+        op["pane_id"] = mcp_pane.pane_id
+        op_models.append(SendKeysOperation(**op))
+
+    result = send_keys_batch(
+        operations=op_models,
+        timeout=timeout,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.succeeded == expected_succeeded
+    assert result.failed == expected_failed
+    assert expected_error_snippet in (result.results[-1].error or "").lower()
 
 
 @pytest.mark.parametrize(
