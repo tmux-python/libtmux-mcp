@@ -248,10 +248,6 @@ def test_run_command_reports_status_after_shell_state_change(
         assert any(expected_output in line for line in result.output)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="run_command stores exit status without targeting the resolved pane",
-)
 @pytest.mark.parametrize(
     RunCommandPaneTargetFixture._fields,
     RUN_COMMAND_PANE_TARGET_FIXTURES,
@@ -524,6 +520,19 @@ FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
             "RUN_OK",
             f"∙ }}; s=$?; tmux set-option -p @s_{_SHORT_PREVIOUS_ID[:6]}",
             f'{_SHORT_PREVIOUS_ID[6:]} "$s"; tmux wait-for -S r_{_SHORT_PREVIOUS_ID}',
+        ],
+        f"r_{_SHORT_CURRENT_ID}",
+        f"@s_{_SHORT_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "previous_targeted_short_marker",
+        [
+            "RUN_OK",
+            f"∙ }}; s=$?; tmux -L dev set-option -p -t %1 @s_{_SHORT_PREVIOUS_ID[:6]}",
+            (
+                f'{_SHORT_PREVIOUS_ID[6:]} "$s"; '
+                f"tmux -L dev wait-for -S r_{_SHORT_PREVIOUS_ID}"
+            ),
         ],
         f"r_{_SHORT_CURRENT_ID}",
         f"@s_{_SHORT_CURRENT_ID}",

@@ -168,7 +168,13 @@ async def run_command(
     command_id = uuid.uuid4().hex[:10]
     channel = f"r_{command_id}"
     status_option = f"@s_{command_id}"
-    status_cmd = shlex.join(_tmux_argv(server, "set-option", "-p", status_option))
+    target_pane_id = pane.pane_id
+    if target_pane_id is None:
+        msg = "resolved pane has no pane_id"
+        raise ExpectedToolError(msg)
+    status_cmd = shlex.join(
+        _tmux_argv(server, "set-option", "-p", "-t", target_pane_id, status_option)
+    )
     signal_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", channel))
     history_prefix = " " if suppress_history else ""
     payload = "\n".join(
@@ -288,11 +294,15 @@ def _filter_run_command_internal_lines(
     wrapped fragments are matched by private wrapper shape so prior
     scrollback does not leak into output.
     """
-    tmux_prefix = r"(?:\S*/)?tmux(?:\s+-[LS]\s+(?:'[^']*'|\S+))*\s+"
+    shell_arg = r"(?:'[^']*'|\S+)"
+    tmux_prefix = rf"(?:\S*/)?tmux(?:\s+-[LS]\s+{shell_arg})*\s+"
+    target_pane_arg = rf"(?:\s+-t\s+{shell_arg})?"
     status_line_re = re.compile(
         r"(?:__libtmux_mcp_status|s)=\$\?;\s*"
         + tmux_prefix
-        + r"set-option -p "
+        + r"set-option -p"
+        + target_pane_arg
+        + r"\s+"
         + r"(?P<prefix>@libtmux_mcp_status_|@s_)"
         + r"(?P<id>[0-9a-fA-F]+)(?![0-9A-Za-z_])"
     )
