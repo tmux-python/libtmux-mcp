@@ -124,10 +124,10 @@ def test_safety_middleware_default_tier() -> None:
 
 
 def test_safety_middleware_invalid_tier_falls_back() -> None:
-    """SafetyMiddleware falls back to mutating for unknown tiers."""
+    """SafetyMiddleware falls back to readonly for unknown tiers."""
     mw = SafetyMiddleware(max_tier="nonexistent")
     assert mw._is_allowed({TAG_READONLY}) is True
-    assert mw._is_allowed({TAG_MUTATING}) is True
+    assert mw._is_allowed({TAG_MUTATING}) is False
     assert mw._is_allowed({TAG_DESTRUCTIVE}) is False
 
 

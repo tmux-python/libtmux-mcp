@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+import textwrap
 import typing as t
 
 import pytest
@@ -82,6 +87,23 @@ BUILD_INSTRUCTIONS_FIXTURES: list[BuildInstructionsFixture] = [
 ]
 
 
+class SafetyLevelFixture(t.NamedTuple):
+    """Test fixture for server safety-level resolution."""
+
+    test_id: str
+    env_value: str | None
+    expected_level: str
+
+
+SAFETY_LEVEL_FIXTURES: list[SafetyLevelFixture] = [
+    SafetyLevelFixture("unset_defaults_mutating", None, TAG_MUTATING),
+    SafetyLevelFixture("valid_readonly", TAG_READONLY, TAG_READONLY),
+    SafetyLevelFixture("valid_mutating", TAG_MUTATING, TAG_MUTATING),
+    SafetyLevelFixture("valid_destructive", TAG_DESTRUCTIVE, TAG_DESTRUCTIVE),
+    SafetyLevelFixture("invalid_fails_closed", "read", TAG_READONLY),
+]
+
+
 @pytest.mark.parametrize(
     BuildInstructionsFixture._fields,
     BUILD_INSTRUCTIONS_FIXTURES,
@@ -127,6 +149,61 @@ def test_build_instructions(
 
     if expect_safety_in_text is not None:
         assert f"Safety level: {expect_safety_in_text}" in result
+
+
+@pytest.mark.parametrize(
+    SafetyLevelFixture._fields,
+    SAFETY_LEVEL_FIXTURES,
+    ids=[f.test_id for f in SAFETY_LEVEL_FIXTURES],
+)
+def test_resolve_safety_level(
+    test_id: str,
+    env_value: str | None,
+    expected_level: str,
+) -> None:
+    """Safety env values resolve to the server's effective tier."""
+    from libtmux_mcp.server import _resolve_safety_level
+
+    assert test_id
+    assert _resolve_safety_level(env_value) == expected_level
+
+
+def test_invalid_safety_env_hides_mutating_tools() -> None:
+    """Invalid ``LIBTMUX_SAFETY`` values expose readonly tools only."""
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            tools = await build_mcp_server().list_tools()
+            names = {tool.name for tool in tools}
+            print(json.dumps({
+                "list_sessions": "list_sessions" in names,
+                "send_keys": "send_keys" in names,
+                "kill_pane": "kill_pane" in names,
+            }))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": "read"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    result = json.loads(proc.stdout)
+
+    assert result == {
+        "list_sessions": True,
+        "send_keys": False,
+        "kill_pane": False,
+    }
 
 
 def test_base_instructions_content() -> None:

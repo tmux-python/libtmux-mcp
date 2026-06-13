@@ -108,7 +108,7 @@ re-sending the same scrollback to the model on every check.
 and declines self-destructive operations — [`kill_session`](https://libtmux-mcp.git-pull.com/tools/session/kill-session/)
 on itself fails loudly instead of silently terminating the host
 environment the agent is running in. [`LIBTMUX_SAFETY`](https://libtmux-mcp.git-pull.com/configuration/#envvar-LIBTMUX_SAFETY)
-(`read`, `read+send`, `read+send+kill`) hides whole tiers from the
+(`readonly`, `mutating`, `destructive`) hides whole tiers from the
 client's tool list before any prompt is built.
 
 ## Documentation

@@ -151,7 +151,7 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     # Safety tier context
     parts.append(
         f"\n\nSafety level: {safety_level} "
-        "(readonly: read; mutating: read+send; destructive: read+send+kill). "
+        "(values: readonly, mutating, destructive). "
         "Set LIBTMUX_SAFETY; off-tier tools are hidden."
     )
 
@@ -187,14 +187,21 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     return "".join(parts)
 
 
-_safety_level = os.environ.get("LIBTMUX_SAFETY", TAG_MUTATING)
-if _safety_level not in VALID_SAFETY_LEVELS:
+def _resolve_safety_level(value: str | None) -> str:
+    """Return the effective safety level for a ``LIBTMUX_SAFETY`` value."""
+    if value is None:
+        return TAG_MUTATING
+    if value in VALID_SAFETY_LEVELS:
+        return value
     logger.warning(
         "invalid LIBTMUX_SAFETY=%r, falling back to %s",
-        _safety_level,
-        TAG_MUTATING,
+        value,
+        TAG_READONLY,
     )
-    _safety_level = TAG_MUTATING
+    return TAG_READONLY
+
+
+_safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
 
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output is terminal scrollback benefit from this backstop;

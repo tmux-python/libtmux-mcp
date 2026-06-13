@@ -68,7 +68,7 @@ class SafetyMiddleware(Middleware):
     """
 
     def __init__(self, max_tier: str = TAG_MUTATING) -> None:
-        self.max_level = _TIER_LEVELS.get(max_tier, 1)
+        self.max_level = _TIER_LEVELS.get(max_tier, 0)
 
     def _is_allowed(self, tags: set[str]) -> bool:
         """Return True if the tool's tags fall within the allowed tier.
