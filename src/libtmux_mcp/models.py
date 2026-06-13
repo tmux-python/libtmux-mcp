@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionInfo(BaseModel):
@@ -304,6 +304,8 @@ class RunCommandResult(BaseModel):
 
 class SendKeysOperation(BaseModel):
     """One raw-input operation for :func:`send_keys_batch`."""
+
+    model_config = ConfigDict(extra="forbid")
 
     keys: str = Field(description="Keys or text to send.")
     pane_id: str | None = Field(

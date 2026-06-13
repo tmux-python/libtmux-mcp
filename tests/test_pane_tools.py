@@ -8,6 +8,7 @@ import shlex
 import time
 import typing as t
 
+import pydantic
 import pytest
 from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
@@ -19,6 +20,7 @@ from libtmux_mcp.models import (
     PaneContentMatch,
     PaneSnapshot,
     SearchPanesResult,
+    SendKeysOperation,
     WaitForTextResult,
 )
 from libtmux_mcp.tools.pane_tools import (
@@ -79,6 +81,14 @@ class RunCommandPaneTargetFixture(t.NamedTuple):
     expected_output: str
 
 
+class SendKeysOperationValidationFixture(t.NamedTuple):
+    """Test fixture for send_keys_batch operation validation."""
+
+    test_id: str
+    payload: dict[str, object]
+    expected_field: str
+
+
 class RunCommandHistoryFixture(t.NamedTuple):
     """Test fixture for run_command shell history suppression."""
 
@@ -120,6 +130,20 @@ RUN_COMMAND_PANE_TARGET_FIXTURES: list[RunCommandPaneTargetFixture] = [
 
 RUN_COMMAND_HISTORY_FIXTURES: list[RunCommandHistoryFixture] = [
     RunCommandHistoryFixture("bash_ignorespace", "RUN_COMMAND_HISTORY_SECRET"),
+]
+
+
+SEND_KEYS_OPERATION_VALIDATION_FIXTURES: list[SendKeysOperationValidationFixture] = [
+    SendKeysOperationValidationFixture(
+        test_id="unknown_pane_alias",
+        payload={"keys": "printf SECRET", "pane": "%2"},
+        expected_field="pane",
+    ),
+    SendKeysOperationValidationFixture(
+        test_id="misspelled_pane_id",
+        payload={"keys": "printf SECRET", "pan_id": "%2"},
+        expected_field="pan_id",
+    ),
 ]
 
 
@@ -253,6 +277,24 @@ def test_send_keys_batch_rejects_empty_operations(mcp_server: Server) -> None:
 
     with pytest.raises(ToolError, match="operations must not be empty"):
         send_keys_batch(operations=[], socket_name=mcp_server.socket_name)
+
+
+@pytest.mark.parametrize(
+    SendKeysOperationValidationFixture._fields,
+    SEND_KEYS_OPERATION_VALIDATION_FIXTURES,
+    ids=[fixture.test_id for fixture in SEND_KEYS_OPERATION_VALIDATION_FIXTURES],
+)
+def test_send_keys_operation_rejects_unknown_fields(
+    test_id: str,
+    payload: dict[str, object],
+    expected_field: str,
+) -> None:
+    """send_keys_batch operation validation rejects unsupported fields."""
+    assert test_id
+    with pytest.raises(pydantic.ValidationError) as excinfo:
+        SendKeysOperation.model_validate(payload)
+
+    assert expected_field in str(excinfo.value)
 
 
 def test_send_keys_docstring_routes_authored_commands_to_run_command() -> None:
