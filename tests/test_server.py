@@ -206,6 +206,25 @@ def test_invalid_safety_env_hides_mutating_tools() -> None:
     }
 
 
+def test_run_server_pins_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_server passes an explicit stdio transport to FastMCP."""
+    from libtmux_mcp import server as server_mod
+
+    class FakeServer:
+        transport: str | None = None
+
+        def run(self, *, transport: str | None = None) -> None:
+            self.transport = transport
+
+    fake = FakeServer()
+
+    monkeypatch.setattr(server_mod, "build_mcp_server", lambda: fake)
+
+    server_mod.run_server()
+
+    assert fake.transport == "stdio"
+
+
 def test_base_instructions_content() -> None:
     """_BASE_INSTRUCTIONS contains key guidance for the LLM."""
     assert "tmux hierarchy" in _BASE_INSTRUCTIONS

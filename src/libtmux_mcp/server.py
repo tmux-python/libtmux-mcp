@@ -375,4 +375,4 @@ def build_mcp_server() -> FastMCP:
 def run_server() -> None:
     """Run the MCP server."""
     server = build_mcp_server()
-    server.run()
+    server.run(transport="stdio")
