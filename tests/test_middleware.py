@@ -234,6 +234,32 @@ def test_summarize_args_redacts_sensitive_dict_values() -> None:
     assert summary["pane_id"] == "%1"
 
 
+def test_summarize_args_redacts_send_keys_batch_operations() -> None:
+    """send_keys_batch operation payloads are digested inside the list."""
+    args: dict[str, t.Any] = {
+        "operations": [
+            {"keys": "psql -U admin -W supersecret mydb", "pane_id": "%1"},
+            {"keys": "printf public", "pane_id": "%2", "enter": False},
+        ],
+        "on_error": "continue",
+    }
+
+    summary = _summarize_args(args)
+    rendered = str(summary)
+
+    assert "supersecret" not in rendered
+    assert "printf public" not in rendered
+    first = summary["operations"][0]
+    second = summary["operations"][1]
+    assert first["pane_id"] == "%1"
+    assert second["pane_id"] == "%2"
+    assert second["enter"] is False
+    for operation in (first, second):
+        assert isinstance(operation["keys"], dict)
+        assert "len" in operation["keys"]
+        assert "sha256_prefix" in operation["keys"]
+
+
 def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
     """Non-sensitive strings over the cap get truncated with a marker."""
     args = {"output_path": "x" * 500}

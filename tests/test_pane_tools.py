@@ -133,20 +133,135 @@ def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
     assert "sent" in result.lower()
 
 
-def test_send_keys_docstring_cross_links_wait_for_channel() -> None:
-    """``send_keys`` docstring steers agents at ``wait_for_channel`` first.
+def test_send_keys_batch_sends_operations_in_order(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """send_keys_batch sends ordered raw-input operations and reports each one."""
+    import asyncio
 
-    Agents read tool descriptions when picking a synchronization primitive.
-    After the baseline-anchor design landed, ``send_keys`` →
-    ``wait_for_text`` can race for fast commands (the baseline locks after
-    the keys are buffered), and the channel pattern is strictly cheaper
-    for command completion. The docstring must therefore mention both
-    ``wait_for_channel`` and ``run_and_wait`` so the agent can find the
-    safe pattern without a separate docs lookup.
-    """
+    from libtmux_mcp.models import SendKeysBatchResult, SendKeysOperation
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    channel = "mcp_test_send_keys_batch_order"
+    result = send_keys_batch(
+        operations=[
+            SendKeysOperation(
+                keys="printf 'BATCH_FIRST\\n'",
+                pane_id=mcp_pane.pane_id,
+            ),
+            SendKeysOperation(
+                keys=f"printf 'BATCH_SECOND\\n'; tmux wait-for -S {channel}",
+                pane_id=mcp_pane.pane_id,
+            ),
+        ],
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert isinstance(result, SendKeysBatchResult)
+    assert result.succeeded == 2
+    assert result.failed == 0
+    assert result.stopped_at is None
+    assert [item.index for item in result.results] == [0, 1]
+    assert all(item.success for item in result.results)
+    assert all(item.pane_id == mcp_pane.pane_id for item in result.results)
+
+    asyncio.run(
+        wait_for_channel(channel, timeout=5.0, socket_name=mcp_server.socket_name)
+    )
+    capture = "\n".join(mcp_pane.capture_pane())
+    assert capture.index("BATCH_FIRST") < capture.index("BATCH_SECOND")
+
+
+def test_send_keys_batch_continues_after_operation_error(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """send_keys_batch can keep later operations after a target failure."""
+    import asyncio
+
+    from libtmux_mcp.models import SendKeysOperation
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    channel = "mcp_test_send_keys_batch_continue"
+    result = send_keys_batch(
+        operations=[
+            SendKeysOperation(
+                keys="printf 'BATCH_BEFORE\\n'",
+                pane_id=mcp_pane.pane_id,
+            ),
+            SendKeysOperation(keys="printf 'BATCH_MISSING\\n'", pane_id="%999999"),
+            SendKeysOperation(
+                keys=f"printf 'BATCH_AFTER\\n'; tmux wait-for -S {channel}",
+                pane_id=mcp_pane.pane_id,
+            ),
+        ],
+        on_error="continue",
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.succeeded == 2
+    assert result.failed == 1
+    assert result.stopped_at is None
+    assert [item.success for item in result.results] == [True, False, True]
+    assert result.results[1].pane_id is None
+    assert "Pane not found" in (result.results[1].error or "")
+
+    asyncio.run(
+        wait_for_channel(channel, timeout=5.0, socket_name=mcp_server.socket_name)
+    )
+    capture = "\n".join(mcp_pane.capture_pane())
+    assert "BATCH_BEFORE" in capture
+    assert "BATCH_AFTER" in capture
+    assert "BATCH_MISSING" not in capture
+
+
+def test_send_keys_batch_stops_after_operation_error(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """send_keys_batch defaults to stop-on-error without raising."""
+    from libtmux_mcp.models import SendKeysOperation
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+
+    result = send_keys_batch(
+        operations=[
+            SendKeysOperation(
+                keys="printf 'BATCH_STOP_BEFORE\\n'",
+                pane_id=mcp_pane.pane_id,
+            ),
+            SendKeysOperation(keys="printf 'BATCH_STOP_MISSING\\n'", pane_id="%999999"),
+            SendKeysOperation(
+                keys="printf 'BATCH_STOP_AFTER\\n'",
+                pane_id=mcp_pane.pane_id,
+            ),
+        ],
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.succeeded == 1
+    assert result.failed == 1
+    assert result.stopped_at == 1
+    assert len(result.results) == 2
+    assert [item.success for item in result.results] == [True, False]
+    capture = "\n".join(mcp_pane.capture_pane())
+    assert "BATCH_STOP_AFTER" not in capture
+
+
+def test_send_keys_batch_rejects_empty_operations(mcp_server: Server) -> None:
+    """send_keys_batch requires at least one operation."""
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+
+    with pytest.raises(ToolError, match="operations must not be empty"):
+        send_keys_batch(operations=[], socket_name=mcp_server.socket_name)
+
+
+def test_send_keys_docstring_routes_authored_commands_to_run_command() -> None:
+    """``send_keys`` docstring keeps raw input below command completion."""
     assert send_keys.__doc__ is not None
+    assert "run_command" in send_keys.__doc__
+    assert "send_keys_batch" in send_keys.__doc__
+    assert "capture_since" in send_keys.__doc__
     assert "wait_for_channel" in send_keys.__doc__
-    assert "run_and_wait" in send_keys.__doc__
 
 
 @pytest.mark.parametrize(
@@ -4203,6 +4318,7 @@ def test_paste_text_does_not_leak_named_buffer(
         # Shell-driving tools: the command the caller sends can reach
         # arbitrary external state, so the interaction is open-world.
         ("send_keys", True),
+        ("send_keys_batch", True),
         ("run_command", True),
         ("paste_text", True),
         ("pipe_pane", True),
