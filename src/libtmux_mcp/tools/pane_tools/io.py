@@ -204,7 +204,10 @@ async def run_command(
         with contextlib.suppress(Exception):
             pane.cmd("set-option", "-p", "-u", status_option)
 
-    raw_lines = await asyncio.to_thread(pane.capture_pane)
+    # join_wrapped keeps the private sync line a single logical row, so
+    # _filter_run_command_internal_lines can match it by the per-call
+    # channel/status option even when a wide prompt wraps it.
+    raw_lines = await asyncio.to_thread(pane.capture_pane, join_wrapped=True)
     visible_lines = _filter_run_command_internal_lines(
         raw_lines,
         channel=channel,
@@ -271,16 +274,14 @@ def _truncate_lines_tail(
 def _filter_run_command_internal_lines(
     lines: list[str], channel: str, status_option: str
 ) -> list[str]:
-    """Drop private synchronisation commands from captured command output."""
-    internal_markers = (
-        channel,
-        status_option,
-        "__libtmux_mcp_status",
-        "libtmux_mcp_",
-        "mcp_status",
-        "tmux wait-for -S",
-        "tmux set-option -p",
-    )
+    """Drop the private synchronisation line from captured output.
+
+    Matches only the per-call ``channel`` and ``status_option`` (random
+    hex that never collides with real output). ``run_command`` captures
+    with ``join_wrapped`` so the line stays one logical row even under a
+    wide prompt, keeping both markers intact.
+    """
+    internal_markers = (channel, status_option)
     return [
         line for line in lines if not any(marker in line for marker in internal_markers)
     ]

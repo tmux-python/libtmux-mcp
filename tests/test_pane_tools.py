@@ -245,10 +245,6 @@ FILTER_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
 ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#76: over-broad markers drop legitimate run_command output",
-)
 @pytest.mark.parametrize(
     FilterInternalLinesFixture._fields,
     FILTER_KEEP_FIXTURES,
@@ -267,6 +263,23 @@ def test_filter_run_command_keeps_legitimate_output(test_id: str, line: str) -> 
         [line], channel=channel, status_option=status_option
     )
     assert kept == [line]
+
+
+def test_filter_run_command_drops_sync_line() -> None:
+    """The joined private synchronisation line is removed from output."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    command_id = "deadbeefdeadbeefdeadbeefdeadbeef"
+    channel = f"libtmux_mcp_run_{command_id}"
+    status_option = f"@libtmux_mcp_status_{command_id}"
+    sync_line = (
+        f"}}; __libtmux_mcp_status=$?; tmux set-option -p {status_option} "
+        f'"$__libtmux_mcp_status"; tmux wait-for -S {channel}'
+    )
+    kept = _filter_run_command_internal_lines(
+        ["RUN_OK", sync_line], channel=channel, status_option=status_option
+    )
+    assert kept == ["RUN_OK"]
 
 
 def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
