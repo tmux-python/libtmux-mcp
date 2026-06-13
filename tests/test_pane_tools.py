@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import shlex
 import time
@@ -48,6 +49,7 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
+    from libtmux.window import Window
 
 
 class RunCommandFixture(t.NamedTuple):
@@ -66,6 +68,15 @@ class RunCommandStatusIsolationFixture(t.NamedTuple):
     command: str
     expected_status: int
     expected_output: str | None
+
+
+class RunCommandPaneTargetFixture(t.NamedTuple):
+    """Test fixture for run_command pane-targeted status handoff."""
+
+    test_id: str
+    command: str
+    expected_status: int
+    expected_output: str
 
 
 class RunCommandHistoryFixture(t.NamedTuple):
@@ -94,6 +105,16 @@ RUN_COMMAND_STATUS_ISOLATION_FIXTURES: list[RunCommandStatusIsolationFixture] = 
         "RUN_COMMAND_PATH_OK",
     ),
     RunCommandStatusIsolationFixture("errexit_false", "set -e; false", 1, None),
+]
+
+
+RUN_COMMAND_PANE_TARGET_FIXTURES: list[RunCommandPaneTargetFixture] = [
+    RunCommandPaneTargetFixture(
+        "missing_tmux_pane_env_in_inactive_target",
+        "printf 'RUN_COMMAND_TARGET_OK\\n'",
+        0,
+        "RUN_COMMAND_TARGET_OK",
+    ),
 ]
 
 
@@ -225,6 +246,64 @@ def test_run_command_reports_status_after_shell_state_change(
     assert result.timed_out is False
     if expected_output is not None:
         assert any(expected_output in line for line in result.output)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="run_command stores exit status without targeting the resolved pane",
+)
+@pytest.mark.parametrize(
+    RunCommandPaneTargetFixture._fields,
+    RUN_COMMAND_PANE_TARGET_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_PANE_TARGET_FIXTURES],
+)
+def test_run_command_status_option_targets_resolved_pane(
+    mcp_server: Server,
+    mcp_window: Window,
+    mcp_pane: Pane,
+    test_id: str,
+    command: str,
+    expected_status: int,
+    expected_output: str,
+) -> None:
+    """run_command status storage targets the pane the command ran in."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+    assert mcp_pane.pane_id is not None
+    target_pane = mcp_window.split(attach=False)
+    assert target_pane.pane_id is not None
+    mcp_window.select_pane(mcp_pane.pane_id)
+
+    target_pane.send_keys("exec env -u TMUX_PANE bash --noprofile --norc", enter=True)
+    retry_until(
+        lambda: any("bash-" in line for line in target_pane.capture_pane()),
+        3,
+        raises=True,
+    )
+
+    result = None
+    try:
+        result = asyncio.run(
+            run_command(
+                command=command,
+                pane_id=target_pane.pane_id,
+                timeout=5.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+    finally:
+        with contextlib.suppress(libtmux_exc.LibTmuxException):
+            mcp_window.select_pane(mcp_pane.pane_id)
+        with contextlib.suppress(libtmux_exc.LibTmuxException):
+            target_pane.kill()
+
+    assert result is not None
+    assert result.exit_status == expected_status
+    assert result.timed_out is False
+    assert any(expected_output in line for line in result.output)
 
 
 @pytest.mark.parametrize(
