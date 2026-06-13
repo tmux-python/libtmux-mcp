@@ -354,12 +354,7 @@ def test_run_command_tail_preserves_output_with_wrapped_private_prompt(
 
 
 class FilterInternalLinesFixture(t.NamedTuple):
-    """Fixture for _filter_run_command_internal_lines false-drop cases.
-
-    Each line contains a substring the over-broad markers matched but
-    not the per-call channel or status option, so it is legitimate
-    command output that must survive filtering.
-    """
+    """Fixture for legitimate output that resembles wrapper text."""
 
     test_id: str
     line: str
@@ -373,7 +368,7 @@ FILTER_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
 ]
 
 
-FILTER_KEEP_XFAIL_FIXTURES: list[FilterInternalLinesFixture] = [
+FILTER_WRAPPER_LIKE_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
     FilterInternalLinesFixture(
         "tmux_script_status_option",
         "s=$?; tmux set-option -p @s_myapp_status 1",
@@ -457,7 +452,7 @@ FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
 ]
 
 
-FILTER_CURRENT_SYNC_XFAIL_FIXTURES: list[FilterCurrentSyncLineFixture] = [
+FILTER_CURRENT_SYNC_KEEP_FIXTURES: list[FilterCurrentSyncLineFixture] = [
     FilterCurrentSyncLineFixture("single_hex_output", ["abcdef1234", "DONE"]),
     FilterCurrentSyncLineFixture(
         "consecutive_hex_output",
@@ -472,7 +467,7 @@ FILTER_CURRENT_SYNC_XFAIL_FIXTURES: list[FilterCurrentSyncLineFixture] = [
     ids=[f.test_id for f in FILTER_KEEP_FIXTURES],
 )
 def test_filter_run_command_keeps_legitimate_output(test_id: str, line: str) -> None:
-    """Output matching old markers but not the per-call UUID survives."""
+    """Legitimate output without private markers survives filtering."""
     from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
 
     command_id = "deadbeefdeadbeefdeadbeefdeadbeef"
@@ -486,14 +481,10 @@ def test_filter_run_command_keeps_legitimate_output(test_id: str, line: str) -> 
     assert kept == [line]
 
 
-@pytest.mark.xfail(
-    reason="run_command filter overmatches wrapper-shaped user output",
-    strict=True,
-)
 @pytest.mark.parametrize(
     FilterInternalLinesFixture._fields,
-    FILTER_KEEP_XFAIL_FIXTURES,
-    ids=[f.test_id for f in FILTER_KEEP_XFAIL_FIXTURES],
+    FILTER_WRAPPER_LIKE_KEEP_FIXTURES,
+    ids=[f.test_id for f in FILTER_WRAPPER_LIKE_KEEP_FIXTURES],
 )
 def test_filter_run_command_keeps_wrapper_like_output(test_id: str, line: str) -> None:
     """Legitimate tmux-looking command output survives filtering."""
@@ -525,14 +516,10 @@ def test_filter_run_command_drops_sync_line() -> None:
     assert kept == ["RUN_OK"]
 
 
-@pytest.mark.xfail(
-    reason="run_command filter drops hex output after the current sync line",
-    strict=True,
-)
 @pytest.mark.parametrize(
     FilterCurrentSyncLineFixture._fields,
-    FILTER_CURRENT_SYNC_XFAIL_FIXTURES,
-    ids=[f.test_id for f in FILTER_CURRENT_SYNC_XFAIL_FIXTURES],
+    FILTER_CURRENT_SYNC_KEEP_FIXTURES,
+    ids=[f.test_id for f in FILTER_CURRENT_SYNC_KEEP_FIXTURES],
 )
 def test_filter_run_command_keeps_hex_output_after_current_sync_line(
     test_id: str, output_lines: list[str]

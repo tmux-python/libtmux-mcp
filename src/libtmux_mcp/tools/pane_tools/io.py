@@ -209,9 +209,8 @@ async def run_command(
         with contextlib.suppress(Exception):
             pane.cmd("set-option", "-p", "-u", status_option)
 
-    # join_wrapped keeps the private sync line a single logical row, so
-    # _filter_run_command_internal_lines can match it by the per-call
-    # channel/status option even when a wide prompt wraps it.
+    # join_wrapped reduces prompt wrapping; the filter also handles private
+    # sync fragments that shells still echo across rows.
     raw_lines = await asyncio.to_thread(pane.capture_pane, join_wrapped=True)
     visible_lines = _filter_run_command_internal_lines(
         raw_lines,
@@ -279,40 +278,62 @@ def _truncate_lines_tail(
 def _filter_run_command_internal_lines(
     lines: list[str], channel: str, status_option: str
 ) -> list[str]:
-    """Drop the private synchronisation line from captured output.
+    """Drop private run_command synchronization rows from captured output.
 
-    Matches only the exact private wrapper shape and per-call markers,
-    including UUID continuations produced when a shell prompt wraps the
-    synchronisation line.
+    The current call is matched by exact channel/status markers. Older
+    wrapped fragments are matched by private wrapper shape so prior
+    scrollback does not leak into output.
     """
+    tmux_prefix = r"(?:\S*/)?tmux(?:\s+-[LS]\s+(?:'[^']*'|\S+))*\s+"
     status_line_re = re.compile(
-        r"(?:__libtmux_mcp_status|s)=\$\?;\s*tmux set-option -p "
-        r"(?:@libtmux_mcp_status_|@s_)[0-9a-fA-F]*"
+        r"(?:__libtmux_mcp_status|s)=\$\?;\s*"
+        + tmux_prefix
+        + r"set-option -p "
+        + r"(?P<prefix>@libtmux_mcp_status_|@s_)"
+        + r"(?P<id>[0-9a-fA-F]+)(?![0-9A-Za-z_])"
     )
     wait_line_re = re.compile(
         r'[0-9a-fA-F]*\s*"\$(?:__libtmux_mcp_status|s)";\s*'
-        r"tmux wait-for -S (?:libtmux_mcp_run_|r_)[0-9a-fA-F]*"
+        + tmux_prefix
+        + r"wait-for -S "
+        + r"(?P<prefix>libtmux_mcp_run_|r_)"
+        + r"(?P<id>[0-9a-fA-F]*)(?![0-9A-Za-z_])"
     )
     internal_markers = (channel, status_option)
     hex_chars = frozenset("0123456789abcdefABCDEF")
     kept: list[str] = []
     drop_hex_continuation = False
 
+    def expected_private_id_length(prefix: str) -> int:
+        return 32 if "libtmux_mcp" in prefix else 10
+
     for line in lines:
         stripped = line.strip()
-        if (
-            any(marker in line for marker in internal_markers)
-            or status_line_re.search(line)
-            or wait_line_re.search(line)
-        ):
-            drop_hex_continuation = True
-            continue
         if (
             drop_hex_continuation
             and 8 <= len(stripped) <= 32
             and all(char in hex_chars for char in stripped)
         ):
+            drop_hex_continuation = False
             continue
+
+        if any(marker in line for marker in internal_markers):
+            drop_hex_continuation = False
+            continue
+
+        status_match = status_line_re.search(line)
+        wait_match = wait_line_re.search(line)
+        if status_match or wait_match:
+            drop_hex_continuation = False
+            for match in (status_match, wait_match):
+                if match is None:
+                    continue
+                private_id = match.group("id")
+                expected_len = expected_private_id_length(match.group("prefix"))
+                if len(private_id) < expected_len:
+                    drop_hex_continuation = True
+            continue
+
         drop_hex_continuation = False
         kept.append(line)
     return kept
