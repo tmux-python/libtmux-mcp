@@ -44,6 +44,10 @@ class WindowInfo(BaseModel):
     )
     window_width: str | None = Field(default=None, description="Width in columns")
     window_height: str | None = Field(default=None, description="Height in rows")
+    active_pane_id: str | None = Field(
+        default=None,
+        description="Pane id (``%N``) of the window's active pane.",
+    )
 
 
 class PaneInfo(BaseModel):
@@ -274,6 +278,30 @@ class CaptureSinceResult(BaseModel):
     )
 
 
+class RunCommandResult(BaseModel):
+    """Result of running a shell command in a pane."""
+
+    pane_id: str = Field(description="Pane ID that received the command")
+    exit_status: int | None = Field(
+        default=None,
+        description="Shell exit status, or None when the command timed out",
+    )
+    timed_out: bool = Field(description="True when the wait timed out")
+    elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+    output: list[str] = Field(
+        default_factory=list,
+        description="Tail-preserved pane output after the wait completes",
+    )
+    output_truncated: bool = Field(
+        default=False,
+        description="True when output was tail-preserved to stay within max_lines",
+    )
+    output_truncated_lines: int = Field(
+        default=0,
+        description="Number of pane lines dropped from the head when truncating",
+    )
+
+
 class PaneSnapshot(BaseModel):
     """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
 
@@ -321,6 +349,15 @@ class PaneSnapshot(BaseModel):
     pane_tty: str | None = Field(
         default=None,
         description="TTY device path of the pane (e.g. '/dev/pts/5').",
+    )
+    pane_pid: str | None = Field(default=None, description="Process ID")
+    pane_dead: bool | None = Field(
+        default=None,
+        description="True when tmux reports the pane process has exited.",
+    )
+    alternate_on: bool | None = Field(
+        default=None,
+        description="True when the pane is using the alternate screen.",
     )
     pane_in_mode: bool = Field(description="True if pane is in copy-mode or view-mode")
     pane_mode: str | None = Field(

@@ -68,7 +68,7 @@ class SafetyMiddleware(Middleware):
     """
 
     def __init__(self, max_tier: str = TAG_MUTATING) -> None:
-        self.max_level = _TIER_LEVELS.get(max_tier, 1)
+        self.max_level = _TIER_LEVELS.get(max_tier, 0)
 
     def _is_allowed(self, tags: set[str]) -> bool:
         """Return True if the tool's tags fall within the allowed tier.
@@ -348,9 +348,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 # ---------------------------------------------------------------------------
 
 #: Argument names that carry user-supplied payloads we never want in logs.
-#: ``keys`` (send_keys), ``text`` (paste_text), ``value`` (set_environment),
-#: ``content`` (load_buffer), ``shell`` (respawn_pane), and ``environment``
-#: (respawn_pane) can contain commands, secrets, or arbitrary large strings.
+#: ``keys`` (send_keys), ``text`` (paste_text), ``command`` (run_command),
+#: ``value`` (set_environment), ``content`` (load_buffer), ``shell``
+#: (respawn_pane), and ``environment`` (respawn_pane) can contain commands,
+#: secrets, or arbitrary large strings.
 #: Matched by exact name, case-sensitive, to mirror the tool signatures.
 #:
 #: ``environment`` is dict-shaped (``dict[str, str]``); the redaction logic
@@ -365,7 +366,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: via the OS process table and tmux's ``pane_current_command`` metadata
 #: until the spawned shell takes over — see ``docs/topics/safety.md``.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
-    {"keys", "text", "value", "content", "shell", "environment"}
+    {"keys", "text", "command", "value", "content", "shell", "environment"}
 )
 
 #: String arguments longer than this get truncated in the log summary to
@@ -506,11 +507,10 @@ class AuditMiddleware(Middleware):
 # ---------------------------------------------------------------------------
 
 #: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`.
-#: Chosen strictly above the per-tool ``max_lines`` caps (500 lines x
-#: ~100 bytes/line) so normal operation does not trip the middleware —
-#: it only fires when a tool forgot to declare its own cap or the user
-#: opted out via ``max_lines=None``.
-DEFAULT_RESPONSE_LIMIT_BYTES = 50_000
+#: Matches FastMCP's stock 1 MB default so normal schema-bearing tool
+#: responses stay below this global backstop. Tool-level caps remain
+#: responsible for terminal-specific truncation metadata.
+DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 
 
 class ReadonlyRetryMiddleware(Middleware):

@@ -5,7 +5,7 @@
 
 **Use when** you want a clean terminal before capturing output.
 
-**Side effects:** Clears the pane's visible content.
+**Side effects:** Clears the pane's visible content and scrollback.
 
 **Example:**
 

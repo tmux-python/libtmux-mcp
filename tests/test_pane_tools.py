@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import pathlib
+import shlex
+import time
 import typing as t
 
 import pytest
@@ -45,6 +49,78 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
+    from libtmux.window import Window
+
+
+class RunCommandFixture(t.NamedTuple):
+    """Test fixture for run_command exit-status cases."""
+
+    test_id: str
+    command: str
+    expected_status: int
+    expected_output: str
+
+
+class RunCommandStatusIsolationFixture(t.NamedTuple):
+    """Test fixture for shell-state changes before run_command's trailer."""
+
+    test_id: str
+    command: str
+    expected_status: int
+    expected_output: str | None
+
+
+class RunCommandPaneTargetFixture(t.NamedTuple):
+    """Test fixture for run_command pane-targeted status handoff."""
+
+    test_id: str
+    command: str
+    expected_status: int
+    expected_output: str
+
+
+class RunCommandHistoryFixture(t.NamedTuple):
+    """Test fixture for run_command shell history suppression."""
+
+    test_id: str
+    secret: str
+
+
+RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
+    RunCommandFixture("success", "printf 'RUN_COMMAND_OK\\n'", 0, "RUN_COMMAND_OK"),
+    RunCommandFixture(
+        "failure",
+        "printf 'RUN_COMMAND_FAIL\\n'; false",
+        1,
+        "RUN_COMMAND_FAIL",
+    ),
+]
+
+
+RUN_COMMAND_STATUS_ISOLATION_FIXTURES: list[RunCommandStatusIsolationFixture] = [
+    RunCommandStatusIsolationFixture(
+        "path_mutation",
+        "PATH=/tmp; printf 'RUN_COMMAND_PATH_OK\\n'",
+        0,
+        "RUN_COMMAND_PATH_OK",
+    ),
+    RunCommandStatusIsolationFixture("errexit_false", "set -e; false", 1, None),
+]
+
+
+RUN_COMMAND_PANE_TARGET_FIXTURES: list[RunCommandPaneTargetFixture] = [
+    RunCommandPaneTargetFixture(
+        "missing_tmux_pane_env_in_inactive_target",
+        "printf 'RUN_COMMAND_TARGET_OK\\n'",
+        0,
+        "RUN_COMMAND_TARGET_OK",
+    ),
+]
+
+
+RUN_COMMAND_HISTORY_FIXTURES: list[RunCommandHistoryFixture] = [
+    RunCommandHistoryFixture("bash_ignorespace", "RUN_COMMAND_HISTORY_SECRET"),
+]
 
 
 def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -71,6 +147,506 @@ def test_send_keys_docstring_cross_links_wait_for_channel() -> None:
     assert send_keys.__doc__ is not None
     assert "wait_for_channel" in send_keys.__doc__
     assert "run_and_wait" in send_keys.__doc__
+
+
+@pytest.mark.parametrize(
+    RunCommandFixture._fields,
+    RUN_COMMAND_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_FIXTURES],
+)
+def test_run_command_reports_exit_status(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    test_id: str,
+    command: str,
+    expected_status: int,
+    expected_output: str,
+) -> None:
+    """run_command waits for completion and reports shell exit status."""
+    import asyncio
+
+    from libtmux_mcp.models import RunCommandResult
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+
+    result = asyncio.run(
+        run_command(
+            command=command,
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert isinstance(result, RunCommandResult)
+    assert result.pane_id == mcp_pane.pane_id
+    assert result.exit_status == expected_status
+    assert result.timed_out is False
+    assert any(expected_output in line for line in result.output)
+
+
+def test_run_command_timeout_reports_without_killing_shell(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """run_command timeout returns while the interactive shell remains usable."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    marker = "RUN_COMMAND_TIMEOUT_FINISHED"
+    result = asyncio.run(
+        run_command(
+            command=f"sleep 0.5; printf '{marker}\\n'",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.05,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.timed_out is True
+    assert result.exit_status is None
+
+    retry_until(
+        lambda: any(marker in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+
+@pytest.mark.parametrize(
+    RunCommandStatusIsolationFixture._fields,
+    RUN_COMMAND_STATUS_ISOLATION_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_STATUS_ISOLATION_FIXTURES],
+)
+def test_run_command_reports_status_after_shell_state_change(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    test_id: str,
+    command: str,
+    expected_status: int,
+    expected_output: str | None,
+) -> None:
+    """run_command reports status after user commands mutate shell state."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+    result = asyncio.run(
+        run_command(
+            command=command,
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.exit_status == expected_status
+    assert result.timed_out is False
+    if expected_output is not None:
+        assert any(expected_output in line for line in result.output)
+
+
+@pytest.mark.parametrize(
+    RunCommandPaneTargetFixture._fields,
+    RUN_COMMAND_PANE_TARGET_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_PANE_TARGET_FIXTURES],
+)
+def test_run_command_status_option_targets_resolved_pane(
+    mcp_server: Server,
+    mcp_window: Window,
+    mcp_pane: Pane,
+    test_id: str,
+    command: str,
+    expected_status: int,
+    expected_output: str,
+) -> None:
+    """run_command status storage targets the pane the command ran in."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+    assert mcp_pane.pane_id is not None
+    target_pane = mcp_window.split(attach=False)
+    assert target_pane.pane_id is not None
+    mcp_window.select_pane(mcp_pane.pane_id)
+
+    target_pane.send_keys("exec env -u TMUX_PANE bash --noprofile --norc", enter=True)
+    retry_until(
+        lambda: any("bash-" in line for line in target_pane.capture_pane()),
+        3,
+        raises=True,
+    )
+
+    result = None
+    try:
+        result = asyncio.run(
+            run_command(
+                command=command,
+                pane_id=target_pane.pane_id,
+                timeout=5.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+    finally:
+        with contextlib.suppress(libtmux_exc.LibTmuxException):
+            mcp_window.select_pane(mcp_pane.pane_id)
+        with contextlib.suppress(libtmux_exc.LibTmuxException):
+            target_pane.kill()
+
+    assert result is not None
+    assert result.exit_status == expected_status
+    assert result.timed_out is False
+    assert any(expected_output in line for line in result.output)
+
+
+@pytest.mark.parametrize(
+    RunCommandHistoryFixture._fields,
+    RUN_COMMAND_HISTORY_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_HISTORY_FIXTURES],
+)
+def test_run_command_suppress_history(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    tmp_path: pathlib.Path,
+    test_id: str,
+    secret: str,
+) -> None:
+    """run_command suppresses shell history for secret-bearing commands."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+    histfile = tmp_path / "bash_history"
+    mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
+    retry_until(
+        lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    setup = (
+        f"HISTFILE={shlex.quote(str(histfile))}; "
+        "HISTCONTROL=ignorespace; set -o history; "
+        "history -c; history -w"
+    )
+    asyncio.run(
+        run_command(
+            command=setup,
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            suppress_history=True,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    asyncio.run(
+        run_command(
+            command=f"printf '{secret}\\n'",
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            suppress_history=True,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    asyncio.run(
+        run_command(
+            command="history -w",
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            suppress_history=True,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert secret not in histfile.read_text()
+
+
+def test_run_command_tail_preserves_output(mcp_server: Server, mcp_pane: Pane) -> None:
+    """run_command output is tail-preserved when max_lines is small."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    result = asyncio.run(
+        run_command(
+            command=(
+                "for i in $(seq 1 6); do printf 'RUN_COMMAND_TRUNC_%s\\n' \"$i\"; done"
+            ),
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            max_lines=2,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.output_truncated is True
+    assert result.output_truncated_lines > 0
+    assert len(result.output) == 2
+    assert any("RUN_COMMAND_TRUNC_6" in line for line in result.output)
+
+
+def test_run_command_tail_preserves_output_with_wrapped_private_prompt(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """run_command keeps command output when a long shell prompt wraps internals."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    long_prompt = "runner@runnervm123456:/home/runner/work/libtmux-mcp/libtmux-mcp$ "
+    mcp_pane.cmd("resize-pane", "-x", "80")
+    mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
+    retry_until(
+        lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+    mcp_pane.send_keys(f"PS1={shlex.quote(long_prompt)}", enter=True)
+    retry_until(
+        lambda: any(long_prompt.rstrip() in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    result = asyncio.run(
+        run_command(
+            command=(
+                "for i in $(seq 1 6); do printf 'RUN_COMMAND_WRAP_%s\\n' \"$i\"; done"
+            ),
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            max_lines=2,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.output_truncated is True
+    assert len(result.output) == 2
+    assert any("RUN_COMMAND_WRAP_6" in line for line in result.output)
+
+
+class FilterInternalLinesFixture(t.NamedTuple):
+    """Fixture for legitimate output that resembles wrapper text."""
+
+    test_id: str
+    line: str
+
+
+FILTER_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
+    FilterInternalLinesFixture("mentions_mcp_status", "grep -n mcp_status app.log"),
+    FilterInternalLinesFixture("mentions_set_option", 'echo "tmux set-option -p x"'),
+    FilterInternalLinesFixture("mentions_wait_for", "run tmux wait-for -S done first"),
+    FilterInternalLinesFixture("mentions_prefix", "ns=libtmux_mcp_ is reserved"),
+]
+
+
+FILTER_WRAPPER_LIKE_KEEP_FIXTURES: list[FilterInternalLinesFixture] = [
+    FilterInternalLinesFixture(
+        "tmux_script_status_option",
+        "s=$?; tmux set-option -p @s_myapp_status 1",
+    ),
+    FilterInternalLinesFixture(
+        "empty_short_status_prefix",
+        "s=$?; tmux set-option -p @s_ 1",
+    ),
+]
+
+
+class FilterDropFixture(t.NamedTuple):
+    """Fixture for private run_command synchronisation fragments."""
+
+    test_id: str
+    lines: list[str]
+    channel: str
+    status_option: str
+
+
+class FilterCurrentSyncLineFixture(t.NamedTuple):
+    """Fixture for output after the current run_command sync line."""
+
+    test_id: str
+    output_lines: list[str]
+
+
+_CURRENT_ID = "deadbeefdeadbeefdeadbeefdeadbeef"
+_PREVIOUS_ID = "feedfacefeedfacefeedfacefeedface"
+_SHORT_CURRENT_ID = "e743e5084b"
+_SHORT_PREVIOUS_ID = "f00dbeef12"
+
+
+FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
+    FilterDropFixture(
+        "current_wrapped_long_marker",
+        [
+            "RUN_OK",
+            "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
+            f"@libtmux_mcp_status_{_CURRENT_ID[:10]}",
+            f'{_CURRENT_ID[10:]} "$__libtmux_mcp_status"; '
+            "tmux wait-for -S libtmux_mcp_run_",
+            _CURRENT_ID,
+        ],
+        f"libtmux_mcp_run_{_CURRENT_ID}",
+        f"@libtmux_mcp_status_{_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "previous_wrapped_long_marker",
+        [
+            "RUN_OK",
+            "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
+            f"@libtmux_mcp_status_{_PREVIOUS_ID[:10]}",
+            f'{_PREVIOUS_ID[10:]} "$__libtmux_mcp_status"; '
+            "tmux wait-for -S libtmux_mcp_run_",
+            _PREVIOUS_ID,
+        ],
+        f"libtmux_mcp_run_{_CURRENT_ID}",
+        f"@libtmux_mcp_status_{_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "current_short_marker",
+        [
+            "RUN_OK",
+            f'∙ }}; s=$?; tmux set-option -p @s_{_SHORT_CURRENT_ID} "$s"; '
+            f"tmux wait-for -S r_{_SHORT_CURRENT_ID}",
+        ],
+        f"r_{_SHORT_CURRENT_ID}",
+        f"@s_{_SHORT_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "previous_wrapped_short_marker",
+        [
+            "RUN_OK",
+            f"∙ }}; s=$?; tmux set-option -p @s_{_SHORT_PREVIOUS_ID[:6]}",
+            f'{_SHORT_PREVIOUS_ID[6:]} "$s"; tmux wait-for -S r_{_SHORT_PREVIOUS_ID}',
+        ],
+        f"r_{_SHORT_CURRENT_ID}",
+        f"@s_{_SHORT_CURRENT_ID}",
+    ),
+    FilterDropFixture(
+        "previous_targeted_short_marker",
+        [
+            "RUN_OK",
+            f"∙ }}; s=$?; tmux -L dev set-option -p -t %1 @s_{_SHORT_PREVIOUS_ID[:6]}",
+            (
+                f'{_SHORT_PREVIOUS_ID[6:]} "$s"; '
+                f"tmux -L dev wait-for -S r_{_SHORT_PREVIOUS_ID}"
+            ),
+        ],
+        f"r_{_SHORT_CURRENT_ID}",
+        f"@s_{_SHORT_CURRENT_ID}",
+    ),
+]
+
+
+FILTER_CURRENT_SYNC_KEEP_FIXTURES: list[FilterCurrentSyncLineFixture] = [
+    FilterCurrentSyncLineFixture("single_hex_output", ["abcdef1234", "DONE"]),
+    FilterCurrentSyncLineFixture(
+        "consecutive_hex_output",
+        ["abcdef1234", "feedface99", "DONE"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    FilterInternalLinesFixture._fields,
+    FILTER_KEEP_FIXTURES,
+    ids=[f.test_id for f in FILTER_KEEP_FIXTURES],
+)
+def test_filter_run_command_keeps_legitimate_output(test_id: str, line: str) -> None:
+    """Legitimate output without private markers survives filtering."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    command_id = "deadbeefdeadbeefdeadbeefdeadbeef"
+    channel = f"libtmux_mcp_run_{command_id}"
+    status_option = f"@libtmux_mcp_status_{command_id}"
+
+    assert test_id
+    kept = _filter_run_command_internal_lines(
+        [line], channel=channel, status_option=status_option
+    )
+    assert kept == [line]
+
+
+@pytest.mark.parametrize(
+    FilterInternalLinesFixture._fields,
+    FILTER_WRAPPER_LIKE_KEEP_FIXTURES,
+    ids=[f.test_id for f in FILTER_WRAPPER_LIKE_KEEP_FIXTURES],
+)
+def test_filter_run_command_keeps_wrapper_like_output(test_id: str, line: str) -> None:
+    """Legitimate tmux-looking command output survives filtering."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    assert test_id
+    kept = _filter_run_command_internal_lines(
+        [line],
+        channel=f"r_{_SHORT_CURRENT_ID}",
+        status_option=f"@s_{_SHORT_CURRENT_ID}",
+    )
+    assert kept == [line]
+
+
+def test_filter_run_command_drops_sync_line() -> None:
+    """The joined private synchronisation line is removed from output."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    command_id = "deadbeefdeadbeefdeadbeefdeadbeef"
+    channel = f"libtmux_mcp_run_{command_id}"
+    status_option = f"@libtmux_mcp_status_{command_id}"
+    sync_line = (
+        f"}}; __libtmux_mcp_status=$?; tmux set-option -p {status_option} "
+        f'"$__libtmux_mcp_status"; tmux wait-for -S {channel}'
+    )
+    kept = _filter_run_command_internal_lines(
+        ["RUN_OK", sync_line], channel=channel, status_option=status_option
+    )
+    assert kept == ["RUN_OK"]
+
+
+@pytest.mark.parametrize(
+    FilterCurrentSyncLineFixture._fields,
+    FILTER_CURRENT_SYNC_KEEP_FIXTURES,
+    ids=[f.test_id for f in FILTER_CURRENT_SYNC_KEEP_FIXTURES],
+)
+def test_filter_run_command_keeps_hex_output_after_current_sync_line(
+    test_id: str, output_lines: list[str]
+) -> None:
+    """Hex-like output after the current sync line survives filtering."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    channel = f"r_{_SHORT_CURRENT_ID}"
+    status_option = f"@s_{_SHORT_CURRENT_ID}"
+    sync_line = (
+        f'); s=$?; tmux set-option -p {status_option} "$s"; tmux wait-for -S {channel}'
+    )
+    kept = _filter_run_command_internal_lines(
+        [sync_line, *output_lines],
+        channel=channel,
+        status_option=status_option,
+    )
+    assert test_id
+    assert kept == output_lines
+
+
+@pytest.mark.parametrize(
+    FilterDropFixture._fields,
+    FILTER_DROP_FIXTURES,
+    ids=[f.test_id for f in FILTER_DROP_FIXTURES],
+)
+def test_filter_run_command_drops_sync_fragments(
+    test_id: str, lines: list[str], channel: str, status_option: str
+) -> None:
+    """Private synchronisation fragments are removed from output."""
+    from libtmux_mcp.tools.pane_tools.io import _filter_run_command_internal_lines
+
+    kept = _filter_run_command_internal_lines(
+        lines,
+        channel=channel,
+        status_option=status_option,
+    )
+    assert test_id
+    assert kept == ["RUN_OK"]
 
 
 def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -743,6 +1319,33 @@ def test_clear_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     )
 
 
+def test_clear_pane_uses_libtmux_reset(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """clear_pane delegates to libtmux's atomic Pane.reset path.
+
+    This test uses monkeypatch because the visible terminal state can
+    look identical for the old two-IPC implementation and the fixed
+    one-call libtmux reset; the regression is the call boundary.
+    """
+    from libtmux.pane import Pane as LibtmuxPane
+
+    reset_calls: list[str | None] = []
+
+    def fake_reset(self: LibtmuxPane) -> LibtmuxPane:
+        reset_calls.append(self.pane_id)
+        return self
+
+    monkeypatch.setattr(LibtmuxPane, "reset", fake_reset)
+
+    clear_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert reset_calls == [mcp_pane.pane_id]
+
+
 def test_resize_pane_dimensions(mcp_server: Server, mcp_pane: Pane) -> None:
     """resize_pane resizes a pane with height/width."""
     result = resize_pane(
@@ -1298,35 +1901,47 @@ def test_search_panes_literal_input_skips_slow_path_probe(
     assert any(m.pane_id == mcp_pane.pane_id for m in result.matches)
 
 
+class SearchFastPathFixture(t.NamedTuple):
+    """Fixture for ``search_panes`` fast-path eligibility cases."""
+
+    test_id: str
+    pattern: str
+    regex: bool
+    expected_fast_path: bool
+
+
+SEARCH_FAST_PATH_FIXTURES: list[SearchFastPathFixture] = [
+    # Literal input with regex metacharacters — the earlier bug's
+    # target case. Raw input is glob-safe for tmux, fast path.
+    SearchFastPathFixture("literal_regex_chars", "192.168.1.1", False, True),
+    # Literal with no metacharacters — always fast path.
+    SearchFastPathFixture("plain_literal", "plain_marker", False, True),
+    # Regex with no metacharacters — fast path still fine.
+    SearchFastPathFixture("plain_regex", "plain_marker", True, True),
+    # Regex with metacharacters — legitimately slow path.
+    SearchFastPathFixture("regex_group", r"err(or|no)", True, False),
+    # Regex dot-star — slow path.
+    SearchFastPathFixture("regex_dot_star", r".*", True, False),
+    # tmux format-injection bytes in a literal — MUST fall to slow
+    # path regardless of regex flag, because tmux's #{C:...} format
+    # block has no escape for `}` (premature close), `#{` (nested
+    # format-variable evaluation), or `#(` (format job execution).
+    SearchFastPathFixture("literal_close_brace", "foo}", False, False),
+    SearchFastPathFixture("literal_nested_format", "log #{err}", False, False),
+    SearchFastPathFixture("literal_format_job", "#(printf ok)", False, False),
+    # Same hazards with regex=True — still slow path; tmux sees the
+    # raw pattern either way.
+    SearchFastPathFixture("regex_close_brace", "x}y", True, False),
+    SearchFastPathFixture("regex_nested_format", "a#{b}", True, False),
+]
+
+
 @pytest.mark.parametrize(
-    ("pattern", "regex", "expected_fast_path"),
-    [
-        # Literal input with regex metacharacters — the earlier bug's
-        # target case. Raw input is glob-safe for tmux, fast path.
-        ("192.168.1.1", False, True),
-        # Literal with no metacharacters — always fast path.
-        ("plain_marker", False, True),
-        # Regex with no metacharacters — fast path still fine.
-        ("plain_marker", True, True),
-        # Regex with metacharacters — legitimately slow path.
-        (r"err(or|no)", True, False),
-        # Regex dot-star — slow path.
-        (r".*", True, False),
-        # tmux format-injection bytes in a literal — MUST fall to slow
-        # path regardless of regex flag, because tmux's #{C:...} format
-        # block has no escape for `}` (premature close) or `#{` (nested
-        # format-variable evaluation).
-        ("foo}", False, False),
-        ("log #{err}", False, False),
-        # Same hazards with regex=True — still slow path; tmux sees the
-        # raw pattern either way.
-        ("x}y", True, False),
-        ("a#{b}", True, False),
-    ],
+    "fixture",
+    SEARCH_FAST_PATH_FIXTURES,
+    ids=lambda fixture: fixture.test_id,
 )
-def test_search_panes_fast_path_decision(
-    pattern: str, regex: bool, expected_fast_path: bool
-) -> None:
+def test_search_panes_fast_path_decision(fixture: SearchFastPathFixture) -> None:
     """Unit-test the ``is_plain_text`` decision on pattern + regex flag.
 
     Mirrors the exact expression in ``search_panes`` so a future
@@ -1337,14 +1952,16 @@ def test_search_panes_fast_path_decision(
     """
     import re as _re
 
+    test_id, pattern, regex, expected_fast_path = fixture
     _regex_meta = _re.compile(r"[\\.*+?{}()\[\]|^$]")
-    _tmux_format_injection = _re.compile(r"\}|#\{")
+    _tmux_format_injection = _re.compile(r"\}|#\{|#\(")
     if _tmux_format_injection.search(pattern):
         is_plain_text = False
     elif regex:
         is_plain_text = not _regex_meta.search(pattern)
     else:
         is_plain_text = True
+    assert test_id
     assert is_plain_text is expected_fast_path
 
 
@@ -1423,6 +2040,25 @@ def test_search_panes_nested_format_variable_is_neutralized(
     # other pane's content contains NEST_ at all.
     for m in result.matches:
         assert m.pane_id == mcp_pane.pane_id
+
+
+def test_search_panes_hash_paren_format_job_is_neutralized(
+    mcp_server: Server, mcp_session: Session, tmp_path: pathlib.Path
+) -> None:
+    """Literal patterns containing ``#(`` do not start tmux format jobs."""
+    marker = tmp_path / "search_panes_format_job_marker"
+    pattern = f"#(printf ok > {shlex.quote(str(marker))})"
+
+    result = search_panes(
+        pattern=pattern,
+        regex=False,
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert isinstance(result.matches, list)
+    time.sleep(0.5)
+    assert not marker.exists()
 
 
 def test_search_panes_numeric_pane_id_ordering(
@@ -2897,6 +3533,21 @@ def test_snapshot_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     assert result.content_truncated_lines == 0
 
 
+def test_snapshot_pane_returns_liveness_metadata(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """snapshot_pane returns process, dead-pane, and alternate-screen metadata."""
+    result = snapshot_pane(
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.pane_pid is not None
+    assert result.pane_pid.isdigit()
+    assert result.pane_dead is False
+    assert isinstance(result.alternate_on, bool)
+
+
 def test_snapshot_pane_truncates_content(mcp_server: Server, mcp_pane: Pane) -> None:
     """snapshot_pane reports truncation via model fields, not in-band header.
 
@@ -3401,6 +4052,23 @@ def test_display_message_zoomed_flag(mcp_server: Server, mcp_session: Session) -
     assert result in ("0", "1")
 
 
+def test_display_message_rejects_format_jobs(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: pathlib.Path
+) -> None:
+    """display_message rejects tmux format jobs before tmux evaluates them."""
+    marker = tmp_path / "display_message_format_job_marker"
+
+    with pytest.raises(ToolError, match=r"#\("):
+        display_message(
+            format_string=f"#(printf ok > {shlex.quote(str(marker))})",
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+
+    time.sleep(0.5)
+    assert not marker.exists()
+
+
 # ---------------------------------------------------------------------------
 # enter_copy_mode / exit_copy_mode tests
 # ---------------------------------------------------------------------------
@@ -3535,6 +4203,7 @@ def test_paste_text_does_not_leak_named_buffer(
         # Shell-driving tools: the command the caller sends can reach
         # arbitrary external state, so the interaction is open-world.
         ("send_keys", True),
+        ("run_command", True),
         ("paste_text", True),
         ("pipe_pane", True),
         # Create-style tools: allocate tmux objects only. Not open-world
@@ -3600,6 +4269,25 @@ def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
     assert tool.annotations is not None, (
         "respawn_pane registration should carry annotations"
     )
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.idempotentHint is False
+    assert tool.annotations.readOnlyHint is False
+
+
+def test_clear_pane_advertises_destructive_non_idempotent() -> None:
+    """``clear_pane`` registers as mutating-tier with destructive hints."""
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-clear-pane-annotations")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool("clear_pane"))
+    assert tool is not None, "clear_pane should be registered"
+    assert tool.annotations is not None, "clear_pane should carry annotations"
     assert tool.annotations.destructiveHint is True
     assert tool.annotations.idempotentHint is False
     assert tool.annotations.readOnlyHint is False

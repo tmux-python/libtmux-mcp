@@ -6,6 +6,38 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**One-call command completion with {tooliconl}`run-command`**
+
+{tooliconl}`run-command` runs a shell command in a pane, waits for it to finish, and returns the exit status, timeout state, and tail-preserved output in a single call — no manual {tooliconl}`send-keys` + {tooliconl}`wait-for-channel` + {tooliconl}`capture-pane` sequence. The command runs in a subshell so its state changes don't leak into later calls, and `suppress_history` keeps secret-bearing commands out of shell history where the shell ignores space-prefixed input. (#73)
+
+**Richer, typed pane and window metadata**
+
+{tooliconl}`snapshot-pane` now reports `pane_pid`, `pane_dead`, and `alternate_on` for liveness and alternate-screen decisions, and window results carry `active_pane_id` for reliable follow-up targeting. The package also ships a `py.typed` marker so downstream type checkers see its inline annotations. (#75)
+
+### Fixes
+
+**Read-only tools no longer evaluate tmux `#()` format jobs**
+
+{tooliconl}`search-panes` and {tooliconl}`display-message` are advertised as read-only, but tmux `#(...)` formats schedule shell jobs during expansion. Both now reject or route around `#()` so a read-only call can never spawn a shell. (#68, #69)
+
+**Invalid `LIBTMUX_SAFETY` fails closed**
+
+An unrecognized `LIBTMUX_SAFETY` value now falls back to `readonly` instead of `mutating`, so a typo in the safety tier can no longer expose write tools the operator meant to hide. (#71)
+
+**Large structured results keep their structured payload**
+
+The global response backstop was truncating big successful results into text-only responses before tool-level caps ran, dropping the structured metadata schema-bearing tools depend on. It now matches FastMCP's 1 MB default, leaving per-tool line caps to handle terminal truncation. (#70)
+
+**{tooliconl}`clear-pane` clears scrollback reliably**
+
+{tooliconl}`clear-pane` now uses libtmux's single-call reset path; the previous two-call sequence could leave scrollback intact. Its annotations also disclose that it is destructive and non-idempotent. (#74)
+
+**Stdio transport pinned at startup**
+
+The server runs with an explicit stdio transport so an inherited FastMCP transport environment can't change its startup surface and break stdio clients, and `--help` / `--version` resolve locally without starting the server. (#72)
+
 ## libtmux-mcp 0.1.0a11 (2026-06-06)
 
 libtmux-mcp 0.1.0a11 redesigns how tool failures reach agents. Error messages now arrive exactly as raised — no more `Internal error:` mangling — with structured detail and recovery hints that tell agents what to do next, from stale pane ids to stray arguments leaked by client schedulers. Expected, agent-correctable failures log at WARNING so ERROR records always mean an operator should look. The fastmcp floor rises to 3.4.0 to build on its error-result and log-level support.

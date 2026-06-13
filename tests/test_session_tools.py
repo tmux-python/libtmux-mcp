@@ -72,6 +72,20 @@ def test_create_window(mcp_server: Server, mcp_session: Session) -> None:
     assert result.window_name == "mcp_test_win"
 
 
+def test_create_window_returns_active_pane_id(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """create_window returns the new window's active pane id."""
+    result = create_window(
+        session_name=mcp_session.session_name,
+        window_name="mcp_active_pane_id",
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.active_pane_id is not None
+    assert result.active_pane_id.startswith("%")
+
+
 def test_create_window_invalid_direction(
     mcp_server: Server, mcp_session: Session
 ) -> None:

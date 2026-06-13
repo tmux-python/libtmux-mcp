@@ -15,12 +15,14 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 
 | Module | Tools |
 |--------|-------|
-| **Server** | `list_sessions`, `create_session`, `kill_server`, `get_server_info` |
+| **Server** | `list_servers`, `list_sessions`, `create_session`, `kill_server`, `get_server_info` |
 | **Session** | `list_windows`, `get_session_info`, `create_window`, `rename_session`, `select_window`, `kill_session` |
 | **Window** | `list_panes`, `get_window_info`, `split_window`, `rename_window`, `select_layout`, `resize_window`, `move_window`, `kill_window` |
-| **Pane** | `send_keys`, `paste_text`, `capture_pane`, `capture_since`, `snapshot_pane`, `search_panes`, `get_pane_info`, `wait_for_text`, `wait_for_content_change`, `display_message`, `select_pane`, `swap_pane`, `resize_pane`, `set_pane_title`, `clear_pane`, `pipe_pane`, `enter_copy_mode`, `exit_copy_mode`, `respawn_pane`, `kill_pane` |
+| **Pane** | `run_command`, `send_keys`, `paste_text`, `capture_pane`, `capture_since`, `snapshot_pane`, `search_panes`, `find_pane_by_position`, `get_pane_info`, `wait_for_text`, `wait_for_content_change`, `wait_for_channel`, `signal_channel`, `display_message`, `select_pane`, `swap_pane`, `resize_pane`, `set_pane_title`, `clear_pane`, `pipe_pane`, `enter_copy_mode`, `exit_copy_mode`, `respawn_pane`, `kill_pane` |
 | **Options** | `show_option`, `set_option` |
 | **Environment** | `show_environment`, `set_environment` |
+| **Buffers** | `load_buffer`, `paste_buffer`, `show_buffer`, `delete_buffer` |
+| **Hooks** | `show_hooks`, `show_hook` |
 
 ## Quickstart
 
@@ -108,7 +110,7 @@ re-sending the same scrollback to the model on every check.
 and declines self-destructive operations — [`kill_session`](https://libtmux-mcp.git-pull.com/tools/session/kill-session/)
 on itself fails loudly instead of silently terminating the host
 environment the agent is running in. [`LIBTMUX_SAFETY`](https://libtmux-mcp.git-pull.com/configuration/#envvar-LIBTMUX_SAFETY)
-(`read`, `read+send`, `read+send+kill`) hides whole tiers from the
+(`readonly`, `mutating`, `destructive`) hides whole tiers from the
 client's tool list before any prompt is built.
 
 ## Documentation

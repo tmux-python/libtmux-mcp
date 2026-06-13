@@ -48,6 +48,22 @@ def test_get_window_info(mcp_server: Server, mcp_session: Session) -> None:
     assert result.session_id == mcp_session.session_id
 
 
+def test_get_window_info_returns_active_pane_id(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """get_window_info returns the window's active pane id."""
+    window = mcp_session.active_window
+    result = get_window_info(
+        window_id=window.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    active_pane = window.active_pane
+
+    assert result.active_pane_id is not None
+    assert active_pane is not None
+    assert result.active_pane_id == active_pane.pane_id
+
+
 def test_get_window_info_by_index(mcp_server: Server, mcp_session: Session) -> None:
     """get_window_info resolves by window_index when session is named."""
     window = mcp_session.active_window

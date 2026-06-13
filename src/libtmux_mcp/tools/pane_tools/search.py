@@ -170,15 +170,15 @@ def search_panes(
     # 2. tmux format-string injection — ``#{C:pattern}`` is a tmux
     #    format block. ``}`` in the pattern closes the block early
     #    (evaluated as truthy, matching every pane as a false
-    #    positive); ``#{`` inside the pattern starts a nested format
-    #    variable. tmux provides no escape mechanism for these bytes
-    #    inside the format block, so the only safe option is to route
-    #    around: when the raw pattern contains either sequence, fall
-    #    through to the slow Python-regex path. This applies whether
-    #    or not ``regex`` is True — the injection risk is tmux-side,
-    #    not regex-side.
+    #    positive); ``#{`` starts a nested format variable; ``#(``
+    #    runs a format job (shell command). tmux provides no escape
+    #    mechanism for these bytes inside the format block, so the
+    #    only safe option is to route around: when the raw pattern
+    #    contains any of these sequences, fall through to the slow
+    #    Python-regex path. This applies whether or not ``regex`` is
+    #    True — the injection risk is tmux-side, not regex-side.
     _REGEX_META = re.compile(r"[\\.*+?{}()\[\]|^$]")
-    _TMUX_FORMAT_INJECTION = re.compile(r"\}|#\{")
+    _TMUX_FORMAT_INJECTION = re.compile(r"\}|#\{|#\(")
     if _TMUX_FORMAT_INJECTION.search(pattern):
         is_plain_text = False
     elif regex:

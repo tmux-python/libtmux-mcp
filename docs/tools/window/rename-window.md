@@ -32,7 +32,8 @@ Response:
   "window_layout": "7f9f,80x24,0,0[80x15,0,0,0,80x8,0,16,1]",
   "window_active": "1",
   "window_width": "80",
-  "window_height": "24"
+  "window_height": "24",
+  "active_pane_id": "%0"
 }
 ```
 

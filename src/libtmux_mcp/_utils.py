@@ -364,11 +364,12 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "openWorldHint": False,
 }
 #: Annotations for tools that move user-supplied payloads into a shell
-#: context. Five consumers today:
+#: context. Six consumers today:
 #:
-#: * ``send_keys``, ``paste_text``, ``pipe_pane`` — the canonical
-#:   shell-driving tools; caller's keys/text/stream reaches the shell
-#:   prompt or pipes into an external command respectively.
+#: * ``send_keys``, ``run_command``, ``paste_text``, ``pipe_pane`` — the
+#:   canonical shell-driving tools; caller's keys/command/text/stream
+#:   reaches the shell prompt or pipes into an external command
+#:   respectively.
 #: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
 #:   into a tmux paste buffer; ``paste_buffer`` pushes that content
 #:   into a target pane where the shell receives it as input. The two
@@ -410,13 +411,10 @@ DISCOVERY_META: dict[str, t.Any] = {
 #: visible to default-profile agents) but whose default behaviour can
 #: terminate processes or otherwise lose state.
 #:
-#: ``respawn_pane`` is the canonical user: tier=mutating because shell
-#: recovery is part of the normal agent workflow; ``destructiveHint=True``
-#: because ``kill=True`` (the default) sends ``SPAWN_KILL`` to the existing
-#: process (`cmd-respawn-pane.c:78-79`); ``idempotentHint=False`` because
-#: repeated calls kill repeated processes — the MCP spec defines idempotent
-#: as "calling repeatedly with the same arguments will have no additional
-#: effect" (`mcp/types.py:1276-1282`).
+#: Canonical users include ``respawn_pane`` and ``clear_pane``:
+#: tier=mutating because shell recovery and scrollback cleanup are part
+#: of normal agent workflows, while the hints still disclose process
+#: termination or state loss.
 #:
 #: Distinct from :data:`ANNOTATIONS_DESTRUCTIVE` (same hint values) because
 #: the tier tag differs: ``ANNOTATIONS_DESTRUCTIVE`` is paired with
@@ -894,6 +892,9 @@ def _serialize_window(window: Window) -> WindowInfo:
     from libtmux_mcp.models import WindowInfo
 
     assert window.window_id is not None
+    active_pane = getattr(window, "active_pane", None)
+    active_pane_id = active_pane.pane_id if active_pane is not None else None
+
     return WindowInfo(
         window_id=window.window_id,
         window_name=window.window_name,
@@ -905,6 +906,7 @@ def _serialize_window(window: Window) -> WindowInfo:
         window_active=getattr(window, "window_active", None),
         window_width=getattr(window, "window_width", None),
         window_height=getattr(window, "window_height", None),
+        active_pane_id=active_pane_id,
     )
 
 

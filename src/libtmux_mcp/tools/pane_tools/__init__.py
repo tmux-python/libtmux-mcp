@@ -29,6 +29,7 @@ from libtmux_mcp.tools.pane_tools.io import (
     capture_pane,
     clear_pane,
     paste_text,
+    run_command,
     send_keys,
 )
 from libtmux_mcp.tools.pane_tools.layout import (
@@ -69,6 +70,7 @@ __all__ = [
     "register",
     "resize_pane",
     "respawn_pane",
+    "run_command",
     "search_panes",
     "select_pane",
     "send_keys",
@@ -84,6 +86,9 @@ def register(mcp: FastMCP) -> None:
     """Register pane-level tools with the MCP instance."""
     mcp.tool(title="Send Keys", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         send_keys
+    )
+    mcp.tool(title="Run Command", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
+        run_command
     )
     mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         capture_pane
@@ -115,9 +120,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY},
     )(find_pane_by_position)
-    mcp.tool(title="Clear Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING})(
-        clear_pane
-    )
+    mcp.tool(
+        title="Clear Pane",
+        annotations=ANNOTATIONS_MUTATING_DESTRUCTIVE,
+        tags={TAG_MUTATING},
+    )(clear_pane)
     mcp.tool(title="Search Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         search_panes
     )

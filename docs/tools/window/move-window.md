@@ -33,7 +33,8 @@ Response:
   "window_layout": "b25f,80x24,0,0,2",
   "window_active": "0",
   "window_width": "80",
-  "window_height": "24"
+  "window_height": "24",
+  "active_pane_id": "%2"
 }
 ```
 

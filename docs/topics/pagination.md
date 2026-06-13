@@ -2,23 +2,23 @@
 
 # Pagination
 
-libtmux-mcp follows the
-[MCP pagination spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/pagination):
-``tools/list``, ``prompts/list``, ``resources/list``, and
-``resources/templates/list`` all return an opaque ``nextCursor`` when
-a page is truncated, and accept ``cursor`` on the next call to
-resume.
+The
+[MCP pagination spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/pagination)
+defines opaque cursors for list-style protocol calls. FastMCP supports
+that protocol pagination when a server is configured with
+``list_page_size``. libtmux-mcp does not currently configure
+protocol-level list pagination, so its registry lists normally return
+as one page under FastMCP's defaults.
 
 ## Where cursors and pages show up
 
 ### Protocol-level list calls
 
-FastMCP handles ``tools/list`` / ``prompts/list`` / ``resources/list``
-/ ``resources/templates/list`` pagination automatically. Neither
-libtmux-mcp nor the agent needs to do anything: the server chooses
-a sensible page size, encodes the cursor in an opaque base64 blob,
-and replays state from it. Callers only need to thread through
-``nextCursor`` if they consume the raw MCP protocol.
+``tools/list`` / ``prompts/list`` / ``resources/list`` /
+``resources/templates/list`` are registry-list calls. In this server's
+current configuration, clients should expect those lists to arrive in
+one response unless libtmux-mcp later enables FastMCP's
+``list_page_size`` setting.
 
 ### Tool-level result paging on ``search_panes``
 
@@ -61,8 +61,7 @@ matches.
 ## Why separate paths
 
 Protocol-level cursors are for **collections the server owns
-end-to-end**: the tool / prompt / resource registries. The server
-knows what it has, so an opaque cursor is cheap.
+end-to-end**: the tool / prompt / resource registries.
 
 Tool-level paging and observation cursors are for **state derived
 from live tmux panes**. Capturing every pane's contents and running a

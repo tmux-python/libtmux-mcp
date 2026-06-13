@@ -94,9 +94,10 @@ _INSTR_READ_TOOLS = (
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: prefer wait_for_channel (compose `tmux wait-for -S`) "
-    "for command completion; capture_since for repeated observation. "
-    "Else wait_for_text/wait_for_content_change for output you don't author."
+    "WAIT, DON'T POLL: run_command for authored shell commands needing "
+    "status; wait_for_channel for custom tmux wait-for; capture_since "
+    "for tailing; wait_for_text/wait_for_content_change for output you "
+    "don't author."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module
@@ -151,7 +152,7 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     # Safety tier context
     parts.append(
         f"\n\nSafety level: {safety_level} "
-        "(readonly: read; mutating: read+send; destructive: read+send+kill). "
+        "(values: readonly, mutating, destructive). "
         "Set LIBTMUX_SAFETY; off-tier tools are hidden."
     )
 
@@ -187,14 +188,21 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     return "".join(parts)
 
 
-_safety_level = os.environ.get("LIBTMUX_SAFETY", TAG_MUTATING)
-if _safety_level not in VALID_SAFETY_LEVELS:
+def _resolve_safety_level(value: str | None) -> str:
+    """Return the effective safety level for a ``LIBTMUX_SAFETY`` value."""
+    if value is None:
+        return TAG_MUTATING
+    if value in VALID_SAFETY_LEVELS:
+        return value
     logger.warning(
         "invalid LIBTMUX_SAFETY=%r, falling back to %s",
-        _safety_level,
-        TAG_MUTATING,
+        value,
+        TAG_READONLY,
     )
-    _safety_level = TAG_MUTATING
+    return TAG_READONLY
+
+
+_safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
 
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output is terminal scrollback benefit from this backstop;
@@ -368,4 +376,4 @@ def build_mcp_server() -> FastMCP:
 def run_server() -> None:
     """Run the MCP server."""
     server = build_mcp_server()
-    server.run()
+    server.run(transport="stdio")
