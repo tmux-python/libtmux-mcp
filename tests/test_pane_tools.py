@@ -50,6 +50,26 @@ if t.TYPE_CHECKING:
     from libtmux.session import Session
 
 
+class RunCommandFixture(t.NamedTuple):
+    """Test fixture for run_command exit-status cases."""
+
+    test_id: str
+    command: str
+    expected_status: int
+    expected_output: str
+
+
+RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
+    RunCommandFixture("success", "printf 'RUN_COMMAND_OK\\n'", 0, "RUN_COMMAND_OK"),
+    RunCommandFixture(
+        "failure",
+        "printf 'RUN_COMMAND_FAIL\\n'; false",
+        1,
+        "RUN_COMMAND_FAIL",
+    ),
+]
+
+
 def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
     """send_keys sends keys to a pane."""
     result = send_keys(
@@ -74,6 +94,95 @@ def test_send_keys_docstring_cross_links_wait_for_channel() -> None:
     assert send_keys.__doc__ is not None
     assert "wait_for_channel" in send_keys.__doc__
     assert "run_and_wait" in send_keys.__doc__
+
+
+@pytest.mark.parametrize(
+    RunCommandFixture._fields,
+    RUN_COMMAND_FIXTURES,
+    ids=[f.test_id for f in RUN_COMMAND_FIXTURES],
+)
+def test_run_command_reports_exit_status(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    test_id: str,
+    command: str,
+    expected_status: int,
+    expected_output: str,
+) -> None:
+    """run_command waits for completion and reports shell exit status."""
+    import asyncio
+
+    from libtmux_mcp.models import RunCommandResult
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    assert test_id
+
+    result = asyncio.run(
+        run_command(
+            command=command,
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert isinstance(result, RunCommandResult)
+    assert result.pane_id == mcp_pane.pane_id
+    assert result.exit_status == expected_status
+    assert result.timed_out is False
+    assert any(expected_output in line for line in result.output)
+
+
+def test_run_command_timeout_reports_without_killing_shell(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """run_command timeout returns while the interactive shell remains usable."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    marker = "RUN_COMMAND_TIMEOUT_FINISHED"
+    result = asyncio.run(
+        run_command(
+            command=f"sleep 0.5; printf '{marker}\\n'",
+            pane_id=mcp_pane.pane_id,
+            timeout=0.05,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.timed_out is True
+    assert result.exit_status is None
+
+    retry_until(
+        lambda: any(marker in line for line in mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+
+def test_run_command_tail_preserves_output(mcp_server: Server, mcp_pane: Pane) -> None:
+    """run_command output is tail-preserved when max_lines is small."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    result = asyncio.run(
+        run_command(
+            command=(
+                "for i in $(seq 1 6); do printf 'RUN_COMMAND_TRUNC_%s\\n' \"$i\"; done"
+            ),
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            max_lines=2,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.output_truncated is True
+    assert result.output_truncated_lines > 0
+    assert len(result.output) == 2
+    assert any("RUN_COMMAND_TRUNC_6" in line for line in result.output)
 
 
 def test_capture_pane(mcp_server: Server, mcp_pane: Pane) -> None:
@@ -3588,6 +3697,7 @@ def test_paste_text_does_not_leak_named_buffer(
         # Shell-driving tools: the command the caller sends can reach
         # arbitrary external state, so the interaction is open-world.
         ("send_keys", True),
+        ("run_command", True),
         ("paste_text", True),
         ("pipe_pane", True),
         # Create-style tools: allocate tmux objects only. Not open-world

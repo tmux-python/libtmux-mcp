@@ -257,6 +257,7 @@ def test_base_instructions_prefer_wait_over_poll() -> None:
     from the instructions steers agents off the polling-scraper path
     for command-completion synchronization.
     """
+    assert "run_command" in _BASE_INSTRUCTIONS
     assert "wait_for_channel" in _BASE_INSTRUCTIONS
     assert "capture_since" in _BASE_INSTRUCTIONS
     assert "wait_for_text" in _BASE_INSTRUCTIONS

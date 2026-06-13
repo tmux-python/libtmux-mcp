@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import pathlib
 import subprocess
 import tempfile
+import time
 import uuid
 
 from libtmux_mcp._utils import (
@@ -14,7 +16,9 @@ from libtmux_mcp._utils import (
     _resolve_pane,
     _tmux_argv,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
+from libtmux_mcp.models import RunCommandResult
 
 
 @handle_tool_errors
@@ -93,6 +97,128 @@ def send_keys(
     return f"Keys sent to pane {pane.pane_id}"
 
 
+@handle_tool_errors_async
+async def run_command(
+    command: str,
+    pane_id: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    window_id: str | None = None,
+    timeout: float = 30.0,
+    max_lines: int | None = None,
+    socket_name: str | None = None,
+) -> RunCommandResult:
+    """Run a shell command in a pane, wait for completion, and capture output.
+
+    Use for the common terminal workflow: run this command, wait until it
+    completes, then report whether it succeeded. The command is sent to
+    the pane's interactive shell, followed by a private ``tmux wait-for``
+    signal and a private pane option carrying the shell exit status.
+
+    Parameters
+    ----------
+    command : str
+        Shell command to run in the target pane.
+    pane_id : str, optional
+        Pane ID (e.g. '%1').
+    session_name : str, optional
+        Session name for pane resolution.
+    session_id : str, optional
+        Session ID (e.g. '$1') for pane resolution.
+    window_id : str, optional
+        Window ID for pane resolution.
+    timeout : float
+        Maximum seconds to wait for command completion.
+    max_lines : int or None
+        Maximum pane output lines to return. Defaults to all captured
+        visible output; pass a small value for a tail-only summary.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    RunCommandResult
+        Typed command result with exit status, timeout state, and
+        tail-preserved pane output.
+    """
+    if not command.strip():
+        msg = "command must not be empty"
+        raise ExpectedToolError(msg)
+    if timeout <= 0:
+        msg = "timeout must be positive"
+        raise ExpectedToolError(msg)
+
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(
+        server,
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
+    command_id = uuid.uuid4().hex
+    channel = f"libtmux_mcp_run_{command_id}"
+    status_option = f"@libtmux_mcp_status_{command_id}"
+    payload = "\n".join(
+        (
+            command.rstrip(),
+            "__libtmux_mcp_status=$?",
+            f'tmux set-option -p {status_option} "$__libtmux_mcp_status"',
+            f"tmux wait-for -S {channel}",
+        )
+    )
+
+    started = time.monotonic()
+    await asyncio.to_thread(pane.send_keys, payload, enter=True, literal=True)
+
+    timed_out = False
+    wait_argv = _tmux_argv(server, "wait-for", channel)
+    try:
+        await asyncio.to_thread(
+            subprocess.run,
+            wait_argv,
+            check=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+        msg = f"wait-for failed for run_command channel {channel!r}: {stderr or e}"
+        raise ExpectedToolError(msg) from e
+
+    elapsed = time.monotonic() - started
+    exit_status: int | None = None
+    if not timed_out:
+        status = pane.cmd("show-option", "-p", "-v", status_option).stdout
+        status_text = status[0].strip() if status else ""
+        try:
+            exit_status = int(status_text)
+        except ValueError as e:
+            msg = f"run_command could not read exit status from {status_option!r}"
+            raise ExpectedToolError(msg) from e
+        with contextlib.suppress(Exception):
+            pane.cmd("set-option", "-p", "-u", status_option)
+
+    raw_lines = await asyncio.to_thread(pane.capture_pane)
+    visible_lines = _filter_run_command_internal_lines(
+        raw_lines,
+        channel=channel,
+        status_option=status_option,
+    )
+    kept_lines, truncated, dropped = _truncate_lines_tail(visible_lines, max_lines)
+    return RunCommandResult(
+        pane_id=pane.pane_id or "",
+        exit_status=exit_status,
+        timed_out=timed_out,
+        elapsed_seconds=elapsed,
+        output=kept_lines,
+        output_truncated=truncated,
+        output_truncated_lines=dropped,
+    )
+
+
 #: Default line cap applied to :func:`capture_pane` and similar scrollback
 #: readers. Large enough to cover typical prompt + a few screens of output,
 #: small enough that a pathological pane (e.g. 50K lines of ``tail -f``)
@@ -137,6 +263,24 @@ def _truncate_lines_tail(
         return lines, False, 0
     dropped = len(lines) - max_lines
     return lines[-max_lines:], True, dropped
+
+
+def _filter_run_command_internal_lines(
+    lines: list[str], channel: str, status_option: str
+) -> list[str]:
+    """Drop private synchronisation commands from captured command output."""
+    internal_markers = (
+        channel,
+        status_option,
+        "__libtmux_mcp_status",
+        "libtmux_mcp_",
+        "mcp_status",
+        "tmux wait-for -S",
+        "tmux set-option -p",
+    )
+    return [
+        line for line in lines if not any(marker in line for marker in internal_markers)
+    ]
 
 
 @handle_tool_errors

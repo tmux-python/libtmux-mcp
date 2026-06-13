@@ -21,6 +21,7 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 - Already know the `pane_id` → use it directly
 
 **Running a command?**
+- {tool}`run-command` — one call to run a shell command, wait for completion, capture output, and return exit status
 - {tool}`send-keys` (with `tmux wait-for -S <channel>` composed into the keys) → {tool}`wait-for-channel` → {tool}`capture-pane` — the deterministic path for commands the agent authors
 - For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text` or {tool}`wait-for-content-change` between `send-keys` and `capture-pane`
 - Pasting multi-line text? → {tool}`paste-text`
@@ -221,6 +222,12 @@ Split a window into panes.
 :link: send-keys
 :link-type: ref
 Send commands or keystrokes to a pane.
+:::
+
+:::{grid-item-card} run_command
+:link: run-command
+:link-type: ref
+Run a shell command and report exit status.
 :::
 
 :::{grid-item-card} rename_session

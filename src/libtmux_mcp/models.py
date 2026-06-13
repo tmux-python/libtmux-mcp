@@ -274,6 +274,30 @@ class CaptureSinceResult(BaseModel):
     )
 
 
+class RunCommandResult(BaseModel):
+    """Result of running a shell command in a pane."""
+
+    pane_id: str = Field(description="Pane ID that received the command")
+    exit_status: int | None = Field(
+        default=None,
+        description="Shell exit status, or None when the command timed out",
+    )
+    timed_out: bool = Field(description="True when the wait timed out")
+    elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+    output: list[str] = Field(
+        default_factory=list,
+        description="Tail-preserved pane output after the wait completes",
+    )
+    output_truncated: bool = Field(
+        default=False,
+        description="True when output was tail-preserved to stay within max_lines",
+    )
+    output_truncated_lines: int = Field(
+        default=0,
+        description="Number of pane lines dropped from the head when truncating",
+    )
+
+
 class PaneSnapshot(BaseModel):
     """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
 

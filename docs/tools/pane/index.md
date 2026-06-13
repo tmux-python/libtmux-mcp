@@ -37,6 +37,10 @@ Evaluate a tmux format string against a target.
 Send keystrokes or commands to a pane.
 :::
 
+:::{grid-item-card} {tooliconl}`run-command`
+Run a shell command, wait, and capture output.
+:::
+
 :::{grid-item-card} {tooliconl}`paste-text`
 Paste multi-line text via tmux buffer.
 :::
@@ -111,6 +115,7 @@ get-pane-info
 find-pane-by-position
 display-message
 send-keys
+run-command
 paste-text
 pipe-pane
 select-pane

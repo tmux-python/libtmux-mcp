@@ -94,9 +94,10 @@ _INSTR_READ_TOOLS = (
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: prefer wait_for_channel (compose `tmux wait-for -S`) "
-    "for command completion; capture_since for repeated observation. "
-    "Else wait_for_text/wait_for_content_change for output you don't author."
+    "WAIT, DON'T POLL: run_command for authored shell commands needing "
+    "status; wait_for_channel for custom tmux wait-for; capture_since "
+    "for tailing; wait_for_text/wait_for_content_change for output you "
+    "don't author."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module
