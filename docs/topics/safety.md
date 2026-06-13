@@ -149,7 +149,7 @@ Each tool carries MCP tool annotations that hint at its behavior:
 | {ref}`resize-pane` | {badge}`mutating` | false | false | true |
 | {ref}`resize-window` | {badge}`mutating` | false | false | true |
 | {ref}`set-pane-title` | {badge}`mutating` | false | false | true |
-| {ref}`clear-pane` | {badge}`mutating` | false | false | true |
+| {ref}`clear-pane` | {badge}`mutating` | false | true | false |
 | {ref}`select-layout` | {badge}`mutating` | false | false | true |
 | {ref}`set-option` | {badge}`mutating` | false | false | true |
 | {ref}`set-environment` | {badge}`mutating` | false | false | true |
