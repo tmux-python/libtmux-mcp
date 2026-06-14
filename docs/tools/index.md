@@ -123,6 +123,18 @@ Start a cursor, then read only new pane output.
 Get detailed pane metadata.
 :::
 
+:::{grid-item-card} get_session_info
+:link: get-session-info
+:link-type: ref
+Get detailed session metadata.
+:::
+
+:::{grid-item-card} get_window_info
+:link: get-window-info
+:link-type: ref
+Get detailed window metadata.
+:::
+
 :::{grid-item-card} find_pane_by_position
 :link: find-pane-by-position
 :link-type: ref
@@ -298,6 +310,12 @@ Set pane title.
 :link: clear-pane
 :link-type: ref
 Clear pane content.
+:::
+
+:::{grid-item-card} respawn_pane
+:link: respawn-pane
+:link-type: ref
+Restart a pane's process, keeping its `pane_id`.
 :::
 
 :::{grid-item-card} set_option
