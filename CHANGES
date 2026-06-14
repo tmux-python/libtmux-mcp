@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a13 (2026-06-13)
+
+libtmux-mcp 0.1.0a13 adds {tooliconl}`send-keys-batch` for sending an ordered batch of raw key/text operations to tmux panes in a single call, with per-operation results, stop-or-continue error handling, and an optional timeout that bounds both the batch and each send. Argument-validation failures also stop echoing the rejected input into the server's logs and tool error results, so a secret-bearing argument can no longer surface there.
+
 ### What's new
 
 **Ordered raw input with {tooliconl}`send-keys-batch`**
