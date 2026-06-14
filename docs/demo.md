@@ -66,11 +66,11 @@ These are the actual tool headings as they render on tool pages:
 
 ### In prose
 
-Use {tooliconl}`search-panes` to find text across all panes. If you know which pane, use {tooliconl}`capture-pane` for one read or {tooliconl}`capture-since` for repeated observation. After running a command with {tooliconl}`send-keys`, compose `tmux wait-for -S` and call {tooliconl}`wait-for-channel` before capturing.
+Use {tooliconl}`search-panes` to find text across all panes. If you know which pane, use {tooliconl}`capture-pane` for one read or {tooliconl}`capture-since` for repeated observation. For authored shell commands, use {tooliconl}`run-command` instead of manually sending, waiting, and capturing.
 
 ### Dense inline (toolref, no badges)
 
-The fundamental pattern: {toolref}`send-keys` → {toolref}`wait-for-channel` → {toolref}`capture-pane`. For discovery: {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`get-pane-info`.
+The fundamental command pattern: {toolref}`run-command` → inspect `exit_status` and `output`. For discovery: {toolref}`list-sessions` → {toolref}`list-panes` → {toolref}`get-pane-info`.
 
 ## Environment variable references
 
@@ -87,7 +87,7 @@ Use {tooliconl}`search-panes` before {tooliconl}`capture-pane` when you don't kn
 ```
 
 ```{warning}
-Do not call {toolref}`capture-pane` immediately after {toolref}`send-keys` — there is a race condition. Compose `tmux wait-for -S` into the command and use {toolref}`wait-for-channel` between them.
+Do not call {toolref}`capture-pane` immediately after {toolref}`send-keys` — there is a race condition. Use {toolref}`run-command` for authored commands, or {toolref}`capture-since` when input and later observation are intentionally separate.
 ```
 
 ```{note}

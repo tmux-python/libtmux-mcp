@@ -115,6 +115,18 @@ class SafetyMiddleware(Middleware):
 # ---------------------------------------------------------------------------
 
 
+def _schema_validation_error(
+    error: BaseException,
+) -> PydanticValidationError | None:
+    """Return the Pydantic validation error behind a schema failure."""
+    if isinstance(error, PydanticValidationError):
+        return error
+    cause = error.__cause__
+    if isinstance(cause, PydanticValidationError):
+        return cause
+    return None
+
+
 def _is_schema_validation_error(error: BaseException) -> bool:
     """Return True for fastmcp argument-schema validation failures.
 
@@ -129,9 +141,74 @@ def _is_schema_validation_error(error: BaseException) -> bool:
     layer converts output-shape failures into error results itself, so
     they never reach the middleware as exceptions.
     """
-    return isinstance(error, PydanticValidationError) or isinstance(
-        error.__cause__, PydanticValidationError
+    return _schema_validation_error(error) is not None
+
+
+def _validation_errors_without_inputs(
+    error: PydanticValidationError,
+) -> list[dict[str, t.Any]]:
+    """Return validation errors without rejected input values."""
+    return t.cast(
+        "list[dict[str, t.Any]]",
+        error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        ),
     )
+
+
+def _format_schema_validation_error(error: BaseException) -> str:
+    """Format a Pydantic validation error without raw input values."""
+    err = _schema_validation_error(error)
+    if err is None:
+        return str(error)
+    count = err.error_count()
+    noun = "validation error" if count == 1 else "validation errors"
+    lines = [f"{count} {noun} for {err.title}"]
+    for item in _validation_errors_without_inputs(err):
+        loc = ".".join(str(part) for part in item.get("loc", ())) or "__root__"
+        msg = str(item.get("msg", "Input validation failed"))
+        error_type = str(item.get("type", "unknown"))
+        lines.extend((loc, f"  {msg} [type={error_type}]"))
+    return "\n".join(lines)
+
+
+def _strip_validation_error_inputs(value: t.Any) -> t.Any:
+    """Remove raw input payloads from structured validation errors."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_validation_error_inputs(item)
+            for key, item in value.items()
+            if key not in {"ctx", "input"}
+        }
+    if isinstance(value, list):
+        return [_strip_validation_error_inputs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_validation_error_inputs(item) for item in value)
+    return value
+
+
+class _FastMCPValidationLogFilter(logging.Filter):
+    """Redact FastMCP invalid-argument warning payloads."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.msg != "Invalid arguments for tool %r: %s":
+            return True
+        if not isinstance(record.args, tuple) or len(record.args) != 2:
+            return True
+        tool_name, errors = record.args
+        record.args = (tool_name, _strip_validation_error_inputs(errors))
+        return True
+
+
+def install_fastmcp_validation_log_filter() -> None:
+    """Install the FastMCP validation log redaction filter once."""
+    logger = logging.getLogger("fastmcp.server.server")
+    if not any(
+        isinstance(item, _FastMCPValidationLogFilter) for item in logger.filters
+    ):
+        logger.addFilter(_FastMCPValidationLogFilter())
 
 
 #: Scheduling flag some MCP clients (notably Gemini CLI when batching
@@ -153,8 +230,8 @@ def _unexpected_kwargs(error: BaseException) -> list[str]:
     and returns the names flagged ``unexpected_keyword_argument``.
     Empty list for every other failure shape.
     """
-    err = error if isinstance(error, PydanticValidationError) else error.__cause__
-    if not isinstance(err, PydanticValidationError):
+    err = _schema_validation_error(error)
+    if err is None:
         return []
     return [
         str(item["loc"][-1])
@@ -224,7 +301,11 @@ def _error_tool_result(
         "expected": isinstance(error, ExpectedToolError)
         or _is_schema_validation_error(error),
     }
-    text = str(error)
+    text = (
+        _format_schema_validation_error(error)
+        if _is_schema_validation_error(error)
+        else str(error)
+    )
     suggestion = getattr(error, "suggestion", None)
     if suggestion is None:
         unknown = _unexpected_kwargs(error)
@@ -315,12 +396,17 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
         # Lazy %-formatting (project logging standard) — also collapses
         # the stock implementation's include_traceback branch, since
         # ``exc_info`` accepts a bool.
+        error_text = (
+            _format_schema_validation_error(error)
+            if _is_schema_validation_error(error)
+            else str(error)
+        )
         self.logger.log(
             level,
             "Error in %s: %s: %s",
             method,
             error_type,
-            error,
+            error_text,
             exc_info=self.include_traceback,
         )
 
@@ -369,6 +455,25 @@ _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {"keys", "text", "command", "value", "content", "shell", "environment"}
 )
 
+#: Nested argument containers that may contain sensitive argument names.
+#: ``operations`` is used by ``send_keys_batch``; preserving pane ids and
+#: booleans is useful for audit trails, but each nested ``keys`` payload
+#: must be digested the same way top-level ``send_keys(keys=...)`` is.
+_NESTED_ARG_LIST_NAMES: frozenset[str] = frozenset({"operations"})
+
+_NONE_TYPE = type(None)
+
+_SEND_KEYS_OPERATION_ARG_TYPES: dict[str, tuple[type[t.Any], ...]] = {
+    "keys": (str,),
+    "pane_id": (str, _NONE_TYPE),
+    "session_name": (str, _NONE_TYPE),
+    "session_id": (str, _NONE_TYPE),
+    "window_id": (str, _NONE_TYPE),
+    "enter": (bool,),
+    "literal": (bool,),
+    "suppress_history": (bool,),
+}
+
 #: String arguments longer than this get truncated in the log summary to
 #: keep records bounded. Non-sensitive strings only — sensitive ones are
 #: replaced entirely by their digest.
@@ -395,6 +500,23 @@ def _redact_digest(value: str) -> dict[str, t.Any]:
     }
 
 
+def _redacted_value_shape(value: t.Any) -> dict[str, t.Any]:
+    """Return non-payload metadata for a value that cannot be logged."""
+    return {"type": type(value).__name__, "redacted": True}
+
+
+def _summarize_send_keys_operation_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Summarize one ``send_keys_batch`` operation for audit logging."""
+    summary: dict[str, t.Any] = {}
+    for key, value in args.items():
+        expected_types = _SEND_KEYS_OPERATION_ARG_TYPES.get(key)
+        if expected_types is None or not isinstance(value, expected_types):
+            summary[key] = _redacted_value_shape(value)
+        else:
+            summary[key] = _summarize_args({key: value})[key]
+    return summary
+
+
 def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     """Summarize tool arguments for audit logging.
 
@@ -404,6 +526,8 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     ``respawn_pane``) have each *value* digested while keys remain
     visible — env-var-name-like keys are operator-debug-useful and
     rarely sensitive, while their values usually are.
+    Known nested operation lists are summarized recursively so batched
+    tool calls keep target metadata while redacting inner payloads.
 
     Examples
     --------
@@ -431,6 +555,16 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
+        elif key in _NESTED_ARG_LIST_NAMES:
+            if isinstance(value, list):
+                summary[key] = [
+                    _summarize_send_keys_operation_args(item)
+                    if isinstance(item, dict)
+                    else _redacted_value_shape(item)
+                    for item in value
+                ]
+            else:
+                summary[key] = _redacted_value_shape(value)
         elif isinstance(value, str) and len(value) > _MAX_LOGGED_STR_LEN:
             summary[key] = value[:_MAX_LOGGED_STR_LEN] + "...<truncated>"
         else:

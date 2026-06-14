@@ -31,15 +31,20 @@ The `enter` parameter defaults to `true`, which is correct for commands (`make t
 {"tool": "capture_pane", "arguments": {"pane_id": "%0"}}
 ```
 
-The capture above may return the terminal state **before** pytest runs. Compose `tmux wait-for -S <channel>` into the command and block on {tooliconl}`wait-for-channel` — deterministic, race-free:
+The capture above may return the terminal state **before** pytest
+runs. For an authored shell command, use {tooliconl}`run-command`
+instead:
 
 ```json
-{"tool": "send_keys", "arguments": {"keys": "pytest; tmux wait-for -S pytest_done", "pane_id": "%0"}}
-{"tool": "wait_for_channel", "arguments": {"channel": "pytest_done", "timeout": 60}}
-{"tool": "capture_pane", "arguments": {"pane_id": "%0"}}
+{"tool": "run_command", "arguments": {"command": "pytest", "pane_id": "%0", "timeout": 60}}
 ```
 
-For output the agent does not author (third-party logs, daemon prompts, interactive supervisors), substitute {tooliconl}`wait-for-text` for `wait_for_channel`. See {ref}`recipes` for the complete pattern.
+For custom shell composition outside {tooliconl}`run-command`, compose
+`tmux wait-for -S <channel>` into the command and block on
+{tooliconl}`wait-for-channel`. For output the agent does not author
+(third-party logs, daemon prompts, interactive supervisors), use
+{tooliconl}`wait-for-text` or observe with {tooliconl}`capture-since`.
+See {ref}`recipes` for complete patterns.
 
 ## Repeated `capture_pane` calls resend old output
 

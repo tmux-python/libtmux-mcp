@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionInfo(BaseModel):
@@ -299,6 +299,79 @@ class RunCommandResult(BaseModel):
     output_truncated_lines: int = Field(
         default=0,
         description="Number of pane lines dropped from the head when truncating",
+    )
+
+
+class SendKeysOperation(BaseModel):
+    """One raw-input operation for :func:`send_keys_batch`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    keys: str = Field(description="Keys or text to send.")
+    pane_id: str | None = Field(
+        default=None,
+        description="Pane ID (e.g. '%1').",
+    )
+    session_name: str | None = Field(
+        default=None,
+        description="Session name for pane resolution.",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Session ID (e.g. '$1') for pane resolution.",
+    )
+    window_id: str | None = Field(
+        default=None,
+        description="Window ID for pane resolution.",
+    )
+    enter: bool = Field(
+        default=True,
+        description="Whether to press Enter after sending keys.",
+    )
+    literal: bool = Field(
+        default=False,
+        description="Whether to send keys literally with no tmux key interpretation.",
+    )
+    suppress_history: bool = Field(
+        default=False,
+        description=(
+            "Suppress shell history by prepending a space where the shell "
+            "ignores space-prefixed commands."
+        ),
+    )
+
+
+class SendKeysOperationResult(BaseModel):
+    """Per-operation result from :func:`send_keys_batch`."""
+
+    index: int = Field(description="Zero-based index in the submitted operation list.")
+    pane_id: str | None = Field(
+        default=None,
+        description="Resolved pane ID, or None if target resolution failed.",
+    )
+    success: bool = Field(description="True when this operation sent successfully.")
+    error: str | None = Field(
+        default=None,
+        description="Error message for this operation, if it failed.",
+    )
+    elapsed_seconds: float = Field(description="Time spent on this operation.")
+
+
+class SendKeysBatchResult(BaseModel):
+    """Structured result for a batch of raw-input send operations."""
+
+    results: list[SendKeysOperationResult] = Field(
+        default_factory=list,
+        description="Per-operation results in attempted order.",
+    )
+    succeeded: int = Field(description="Number of operations sent successfully.")
+    failed: int = Field(description="Number of operations that failed.")
+    stopped_at: int | None = Field(
+        default=None,
+        description=(
+            "Index where processing stopped because on_error='stop', or None "
+            "when all operations were attempted."
+        ),
     )
 
 

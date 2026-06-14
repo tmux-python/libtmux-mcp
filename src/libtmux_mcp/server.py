@@ -32,10 +32,12 @@ from libtmux_mcp.middleware import (
     SafetyMiddleware,
     TailPreservingResponseLimitingMiddleware,
     ToolErrorResultMiddleware,
+    install_fastmcp_validation_log_filter,
 )
 from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
 
 logger = logging.getLogger(__name__)
+install_fastmcp_validation_log_filter()
 
 #: Cache-key shape used by :data:`_server_cache` and the GC helper.
 #: ``(socket_name, socket_path, tmux_bin)`` — see
@@ -94,10 +96,10 @@ _INSTR_READ_TOOLS = (
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: run_command for authored shell commands needing "
+    "WAIT, DON'T POLL: run_command for authored commands needing "
     "status; wait_for_channel for custom tmux wait-for; capture_since "
     "for tailing; wait_for_text/wait_for_content_change for output you "
-    "don't author."
+    "don't author; send_keys_batch for raw input."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module

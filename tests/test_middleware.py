@@ -176,6 +176,33 @@ class CommandRedactionFixture(t.NamedTuple):
     command: str
 
 
+class MalformedOperationAuditFixture(t.NamedTuple):
+    """Test fixture for malformed send_keys_batch audit entries."""
+
+    test_id: str
+    operation: object
+    forbidden_text: str
+    expected_type: str
+
+
+class MalformedOperationsPayloadAuditFixture(t.NamedTuple):
+    """Test fixture for malformed send_keys_batch audit payloads."""
+
+    test_id: str
+    args: dict[str, object]
+    forbidden_text: str
+    expected_shape: t.Literal["redacted_container", "redacted_unknown_field"]
+
+
+class BatchSchemaValidationRedactionFixture(t.NamedTuple):
+    """Test fixture for schema-validation redaction of batch payloads."""
+
+    test_id: str
+    arguments: dict[str, t.Any]
+    secret: str
+    expected_fragments: tuple[str, ...]
+
+
 COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
     CommandRedactionFixture(
         test_id="credential_bearing",
@@ -184,6 +211,62 @@ COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
     CommandRedactionFixture(
         test_id="plain",
         command="ls -la /tmp",
+    ),
+]
+
+
+MALFORMED_OPERATION_AUDIT_FIXTURES: list[MalformedOperationAuditFixture] = [
+    MalformedOperationAuditFixture(
+        test_id="string_operation",
+        operation="keys=printf SECRET_COMMAND",
+        forbidden_text="SECRET_COMMAND",
+        expected_type="str",
+    ),
+    MalformedOperationAuditFixture(
+        test_id="list_operation",
+        operation=["keys=printf SECRET_COMMAND"],
+        forbidden_text="SECRET_COMMAND",
+        expected_type="list",
+    ),
+]
+
+
+MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES: list[
+    MalformedOperationsPayloadAuditFixture
+] = [
+    MalformedOperationsPayloadAuditFixture(
+        test_id="operations_object",
+        args={"operations": {"keys": "printf SECRET_OBJECT", "pane_id": "%1"}},
+        forbidden_text="SECRET_OBJECT",
+        expected_shape="redacted_container",
+    ),
+    MalformedOperationsPayloadAuditFixture(
+        test_id="unknown_operation_field",
+        args={"operations": [{"key": "printf SECRET_KEY", "pane_id": "%1"}]},
+        forbidden_text="SECRET_KEY",
+        expected_shape="redacted_unknown_field",
+    ),
+]
+
+
+BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES: list[
+    BatchSchemaValidationRedactionFixture
+] = [
+    BatchSchemaValidationRedactionFixture(
+        test_id="unknown_operation_field",
+        arguments={
+            "operations": [{"key": "printf SECRET_SCHEMA_KEY", "pane_id": "%1"}]
+        },
+        secret="SECRET_SCHEMA_KEY",
+        expected_fragments=("operations.0.key", "extra_forbidden"),
+    ),
+    BatchSchemaValidationRedactionFixture(
+        test_id="operations_object",
+        arguments={
+            "operations": {"keys": "printf SECRET_SCHEMA_OBJECT", "pane_id": "%1"}
+        },
+        secret="SECRET_SCHEMA_OBJECT",
+        expected_fragments=("operations", "list_type"),
     ),
 ]
 
@@ -234,12 +317,141 @@ def test_summarize_args_redacts_sensitive_dict_values() -> None:
     assert summary["pane_id"] == "%1"
 
 
+def test_summarize_args_redacts_send_keys_batch_operations() -> None:
+    """send_keys_batch operation payloads are digested inside the list."""
+    args: dict[str, t.Any] = {
+        "operations": [
+            {"keys": "psql -U admin -W supersecret mydb", "pane_id": "%1"},
+            {"keys": "printf public", "pane_id": "%2", "enter": False},
+        ],
+        "on_error": "continue",
+    }
+
+    summary = _summarize_args(args)
+    rendered = str(summary)
+
+    assert "supersecret" not in rendered
+    assert "printf public" not in rendered
+    first = summary["operations"][0]
+    second = summary["operations"][1]
+    assert first["pane_id"] == "%1"
+    assert second["pane_id"] == "%2"
+    assert second["enter"] is False
+    for operation in (first, second):
+        assert isinstance(operation["keys"], dict)
+        assert "len" in operation["keys"]
+        assert "sha256_prefix" in operation["keys"]
+
+
+@pytest.mark.parametrize(
+    MalformedOperationAuditFixture._fields,
+    MALFORMED_OPERATION_AUDIT_FIXTURES,
+    ids=[fixture.test_id for fixture in MALFORMED_OPERATION_AUDIT_FIXTURES],
+)
+def test_summarize_args_redacts_malformed_send_keys_batch_operation_entries(
+    test_id: str,
+    operation: object,
+    forbidden_text: str,
+    expected_type: str,
+) -> None:
+    """Malformed send_keys_batch operation entries do not leak raw payloads."""
+    assert test_id
+    summary = _summarize_args({"operations": [operation]})
+    rendered = str(summary)
+
+    assert forbidden_text not in rendered
+    item = summary["operations"][0]
+    assert isinstance(item, dict)
+    assert item["type"] == expected_type
+    assert item["redacted"] is True
+
+
+@pytest.mark.parametrize(
+    MalformedOperationsPayloadAuditFixture._fields,
+    MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES,
+    ids=[fixture.test_id for fixture in MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES],
+)
+def test_summarize_args_redacts_malformed_send_keys_batch_operation_payloads(
+    test_id: str,
+    args: dict[str, object],
+    forbidden_text: str,
+    expected_shape: t.Literal["redacted_container", "redacted_unknown_field"],
+) -> None:
+    """Malformed send_keys_batch operation payloads do not leak raw values."""
+    assert test_id
+    summary = _summarize_args(args)
+    rendered = str(summary)
+
+    assert forbidden_text not in rendered
+    operations = summary["operations"]
+    if expected_shape == "redacted_container":
+        assert operations == {"type": "dict", "redacted": True}
+    else:
+        assert isinstance(operations, list)
+        item = operations[0]
+        assert isinstance(item, dict)
+        assert item["pane_id"] == "%1"
+        assert item["key"] == {"type": "str", "redacted": True}
+
+
 def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
     """Non-sensitive strings over the cap get truncated with a marker."""
     args = {"output_path": "x" * 500}
     summary = _summarize_args(args)
     assert summary["output_path"].endswith("...<truncated>")
     assert len(summary["output_path"]) < 500
+
+
+@pytest.mark.parametrize(
+    BatchSchemaValidationRedactionFixture._fields,
+    BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES,
+    ids=[fixture.test_id for fixture in BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES],
+)
+def test_send_keys_batch_schema_validation_redacts_inputs(
+    test_id: str,
+    arguments: dict[str, t.Any],
+    secret: str,
+    expected_fragments: tuple[str, ...],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed batch schema errors do not echo raw key payloads."""
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    assert test_id
+    for logger_name in ("fastmcp", "fastmcp.server.server", "fastmcp.errors"):
+        monkeypatch.setattr(logging.getLogger(logger_name), "propagate", True)
+
+    async def _call() -> t.Any:
+        async with Client(build_mcp_server()) as client:
+            return await client.call_tool(
+                "send_keys_batch",
+                arguments,
+                raise_on_error=False,
+            )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="fastmcp.server.server"),
+        caplog.at_level(logging.WARNING, logger="fastmcp.errors"),
+    ):
+        result = asyncio.run(_call())
+
+    assert result.is_error is True
+    result_text = result.content[0].text
+    logs_text = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name in {"fastmcp.server.server", "fastmcp.errors"}
+    )
+
+    assert secret not in result_text
+    assert secret not in logs_text
+    assert "input_value" not in result_text
+    assert "'input':" not in logs_text
+    for fragment in expected_fragments:
+        assert fragment in result_text or fragment in logs_text
 
 
 class _RecordingCallNext:

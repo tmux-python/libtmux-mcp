@@ -6,6 +6,18 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Ordered raw input with {tooliconl}`send-keys-batch`**
+
+{tooliconl}`send-keys-batch` sends several raw-input operations in order and returns per-operation success or failure metadata. Choose stop-at-first-failure or continue-and-report handling, and set an optional timeout to bound a long batch and each underlying send. It is intentionally scoped to keystrokes and text input for TUIs or persistent shells; authored command completion stays with {tooliconl}`run-command`, and repeated observation stays with {tooliconl}`capture-since`. (#49, #61)
+
+### Fixes
+
+**Argument-validation failures no longer echo rejected input**
+
+When a tool call fails argument-schema validation, the error result and the server's invalid-argument log record now omit the rejected input values, so a secret-bearing argument can no longer surface in logs or error text. (#78)
+
 ## libtmux-mcp 0.1.0a12 (2026-06-13)
 
 libtmux-mcp 0.1.0a12 hardens the MCP server's read-only and safety surface and adds a one-call `run_command` tool. Read-only tools can no longer trigger tmux format-job shell evaluation, an invalid safety tier fails closed instead of exposing write tools, and large successful results keep their structured payload. Panes and windows also gain liveness and active-pane metadata, and the package ships a `py.typed` marker. The fastmcp floor rises to 3.4.2 to pick up its explicit `starlette>=1.0.1` floor (CVE-2026-48710).

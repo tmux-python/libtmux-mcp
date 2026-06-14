@@ -49,13 +49,18 @@ Search all my panes for the word "error".
 
 ## How it works
 
-When you say "run `make test` and show me the output", the agent executes a three-step pattern:
+When you say "run `make test` and show me the output", the agent follows a typed command pattern:
 
-1. {tool}`send-keys` — send the command (composed with `tmux wait-for -S <channel>`) to a tmux pane
-2. {tool}`wait-for-channel` — block deterministically until the command signals completion
-3. {tool}`capture-pane` — read the terminal output
+1. {tool}`run-command` — send the authored shell command, wait for completion, and return exit status plus output
+2. Inspect the typed result's `exit_status`, `timed_out`, and `output` fields
 
-This **send → wait → capture** sequence is the fundamental workflow. For commands the agent authors, the channel pattern is deterministic; for output the agent does not author (third-party log lines, daemon prompts, interactive supervisors), substitute {tool}`wait-for-text` for step 2.
+This **run → inspect** sequence is the default workflow for commands
+the agent authors. For custom shell composition outside
+{tool}`run-command`, the lower-level escape hatch is
+{tool}`send-keys` with `tmux wait-for -S <channel>` composed into the
+payload, followed by {tool}`wait-for-channel`. For output the agent
+does not author (third-party log lines, daemon prompts, interactive
+supervisors), use {tool}`wait-for-text` or {tool}`wait-for-content-change`.
 
 When you need to keep checking the same pane after that first read, switch to
 {tool}`capture-since`: the first call returns a cursor, and follow-up calls

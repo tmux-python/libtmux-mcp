@@ -196,19 +196,20 @@ create a new pane, then calls {tooliconl}`send-keys` in that pane:
 
 The agent calls {tooliconl}`wait-for-text` on the server pane with
 `pattern: "Listening on"` and `timeout: 30`. Once the wait resolves, the
-agent calls {tooliconl}`send-keys` in the original pane:
-`npm test -- --integration`, then {tooliconl}`wait-for-text` with
-`pattern: "passed|failed|error"` and `regex: true`, then
-{tooliconl}`capture-pane` to read the test results.
+agent calls {tooliconl}`run-command` in the original pane with
+`command: "npm test -- --integration"` and a test-appropriate
+timeout, then reads `exit_status`, `timed_out`, and `output`.
 
 ```{warning}
 Calling {toolref}`capture-pane` immediately after {toolref}`send-keys` is a
 race condition. {toolref}`send-keys` returns the moment tmux accepts the
 keystrokes, not when the command finishes. For commands the agent authors,
-compose `tmux wait-for -S <channel>` into the command and call
-{toolref}`wait-for-channel` — deterministic, race-free. For output the
-agent does not author (server-startup banners, test-result lines like
-the ones above), use {toolref}`wait-for-text` instead.
+use {toolref}`run-command` — deterministic, typed, and race-free. For
+custom shell composition outside that shape, compose
+`tmux wait-for -S <channel>` into the command and call
+{toolref}`wait-for-channel`. For output the agent does not author
+(server-startup banners, daemon prompts), use {toolref}`wait-for-text`
+instead.
 ```
 
 ### The non-obvious part
@@ -393,21 +394,18 @@ long-lived process, I would not hijack it -- I would use a different pane.
 
 ### Act
 
-The agent calls {tooliconl}`clear-pane`, then {tooliconl}`send-keys` with
-`keys: "pytest; tmux wait-for -S pytest_done"`, then
-{tooliconl}`wait-for-channel` with `channel: "pytest_done"`, then
-{tooliconl}`capture-pane` to read the fresh output. Composing the
-`tmux wait-for -S` signal directly into the shell command is the
-deterministic path for authored commands.
+The agent calls {tooliconl}`clear-pane`, then {tooliconl}`run-command`
+with `command: "pytest"` and a test-appropriate timeout. The result
+contains exit status and fresh tail-preserved output without a manual
+send-wait-capture sequence.
 
 ### The non-obvious part
 
 {toolref}`clear-pane` runs two tmux commands internally (`send-keys -R` then
 `clear-history`) with a brief gap between them. Calling
 {toolref}`capture-pane` immediately after {toolref}`clear-pane` may catch
-partial state. The {toolref}`wait-for-text` call after {toolref}`send-keys`
-naturally provides the needed delay, so the sequence clear-send-wait-capture
-is safe.
+partial state. The {toolref}`run-command` call naturally provides the
+needed command-completion boundary, so the sequence clear-run-inspect is safe.
 
 ---
 

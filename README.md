@@ -18,7 +18,7 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 | **Server** | `list_servers`, `list_sessions`, `create_session`, `kill_server`, `get_server_info` |
 | **Session** | `list_windows`, `get_session_info`, `create_window`, `rename_session`, `select_window`, `kill_session` |
 | **Window** | `list_panes`, `get_window_info`, `split_window`, `rename_window`, `select_layout`, `resize_window`, `move_window`, `kill_window` |
-| **Pane** | `run_command`, `send_keys`, `paste_text`, `capture_pane`, `capture_since`, `snapshot_pane`, `search_panes`, `find_pane_by_position`, `get_pane_info`, `wait_for_text`, `wait_for_content_change`, `wait_for_channel`, `signal_channel`, `display_message`, `select_pane`, `swap_pane`, `resize_pane`, `set_pane_title`, `clear_pane`, `pipe_pane`, `enter_copy_mode`, `exit_copy_mode`, `respawn_pane`, `kill_pane` |
+| **Pane** | `run_command`, `send_keys`, `send_keys_batch`, `paste_text`, `capture_pane`, `capture_since`, `snapshot_pane`, `search_panes`, `find_pane_by_position`, `get_pane_info`, `wait_for_text`, `wait_for_content_change`, `wait_for_channel`, `signal_channel`, `display_message`, `select_pane`, `swap_pane`, `resize_pane`, `set_pane_title`, `clear_pane`, `pipe_pane`, `enter_copy_mode`, `exit_copy_mode`, `respawn_pane`, `kill_pane` |
 | **Options** | `show_option`, `set_option` |
 | **Environment** | `show_environment`, `set_environment` |
 | **Buffers** | `load_buffer`, `paste_buffer`, `show_buffer`, `delete_buffer` |
@@ -88,13 +88,26 @@ terminal it is using — pytest finishing, a dev server printing its
 port, a deploy log settling. The difference then is not more access
 to tmux, but a better place to put the control loop.
 
-The server-side moves are three:
+The server-side moves are:
+
+**Running.** [`run_command`](https://libtmux-mcp.git-pull.com/tools/pane/run-command/)
+sends an authored shell command, waits for deterministic completion,
+and returns exit status plus tail-preserved output as one typed value.
+The alternative is teaching every agent to compose `send-keys`,
+`wait-for`, and a pane capture correctly.
+
+**Driving.** [`send_keys_batch`](https://libtmux-mcp.git-pull.com/tools/pane/send-keys-batch/)
+sends several ordered raw-input operations for TUIs and persistent
+shell interaction. It is deliberately not a workflow DSL; command
+completion stays in `run_command`, and repeated observation stays in
+`capture_since`.
 
 **Waiting.** [`wait_for_text`](https://libtmux-mcp.git-pull.com/tools/pane/wait-for-text/)
 and [`wait_for_content_change`](https://libtmux-mcp.git-pull.com/tools/pane/wait-for-content-change/)
-block inside the server until the condition fires. The alternative is
-the model polling `capture-pane` in a loop, paying both context tokens
-and round-trip latency for every turn.
+block inside the server until a condition fires for output the agent
+does not author. The alternative is the model polling `capture-pane`
+in a loop, paying both context tokens and round-trip latency for every
+turn.
 
 **Reading.** [`snapshot_pane`](https://libtmux-mcp.git-pull.com/tools/pane/snapshot-pane/)
 returns content, cursor, copy-mode state, and scroll offset as one

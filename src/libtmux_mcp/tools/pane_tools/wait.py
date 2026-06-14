@@ -160,11 +160,12 @@ async def wait_for_text(
     (``echo``, prompt-return after ``^C``) can land *before* this tool
     snapshots the baseline, and the match is then invisible to the
     wait. The race is small but real on CI and over remote sockets.
-    For commands you author, prefer the channel pattern: append
+    For commands you author, prefer ``run_command`` so completion,
+    exit status, and output arrive as one typed result. For custom
+    shell composition outside that shape, append
     ``; tmux wait-for -S <channel>`` to your ``send_keys`` payload and
-    call ``wait_for_channel`` instead. The ``run_and_wait`` prompt at
-    ``libtmux_mcp.prompts.recipes`` shows the safe composition.
-    Reserve ``wait_for_text`` for output you do not control
+    call ``wait_for_channel`` instead. Reserve ``wait_for_text`` for
+    output you do not control
     (third-party process logs, daemon prompts, interactive
     supervisors).
 
