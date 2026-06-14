@@ -391,20 +391,24 @@ def test_send_keys_batch_timeout(
 ) -> None:
     """send_keys_batch aborts if execution exceeds timeout."""
     assert test_id
-    import time
-
-    from libtmux import Pane
-
     from libtmux_mcp.models import SendKeysOperation
     from libtmux_mcp.tools.pane_tools import send_keys_batch
 
-    original_send_keys = Pane.send_keys
+    call_count = 0
 
-    def slow_send_keys(*args: t.Any, **kwargs: t.Any) -> t.Any:
-        time.sleep(0.1)
-        return original_send_keys(*args, **kwargs)
+    def timed_send_keys(
+        *args: t.Any, **kwargs: t.Any
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 3:
+            raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0)
 
-    monkeypatch.setattr(Pane, "send_keys", slow_send_keys)
+    monkeypatch.setattr(
+        "libtmux_mcp.tools.pane_tools.io.subprocess.run",
+        timed_send_keys,
+    )
 
     op_models = []
     for op in operations:
@@ -421,10 +425,6 @@ def test_send_keys_batch_timeout(
     assert expected_error_snippet in (result.results[-1].error or "").lower()
 
 
-@pytest.mark.xfail(
-    reason="send_keys_batch timeout is not enforced during an in-progress send",
-    strict=True,
-)
 @pytest.mark.parametrize(
     SendKeysBatchInProgressTimeoutFixture._fields,
     SEND_KEYS_BATCH_IN_PROGRESS_TIMEOUT_FIXTURES,

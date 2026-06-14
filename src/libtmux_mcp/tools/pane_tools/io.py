@@ -31,6 +31,70 @@ from libtmux_mcp.models import (
     SendKeysOperationResult,
 )
 
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+
+
+def _batch_timeout_error(timeout: float) -> str:
+    """Return the standard send_keys_batch timeout error."""
+    return f"batch execution exceeded timeout of {timeout}s"
+
+
+def _remaining_timeout(deadline: float, timeout: float) -> float:
+    """Return the remaining operation budget or raise timeout."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ExpectedToolError(_batch_timeout_error(timeout))
+    return remaining
+
+
+def _run_timed_send_keys_argv(
+    argv: list[str],
+    *,
+    deadline: float,
+    timeout: float,
+) -> None:
+    """Run one ``tmux send-keys`` argv within the batch deadline."""
+    try:
+        subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=_remaining_timeout(deadline, timeout),
+        )
+    except subprocess.TimeoutExpired as e:
+        raise ExpectedToolError(_batch_timeout_error(timeout)) from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+        msg = f"send-keys failed: {stderr or e}"
+        raise ExpectedToolError(msg) from e
+
+
+def _run_timed_send_keys(
+    pane: Pane,
+    operation: SendKeysOperation,
+    *,
+    deadline: float,
+    timeout: float,
+) -> None:
+    """Run ``tmux send-keys`` for one operation within the batch deadline."""
+    pane_id = pane.pane_id
+    if pane_id is None:
+        msg = "resolved pane has no pane_id"
+        raise ExpectedToolError(msg)
+
+    tmux_args = ["send-keys", "-t", pane_id]
+    if operation.literal:
+        tmux_args.append("-l")
+    tmux_args.append((" " if operation.suppress_history else "") + operation.keys)
+
+    send_argvs = [_tmux_argv(pane.server, *tmux_args)]
+    if operation.enter:
+        send_argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
+
+    for argv in send_argvs:
+        _run_timed_send_keys_argv(argv, deadline=deadline, timeout=timeout)
+
 
 @handle_tool_errors
 def send_keys(
@@ -152,15 +216,17 @@ def send_keys_batch(
     results: list[SendKeysOperationResult] = []
     stopped_at: int | None = None
     batch_started = time.monotonic()
+    deadline = batch_started + timeout if timeout is not None else None
 
     for index, operation in enumerate(operations):
-        if timeout is not None and (time.monotonic() - batch_started) > timeout:
+        if deadline is not None and time.monotonic() > deadline:
+            assert timeout is not None
             results.append(
                 SendKeysOperationResult(
                     index=index,
                     pane_id=operation.pane_id,
                     success=False,
-                    error=f"batch execution exceeded timeout of {timeout}s",
+                    error=_batch_timeout_error(timeout),
                     elapsed_seconds=0.0,
                 )
             )
@@ -194,12 +260,21 @@ def send_keys_batch(
                     stopped_at = index
                     break
                 continue
-            pane.send_keys(
-                operation.keys,
-                enter=operation.enter,
-                suppress_history=operation.suppress_history,
-                literal=operation.literal,
-            )
+            if deadline is None:
+                pane.send_keys(
+                    operation.keys,
+                    enter=operation.enter,
+                    suppress_history=operation.suppress_history,
+                    literal=operation.literal,
+                )
+            else:
+                assert timeout is not None
+                _run_timed_send_keys(
+                    pane,
+                    operation,
+                    deadline=deadline,
+                    timeout=timeout,
+                )
         except Exception as e:
             elapsed = time.monotonic() - started
             tool_err = (
