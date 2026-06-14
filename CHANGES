@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Tier-aware tool batching**
+
+{tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. (#79)
+
 ## libtmux-mcp 0.1.0a13 (2026-06-13)
 
 libtmux-mcp 0.1.0a13 adds {tooliconl}`send-keys-batch` for sending an ordered batch of raw key/text operations to tmux panes in a single call, with per-operation results, stop-or-continue error handling, and an optional timeout that bounds both the batch and each send. Argument-validation failures also stop echoing the rejected input into the server's logs and tool error results, so a secret-bearing argument can no longer surface there.
