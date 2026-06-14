@@ -19,6 +19,7 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     handle_tool_errors_async,
 )
+from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
 from libtmux_mcp.models import (
     ToolCallBatchResult,
     ToolCallOperation,
@@ -43,6 +44,13 @@ _BATCH_TOOL_NAMES: frozenset[str] = frozenset(
         "call_destructive_tools_batch",
     }
 )
+
+_BATCH_TRUNCATED_CONTENT: list[dict[str, t.Any]] = [
+    {
+        "type": "text",
+        "text": "[... batch truncated nested content ...]",
+    }
+]
 
 
 def _content_block_to_dict(block: t.Any) -> dict[str, t.Any]:
@@ -127,6 +135,47 @@ def _ensure_tool_result(tool_name: str, result: t.Any) -> ToolResult:
     raise ExpectedToolError(msg)
 
 
+def _batch_result_size(result: ToolCallBatchResult) -> int:
+    """Return the serialized byte size of a batch result."""
+    return len(result.model_dump_json(fallback=str).encode("utf-8"))
+
+
+def _operation_has_nested_payload(result: ToolCallOperationResult) -> bool:
+    """Return True when a row still carries payload fields that can be elided."""
+    return bool(result.content) or result.structured_content is not None
+
+
+def _limit_batch_result(
+    result: ToolCallBatchResult,
+    *,
+    max_bytes: int = DEFAULT_RESPONSE_LIMIT_BYTES,
+) -> ToolCallBatchResult:
+    """Elide nested result payloads until the batch envelope fits."""
+    if _batch_result_size(result) <= max_bytes:
+        return result
+
+    limited = result.model_copy(
+        deep=True,
+        update={"response_truncated": True},
+    )
+    dropped_bytes = 0
+    for operation in limited.results:
+        if not _operation_has_nested_payload(operation):
+            continue
+
+        before = _batch_result_size(limited)
+        operation.content = [item.copy() for item in _BATCH_TRUNCATED_CONTENT]
+        operation.structured_content = None
+        after = _batch_result_size(limited)
+        dropped_bytes += max(before - after, 0)
+        limited.response_truncated_bytes = dropped_bytes
+
+        if _batch_result_size(limited) <= max_bytes:
+            break
+
+    return limited
+
+
 async def _call_one_tool(
     *,
     fastmcp: FastMCP,
@@ -207,11 +256,13 @@ async def _call_tools_batch(
 
     succeeded = sum(1 for result in results if result.success)
     failed = len(results) - succeeded
-    return ToolCallBatchResult(
-        results=results,
-        succeeded=succeeded,
-        failed=failed,
-        stopped_at=stopped_at,
+    return _limit_batch_result(
+        ToolCallBatchResult(
+            results=results,
+            succeeded=succeeded,
+            failed=failed,
+            stopped_at=stopped_at,
+        )
     )
 
 

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import typing as t
+
+import pytest
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
@@ -16,6 +19,21 @@ from libtmux_mcp._utils import (
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+
+
+class BatchResponseLimitFixture(t.NamedTuple):
+    """Test fixture for aggregate batch response limiting."""
+
+    test_id: str
+    payload_size: int
+
+
+BATCH_RESPONSE_LIMIT_FIXTURES: list[BatchResponseLimitFixture] = [
+    BatchResponseLimitFixture(
+        test_id="two_large_readonly_results",
+        payload_size=300_000,
+    ),
+]
 
 
 def _batch_probe_server() -> FastMCP:
@@ -109,6 +127,71 @@ def test_call_readonly_tools_batch_preserves_structured_results() -> None:
     }
     assert first["elapsed_seconds"] >= 0.0
     assert second["elapsed_seconds"] >= 0.0
+
+
+@pytest.mark.parametrize(
+    BatchResponseLimitFixture._fields,
+    BATCH_RESPONSE_LIMIT_FIXTURES,
+    ids=[fixture.test_id for fixture in BATCH_RESPONSE_LIMIT_FIXTURES],
+)
+def test_call_readonly_tools_batch_caps_aggregate_response(
+    test_id: str,
+    payload_size: int,
+) -> None:
+    """The batch envelope survives when nested result payloads are capped."""
+    from fastmcp import Client
+
+    from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
+
+    first_payload = "first-" + ("a" * payload_size)
+    second_payload = "second-" + ("b" * payload_size)
+
+    async def _call() -> t.Any:
+        async with Client(_batch_probe_server()) as client:
+            return await client.call_tool(
+                "call_readonly_tools_batch",
+                {
+                    "operations": [
+                        {
+                            "tool": "readonly_probe",
+                            "arguments": {"value": first_payload},
+                        },
+                        {
+                            "tool": "readonly_probe",
+                            "arguments": {"value": second_payload},
+                        },
+                    ],
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is False
+    structured = result.structured_content
+    assert structured["response_truncated"] is True
+    assert structured["response_truncated_bytes"] > 0
+    assert structured["succeeded"] == 2
+    assert structured["failed"] == 0
+    assert structured["stopped_at"] is None
+
+    serialized = json.dumps(structured, separators=(",", ":"), sort_keys=True)
+    assert len(serialized.encode("utf-8")) <= DEFAULT_RESPONSE_LIMIT_BYTES
+    assert first_payload not in serialized
+    assert second_payload in serialized
+
+    first, second = structured["results"]
+    assert first["index"] == 0
+    assert first["tool"] == "readonly_probe"
+    assert first["success"] is True
+    assert first["structured_content"] is None
+    assert first["content"] == [
+        {
+            "type": "text",
+            "text": "[... batch truncated nested content ...]",
+        }
+    ]
+    assert second["structured_content"] == {"value": second_payload}
 
 
 def test_call_readonly_tools_batch_rejects_mutating_inner_tool() -> None:

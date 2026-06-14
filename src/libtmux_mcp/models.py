@@ -428,6 +428,17 @@ class ToolCallBatchResult(BaseModel):
             "when all operations were attempted."
         ),
     )
+    response_truncated: bool = Field(
+        default=False,
+        description=(
+            "True when nested result payloads were elided to keep the batch "
+            "response under the server response cap."
+        ),
+    )
+    response_truncated_bytes: int = Field(
+        default=0,
+        description="Approximate serialized bytes removed from nested result payloads.",
+    )
 
 
 class PaneSnapshot(BaseModel):
