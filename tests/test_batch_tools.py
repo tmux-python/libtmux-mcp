@@ -67,6 +67,22 @@ BATCH_ANNOTATION_FIXTURES: list[BatchAnnotationFixture] = [
 ]
 
 
+def _content_block_to_wire(block: t.Any) -> dict[str, t.Any]:
+    if hasattr(block, "model_dump"):
+        dumped = block.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if isinstance(dumped, dict):
+            return t.cast("dict[str, t.Any]", dumped)
+    return {"type": type(block).__name__, "value": str(block)}
+
+
+def _call_tool_result_wire(result: t.Any) -> dict[str, t.Any]:
+    return {
+        "content": [_content_block_to_wire(block) for block in result.content],
+        "structuredContent": result.structured_content,
+        "isError": result.is_error,
+    }
+
+
 def _batch_probe_server() -> FastMCP:
     """Build a small FastMCP server with batch tools and tiered probes."""
     from fastmcp import FastMCP
@@ -206,10 +222,14 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
     assert structured["failed"] == 0
     assert structured["stopped_at"] is None
 
-    serialized = json.dumps(structured, separators=(",", ":"), sort_keys=True)
+    serialized = json.dumps(
+        _call_tool_result_wire(result),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     assert len(serialized.encode("utf-8")) <= DEFAULT_RESPONSE_LIMIT_BYTES
     assert first_payload not in serialized
-    assert second_payload in serialized
+    assert second_payload not in serialized
 
     first, second = structured["results"]
     assert first["index"] == 0
@@ -222,7 +242,13 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
             "text": "[... batch truncated nested content ...]",
         }
     ]
-    assert second["structured_content"] == {"value": second_payload}
+    assert second["structured_content"] is None
+    assert second["content"] == [
+        {
+            "type": "text",
+            "text": "[... batch truncated nested content ...]",
+        }
+    ]
 
 
 def test_call_readonly_tools_batch_rejects_mutating_inner_tool() -> None:

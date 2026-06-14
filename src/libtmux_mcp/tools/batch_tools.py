@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import typing as t
 
@@ -140,9 +141,16 @@ def _ensure_tool_result(tool_name: str, result: t.Any) -> ToolResult:
     raise ExpectedToolError(msg)
 
 
-def _batch_result_size(result: ToolCallBatchResult) -> int:
-    """Return the serialized byte size of a batch result."""
-    return len(result.model_dump_json(fallback=str).encode("utf-8"))
+def _batch_response_size(result: ToolCallBatchResult) -> int:
+    """Return the serialized byte size of FastMCP's batch response envelope."""
+    result_json = result.model_dump_json(fallback=str)
+    envelope = {
+        "content": [{"type": "text", "text": result_json}],
+        "structuredContent": json.loads(result_json),
+        "isError": False,
+    }
+    serialized = json.dumps(envelope, separators=(",", ":"), sort_keys=True)
+    return len(serialized.encode("utf-8"))
 
 
 def _operation_has_nested_payload(result: ToolCallOperationResult) -> bool:
@@ -156,7 +164,7 @@ def _limit_batch_result(
     max_bytes: int = DEFAULT_RESPONSE_LIMIT_BYTES,
 ) -> ToolCallBatchResult:
     """Elide nested result payloads until the batch envelope fits."""
-    if _batch_result_size(result) <= max_bytes:
+    if _batch_response_size(result) <= max_bytes:
         return result
 
     limited = result.model_copy(
@@ -168,14 +176,14 @@ def _limit_batch_result(
         if not _operation_has_nested_payload(operation):
             continue
 
-        before = _batch_result_size(limited)
+        before = _batch_response_size(limited)
         operation.content = [item.copy() for item in _BATCH_TRUNCATED_CONTENT]
         operation.structured_content = None
-        after = _batch_result_size(limited)
+        after = _batch_response_size(limited)
         dropped_bytes += max(before - after, 0)
         limited.response_truncated_bytes = dropped_bytes
 
-        if _batch_result_size(limited) <= max_bytes:
+        if _batch_response_size(limited) <= max_bytes:
             break
 
     return limited
