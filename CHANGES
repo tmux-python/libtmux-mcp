@@ -10,7 +10,7 @@ _Notes on upcoming releases will be added here_
 
 **Tier-aware tool batching**
 
-{tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. (#79)
+{tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. Large aggregate results stay within the server's response limit — oversized nested payloads are dropped and the result flags the truncation. (#79)
 
 ## libtmux-mcp 0.1.0a13 (2026-06-13)
 
