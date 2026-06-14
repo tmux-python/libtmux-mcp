@@ -4,7 +4,7 @@
 ```
 
 **Use when** you need an ordered workflow made from existing typed MCP
-tools, such as creating a window and splitting it, while preserving
+tools, such as renaming and splitting a known window, while preserving
 each tool's own schema and safety checks.
 
 **Avoid when** you need tmux's native semicolon command parsing. This
@@ -24,12 +24,12 @@ running with `LIBTMUX_SAFETY=destructive`.
   "arguments": {
     "operations": [
       {
-        "tool": "create_window",
-        "arguments": {"session_name": "dev", "window_name": "logs"}
+        "tool": "rename_window",
+        "arguments": {"window_id": "@2", "new_name": "logs"}
       },
       {
         "tool": "split_window",
-        "arguments": {"session_name": "dev", "window_name": "logs"}
+        "arguments": {"window_id": "@2", "direction": "right"}
       }
     ],
     "on_error": "stop"
