@@ -11,6 +11,7 @@ if t.TYPE_CHECKING:
 def register_tools(mcp: FastMCP) -> None:
     """Register all tool modules with the FastMCP instance."""
     from libtmux_mcp.tools import (
+        batch_tools,
         buffer_tools,
         env_tools,
         hook_tools,
@@ -22,6 +23,7 @@ def register_tools(mcp: FastMCP) -> None:
         window_tools,
     )
 
+    batch_tools.register(mcp)
     server_tools.register(mcp)
     session_tools.register(mcp)
     window_tools.register(mcp)

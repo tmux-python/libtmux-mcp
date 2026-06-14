@@ -375,6 +375,61 @@ class SendKeysBatchResult(BaseModel):
     )
 
 
+class ToolCallOperation(BaseModel):
+    """One nested MCP tool call for a batch wrapper."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str = Field(description="Registered MCP tool name to call.")
+    arguments: dict[str, t.Any] = Field(
+        default_factory=dict,
+        description="Arguments for the nested tool call.",
+    )
+
+
+class ToolCallOperationResult(BaseModel):
+    """Per-operation result from a generic MCP tool batch."""
+
+    index: int = Field(description="Zero-based index in the submitted operation list.")
+    tool: str = Field(description="Nested tool name that was attempted.")
+    success: bool = Field(description="True when this nested tool call succeeded.")
+    error: str | None = Field(
+        default=None,
+        description="Error message for this operation, if it failed.",
+    )
+    content: list[dict[str, t.Any]] = Field(
+        default_factory=list,
+        description="MCP content blocks returned by the nested tool.",
+    )
+    structured_content: dict[str, t.Any] | None = Field(
+        default=None,
+        description="Structured content returned by the nested tool, if any.",
+    )
+    meta: dict[str, t.Any] | None = Field(
+        default=None,
+        description="Runtime metadata returned by the nested tool, if any.",
+    )
+    elapsed_seconds: float = Field(description="Time spent on this operation.")
+
+
+class ToolCallBatchResult(BaseModel):
+    """Structured result for a serial batch of MCP tool calls."""
+
+    results: list[ToolCallOperationResult] = Field(
+        default_factory=list,
+        description="Per-operation results in attempted order.",
+    )
+    succeeded: int = Field(description="Number of nested tool calls that succeeded.")
+    failed: int = Field(description="Number of nested tool calls that failed.")
+    stopped_at: int | None = Field(
+        default=None,
+        description=(
+            "Index where processing stopped because on_error='stop', or None "
+            "when all operations were attempted."
+        ),
+    )
+
+
 class PaneSnapshot(BaseModel):
     """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
 
