@@ -77,7 +77,7 @@ Read tmux state without changing anything.
 
 Create or modify tmux objects.
 
-{toolref}`create-session` · {toolref}`send-keys` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option`
+{toolref}`create-session` · {toolref}`send-keys` · {toolref}`send-keys-batch` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option`
 
 ### Destroy (destructive)
 
