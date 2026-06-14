@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import pathlib
 import shlex
+import subprocess
 import time
 import typing as t
 
@@ -184,6 +185,31 @@ SEND_KEYS_BATCH_TIMEOUT_FIXTURES: list[SendKeysBatchTimeoutFixture] = [
         ],
         timeout=0.05,
         expected_succeeded=1,
+        expected_failed=1,
+        expected_error_snippet="timeout",
+    ),
+]
+
+
+class SendKeysBatchInProgressTimeoutFixture(t.NamedTuple):
+    """Test fixture for send_keys_batch in-progress send timeout."""
+
+    test_id: str
+    timeout: float
+    blocked_seconds: float
+    expected_succeeded: int
+    expected_failed: int
+    expected_error_snippet: str
+
+
+SEND_KEYS_BATCH_IN_PROGRESS_TIMEOUT_FIXTURES: list[
+    SendKeysBatchInProgressTimeoutFixture
+] = [
+    SendKeysBatchInProgressTimeoutFixture(
+        test_id="single_operation_stalls",
+        timeout=0.05,
+        blocked_seconds=0.1,
+        expected_succeeded=0,
         expected_failed=1,
         expected_error_snippet="timeout",
     ),
@@ -393,6 +419,54 @@ def test_send_keys_batch_timeout(
     assert result.succeeded == expected_succeeded
     assert result.failed == expected_failed
     assert expected_error_snippet in (result.results[-1].error or "").lower()
+
+
+@pytest.mark.xfail(
+    reason="send_keys_batch timeout is not enforced during an in-progress send",
+    strict=True,
+)
+@pytest.mark.parametrize(
+    SendKeysBatchInProgressTimeoutFixture._fields,
+    SEND_KEYS_BATCH_IN_PROGRESS_TIMEOUT_FIXTURES,
+    ids=[fixture.test_id for fixture in SEND_KEYS_BATCH_IN_PROGRESS_TIMEOUT_FIXTURES],
+)
+def test_send_keys_batch_timeout_bounds_in_progress_send(
+    test_id: str,
+    timeout: float,
+    blocked_seconds: float,
+    expected_succeeded: int,
+    expected_failed: int,
+    expected_error_snippet: str,
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_keys_batch fails a send that blocks past the batch timeout."""
+    assert test_id
+    from libtmux import Pane
+
+    from libtmux_mcp.models import SendKeysOperation
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+
+    def stalled_send_keys(*args: t.Any, **kwargs: t.Any) -> None:
+        time.sleep(blocked_seconds)
+
+    def timed_out_run(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+        raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
+
+    monkeypatch.setattr(Pane, "send_keys", stalled_send_keys)
+    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", timed_out_run)
+
+    result = send_keys_batch(
+        operations=[
+            SendKeysOperation(keys="echo stalled", pane_id=mcp_pane.pane_id),
+        ],
+        timeout=timeout,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.succeeded == expected_succeeded
+    assert result.failed == expected_failed
+    assert expected_error_snippet in (result.results[0].error or "").lower()
 
 
 @pytest.mark.parametrize(
