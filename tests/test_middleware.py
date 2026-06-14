@@ -194,6 +194,15 @@ class MalformedOperationsPayloadAuditFixture(t.NamedTuple):
     expected_shape: t.Literal["redacted_container", "redacted_unknown_field"]
 
 
+class BatchSchemaValidationRedactionFixture(t.NamedTuple):
+    """Test fixture for schema-validation redaction of batch payloads."""
+
+    test_id: str
+    arguments: dict[str, t.Any]
+    secret: str
+    expected_fragments: tuple[str, ...]
+
+
 COMMAND_REDACTION_FIXTURES: list[CommandRedactionFixture] = [
     CommandRedactionFixture(
         test_id="credential_bearing",
@@ -236,6 +245,28 @@ MALFORMED_OPERATIONS_PAYLOAD_AUDIT_FIXTURES: list[
         args={"operations": [{"key": "printf SECRET_KEY", "pane_id": "%1"}]},
         forbidden_text="SECRET_KEY",
         expected_shape="redacted_unknown_field",
+    ),
+]
+
+
+BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES: list[
+    BatchSchemaValidationRedactionFixture
+] = [
+    BatchSchemaValidationRedactionFixture(
+        test_id="unknown_operation_field",
+        arguments={
+            "operations": [{"key": "printf SECRET_SCHEMA_KEY", "pane_id": "%1"}]
+        },
+        secret="SECRET_SCHEMA_KEY",
+        expected_fragments=("operations.0.key", "extra_forbidden"),
+    ),
+    BatchSchemaValidationRedactionFixture(
+        test_id="operations_object",
+        arguments={
+            "operations": {"keys": "printf SECRET_SCHEMA_OBJECT", "pane_id": "%1"}
+        },
+        secret="SECRET_SCHEMA_OBJECT",
+        expected_fragments=("operations", "list_type"),
     ),
 ]
 
@@ -369,6 +400,62 @@ def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
     summary = _summarize_args(args)
     assert summary["output_path"].endswith("...<truncated>")
     assert len(summary["output_path"]) < 500
+
+
+@pytest.mark.xfail(
+    reason="schema validation leaks raw send_keys_batch payloads",
+    strict=True,
+)
+@pytest.mark.parametrize(
+    BatchSchemaValidationRedactionFixture._fields,
+    BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES,
+    ids=[fixture.test_id for fixture in BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES],
+)
+def test_send_keys_batch_schema_validation_redacts_inputs(
+    test_id: str,
+    arguments: dict[str, t.Any],
+    secret: str,
+    expected_fragments: tuple[str, ...],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed batch schema errors do not echo raw key payloads."""
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    assert test_id
+    for logger_name in ("fastmcp", "fastmcp.server.server", "fastmcp.errors"):
+        monkeypatch.setattr(logging.getLogger(logger_name), "propagate", True)
+
+    async def _call() -> t.Any:
+        async with Client(build_mcp_server()) as client:
+            return await client.call_tool(
+                "send_keys_batch",
+                arguments,
+                raise_on_error=False,
+            )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="fastmcp.server.server"),
+        caplog.at_level(logging.WARNING, logger="fastmcp.errors"),
+    ):
+        result = asyncio.run(_call())
+
+    assert result.is_error is True
+    result_text = result.content[0].text
+    logs_text = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name in {"fastmcp.server.server", "fastmcp.errors"}
+    )
+
+    assert secret not in result_text
+    assert secret not in logs_text
+    assert "input_value" not in result_text
+    assert "'input':" not in logs_text
+    for fragment in expected_fragments:
+        assert fragment in result_text or fragment in logs_text
 
 
 class _RecordingCallNext:
