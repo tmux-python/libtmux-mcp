@@ -10,9 +10,7 @@ from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_RO,
-    ANNOTATIONS_SHELL,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -51,6 +49,13 @@ _BATCH_TRUNCATED_CONTENT: list[dict[str, t.Any]] = [
         "text": "[... batch truncated nested content ...]",
     }
 ]
+
+_ANNOTATIONS_BATCH_SIDE_EFFECTS: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
 
 
 def _content_block_to_dict(block: t.Any) -> dict[str, t.Any]:
@@ -337,11 +342,11 @@ def register(mcp: FastMCP) -> None:
     )(call_readonly_tools_batch)
     mcp.tool(
         title="Call Mutating Tools Batch",
-        annotations=ANNOTATIONS_SHELL,
+        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
         tags={TAG_MUTATING},
     )(call_mutating_tools_batch)
     mcp.tool(
         title="Call Destructive Tools Batch",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
+        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
         tags={TAG_DESTRUCTIVE},
     )(call_destructive_tools_batch)

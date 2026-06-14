@@ -36,6 +36,37 @@ BATCH_RESPONSE_LIMIT_FIXTURES: list[BatchResponseLimitFixture] = [
 ]
 
 
+class BatchAnnotationFixture(t.NamedTuple):
+    """Test fixture for generic batch wrapper annotations."""
+
+    test_id: str
+    tool_name: str
+    read_only_hint: bool
+    destructive_hint: bool
+    idempotent_hint: bool
+    open_world_hint: bool
+
+
+BATCH_ANNOTATION_FIXTURES: list[BatchAnnotationFixture] = [
+    BatchAnnotationFixture(
+        test_id="mutating_batch_warns_destructive_open_world",
+        tool_name="call_mutating_tools_batch",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    BatchAnnotationFixture(
+        test_id="destructive_batch_warns_destructive_open_world",
+        tool_name="call_destructive_tools_batch",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+]
+
+
 def _batch_probe_server() -> FastMCP:
     """Build a small FastMCP server with batch tools and tiered probes."""
     from fastmcp import FastMCP
@@ -312,3 +343,28 @@ def test_call_tools_batch_rejects_self_invocation() -> None:
     [operation] = result.structured_content["results"]
     assert operation["success"] is False
     assert "cannot call batch tools recursively" in operation["error"]
+
+
+@pytest.mark.parametrize(
+    BatchAnnotationFixture._fields,
+    BATCH_ANNOTATION_FIXTURES,
+    ids=[fixture.test_id for fixture in BATCH_ANNOTATION_FIXTURES],
+)
+def test_batch_wrappers_advertise_worst_case_annotations(
+    test_id: str,
+    tool_name: str,
+    read_only_hint: bool,
+    destructive_hint: bool,
+    idempotent_hint: bool,
+    open_world_hint: bool,
+) -> None:
+    """Batch wrappers advertise the strongest hint from their allowed tools."""
+    mcp = _batch_probe_server()
+
+    tool = asyncio.run(mcp.get_tool(tool_name))
+    assert tool is not None, f"{tool_name} should be registered"
+    assert tool.annotations is not None, f"{tool_name} should carry annotations"
+    assert tool.annotations.readOnlyHint is read_only_hint
+    assert tool.annotations.destructiveHint is destructive_hint
+    assert tool.annotations.idempotentHint is idempotent_hint
+    assert tool.annotations.openWorldHint is open_world_hint
