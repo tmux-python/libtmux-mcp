@@ -115,6 +115,18 @@ class SafetyMiddleware(Middleware):
 # ---------------------------------------------------------------------------
 
 
+def _schema_validation_error(
+    error: BaseException,
+) -> PydanticValidationError | None:
+    """Return the Pydantic validation error behind a schema failure."""
+    if isinstance(error, PydanticValidationError):
+        return error
+    cause = error.__cause__
+    if isinstance(cause, PydanticValidationError):
+        return cause
+    return None
+
+
 def _is_schema_validation_error(error: BaseException) -> bool:
     """Return True for fastmcp argument-schema validation failures.
 
@@ -129,9 +141,74 @@ def _is_schema_validation_error(error: BaseException) -> bool:
     layer converts output-shape failures into error results itself, so
     they never reach the middleware as exceptions.
     """
-    return isinstance(error, PydanticValidationError) or isinstance(
-        error.__cause__, PydanticValidationError
+    return _schema_validation_error(error) is not None
+
+
+def _validation_errors_without_inputs(
+    error: PydanticValidationError,
+) -> list[dict[str, t.Any]]:
+    """Return validation errors without rejected input values."""
+    return t.cast(
+        "list[dict[str, t.Any]]",
+        error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        ),
     )
+
+
+def _format_schema_validation_error(error: BaseException) -> str:
+    """Format a Pydantic validation error without raw input values."""
+    err = _schema_validation_error(error)
+    if err is None:
+        return str(error)
+    count = err.error_count()
+    noun = "validation error" if count == 1 else "validation errors"
+    lines = [f"{count} {noun} for {err.title}"]
+    for item in _validation_errors_without_inputs(err):
+        loc = ".".join(str(part) for part in item.get("loc", ())) or "__root__"
+        msg = str(item.get("msg", "Input validation failed"))
+        error_type = str(item.get("type", "unknown"))
+        lines.extend((loc, f"  {msg} [type={error_type}]"))
+    return "\n".join(lines)
+
+
+def _strip_validation_error_inputs(value: t.Any) -> t.Any:
+    """Remove raw input payloads from structured validation errors."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_validation_error_inputs(item)
+            for key, item in value.items()
+            if key not in {"ctx", "input"}
+        }
+    if isinstance(value, list):
+        return [_strip_validation_error_inputs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_validation_error_inputs(item) for item in value)
+    return value
+
+
+class _FastMCPValidationLogFilter(logging.Filter):
+    """Redact FastMCP invalid-argument warning payloads."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.msg != "Invalid arguments for tool %r: %s":
+            return True
+        if not isinstance(record.args, tuple) or len(record.args) != 2:
+            return True
+        tool_name, errors = record.args
+        record.args = (tool_name, _strip_validation_error_inputs(errors))
+        return True
+
+
+def install_fastmcp_validation_log_filter() -> None:
+    """Install the FastMCP validation log redaction filter once."""
+    logger = logging.getLogger("fastmcp.server.server")
+    if not any(
+        isinstance(item, _FastMCPValidationLogFilter) for item in logger.filters
+    ):
+        logger.addFilter(_FastMCPValidationLogFilter())
 
 
 #: Scheduling flag some MCP clients (notably Gemini CLI when batching
@@ -153,8 +230,8 @@ def _unexpected_kwargs(error: BaseException) -> list[str]:
     and returns the names flagged ``unexpected_keyword_argument``.
     Empty list for every other failure shape.
     """
-    err = error if isinstance(error, PydanticValidationError) else error.__cause__
-    if not isinstance(err, PydanticValidationError):
+    err = _schema_validation_error(error)
+    if err is None:
         return []
     return [
         str(item["loc"][-1])
@@ -224,7 +301,11 @@ def _error_tool_result(
         "expected": isinstance(error, ExpectedToolError)
         or _is_schema_validation_error(error),
     }
-    text = str(error)
+    text = (
+        _format_schema_validation_error(error)
+        if _is_schema_validation_error(error)
+        else str(error)
+    )
     suggestion = getattr(error, "suggestion", None)
     if suggestion is None:
         unknown = _unexpected_kwargs(error)
@@ -315,12 +396,17 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
         # Lazy %-formatting (project logging standard) — also collapses
         # the stock implementation's include_traceback branch, since
         # ``exc_info`` accepts a bool.
+        error_text = (
+            _format_schema_validation_error(error)
+            if _is_schema_validation_error(error)
+            else str(error)
+        )
         self.logger.log(
             level,
             "Error in %s: %s: %s",
             method,
             error_type,
-            error,
+            error_text,
             exc_info=self.include_traceback,
         )
 

@@ -32,10 +32,12 @@ from libtmux_mcp.middleware import (
     SafetyMiddleware,
     TailPreservingResponseLimitingMiddleware,
     ToolErrorResultMiddleware,
+    install_fastmcp_validation_log_filter,
 )
 from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
 
 logger = logging.getLogger(__name__)
+install_fastmcp_validation_log_filter()
 
 #: Cache-key shape used by :data:`_server_cache` and the GC helper.
 #: ``(socket_name, socket_path, tmux_bin)`` — see

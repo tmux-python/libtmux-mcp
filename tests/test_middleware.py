@@ -402,10 +402,6 @@ def test_summarize_args_truncates_long_non_sensitive_strings() -> None:
     assert len(summary["output_path"]) < 500
 
 
-@pytest.mark.xfail(
-    reason="schema validation leaks raw send_keys_batch payloads",
-    strict=True,
-)
 @pytest.mark.parametrize(
     BatchSchemaValidationRedactionFixture._fields,
     BATCH_SCHEMA_VALIDATION_REDACTION_FIXTURES,
