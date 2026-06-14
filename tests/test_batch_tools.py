@@ -36,6 +36,21 @@ BATCH_RESPONSE_LIMIT_FIXTURES: list[BatchResponseLimitFixture] = [
 ]
 
 
+class BatchOperationLimitFixture(t.NamedTuple):
+    """Test fixture for operation-count batch limiting."""
+
+    test_id: str
+    operation_count: int
+
+
+BATCH_OPERATION_LIMIT_FIXTURES: list[BatchOperationLimitFixture] = [
+    BatchOperationLimitFixture(
+        test_id="many_missing_tools",
+        operation_count=6_000,
+    ),
+]
+
+
 class BatchAnnotationFixture(t.NamedTuple):
     """Test fixture for generic batch wrapper annotations."""
 
@@ -249,6 +264,52 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
             "text": "[... batch truncated nested content ...]",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    BatchOperationLimitFixture._fields,
+    BATCH_OPERATION_LIMIT_FIXTURES,
+    ids=[fixture.test_id for fixture in BATCH_OPERATION_LIMIT_FIXTURES],
+)
+def test_call_readonly_tools_batch_rejects_oversized_operation_count(
+    test_id: str,
+    operation_count: int,
+) -> None:
+    """The batch wrapper rejects requests whose rows alone can exceed the cap."""
+    from fastmcp import Client
+
+    from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
+
+    assert test_id
+
+    async def _call() -> t.Any:
+        async with Client(_batch_probe_server()) as client:
+            return await client.call_tool(
+                "call_readonly_tools_batch",
+                {
+                    "operations": [
+                        {
+                            "tool": "missing_probe",
+                            "arguments": {},
+                        }
+                        for _ in range(operation_count)
+                    ],
+                    "on_error": "continue",
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+    serialized = json.dumps(
+        _call_tool_result_wire(result),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+    assert len(serialized.encode("utf-8")) <= DEFAULT_RESPONSE_LIMIT_BYTES
+    assert result.is_error is True
+    assert result.structured_content is None
+    assert "operations must contain at most" in serialized
 
 
 def test_call_readonly_tools_batch_rejects_mutating_inner_tool() -> None:

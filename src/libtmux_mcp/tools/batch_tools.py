@@ -44,6 +44,8 @@ _BATCH_TOOL_NAMES: frozenset[str] = frozenset(
     }
 )
 
+MAX_BATCH_OPERATIONS = 1_000
+
 _BATCH_TRUNCATED_CONTENT: list[dict[str, t.Any]] = [
     {
         "type": "text",
@@ -245,6 +247,9 @@ async def _call_tools_batch(
     """Execute nested MCP tool calls serially through FastMCP."""
     if not operations:
         msg = "operations must contain at least one tool call"
+        raise ExpectedToolError(msg)
+    if len(operations) > MAX_BATCH_OPERATIONS:
+        msg = f"operations must contain at most {MAX_BATCH_OPERATIONS} tool calls"
         raise ExpectedToolError(msg)
     if on_error not in {"stop", "continue"}:
         msg = "on_error must be 'stop' or 'continue'"
