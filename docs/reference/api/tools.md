@@ -1,5 +1,14 @@
 # Tools
 
+## Batch tools
+
+```{eval-rst}
+.. automodule:: libtmux_mcp.tools.batch_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
 ## Server tools
 
 ```{eval-rst}

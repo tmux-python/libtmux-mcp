@@ -8,9 +8,9 @@ libtmux-mcp uses a three-tier safety system to control which tools are available
 
 | Tier | Label | Access | Use case |
 |------|-------|--------|----------|
-| `readonly` | {badge}`readonly` | List, capture, search, info | Monitoring, browsing |
-| `mutating` (default) | {badge}`mutating` | + create, send_keys, send_keys_batch, rename, resize | Normal agent workflow |
-| `destructive` | {badge}`destructive` | + kill_server, kill_session, kill_window, kill_pane | Full control |
+| `readonly` | {badge}`readonly` | List, capture, search, info, readonly batches | Monitoring, browsing |
+| `mutating` (default) | {badge}`mutating` | + create, send_keys, send_keys_batch, mutating batches, rename, resize | Normal agent workflow |
+| `destructive` | {badge}`destructive` | + destructive batches, kill_server, kill_session, kill_window, kill_pane | Full control |
 
 ## Configuration
 

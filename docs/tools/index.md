@@ -2,7 +2,11 @@
 
 # Tools
 
-All tools accept an optional `socket_name` parameter for multi-server support. It defaults to the {envvar}`LIBTMUX_SOCKET` env var. See {ref}`configuration`.
+Targeted tmux tools accept an optional `socket_name` parameter for
+multi-server support. It defaults to the {envvar}`LIBTMUX_SOCKET` env
+var. {toolref}`list-servers` discovers sockets itself, and batch tools
+leave socket selection inside each nested tool's arguments. See
+{ref}`configuration`.
 
 ## Which tool do I want?
 
@@ -49,6 +53,11 @@ All tools accept an optional `socket_name` parameter for multi-server support. I
 **Coordinating across panes?**
 - Block until signalled → {tool}`wait-for-channel`
 - Signal a waiter → {tool}`signal-channel`
+
+**Batching typed tool calls?**
+- Read-only observations → {tool}`call-readonly-tools-batch`
+- Ordered readonly + mutating workflows → {tool}`call-mutating-tools-batch`
+- Reviewed workflows that include destructive steps → {tool}`call-destructive-tools-batch`
 
 **Staging multi-line input?**
 - Stage content → {tool}`load-buffer`
@@ -136,6 +145,12 @@ Wait for text to appear in a pane.
 :link: get-server-info
 :link-type: ref
 Get tmux server info.
+:::
+
+:::{grid-item-card} call_readonly_tools_batch
+:link: call-readonly-tools-batch
+:link-type: ref
+Call typed readonly tools in order.
 :::
 
 :::{grid-item-card} list_servers
@@ -235,6 +250,12 @@ Send several ordered raw-input operations.
 :link: run-command
 :link-type: ref
 Run a shell command and report exit status.
+:::
+
+:::{grid-item-card} call_mutating_tools_batch
+:link: call-mutating-tools-batch
+:link-type: ref
+Call typed readonly or mutating tools in order.
 :::
 
 :::{grid-item-card} rename_session
@@ -396,6 +417,12 @@ Destroy a pane.
 Kill the entire tmux server.
 :::
 
+:::{grid-item-card} call_destructive_tools_batch
+:link: call-destructive-tools-batch
+:link-type: ref
+Call typed tools including destructive steps.
+:::
+
 :::{grid-item-card} delete_buffer
 :link: delete-buffer
 :link-type: ref
@@ -409,6 +436,7 @@ Delete an MCP-staged tmux paste buffer.
 :caption: Tools by tmux scope
 
 server/index
+batch/index
 session/index
 window/index
 pane/index

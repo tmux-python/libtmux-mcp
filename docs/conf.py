@@ -118,6 +118,7 @@ conf = merge_sphinx_config(
 conf["myst_enable_extensions"] = [*conf["myst_enable_extensions"], "attrs_inline"]
 
 conf["fastmcp_tool_modules"] = [
+    "libtmux_mcp.tools.batch_tools",
     "libtmux_mcp.tools.server_tools",
     "libtmux_mcp.tools.session_tools",
     "libtmux_mcp.tools.window_tools",
@@ -129,6 +130,7 @@ conf["fastmcp_tool_modules"] = [
     "libtmux_mcp.tools.hook_tools",
 ]
 conf["fastmcp_area_map"] = {
+    "batch_tools": "batch/index",
     "server_tools": "server/index",
     "session_tools": "session/index",
     "window_tools": "window/index",
@@ -159,6 +161,9 @@ conf["fastmcp_model_classes"] = (
     "SendKeysOperation",
     "SendKeysOperationResult",
     "SendKeysBatchResult",
+    "ToolCallOperation",
+    "ToolCallOperationResult",
+    "ToolCallBatchResult",
     "HookEntry",
     "HookListResult",
     "BufferRef",

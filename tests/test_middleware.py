@@ -343,6 +343,41 @@ def test_summarize_args_redacts_send_keys_batch_operations() -> None:
         assert "sha256_prefix" in operation["keys"]
 
 
+def test_summarize_args_redacts_nested_tool_batch_arguments() -> None:
+    """Generic batch operations preserve tool names while digesting payloads."""
+    args: dict[str, t.Any] = {
+        "operations": [
+            {
+                "tool": "send_keys",
+                "arguments": {
+                    "keys": "psql -U admin -W supersecret mydb",
+                    "pane_id": "%1",
+                },
+            },
+            {
+                "tool": "set_environment",
+                "arguments": {
+                    "name": "DATABASE_URL",
+                    "value": "postgres://admin:topsecret@db/prod",
+                },
+            },
+        ],
+    }
+
+    summary = _summarize_args(args)
+    rendered = str(summary)
+
+    assert "supersecret" not in rendered
+    assert "topsecret" not in rendered
+    first, second = summary["operations"]
+    assert first["tool"] == "send_keys"
+    assert first["arguments"]["pane_id"] == "%1"
+    assert isinstance(first["arguments"]["keys"], dict)
+    assert second["tool"] == "set_environment"
+    assert second["arguments"]["name"] == "DATABASE_URL"
+    assert isinstance(second["arguments"]["value"], dict)
+
+
 @pytest.mark.parametrize(
     MalformedOperationAuditFixture._fields,
     MALFORMED_OPERATION_AUDIT_FIXTURES,
