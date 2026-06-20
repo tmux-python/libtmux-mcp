@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import typing as t
 
 import pytest
@@ -393,6 +394,143 @@ def test_run_tmux_operations_dry_run_continues_after_pending_plan(
         TmuxOperationStatus.PLANNED,
         TmuxOperationStatus.PLANNED,
     ]
+
+
+class TimeoutDispatchCase(t.NamedTuple):
+    """Case for bounded native dispatch execution."""
+
+    test_id: str
+    helper_name: str
+    path: t.Literal["chain", "standalone", "marked"]
+    expected_mode: t.Literal["chain", "standalone"]
+    expected_indexes: list[int]
+
+
+def _timeout_operations(
+    case: TimeoutDispatchCase,
+    pane_id: str,
+) -> list[TmuxOperation]:
+    """Return operations that route through the case's dispatch helper."""
+    if case.path == "chain":
+        return [
+            SetOptionOperation(option="@cc_ops_timeout_a", value="1", global_=True),
+            SetOptionOperation(option="@cc_ops_timeout_b", value="2", global_=True),
+        ]
+    if case.path == "standalone":
+        return [CapturePaneOperation(pane_id=pane_id)]
+    if case.path == "marked":
+        return [
+            SplitPaneOperation(ref="child", pane_id=pane_id),
+            TmuxSendKeysOperation(pane_ref="child", keys="echo timeout"),
+        ]
+    raise AssertionError(case.path)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        TimeoutDispatchCase(
+            test_id="pending_chain",
+            helper_name="_dispatch_chain",
+            path="chain",
+            expected_mode="chain",
+            expected_indexes=[0, 1],
+        ),
+        TimeoutDispatchCase(
+            test_id="standalone_output",
+            helper_name="_dispatch_standalone",
+            path="standalone",
+            expected_mode="standalone",
+            expected_indexes=[0],
+        ),
+        TimeoutDispatchCase(
+            test_id="marked_split",
+            helper_name="_dispatch_marked_split",
+            path="marked",
+            expected_mode="chain",
+            expected_indexes=[0, 1],
+        ),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_dispatch_timeout(
+    case: TimeoutDispatchCase,
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dispatch timeout returns failed per-operation results.
+
+    The dispatch helpers are synchronous wrappers around tmux subprocesses, so
+    this uses monkeypatch rather than a blocking tmux command.
+    """
+
+    def sleep_dispatch(*args: object, **kwargs: object) -> t.NoReturn:
+        time.sleep(0.05)
+        msg = "dispatch should have timed out"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(chain_tools, case.helper_name, sleep_dispatch)
+    assert mcp_pane.pane_id is not None
+
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=_timeout_operations(case, mcp_pane.pane_id),
+            dispatch_timeout=0.001,
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert not result.succeeded
+    assert result.dispatch_count == 1
+    assert result.dispatches[0].mode == case.expected_mode
+    assert result.dispatches[0].operation_indexes == case.expected_indexes
+    assert result.dispatches[0].returncode is None
+    assert result.dispatches[0].stderr == [
+        "tmux dispatch timed out after 0.001 seconds",
+    ]
+    assert [step.status for step in result.steps] == [
+        TmuxOperationStatus.FAILED,
+        *[TmuxOperationStatus.FAILED for _ in case.expected_indexes[1:]],
+    ]
+    assert all(step.returncode is None for step in result.steps)
+    assert all(step.stderr == result.dispatches[0].stderr for step in result.steps)
+
+
+class TimeoutValidationCase(t.NamedTuple):
+    """Case for timeout input validation."""
+
+    test_id: str
+    dispatch_timeout: float
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        TimeoutValidationCase(test_id="zero", dispatch_timeout=0.0),
+        TimeoutValidationCase(test_id="negative", dispatch_timeout=-1.0),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_dispatch_timeout_validation(
+    case: TimeoutValidationCase,
+    mcp_session: Session,
+) -> None:
+    """Dispatch timeout must be positive when set."""
+    with pytest.raises(ExpectedToolError, match="dispatch_timeout"):
+        asyncio.run(
+            run_tmux_operations(
+                operations=[
+                    SetOptionOperation(
+                        option="@cc_ops_timeout_validation",
+                        value="1",
+                        global_=True,
+                    ),
+                ],
+                dispatch_timeout=case.dispatch_timeout,
+                socket_name=mcp_session.server.socket_name,
+            ),
+        )
 
 
 class ValidationCase(t.NamedTuple):

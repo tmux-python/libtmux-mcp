@@ -540,6 +540,97 @@ def _plan_chain(
     return dispatch, [_planned_step(index, kind) for index, kind, _ in pending]
 
 
+def _timeout_stderr(dispatch_timeout: float) -> list[str]:
+    """Return the stderr payload for a bounded dispatch timeout."""
+    return [f"tmux dispatch timed out after {dispatch_timeout:g} seconds"]
+
+
+def _timeout_step(
+    index: int,
+    kind: str,
+    stderr: list[str],
+) -> TmuxOperationStepResult:
+    """Return a failed step for a dispatch timeout."""
+    return TmuxOperationStepResult(
+        index=index,
+        kind=kind,
+        status=TmuxOperationStatus.FAILED,
+        stderr=stderr,
+    )
+
+
+def _timeout_standalone(
+    index: int,
+    kind: str,
+    calls: tuple[CommandCall, ...],
+    dispatch_timeout: float,
+) -> tuple[TmuxOperationDispatchResult, TmuxOperationStepResult, str | None]:
+    """Return timeout results for one standalone dispatch."""
+    stderr = _timeout_stderr(dispatch_timeout)
+    return (
+        TmuxOperationDispatchResult(
+            mode="standalone",
+            operation_indexes=[index],
+            argv=_calls_argv(calls),
+            returncode=None,
+            stderr=stderr,
+        ),
+        _timeout_step(index, kind, stderr),
+        None,
+    )
+
+
+def _timeout_marked_split(
+    index: int,
+    operation: SplitPaneOperation,
+    calls: tuple[CommandCall, ...],
+    decorates: list[_MarkedDecorate],
+    dispatch_timeout: float,
+) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult], str | None]:
+    """Return timeout results for one folded split-ref dispatch."""
+    stderr = _timeout_stderr(dispatch_timeout)
+    return (
+        TmuxOperationDispatchResult(
+            mode="chain",
+            operation_indexes=[
+                index,
+                *(decorate_index for decorate_index, _ in decorates),
+            ],
+            argv=list(CommandChain(calls).argv()),
+            returncode=None,
+            stderr=stderr,
+        ),
+        [
+            _timeout_step(index, operation.kind, stderr),
+            *[
+                _timeout_step(decorate_index, decorate.kind, stderr)
+                for decorate_index, decorate in decorates
+            ],
+        ],
+        None,
+    )
+
+
+def _timeout_chain(
+    pending: list[_PendingCalls],
+    dispatch_timeout: float,
+) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult]]:
+    """Return timeout results for a pending folded chain."""
+    stderr = _timeout_stderr(dispatch_timeout)
+    calls = tuple(call for _, _, op_calls in pending for call in op_calls)
+    dispatch = TmuxOperationDispatchResult(
+        mode="chain",
+        operation_indexes=[index for index, _, _ in pending],
+        argv=list(CommandChain(calls).argv()),
+        returncode=None,
+        stderr=stderr,
+    )
+    return (
+        dispatch,
+        [_timeout_step(index, kind, stderr) for index, kind, _ in pending],
+    )
+
+
 def _compile_failure_step(
     index: int,
     operation: TmuxOperation,
@@ -584,6 +675,7 @@ async def run_tmux_operations(
     operations: list[TmuxOperation],
     on_error: t.Literal["stop", "continue"] = "stop",
     dry_run: bool = False,
+    dispatch_timeout: float | None = 10.0,
     socket_name: str | None = None,
 ) -> RunTmuxOperationsResult:
     """Run typed tmux operations with minimum safe native dispatches.
@@ -596,6 +688,8 @@ async def run_tmux_operations(
     register.
     ``on_error="continue"`` disables folding because tmux sequences abort the
     rest of the sequence on first failure.
+    ``dispatch_timeout`` bounds how long the tool waits for one native tmux
+    dispatch; timed-out subprocess work may still finish in the background.
     """
     validated = TMUX_OPERATIONS_ADAPTER.validate_python(operations)
     if not validated:
@@ -603,6 +697,9 @@ async def run_tmux_operations(
         raise ExpectedToolError(msg)
     if on_error not in {"stop", "continue"}:
         msg = "on_error must be 'stop' or 'continue'"
+        raise ExpectedToolError(msg)
+    if dispatch_timeout is not None and dispatch_timeout <= 0:
+        msg = "dispatch_timeout must be greater than 0 or null"
         raise ExpectedToolError(msg)
 
     runner = None if dry_run else _get_server(socket_name=socket_name)
@@ -618,7 +715,23 @@ async def run_tmux_operations(
             dispatch, steps = _plan_chain(pending)
         else:
             assert runner is not None
-            dispatch, steps = await asyncio.to_thread(_dispatch_chain, runner, pending)
+            pending_snapshot = list(pending)
+            try:
+                chain_dispatch_coro = asyncio.to_thread(
+                    _dispatch_chain,
+                    runner,
+                    pending_snapshot,
+                )
+                if dispatch_timeout is None:
+                    dispatch, steps = await chain_dispatch_coro
+                else:
+                    dispatch, steps = await asyncio.wait_for(
+                        chain_dispatch_coro,
+                        timeout=dispatch_timeout,
+                    )
+            except TimeoutError:
+                assert dispatch_timeout is not None
+                dispatch, steps = _timeout_chain(pending_snapshot, dispatch_timeout)
         dispatches.append(dispatch)
         pending.clear()
         for step in steps:
@@ -694,14 +807,36 @@ async def run_tmux_operations(
                     )
                 else:
                     assert runner is not None
-                    dispatch, steps, created_pane_id = await asyncio.to_thread(
-                        _dispatch_marked_split,
-                        runner,
-                        index,
-                        operation,
-                        marked_calls,
-                        decorates,
-                    )
+                    decorates_snapshot = list(decorates)
+                    try:
+                        marked_dispatch_coro = asyncio.to_thread(
+                            _dispatch_marked_split,
+                            runner,
+                            index,
+                            operation,
+                            marked_calls,
+                            decorates_snapshot,
+                        )
+                        if dispatch_timeout is None:
+                            (
+                                dispatch,
+                                steps,
+                                created_pane_id,
+                            ) = await marked_dispatch_coro
+                        else:
+                            dispatch, steps, created_pane_id = await asyncio.wait_for(
+                                marked_dispatch_coro,
+                                timeout=dispatch_timeout,
+                            )
+                    except TimeoutError:
+                        assert dispatch_timeout is not None
+                        dispatch, steps, created_pane_id = _timeout_marked_split(
+                            index,
+                            operation,
+                            marked_calls,
+                            decorates_snapshot,
+                            dispatch_timeout,
+                        )
                 dispatches.append(dispatch)
                 for step in steps:
                     steps_by_index[step.index] = step
@@ -775,14 +910,30 @@ async def run_tmux_operations(
             )
         else:
             assert runner is not None
-            dispatch, step, created_pane_id = await asyncio.to_thread(
-                _dispatch_standalone,
-                runner,
-                index,
-                operation.kind,
-                calls,
-                capture_created_pane=capture_created_pane,
-            )
+            try:
+                standalone_dispatch_coro = asyncio.to_thread(
+                    _dispatch_standalone,
+                    runner,
+                    index,
+                    operation.kind,
+                    calls,
+                    capture_created_pane=capture_created_pane,
+                )
+                if dispatch_timeout is None:
+                    dispatch, step, created_pane_id = await standalone_dispatch_coro
+                else:
+                    dispatch, step, created_pane_id = await asyncio.wait_for(
+                        standalone_dispatch_coro,
+                        timeout=dispatch_timeout,
+                    )
+            except TimeoutError:
+                assert dispatch_timeout is not None
+                dispatch, step, created_pane_id = _timeout_standalone(
+                    index,
+                    operation.kind,
+                    calls,
+                    dispatch_timeout,
+                )
         dispatches.append(dispatch)
         steps_by_index[index] = step
         if (

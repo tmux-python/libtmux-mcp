@@ -28,6 +28,12 @@ rendered dispatches without touching tmux. Referenced split panes use
 deterministic placeholders in `created_panes` until the plan is run for
 real.
 
+`dispatch_timeout` defaults to 10 seconds and bounds how long the tool
+waits for each native tmux dispatch. A timed-out dispatch marks the
+included operations failed with `returncode: null`; because dispatches
+run in a worker thread, the underlying tmux subprocess may still finish
+after the tool returns.
+
 An id-producing `split_pane` can fold with immediate `send_keys` or
 `resize_pane` operations that target its `pane_ref`; the tool uses
 tmux's `{marked}` target internally and still returns the concrete pane
