@@ -34,6 +34,11 @@ included operations failed with `returncode: null`; because dispatches
 run in a worker thread, the underlying tmux subprocess may still finish
 after the tool returns.
 
+Set `rollback_on_error` to `true` to kill panes created by
+ref-producing `split_pane` operations when the overall operation list
+fails. The result still reports `created_panes`, and adds
+`rolled_back_panes` plus `rollback_errors` for cleanup visibility.
+
 An id-producing `split_pane` can fold with immediate `send_keys` or
 `resize_pane` operations that target its `pane_ref`; the tool uses
 tmux's `{marked}` target internally and still returns the concrete pane

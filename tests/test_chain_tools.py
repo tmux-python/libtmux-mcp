@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.models import (
     CapturePaneOperation,
+    RunTmuxOperationsResult,
     SetOptionOperation,
     SplitPaneOperation,
     TmuxOperation,
@@ -620,6 +621,69 @@ def test_run_tmux_operations_marked_split_failure_skips_later_ops(
         TmuxOperationStatus.SKIPPED,
     ]
     assert server.cmd("show-option", "-gv", "@cc_ops_after_marked_failure").stdout == []
+
+
+class RollbackCase(t.NamedTuple):
+    """Case for rollback of created panes."""
+
+    test_id: str
+    rollback_on_error: bool
+    expect_rollback: bool
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        RollbackCase(
+            test_id="enabled",
+            rollback_on_error=True,
+            expect_rollback=True,
+        ),
+        RollbackCase(
+            test_id="disabled",
+            rollback_on_error=False,
+            expect_rollback=False,
+        ),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_rolls_back_created_panes(
+    case: RollbackCase,
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """Rollback kills panes created before a later operation fails."""
+    result: RunTmuxOperationsResult | None = None
+    try:
+        result = asyncio.run(
+            run_tmux_operations(
+                operations=[
+                    SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
+                    TmuxSendKeysOperation(
+                        pane_id="%999999",
+                        keys="bad",
+                        enter=False,
+                    ),
+                ],
+                rollback_on_error=case.rollback_on_error,
+                socket_name=mcp_server.socket_name,
+            ),
+        )
+
+        assert not result.succeeded
+        new_pane_id = result.created_panes["child"]
+        assert result.rollback_errors == []
+        assert result.rolled_back_panes == (
+            [new_pane_id] if case.expect_rollback else []
+        )
+        mcp_pane.window.refresh()
+        pane_ids = [pane.pane_id for pane in mcp_pane.window.panes]
+        assert (new_pane_id not in pane_ids) is case.expect_rollback
+    finally:
+        if result is not None and not case.expect_rollback:
+            pane_id = result.created_panes.get("child")
+            if pane_id is not None:
+                mcp_server.cmd("kill-pane", "-t", pane_id)
 
 
 class ValidationCase(t.NamedTuple):

@@ -890,3 +890,11 @@ class RunTmuxOperationsResult(BaseModel):
         default_factory=dict,
         description="Mapping of split_pane ref names to concrete pane IDs.",
     )
+    rolled_back_panes: list[str] = Field(
+        default_factory=list,
+        description="Pane IDs killed by rollback_on_error.",
+    )
+    rollback_errors: list[str] = Field(
+        default_factory=list,
+        description="Errors raised while rolling back created panes.",
+    )

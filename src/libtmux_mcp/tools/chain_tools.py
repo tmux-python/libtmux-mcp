@@ -631,6 +631,23 @@ def _timeout_chain(
     )
 
 
+def _rollback_created_panes(
+    runner: CommandRunner,
+    pane_ids: list[str],
+) -> tuple[list[str], list[str]]:
+    """Kill created panes in reverse order and report cleanup failures."""
+    rolled_back_panes: list[str] = []
+    rollback_errors: list[str] = []
+    for pane_id in reversed(pane_ids):
+        result = runner.cmd("kill-pane", "-t", pane_id)
+        if result.returncode == 0:
+            rolled_back_panes.append(pane_id)
+            continue
+        stderr = list(result.stderr) or [f"kill-pane exited {result.returncode}"]
+        rollback_errors.extend(f"{pane_id}: {line}" for line in stderr)
+    return rolled_back_panes, rollback_errors
+
+
 def _compile_failure_step(
     index: int,
     operation: TmuxOperation,
@@ -676,6 +693,7 @@ async def run_tmux_operations(
     on_error: t.Literal["stop", "continue"] = "stop",
     dry_run: bool = False,
     dispatch_timeout: float | None = 10.0,
+    rollback_on_error: bool = False,
     socket_name: str | None = None,
 ) -> RunTmuxOperationsResult:
     """Run typed tmux operations with minimum safe native dispatches.
@@ -690,6 +708,8 @@ async def run_tmux_operations(
     rest of the sequence on first failure.
     ``dispatch_timeout`` bounds how long the tool waits for one native tmux
     dispatch; timed-out subprocess work may still finish in the background.
+    ``rollback_on_error`` kills panes created by ref-producing ``split_pane``
+    operations when the overall operation list fails.
     """
     validated = TMUX_OPERATIONS_ADAPTER.validate_python(operations)
     if not validated:
@@ -707,6 +727,12 @@ async def run_tmux_operations(
     dispatches: list[TmuxOperationDispatchResult] = []
     steps_by_index: dict[int, TmuxOperationStepResult] = {}
     created_panes: dict[str, str] = {}
+    created_pane_order: list[str] = []
+
+    def record_created_pane(ref: str, pane_id: str) -> None:
+        created_panes[ref] = pane_id
+        if pane_id not in created_pane_order:
+            created_pane_order.append(pane_id)
 
     async def flush_pending() -> bool:
         if not pending:
@@ -841,7 +867,7 @@ async def run_tmux_operations(
                 for step in steps:
                     steps_by_index[step.index] = step
                 if created_pane_id is not None:
-                    created_panes[operation.ref] = created_pane_id
+                    record_created_pane(operation.ref, created_pane_id)
                 if not _steps_succeeded(steps, dry_run=dry_run):
                     for skip_index, skipped in enumerate(
                         validated[next_index:],
@@ -941,7 +967,7 @@ async def run_tmux_operations(
             and operation.ref is not None
             and created_pane_id is not None
         ):
-            created_panes[operation.ref] = created_pane_id
+            record_created_pane(operation.ref, created_pane_id)
         if not _step_succeeded(step, dry_run=dry_run) and on_error == "stop":
             for skip_index, skipped in enumerate(
                 validated[index + 1 :],
@@ -956,6 +982,15 @@ async def run_tmux_operations(
 
     steps = [steps_by_index[index] for index in range(len(validated))]
     succeeded = _steps_succeeded(steps, dry_run=dry_run)
+    rolled_back_panes: list[str] = []
+    rollback_errors: list[str] = []
+    if rollback_on_error and not dry_run and not succeeded and created_pane_order:
+        assert runner is not None
+        rolled_back_panes, rollback_errors = await asyncio.to_thread(
+            _rollback_created_panes,
+            runner,
+            created_pane_order,
+        )
     return RunTmuxOperationsResult(
         succeeded=succeeded,
         dry_run=dry_run,
@@ -963,6 +998,8 @@ async def run_tmux_operations(
         dispatches=dispatches,
         steps=steps,
         created_panes=created_panes,
+        rolled_back_panes=rolled_back_panes,
+        rollback_errors=rollback_errors,
     )
 
 
