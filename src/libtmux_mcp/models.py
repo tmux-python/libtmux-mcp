@@ -667,3 +667,42 @@ class ContentChangeResult(BaseModel):
     changed: bool = Field(description="Whether the content changed before timeout")
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+
+
+class ChainCommand(BaseModel):
+    """One tmux command in a one-dispatch chain for :func:`run_command_chain`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: str = Field(description="tmux command name, e.g. 'split-window'.")
+    args: list[str] = Field(
+        default_factory=list,
+        description="Positional argument tokens, rendered in order after the target.",
+    )
+    target: str | None = Field(
+        default=None,
+        description=(
+            "Optional ``-t`` target (pane/window/session id). An empty string is "
+            "rejected; None means the command carries no target."
+        ),
+    )
+
+
+class RunCommandChainResult(BaseModel):
+    """Result of one native tmux command-sequence dispatch."""
+
+    argv: list[str] = Field(
+        description="Rendered argv, with a standalone ';' token between commands.",
+    )
+    command_count: int = Field(
+        description="Number of commands folded into the single dispatch.",
+    )
+    returncode: int = Field(description="Exit code of the single tmux invocation.")
+    stdout: list[str] = Field(
+        default_factory=list,
+        description="Merged stdout lines from the sequence.",
+    )
+    stderr: list[str] = Field(
+        default_factory=list,
+        description="Merged stderr lines from the sequence.",
+    )
