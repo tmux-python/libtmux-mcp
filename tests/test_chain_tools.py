@@ -363,6 +363,38 @@ def test_run_tmux_operations_dry_run_plans_marked_split_ref(
     assert len(mcp_pane.window.panes) == pane_count
 
 
+def test_run_tmux_operations_dry_run_continues_after_pending_plan(
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """Dry-run treats planned pending dispatches as successful."""
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=[
+                SetOptionOperation(
+                    option="@cc_ops_dry_pending",
+                    value="1",
+                    global_=True,
+                ),
+                CapturePaneOperation(pane_id=mcp_pane.pane_id),
+            ],
+            dry_run=True,
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert result.succeeded
+    assert result.dispatch_count == 2
+    assert [dispatch.mode for dispatch in result.dispatches] == [
+        "chain",
+        "standalone",
+    ]
+    assert [step.status for step in result.steps] == [
+        TmuxOperationStatus.PLANNED,
+        TmuxOperationStatus.PLANNED,
+    ]
+
+
 class ValidationCase(t.NamedTuple):
     """Case for typed operation validation failures."""
 
