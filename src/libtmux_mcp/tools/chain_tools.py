@@ -42,6 +42,7 @@ TMUX_OPERATIONS_ADAPTER: TypeAdapter[list[TmuxOperation]] = TypeAdapter(
 )
 
 _PendingCalls: t.TypeAlias = tuple[int, str, tuple[CommandCall, ...]]
+_MarkedDecorate: t.TypeAlias = tuple[int, TmuxOperation]
 
 
 class _CompileError(Exception):
@@ -197,6 +198,28 @@ def _is_output_operation(operation: TmuxOperation) -> bool:
     )
 
 
+def _collect_marked_decorates(
+    operations: list[TmuxOperation],
+    start: int,
+    pane_ref: str,
+) -> tuple[list[_MarkedDecorate], int]:
+    """Collect immediate operations that can target a fresh split via {marked}."""
+    decorates: list[_MarkedDecorate] = []
+    index = start + 1
+    while index < len(operations):
+        operation = operations[index]
+        if (
+            isinstance(operation, (TmuxSendKeysOperation, ResizePaneOperation))
+            and operation.pane_id is None
+            and operation.pane_ref == pane_ref
+        ):
+            decorates.append((index, operation))
+            index += 1
+            continue
+        break
+    return decorates, index
+
+
 def _run_calls(
     runner: CommandRunner,
     calls: tuple[CommandCall, ...],
@@ -255,6 +278,72 @@ def _dispatch_standalone(
         ),
         created_pane_id,
     )
+
+
+def _dispatch_marked_split(
+    runner: CommandRunner,
+    index: int,
+    operation: SplitPaneOperation,
+    split_calls: tuple[CommandCall, ...],
+    decorates: list[_MarkedDecorate],
+    created_panes: dict[str, str],
+) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult], str | None]:
+    """Run one id-producing split and its immediate decorates via {marked}."""
+    if operation.ref is None:
+        msg = "marked split dispatch requires a split ref"
+        raise _CompileError(msg)
+
+    marked_created = {**created_panes, operation.ref: "{marked}"}
+    calls = [*split_calls, CommandCall("select-pane", ("-m",))]
+    for _, decorate in decorates:
+        calls.extend(_operation_calls(decorate, marked_created))
+    calls.append(CommandCall("select-pane", ("-M",)))
+
+    chain = CommandChain(tuple(calls))
+    result = chain.run(runner)
+    stdout = list(result.stdout)
+    stderr = list(result.stderr)
+    created_pane_id: str | None = None
+    status = TmuxOperationStatus.SUCCEEDED
+    if result.returncode != 0:
+        status = TmuxOperationStatus.FAILED
+    elif stdout:
+        created_pane_id = stdout[0]
+    else:
+        status = TmuxOperationStatus.FAILED
+        stderr = [*stderr, "split-pane did not return a pane id"]
+
+    dispatch = TmuxOperationDispatchResult(
+        mode="chain",
+        operation_indexes=[index, *(decorate_index for decorate_index, _ in decorates)],
+        argv=list(chain.argv()),
+        returncode=result.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    steps = [
+        TmuxOperationStepResult(
+            index=index,
+            kind=operation.kind,
+            status=status,
+            returncode=result.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            created_pane_id=created_pane_id,
+        ),
+        *[
+            TmuxOperationStepResult(
+                index=decorate_index,
+                kind=decorate.kind,
+                status=status,
+                returncode=result.returncode,
+                stdout=stdout if status == TmuxOperationStatus.FAILED else None,
+                stderr=stderr if status == TmuxOperationStatus.FAILED else None,
+            )
+            for decorate_index, decorate in decorates
+        ],
+    ]
+    return dispatch, steps, created_pane_id
 
 
 def _dispatch_chain(
@@ -326,9 +415,11 @@ async def run_tmux_operations(
     """Run typed tmux operations with minimum safe native dispatches.
 
     Consecutive chainable, no-output operations fold into one tmux
-    ``a ; b ; c`` sequence. Operations that need per-step output, such as
-    ``capture_pane`` and id-producing ``split_pane`` refs, run as standalone
-    dispatches so their stdout can be attributed to the correct operation.
+    ``a ; b ; c`` sequence. Output operations such as ``capture_pane`` run as
+    standalone dispatches so their stdout can be attributed to the correct
+    operation. A single id-producing ``split_pane`` may still fold with
+    immediate decorations that target its ref through tmux's ``{marked}``
+    register.
     ``on_error="continue"`` disables folding because tmux sequences abort the
     rest of the sequence on first failure.
     """
@@ -356,7 +447,9 @@ async def run_tmux_operations(
             steps_by_index[step.index] = step
         return all(step.status == TmuxOperationStatus.SUCCEEDED for step in steps)
 
-    for index, operation in enumerate(validated):
+    index = 0
+    while index < len(validated):
+        operation = validated[index]
         try:
             calls = _operation_calls(operation, created_panes)
         except _CompileError as exc:
@@ -372,11 +465,57 @@ async def run_tmux_operations(
                 ):
                     steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
                 break
+            index += 1
             continue
+
+        if (
+            on_error == "stop"
+            and isinstance(operation, SplitPaneOperation)
+            and operation.ref is not None
+        ):
+            decorates, next_index = _collect_marked_decorates(
+                validated,
+                index,
+                operation.ref,
+            )
+            if decorates:
+                if not await flush_pending():
+                    for skip_index, skipped in enumerate(
+                        validated[index:], start=index
+                    ):
+                        steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
+                    break
+                dispatch, steps, created_pane_id = await asyncio.to_thread(
+                    _dispatch_marked_split,
+                    runner,
+                    index,
+                    operation,
+                    calls,
+                    decorates,
+                    created_panes,
+                )
+                dispatches.append(dispatch)
+                for step in steps:
+                    steps_by_index[step.index] = step
+                if created_pane_id is not None:
+                    created_panes[operation.ref] = created_pane_id
+                if any(step.status != TmuxOperationStatus.SUCCEEDED for step in steps):
+                    for skip_index, skipped in enumerate(
+                        validated[next_index:],
+                        start=next_index,
+                    ):
+                        steps_by_index[skip_index] = _skipped_step(
+                            skip_index,
+                            skipped,
+                        )
+                    break
+                index = next_index
+                continue
 
         force_standalone = on_error == "continue" or _is_output_operation(operation)
         if not force_standalone:
             pending.append((index, operation.kind, calls))
+            index += 1
             continue
 
         if not await flush_pending() and on_error == "stop":
@@ -410,6 +549,7 @@ async def run_tmux_operations(
             ):
                 steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
             break
+        index += 1
 
     if pending:
         await flush_pending()
