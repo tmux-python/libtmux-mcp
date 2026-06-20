@@ -6,10 +6,15 @@ import asyncio
 import typing as t
 
 from libtmux._experimental.chain import (
+    ChainabilityError,
     CommandCall,
     CommandChain,
     CommandResultLike,
     CommandRunner,
+    CommandScope,
+    CommandScopeError,
+    ensure_chainable,
+    validate_command_scope,
 )
 from pydantic import TypeAdapter
 
@@ -36,6 +41,14 @@ from libtmux_mcp.models import (
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from typing_extensions import assert_never
+else:
+
+    def assert_never(value: object) -> t.NoReturn:
+        """Runtime fallback for the type-checker-only exhaustiveness helper."""
+        msg = f"unhandled operation: {value!r}"
+        raise AssertionError(msg)
+
 
 TMUX_OPERATIONS_ADAPTER: TypeAdapter[list[TmuxOperation]] = TypeAdapter(
     list[TmuxOperation],
@@ -47,6 +60,49 @@ _MarkedDecorate: t.TypeAlias = tuple[int, TmuxOperation]
 
 class _CompileError(Exception):
     """Operation-level compile failure that should become a step result."""
+
+
+def _operation_scope(operation: TmuxOperation) -> CommandScope:
+    """Return the tmux target scope for one typed operation."""
+    if isinstance(
+        operation,
+        (
+            SplitPaneOperation,
+            TmuxSendKeysOperation,
+            ResizePaneOperation,
+            CapturePaneOperation,
+        ),
+    ):
+        return "pane"
+    if isinstance(operation, SelectLayoutOperation):
+        return "window"
+    if isinstance(operation, SetOptionOperation):
+        scope: CommandScope
+        scope = operation.scope if operation.scope is not None else "server"
+        return scope
+    assert_never(operation)
+
+
+def _validate_operation_scope(
+    operation: TmuxOperation,
+    calls: tuple[CommandCall, ...],
+) -> None:
+    """Validate typed operation targets against libtmux command metadata."""
+    scope = _operation_scope(operation)
+    try:
+        for call in calls:
+            validate_command_scope(call.name, scope)
+    except CommandScopeError as exc:
+        raise _CompileError(str(exc)) from exc
+
+
+def _ensure_chainable_calls(calls: tuple[CommandCall, ...]) -> None:
+    """Raise a compile error unless every call may fold into a tmux chain."""
+    try:
+        for call in calls:
+            ensure_chainable(call.name)
+    except ChainabilityError as exc:
+        raise _CompileError(str(exc)) from exc
 
 
 def _target_pane(
@@ -176,19 +232,21 @@ def _operation_calls(
 ) -> tuple[CommandCall, ...]:
     """Lower one typed operation to tmux command calls."""
     if isinstance(operation, SplitPaneOperation):
-        return _split_calls(operation, created_panes)
-    if isinstance(operation, TmuxSendKeysOperation):
-        return _send_keys_calls(operation, created_panes)
-    if isinstance(operation, ResizePaneOperation):
-        return _resize_pane_calls(operation, created_panes)
-    if isinstance(operation, SelectLayoutOperation):
-        return _select_layout_calls(operation)
-    if isinstance(operation, SetOptionOperation):
-        return _set_option_calls(operation)
-    if isinstance(operation, CapturePaneOperation):
-        return _capture_pane_calls(operation, created_panes)
-    msg = f"unsupported operation type: {type(operation).__name__}"
-    raise TypeError(msg)
+        calls = _split_calls(operation, created_panes)
+    elif isinstance(operation, TmuxSendKeysOperation):
+        calls = _send_keys_calls(operation, created_panes)
+    elif isinstance(operation, ResizePaneOperation):
+        calls = _resize_pane_calls(operation, created_panes)
+    elif isinstance(operation, SelectLayoutOperation):
+        calls = _select_layout_calls(operation)
+    elif isinstance(operation, SetOptionOperation):
+        calls = _set_option_calls(operation)
+    elif isinstance(operation, CapturePaneOperation):
+        calls = _capture_pane_calls(operation, created_panes)
+    else:
+        assert_never(operation)
+    _validate_operation_scope(operation, calls)
+    return calls
 
 
 def _is_output_operation(operation: TmuxOperation) -> bool:
@@ -218,6 +276,27 @@ def _collect_marked_decorates(
             continue
         break
     return decorates, index
+
+
+def _marked_split_calls(
+    operation: SplitPaneOperation,
+    split_calls: tuple[CommandCall, ...],
+    decorates: list[_MarkedDecorate],
+    created_panes: dict[str, str],
+) -> tuple[CommandCall, ...]:
+    """Build the folded command calls for a ref-producing split."""
+    if operation.ref is None:
+        msg = "marked split dispatch requires a split ref"
+        raise _CompileError(msg)
+
+    marked_created = {**created_panes, operation.ref: "{marked}"}
+    calls = [*split_calls, CommandCall("select-pane", ("-m",))]
+    for _, decorate in decorates:
+        calls.extend(_operation_calls(decorate, marked_created))
+    calls.append(CommandCall("select-pane", ("-M",)))
+    marked_calls = tuple(calls)
+    _ensure_chainable_calls(marked_calls)
+    return marked_calls
 
 
 def _run_calls(
@@ -284,22 +363,11 @@ def _dispatch_marked_split(
     runner: CommandRunner,
     index: int,
     operation: SplitPaneOperation,
-    split_calls: tuple[CommandCall, ...],
+    calls: tuple[CommandCall, ...],
     decorates: list[_MarkedDecorate],
-    created_panes: dict[str, str],
 ) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult], str | None]:
     """Run one id-producing split and its immediate decorates via {marked}."""
-    if operation.ref is None:
-        msg = "marked split dispatch requires a split ref"
-        raise _CompileError(msg)
-
-    marked_created = {**created_panes, operation.ref: "{marked}"}
-    calls = [*split_calls, CommandCall("select-pane", ("-m",))]
-    for _, decorate in decorates:
-        calls.extend(_operation_calls(decorate, marked_created))
-    calls.append(CommandCall("select-pane", ("-M",)))
-
-    chain = CommandChain(tuple(calls))
+    chain = CommandChain(calls)
     result = chain.run(runner)
     stdout = list(result.stdout)
     stderr = list(result.stderr)
@@ -485,14 +553,35 @@ async def run_tmux_operations(
                     ):
                         steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
                     break
+                try:
+                    marked_calls = _marked_split_calls(
+                        operation,
+                        calls,
+                        decorates,
+                        created_panes,
+                    )
+                except _CompileError as exc:
+                    steps_by_index[index] = _compile_failure_step(
+                        index,
+                        operation,
+                        exc,
+                    )
+                    for skip_index, skipped in enumerate(
+                        validated[index + 1 :],
+                        start=index + 1,
+                    ):
+                        steps_by_index[skip_index] = _skipped_step(
+                            skip_index,
+                            skipped,
+                        )
+                    break
                 dispatch, steps, created_pane_id = await asyncio.to_thread(
                     _dispatch_marked_split,
                     runner,
                     index,
                     operation,
-                    calls,
+                    marked_calls,
                     decorates,
-                    created_panes,
                 )
                 dispatches.append(dispatch)
                 for step in steps:
@@ -514,6 +603,32 @@ async def run_tmux_operations(
 
         force_standalone = on_error == "continue" or _is_output_operation(operation)
         if not force_standalone:
+            try:
+                _ensure_chainable_calls(calls)
+            except _CompileError as exc:
+                if not await flush_pending():
+                    for skip_index, skipped in enumerate(
+                        validated[index:],
+                        start=index,
+                    ):
+                        steps_by_index[skip_index] = _skipped_step(
+                            skip_index,
+                            skipped,
+                        )
+                    break
+                steps_by_index[index] = _compile_failure_step(index, operation, exc)
+                if on_error == "stop":
+                    for skip_index, skipped in enumerate(
+                        validated[index + 1 :],
+                        start=index + 1,
+                    ):
+                        steps_by_index[skip_index] = _skipped_step(
+                            skip_index,
+                            skipped,
+                        )
+                    break
+                index += 1
+                continue
             pending.append((index, operation.kind, calls))
             index += 1
             continue

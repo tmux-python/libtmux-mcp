@@ -6,6 +6,7 @@ import asyncio
 import typing as t
 
 import pytest
+from libtmux._experimental.chain import ChainabilityError, CommandScopeError
 from pydantic import ValidationError
 
 from libtmux_mcp._utils import ExpectedToolError
@@ -17,6 +18,7 @@ from libtmux_mcp.models import (
     TmuxOperationStatus,
     TmuxSendKeysOperation,
 )
+from libtmux_mcp.tools import chain_tools
 from libtmux_mcp.tools.chain_tools import (
     TMUX_OPERATIONS_ADAPTER,
     run_tmux_operations,
@@ -174,6 +176,85 @@ def test_run_tmux_operations_continue_uses_standalone_dispatches(
         TmuxOperationStatus.SUCCEEDED,
     ]
     assert server.cmd("show-option", "-gv", "@cc_ops_after_error").stdout == ["set"]
+
+
+class CompileContractCase(t.NamedTuple):
+    """Case for libtmux compiler contract failures."""
+
+    test_id: str
+    contract: t.Literal["chainable", "scope"]
+    expected_error: str
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        CompileContractCase(
+            test_id="chainability_contract",
+            contract="chainable",
+            expected_error="not chainable from test",
+        ),
+        CompileContractCase(
+            test_id="scope_contract",
+            contract="scope",
+            expected_error="wrong scope from test",
+        ),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_surfaces_libtmux_contract_errors(
+    case: CompileContractCase,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compiler reports libtmux contract drift as an operation failure.
+
+    The contract metadata is static, so this uses monkeypatch instead of a
+    tmux fixture to simulate libtmux rejecting a command.
+    """
+    if case.contract == "chainable":
+
+        def fail_chainable(command_name: str) -> None:
+            msg = f"{command_name} {case.expected_error}"
+            raise ChainabilityError(msg)
+
+        monkeypatch.setattr(
+            chain_tools,
+            "ensure_chainable",
+            fail_chainable,
+            raising=False,
+        )
+    else:
+
+        def fail_scope(command_name: str, target_scope: str) -> None:
+            msg = f"{command_name} {target_scope} {case.expected_error}"
+            raise CommandScopeError(msg)
+
+        monkeypatch.setattr(
+            chain_tools,
+            "validate_command_scope",
+            fail_scope,
+            raising=False,
+        )
+
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=[
+                SetOptionOperation(
+                    option="@cc_ops_contract_error",
+                    value="set",
+                    global_=True,
+                ),
+            ],
+            socket_name=mcp_session.server.socket_name,
+        ),
+    )
+
+    assert not result.succeeded
+    assert result.dispatch_count == 0
+    assert result.steps[0].status == TmuxOperationStatus.FAILED
+    assert result.steps[0].stderr is not None
+    assert case.expected_error in result.steps[0].stderr[0]
 
 
 class ValidationCase(t.NamedTuple):
