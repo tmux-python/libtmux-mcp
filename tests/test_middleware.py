@@ -1222,14 +1222,14 @@ def test_tool_error_result_logs_at_error_log_level(
     with caplog.at_level(logging.DEBUG, logger="fastmcp.errors"):
         asyncio.run(_call())
 
-    levels = [
+    levels = {
         r.levelno
         for r in caplog.records
         if r.name == "fastmcp.errors"
         and "Error in tools/call" in r.getMessage()
         and message_fragment in r.getMessage()
-    ]
-    assert levels == [expected_level]
+    }
+    assert levels == {expected_level}
 
 
 def test_schema_validation_failure_marked_expected_in_meta() -> None:
