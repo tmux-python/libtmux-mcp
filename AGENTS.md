@@ -313,10 +313,15 @@ Format commit messages as:
 Scope(type[detail]): concise description
 
 why: Explanation of necessity or impact.
+
 what:
 - Specific technical changes made
 - Focused on a single topic
 ```
+
+Keep the subject ≤50 chars (excluding any trailing `(#NN)` PR ref); wrap
+body lines at ≤72 chars. Separate the `why:` and `what:` blocks with a
+blank line.
 
 Common commit types:
 - **feat**: New features or enhancements
@@ -335,6 +340,7 @@ Example:
 mcp(feat[pane_tools]): Add wait_for_text tool for terminal automation
 
 why: Enable agents to wait for command output without manual polling
+
 what:
 - Add wait_for_text tool with configurable timeout and polling interval
 - Use integrated retry logic to save agent tokens
@@ -356,6 +362,7 @@ git commit -m "$(cat <<'EOF'
 feat(Component[method]) add feature description
 
 why: Explanation of the change.
+
 what:
 - First change
 - Second change
