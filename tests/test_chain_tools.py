@@ -8,10 +8,12 @@ import typing as t
 import pytest
 
 from libtmux_mcp._utils import ExpectedToolError
-from libtmux_mcp.models import ChainCommand
-from libtmux_mcp.tools.chain_tools import run_command_chain
+from libtmux_mcp.models import ChainCommand, ForwardSplit
+from libtmux_mcp.tools.chain_tools import build_forward_layout, run_command_chain
 
 if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+    from libtmux.server import Server
     from libtmux.session import Session
 
 
@@ -79,3 +81,57 @@ def test_run_command_chain_blocks_kill_server(mcp_session: Session) -> None:
             ),
         )
     assert server.is_alive()
+
+
+def test_build_forward_layout_captures_ids(mcp_server: Server, mcp_pane: Pane) -> None:
+    """Two splits off a seed pane return two distinct, real pane ids."""
+    result = asyncio.run(
+        build_forward_layout(
+            splits=[ForwardSplit(horizontal=True), ForwardSplit()],
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert len(result.pane_ids) == 2
+    assert result.pane_ids[0] != result.pane_ids[1]
+    assert all(pid.startswith("%") for pid in result.pane_ids)
+    assert result.dispatch_count >= 2  # independent splits need a dispatch each
+
+    mcp_pane.window.refresh()
+    existing = {p.pane_id for p in mcp_pane.window.panes}
+    assert set(result.pane_ids) <= existing
+
+
+def test_build_forward_layout_single_split_send_keys(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A lone split folds to one dispatch and its send_keys reaches the new pane."""
+    from libtmux_mcp.tools.wait_for_tools import wait_for_channel
+
+    channel = "cc_fwd_layout"
+    keys = f"printf 'CC_FWD\\n'; tmux wait-for -S {channel}"
+    result = asyncio.run(
+        build_forward_layout(
+            splits=[ForwardSplit(send_keys=keys)],
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert len(result.pane_ids) == 1
+    assert result.dispatch_count == 1  # single split -> one {marked} invocation
+
+    asyncio.run(
+        wait_for_channel(channel, timeout=5.0, socket_name=mcp_server.socket_name),
+    )
+    mcp_pane.window.refresh()
+    new_pane = mcp_pane.window.panes.get(pane_id=result.pane_ids[0])
+    assert new_pane is not None
+    assert "CC_FWD" in "\n".join(new_pane.capture_pane())
+
+
+def test_build_forward_layout_validation(mcp_pane: Pane) -> None:
+    """An empty split list fails closed."""
+    with pytest.raises(ExpectedToolError):
+        asyncio.run(build_forward_layout(splits=[], pane_id=mcp_pane.pane_id))

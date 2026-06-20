@@ -11,16 +11,29 @@ from __future__ import annotations
 import asyncio
 import typing as t
 
-from libtmux._experimental.chain import CommandCall, CommandChain
+from libtmux._experimental.chain import (
+    AsyncServerPlanRunner,
+    CommandCall,
+    CommandChain,
+    ForwardPlan,
+)
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
+    ANNOTATIONS_SHELL,
     TAG_DESTRUCTIVE,
+    TAG_MUTATING,
     ExpectedToolError,
     _get_server,
+    _resolve_pane,
     handle_tool_errors_async,
 )
-from libtmux_mcp.models import ChainCommand, RunCommandChainResult
+from libtmux_mcp.models import (
+    ChainCommand,
+    ForwardLayoutResult,
+    ForwardSplit,
+    RunCommandChainResult,
+)
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -90,6 +103,72 @@ async def run_command_chain(
     )
 
 
+def _send_keys_decorate(keys: str) -> t.Callable[..., t.Any]:
+    """Build a send_keys decorate bound to a captured string (per-iteration binding)."""
+
+    def build(handle: t.Any) -> t.Any:
+        return handle.cmd.send_keys(keys, enter=True)
+
+    return build
+
+
+@handle_tool_errors_async
+async def build_forward_layout(
+    splits: list[ForwardSplit],
+    pane_id: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    socket_name: str | None = None,
+) -> ForwardLayoutResult:
+    r"""Split a seed pane into several panes, returning their new ids.
+
+    Unlike a single ``\;`` chain, this captures the id tmux assigns each new
+    pane (a fresh id can't be substituted back into the same invocation), so it
+    resolves over the minimum number of dispatches: a single split folds into
+    one, several independent splits take one per creation plus one trailing
+    chain for the decorations.
+
+    Parameters
+    ----------
+    splits : list[ForwardSplit]
+        Splits off the seed pane, each ``{horizontal, shell, send_keys}``.
+    pane_id : str, optional
+        Seed pane id; defaults to the resolved/active pane.
+    session_name, session_id : str, optional
+        Used to resolve the seed pane when ``pane_id`` is omitted.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    ForwardLayoutResult
+        The created pane ids (in split order) and the dispatch count.
+    """
+    if not splits:
+        msg = "splits must not be empty"
+        raise ExpectedToolError(msg)
+
+    server = _get_server(socket_name=socket_name)
+    seed = _resolve_pane(
+        server,
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+    )
+    plan = ForwardPlan.from_pane(seed)
+    for split in splits:
+        handle = plan.split(horizontal=split.horizontal, shell=split.shell)
+        if split.send_keys is not None:
+            handle.do(_send_keys_decorate(split.send_keys))
+
+    resolved = await plan.run_resolving_async(AsyncServerPlanRunner(server))
+    pane_ids = [resolved.bindings[index] for index in range(len(splits))]
+    return ForwardLayoutResult(
+        pane_ids=pane_ids,
+        dispatch_count=len(resolved.results),
+    )
+
+
 def register(mcp: FastMCP) -> None:
     """Register chain tools with the MCP instance."""
     mcp.tool(
@@ -97,3 +176,8 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_DESTRUCTIVE},
     )(run_command_chain)
+    mcp.tool(
+        title="Build Forward Layout",
+        annotations=ANNOTATIONS_SHELL,
+        tags={TAG_MUTATING},
+    )(build_forward_layout)
