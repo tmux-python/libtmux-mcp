@@ -671,6 +671,7 @@ class TmuxOperationStatus(str, enum.Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     SKIPPED = "skipped"
+    PLANNED = "planned"
 
 
 class _PaneTargetOperation(BaseModel):
@@ -865,7 +866,7 @@ class TmuxOperationDispatchResult(BaseModel):
         description="Operation indexes included in this dispatch.",
     )
     argv: list[str] = Field(description="Rendered tmux argv.")
-    returncode: int = Field(description="tmux process exit code.")
+    returncode: int | None = Field(description="tmux process exit code, if run.")
     stdout: list[str] = Field(default_factory=list, description="stdout lines.")
     stderr: list[str] = Field(default_factory=list, description="stderr lines.")
 
@@ -874,6 +875,10 @@ class RunTmuxOperationsResult(BaseModel):
     """Result of compiling and running typed tmux operations."""
 
     succeeded: bool = Field(description="False when any operation failed or skipped.")
+    dry_run: bool = Field(
+        default=False,
+        description="True when dispatches were planned but not executed.",
+    )
     dispatch_count: int = Field(description="Number of native tmux dispatches.")
     dispatches: list[TmuxOperationDispatchResult] = Field(
         description="Native tmux dispatches used by the compiler.",

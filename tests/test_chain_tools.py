@@ -257,6 +257,112 @@ def test_run_tmux_operations_surfaces_libtmux_contract_errors(
     assert case.expected_error in result.steps[0].stderr[0]
 
 
+class DryRunSetOptionCase(t.NamedTuple):
+    """Case for dry-run option chains."""
+
+    test_id: str
+    operations: list[TmuxOperation]
+    absent_options: list[str]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        DryRunSetOptionCase(
+            test_id="folded_global_options",
+            operations=[
+                SetOptionOperation(option="@cc_ops_dry_a", value="1", global_=True),
+                SetOptionOperation(option="@cc_ops_dry_b", value="2", global_=True),
+            ],
+            absent_options=["@cc_ops_dry_a", "@cc_ops_dry_b"],
+        ),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_dry_run_plans_without_mutating(
+    case: DryRunSetOptionCase,
+    mcp_session: Session,
+) -> None:
+    """Dry-run returns planned dispatches without changing tmux state."""
+    server = mcp_session.server
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=case.operations,
+            dry_run=True,
+            socket_name=server.socket_name,
+        ),
+    )
+
+    assert result.succeeded
+    assert result.dry_run
+    assert result.dispatch_count == 1
+    assert result.dispatches[0].mode == "chain"
+    assert result.dispatches[0].returncode is None
+    assert ";" in result.dispatches[0].argv
+    assert [step.status for step in result.steps] == [
+        TmuxOperationStatus.PLANNED,
+        TmuxOperationStatus.PLANNED,
+    ]
+    assert all(step.returncode is None for step in result.steps)
+    for option in case.absent_options:
+        assert server.cmd("show-option", "-gv", option).stdout == []
+
+
+class DryRunSplitRefCase(t.NamedTuple):
+    """Case for dry-run split refs."""
+
+    test_id: str
+    ref: str
+    keys: str
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        DryRunSplitRefCase(
+            test_id="marked_split_ref",
+            ref="child",
+            keys="printf 'DRY_RUN_REF\\n'",
+        ),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_dry_run_plans_marked_split_ref(
+    case: DryRunSplitRefCase,
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """Dry-run uses placeholders for pane refs without creating panes."""
+    mcp_pane.window.refresh()
+    pane_count = len(mcp_pane.window.panes)
+
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=[
+                SplitPaneOperation(ref=case.ref, pane_id=mcp_pane.pane_id),
+                TmuxSendKeysOperation(pane_ref=case.ref, keys=case.keys),
+            ],
+            dry_run=True,
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    placeholder = f"<pane_ref:{case.ref}>"
+    assert result.succeeded
+    assert result.dry_run
+    assert result.dispatch_count == 1
+    assert result.dispatches[0].mode == "chain"
+    assert result.dispatches[0].returncode is None
+    assert result.dispatches[0].operation_indexes == [0, 1]
+    assert result.created_panes == {case.ref: placeholder}
+    assert result.steps[0].status == TmuxOperationStatus.PLANNED
+    assert result.steps[0].created_pane_id == placeholder
+    assert result.steps[1].status == TmuxOperationStatus.PLANNED
+
+    mcp_pane.window.refresh()
+    assert len(mcp_pane.window.panes) == pane_count
+
+
 class ValidationCase(t.NamedTuple):
     """Case for typed operation validation failures."""
 
