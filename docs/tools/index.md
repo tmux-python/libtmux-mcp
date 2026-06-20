@@ -55,6 +55,7 @@ leave socket selection inside each nested tool's arguments. See
 - Signal a waiter → {tool}`signal-channel`
 
 **Batching typed tool calls?**
+- Native tmux operation chains → {tool}`run-tmux-operations`
 - Read-only observations → {tool}`call-readonly-tools-batch`
 - Ordered readonly + mutating workflows → {tool}`call-mutating-tools-batch`
 - Reviewed workflows that include destructive steps → {tool}`call-destructive-tools-batch`
@@ -270,6 +271,12 @@ Run a shell command and report exit status.
 Call typed readonly or mutating tools in order.
 :::
 
+:::{grid-item-card} run_tmux_operations
+:link: run-tmux-operations
+:link-type: ref
+Compile typed tmux operations into native chains.
+:::
+
 :::{grid-item-card} rename_session
 :link: rename-session
 :link-type: ref
@@ -455,6 +462,7 @@ Delete an MCP-staged tmux paste buffer.
 
 server/index
 batch/index
+chain/index
 session/index
 window/index
 pane/index

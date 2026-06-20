@@ -119,6 +119,7 @@ conf["myst_enable_extensions"] = [*conf["myst_enable_extensions"], "attrs_inline
 
 conf["fastmcp_tool_modules"] = [
     "libtmux_mcp.tools.batch_tools",
+    "libtmux_mcp.tools.chain_tools",
     "libtmux_mcp.tools.server_tools",
     "libtmux_mcp.tools.session_tools",
     "libtmux_mcp.tools.window_tools",
@@ -131,6 +132,7 @@ conf["fastmcp_tool_modules"] = [
 ]
 conf["fastmcp_area_map"] = {
     "batch_tools": "batch/index",
+    "chain_tools": "chain/index",
     "server_tools": "server/index",
     "session_tools": "session/index",
     "window_tools": "window/index",
@@ -161,6 +163,15 @@ conf["fastmcp_model_classes"] = (
     "SendKeysOperation",
     "SendKeysOperationResult",
     "SendKeysBatchResult",
+    "SplitPaneOperation",
+    "TmuxSendKeysOperation",
+    "ResizePaneOperation",
+    "SelectLayoutOperation",
+    "SetOptionOperation",
+    "CapturePaneOperation",
+    "TmuxOperationStepResult",
+    "TmuxOperationDispatchResult",
+    "RunTmuxOperationsResult",
     "ToolCallOperation",
     "ToolCallOperationResult",
     "ToolCallBatchResult",

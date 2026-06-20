@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import enum
 import typing as t
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SessionInfo(BaseModel):
@@ -657,70 +658,230 @@ class ContentChangeResult(BaseModel):
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
 
 
-class ChainCommand(BaseModel):
-    """One tmux command in a one-dispatch chain for :func:`run_command_chain`."""
+def _require_single_pane_target(pane_id: str | None, pane_ref: str | None) -> None:
+    """Validate exactly one concrete pane target or prior split reference."""
+    if (pane_id is None) == (pane_ref is None):
+        msg = "Provide exactly one of pane_id or pane_ref."
+        raise ValueError(msg)
+
+
+class TmuxOperationStatus(str, enum.Enum):
+    """Execution status for one typed tmux operation."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class _PaneTargetOperation(BaseModel):
+    """Shared target fields for operations that act on one pane."""
 
     model_config = ConfigDict(extra="forbid")
 
-    command: str = Field(description="tmux command name, e.g. 'split-window'.")
-    args: list[str] = Field(
-        default_factory=list,
-        description="Positional argument tokens, rendered in order after the target.",
-    )
-    target: str | None = Field(
+    pane_id: str | None = Field(
         default=None,
-        description=(
-            "Optional ``-t`` target (pane/window/session id). An empty string is "
-            "rejected; None means the command carries no target."
-        ),
+        description="Concrete tmux pane ID, e.g. '%1'.",
+    )
+    pane_ref: str | None = Field(
+        default=None,
+        description="Reference name captured from an earlier split_pane operation.",
     )
 
 
-class RunCommandChainResult(BaseModel):
-    """Result of one native tmux command-sequence dispatch."""
+class SplitPaneOperation(_PaneTargetOperation):
+    """Split a pane and optionally expose the new pane under ``ref``."""
 
-    argv: list[str] = Field(
-        description="Rendered argv, with a standalone ';' token between commands.",
+    kind: t.Literal["split_pane"] = Field(
+        default="split_pane",
+        description="Operation discriminator.",
     )
-    command_count: int = Field(
-        description="Number of commands folded into the single dispatch.",
+    ref: str | None = Field(
+        default=None,
+        description="Reference name for the created pane ID.",
     )
-    returncode: int = Field(description="Exit code of the single tmux invocation.")
-    stdout: list[str] = Field(
-        default_factory=list,
-        description="Merged stdout lines from the sequence.",
-    )
-    stderr: list[str] = Field(
-        default_factory=list,
-        description="Merged stderr lines from the sequence.",
-    )
-
-
-class ForwardSplit(BaseModel):
-    """One split for :func:`build_forward_layout`."""
-
-    model_config = ConfigDict(extra="forbid")
-
     horizontal: bool = Field(
         default=False,
-        description="Split left/right (-h) instead of top/bottom (-v).",
+        description="Split left/right (-h) instead of top/bottom.",
     )
     shell: str | None = Field(
         default=None,
         description="Command to run in the new pane instead of the default shell.",
     )
-    send_keys: str | None = Field(
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> SplitPaneOperation:
+        _require_single_pane_target(self.pane_id, self.pane_ref)
+        return self
+
+
+class TmuxSendKeysOperation(_PaneTargetOperation):
+    """Send keys to a concrete pane or prior split reference."""
+
+    kind: t.Literal["send_keys"] = Field(
+        default="send_keys",
+        description="Operation discriminator.",
+    )
+    keys: str = Field(description="Keys or text to send.")
+    enter: bool = Field(default=True, description="Press Enter after sending keys.")
+    literal: bool = Field(
+        default=False,
+        description="Pass -l so tmux sends keys literally.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> TmuxSendKeysOperation:
+        _require_single_pane_target(self.pane_id, self.pane_ref)
+        return self
+
+
+class ResizePaneOperation(_PaneTargetOperation):
+    """Resize a pane by dimensions or zoom toggle."""
+
+    kind: t.Literal["resize_pane"] = Field(
+        default="resize_pane",
+        description="Operation discriminator.",
+    )
+    height: int | None = Field(default=None, description="New height in lines.")
+    width: int | None = Field(default=None, description="New width in columns.")
+    zoom: bool | None = Field(default=None, description="Toggle pane zoom.")
+
+    @model_validator(mode="after")
+    def _validate_resize(self) -> ResizePaneOperation:
+        _require_single_pane_target(self.pane_id, self.pane_ref)
+        if self.zoom is not None and (
+            self.height is not None or self.width is not None
+        ):
+            msg = "Cannot combine zoom with height/width."
+            raise ValueError(msg)
+        if self.zoom is None and self.height is None and self.width is None:
+            msg = "Provide height, width, or zoom."
+            raise ValueError(msg)
+        return self
+
+
+class SelectLayoutOperation(BaseModel):
+    """Select a layout for a tmux window."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["select_layout"] = Field(
+        default="select_layout",
+        description="Operation discriminator.",
+    )
+    window_id: str = Field(description="Concrete tmux window ID, e.g. '@1'.")
+    layout: str = Field(description="Layout name or custom layout string.")
+
+
+class SetOptionOperation(BaseModel):
+    """Set a tmux option at server, session, window, or pane scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["set_option"] = Field(
+        default="set_option",
+        description="Operation discriminator.",
+    )
+    option: str = Field(description="Option name to set.")
+    value: str = Field(description="Option value.")
+    scope: t.Literal["server", "session", "window", "pane"] | None = Field(
         default=None,
-        description="Keys to send into the new pane after it is created.",
+        description="Option scope; omitted means server option.",
+    )
+    target: str | None = Field(
+        default=None,
+        description="Target identifier for session, window, or pane scoped options.",
+    )
+    global_: bool = Field(default=False, description="Set the global option table.")
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> SetOptionOperation:
+        if self.target is not None and self.scope is None:
+            msg = "scope is required when target is specified."
+            raise ValueError(msg)
+        if self.scope in {"session", "window", "pane"} and self.target is None:
+            msg = "target is required when scope is 'session', 'window', or 'pane'."
+            raise ValueError(msg)
+        return self
+
+
+class CapturePaneOperation(_PaneTargetOperation):
+    """Capture pane output as a standalone read operation."""
+
+    kind: t.Literal["capture_pane"] = Field(
+        default="capture_pane",
+        description="Operation discriminator.",
+    )
+    start: int | None = Field(default=None, description="Start capture line.")
+    end: int | None = Field(default=None, description="End capture line.")
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> CapturePaneOperation:
+        _require_single_pane_target(self.pane_id, self.pane_ref)
+        return self
+
+
+TmuxOperation: t.TypeAlias = t.Annotated[
+    SplitPaneOperation
+    | TmuxSendKeysOperation
+    | ResizePaneOperation
+    | SelectLayoutOperation
+    | SetOptionOperation
+    | CapturePaneOperation,
+    Field(discriminator="kind"),
+]
+
+
+class TmuxOperationStepResult(BaseModel):
+    """Result for one typed operation."""
+
+    index: int = Field(description="Zero-based operation index.")
+    kind: str = Field(description="Operation kind.")
+    status: TmuxOperationStatus = Field(description="Execution status.")
+    returncode: int | None = Field(
+        default=None,
+        description="tmux return code when the operation was dispatched.",
+    )
+    stdout: list[str] | None = Field(
+        default=None,
+        description="stdout lines for standalone/output operations.",
+    )
+    stderr: list[str] | None = Field(
+        default=None,
+        description="stderr lines for failed or standalone operations.",
+    )
+    created_pane_id: str | None = Field(
+        default=None,
+        description="Pane ID captured from a split_pane operation with ref.",
     )
 
 
-class ForwardLayoutResult(BaseModel):
-    """Result of :func:`build_forward_layout`."""
+class TmuxOperationDispatchResult(BaseModel):
+    """Result for one native tmux dispatch."""
 
-    pane_ids: list[str] = Field(
-        description="Captured ids of the created panes, in split order.",
+    mode: t.Literal["chain", "standalone"] = Field(
+        description="Whether the dispatch used a tmux sequence or one command.",
     )
-    dispatch_count: int = Field(
-        description="Number of native tmux invocations the resolution used.",
+    operation_indexes: list[int] = Field(
+        description="Operation indexes included in this dispatch.",
+    )
+    argv: list[str] = Field(description="Rendered tmux argv.")
+    returncode: int = Field(description="tmux process exit code.")
+    stdout: list[str] = Field(default_factory=list, description="stdout lines.")
+    stderr: list[str] = Field(default_factory=list, description="stderr lines.")
+
+
+class RunTmuxOperationsResult(BaseModel):
+    """Result of compiling and running typed tmux operations."""
+
+    succeeded: bool = Field(description="False when any operation failed or skipped.")
+    dispatch_count: int = Field(description="Number of native tmux dispatches.")
+    dispatches: list[TmuxOperationDispatchResult] = Field(
+        description="Native tmux dispatches used by the compiler.",
+    )
+    steps: list[TmuxOperationStepResult] = Field(
+        description="Per-operation results in input order.",
+    )
+    created_panes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping of split_pane ref names to concrete pane IDs.",
     )
