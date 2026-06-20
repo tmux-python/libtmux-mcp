@@ -1179,56 +1179,7 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.58.1"
-source = { editable = "../libtmux" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-coverage = [
-    { name = "codecov" },
-    { name = "coverage" },
-    { name = "pytest-cov" },
-]
-dev = [
-    { name = "codecov" },
-    { name = "coverage" },
-    { name = "gp-libs" },
-    { name = "gp-sphinx", specifier = "==0.0.1a31" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "pytest-rerunfailures" },
-    { name = "pytest-watcher" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "sphinx-autobuild" },
-    { name = "sphinx-autodoc-api-style", specifier = "==0.0.1a31" },
-    { name = "sphinx-autodoc-pytest-fixtures", specifier = "==0.0.1a31" },
-    { name = "types-docutils" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
-]
-docs = [
-    { name = "gp-sphinx", specifier = "==0.0.1a31" },
-    { name = "sphinx-autobuild" },
-    { name = "sphinx-autodoc-api-style", specifier = "==0.0.1a31" },
-    { name = "sphinx-autodoc-pytest-fixtures", specifier = "==0.0.1a31" },
-]
-lint = [
-    { name = "mypy" },
-    { name = "ruff" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
-]
-testing = [
-    { name = "gp-libs" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-mock" },
-    { name = "pytest-rerunfailures" },
-    { name = "pytest-watcher" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
-]
+source = { git = "https://github.com/tmux-python/libtmux.git?rev=591a312f78d165816bb95a035a46219657c4b53d#591a312f78d165816bb95a035a46219657c4b53d" }
 
 [[package]]
 name = "libtmux-mcp"
@@ -1291,7 +1242,7 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.4.2,<4.0.0" },
-    { name = "libtmux", editable = "../libtmux" },
+    { name = "libtmux", git = "https://github.com/tmux-python/libtmux.git?rev=591a312f78d165816bb95a035a46219657c4b53d" },
 ]
 
 [package.metadata.requires-dev]
