@@ -533,6 +533,95 @@ def test_run_tmux_operations_dispatch_timeout_validation(
         )
 
 
+class CompileErrorPathCase(t.NamedTuple):
+    """Case for branch-local compile error paths."""
+
+    test_id: str
+    operations: list[TmuxOperation]
+    expected_dispatch_count: int
+    expected_statuses: list[TmuxOperationStatus]
+    expected_error: str | None
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        CompileErrorPathCase(
+            test_id="unknown_pane_ref",
+            operations=[
+                TmuxSendKeysOperation(pane_ref="missing", keys="bad", enter=False),
+            ],
+            expected_dispatch_count=0,
+            expected_statuses=[TmuxOperationStatus.FAILED],
+            expected_error="unknown pane_ref: missing",
+        ),
+        CompileErrorPathCase(
+            test_id="pending_failure_before_compile_error",
+            operations=[
+                TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
+                TmuxSendKeysOperation(pane_ref="missing", keys="bad", enter=False),
+            ],
+            expected_dispatch_count=1,
+            expected_statuses=[
+                TmuxOperationStatus.FAILED,
+                TmuxOperationStatus.SKIPPED,
+            ],
+            expected_error=None,
+        ),
+    ],
+    ids=lambda case: case.test_id,
+)
+def test_run_tmux_operations_compile_error_paths(
+    case: CompileErrorPathCase,
+    mcp_session: Session,
+) -> None:
+    """Compile errors report directly unless pending work fails first."""
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=case.operations,
+            socket_name=mcp_session.server.socket_name,
+        ),
+    )
+
+    assert not result.succeeded
+    assert result.dispatch_count == case.expected_dispatch_count
+    assert [step.status for step in result.steps] == case.expected_statuses
+    if case.expected_error is not None:
+        assert result.steps[0].stderr is not None
+        assert result.steps[0].stderr == [case.expected_error]
+
+
+def test_run_tmux_operations_marked_split_failure_skips_later_ops(
+    mcp_session: Session,
+) -> None:
+    """A failed marked split skips operations after its folded decorations."""
+    server = mcp_session.server
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=[
+                SplitPaneOperation(ref="child", pane_id="%999999"),
+                TmuxSendKeysOperation(pane_ref="child", keys="bad", enter=False),
+                SetOptionOperation(
+                    option="@cc_ops_after_marked_failure",
+                    value="set",
+                    global_=True,
+                ),
+            ],
+            socket_name=server.socket_name,
+        ),
+    )
+
+    assert not result.succeeded
+    assert result.dispatch_count == 1
+    assert result.dispatches[0].operation_indexes == [0, 1]
+    assert [step.status for step in result.steps] == [
+        TmuxOperationStatus.FAILED,
+        TmuxOperationStatus.FAILED,
+        TmuxOperationStatus.SKIPPED,
+    ]
+    assert server.cmd("show-option", "-gv", "@cc_ops_after_marked_failure").stdout == []
+
+
 class ValidationCase(t.NamedTuple):
     """Case for typed operation validation failures."""
 
