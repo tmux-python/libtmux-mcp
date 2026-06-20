@@ -694,3 +694,33 @@ class RunCommandChainResult(BaseModel):
         default_factory=list,
         description="Merged stderr lines from the sequence.",
     )
+
+
+class ForwardSplit(BaseModel):
+    """One split for :func:`build_forward_layout`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    horizontal: bool = Field(
+        default=False,
+        description="Split left/right (-h) instead of top/bottom (-v).",
+    )
+    shell: str | None = Field(
+        default=None,
+        description="Command to run in the new pane instead of the default shell.",
+    )
+    send_keys: str | None = Field(
+        default=None,
+        description="Keys to send into the new pane after it is created.",
+    )
+
+
+class ForwardLayoutResult(BaseModel):
+    """Result of :func:`build_forward_layout`."""
+
+    pane_ids: list[str] = Field(
+        description="Captured ids of the created panes, in split order.",
+    )
+    dispatch_count: int = Field(
+        description="Number of native tmux invocations the resolution used.",
+    )
