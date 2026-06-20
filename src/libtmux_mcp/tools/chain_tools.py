@@ -563,6 +563,22 @@ def _skipped_step(index: int, operation: TmuxOperation) -> TmuxOperationStepResu
     )
 
 
+def _step_succeeded(step: TmuxOperationStepResult, *, dry_run: bool) -> bool:
+    """Return whether a step should allow later operations to continue."""
+    return step.status == TmuxOperationStatus.SUCCEEDED or (
+        dry_run and step.status == TmuxOperationStatus.PLANNED
+    )
+
+
+def _steps_succeeded(
+    steps: t.Iterable[TmuxOperationStepResult],
+    *,
+    dry_run: bool,
+) -> bool:
+    """Return whether every step succeeded for control-flow purposes."""
+    return all(_step_succeeded(step, dry_run=dry_run) for step in steps)
+
+
 @handle_tool_errors_async
 async def run_tmux_operations(
     operations: list[TmuxOperation],
@@ -607,7 +623,7 @@ async def run_tmux_operations(
         pending.clear()
         for step in steps:
             steps_by_index[step.index] = step
-        return all(step.status == TmuxOperationStatus.SUCCEEDED for step in steps)
+        return _steps_succeeded(steps, dry_run=dry_run)
 
     index = 0
     while index < len(validated):
@@ -691,7 +707,7 @@ async def run_tmux_operations(
                     steps_by_index[step.index] = step
                 if created_pane_id is not None:
                     created_panes[operation.ref] = created_pane_id
-                if any(step.status != TmuxOperationStatus.SUCCEEDED for step in steps):
+                if not _steps_succeeded(steps, dry_run=dry_run):
                     for skip_index, skipped in enumerate(
                         validated[next_index:],
                         start=next_index,
@@ -775,7 +791,7 @@ async def run_tmux_operations(
             and created_pane_id is not None
         ):
             created_panes[operation.ref] = created_pane_id
-        if step.status != TmuxOperationStatus.SUCCEEDED and on_error == "stop":
+        if not _step_succeeded(step, dry_run=dry_run) and on_error == "stop":
             for skip_index, skipped in enumerate(
                 validated[index + 1 :],
                 start=index + 1,
@@ -788,10 +804,7 @@ async def run_tmux_operations(
         await flush_pending()
 
     steps = [steps_by_index[index] for index in range(len(validated))]
-    success_statuses = {TmuxOperationStatus.SUCCEEDED}
-    if dry_run:
-        success_statuses.add(TmuxOperationStatus.PLANNED)
-    succeeded = all(step.status in success_statuses for step in steps)
+    succeeded = _steps_succeeded(steps, dry_run=dry_run)
     return RunTmuxOperationsResult(
         succeeded=succeeded,
         dry_run=dry_run,
