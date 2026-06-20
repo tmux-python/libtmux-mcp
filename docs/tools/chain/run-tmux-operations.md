@@ -11,6 +11,12 @@ sequence.
 {tooliconl}`call-mutating-tools-batch` for that. Use individual tools
 when a workflow has only one step.
 
+**Dispatch boundaries:** Output operations such as `capture_pane` run as
+standalone dispatches so their stdout belongs to one step. Referenced
+`split_pane` operations also run at a boundary unless their immediate
+`send_keys` or `resize_pane` followers target the new pane through the
+same `pane_ref`.
+
 **Side effects:** Mutates tmux state according to the submitted
 operation list. With `on_error="stop"`, chainable operations may share
 one tmux sequence and native tmux failure semantics stop later steps.
