@@ -6,6 +6,17 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Typed tmux operation chains with {tooliconl}`run-tmux-operations`**
+
+{tooliconl}`run-tmux-operations` accepts an ordered list of typed tmux
+operations and compiles safe no-output steps into the fewest native tmux
+dispatches it can. It preserves per-operation results for standalone read
+steps, returns concrete pane IDs captured from referenced splits, and keeps
+{tooliconl}`call-mutating-tools-batch` available for workflows that need to
+call arbitrary MCP tools instead of this tool's typed operation set.
+
 ## libtmux-mcp 0.1.0a14 (2026-06-14)
 
 libtmux-mcp 0.1.0a14 adds tier-aware tool batching. {tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.
