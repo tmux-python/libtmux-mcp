@@ -132,7 +132,9 @@ def test_run_tmux_operations_captures_split_refs(
     )
 
     assert result.succeeded
-    assert result.dispatch_count == 2
+    assert result.dispatch_count == 1
+    assert result.dispatches[0].mode == "chain"
+    assert result.dispatches[0].operation_indexes == [0, 1]
     new_pane_id = result.created_panes["child"]
     assert new_pane_id.startswith("%")
 

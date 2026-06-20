@@ -17,6 +17,11 @@ one tmux sequence and native tmux failure semantics stop later steps.
 With `on_error="continue"`, operations run as standalone dispatches so
 later steps can still run after an earlier failure.
 
+An id-producing `split_pane` can fold with immediate `send_keys` or
+`resize_pane` operations that target its `pane_ref`; the tool uses
+tmux's `{marked}` target internally and still returns the concrete pane
+ID in `created_panes`.
+
 **Example:**
 
 ```json
