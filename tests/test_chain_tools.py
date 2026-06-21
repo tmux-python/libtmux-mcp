@@ -131,6 +131,7 @@ def test_run_tmux_operations_captures_split_refs(
                 SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
                 TmuxSendKeysOperation(pane_ref="child", keys=keys),
             ],
+            transport="subprocess",
             socket_name=mcp_server.socket_name,
         ),
     )
@@ -178,6 +179,51 @@ def test_run_tmux_operations_continue_uses_standalone_dispatches(
         TmuxOperationStatus.SUCCEEDED,
     ]
     assert server.cmd("show-option", "-gv", "@cc_ops_after_error").stdout == ["set"]
+
+
+def test_run_tmux_operations_control_attributes_per_operation(
+    mcp_session: Session,
+) -> None:
+    """Control transport (the default) gives each folded op its own verdict."""
+    server = mcp_session.server
+    operations: list[TmuxOperation] = [
+        SetOptionOperation(option="@cc_ops_cm_a", value="1", global_=True),
+        TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
+        SetOptionOperation(option="@cc_ops_cm_b", value="2", global_=True),
+    ]
+
+    # Default transport is control: the middle op fails but the last op still
+    # runs, and each op carries its own status.
+    control = asyncio.run(
+        run_tmux_operations(
+            operations=operations,
+            socket_name=server.socket_name,
+        ),
+    )
+    assert not control.succeeded
+    assert [step.status for step in control.steps] == [
+        TmuxOperationStatus.SUCCEEDED,
+        TmuxOperationStatus.FAILED,
+        TmuxOperationStatus.SUCCEEDED,
+    ]
+    assert control.steps[1].stderr is not None
+    assert "%999999" in "\n".join(control.steps[1].stderr)
+    assert server.cmd("show-option", "-gv", "@cc_ops_cm_b").stdout == ["2"]
+
+    # The subprocess transport folds into one ';' group, which aborts on first
+    # error, so every step blurs into the merged failure.
+    native = asyncio.run(
+        run_tmux_operations(
+            operations=operations,
+            transport="subprocess",
+            socket_name=server.socket_name,
+        ),
+    )
+    assert [step.status for step in native.steps] == [
+        TmuxOperationStatus.FAILED,
+        TmuxOperationStatus.FAILED,
+        TmuxOperationStatus.FAILED,
+    ]
 
 
 class CompileContractCase(t.NamedTuple):
@@ -478,6 +524,7 @@ def test_run_tmux_operations_dispatch_timeout(
         run_tmux_operations(
             operations=_timeout_operations(case, mcp_pane.pane_id),
             dispatch_timeout=0.001,
+            transport="subprocess",
             socket_name=mcp_server.socket_name,
         ),
     )
@@ -608,6 +655,7 @@ def test_run_tmux_operations_marked_split_failure_skips_later_ops(
                     global_=True,
                 ),
             ],
+            transport="subprocess",
             socket_name=server.socket_name,
         ),
     )

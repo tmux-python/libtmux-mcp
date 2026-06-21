@@ -20,6 +20,15 @@ split refs when a later operation fails. It keeps
 {tooliconl}`call-mutating-tools-batch` available for workflows that need to call
 arbitrary MCP tools instead of this tool's typed operation set.
 
+**Per-operation results over tmux control mode**
+
+{tooliconl}`run-tmux-operations` dispatches over a persistent `tmux -C`
+control connection by default (`transport="control"`), so each operation in a
+folded chain keeps its own stdout and return code and one operation's failure
+does not abort the rest. Pass `transport="subprocess"` to fold into a single
+native `tmux a ; b ; c` sequence that returns one merged result and aborts on
+the first error.
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.
