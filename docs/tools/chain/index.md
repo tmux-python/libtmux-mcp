@@ -1,16 +1,16 @@
 # Chain tools
 
-Chain tools compile typed tmux operations into the fewest safe native
-tmux dispatches. They are different from batch tools: batch tools call
-existing MCP tools one by one, while chain tools lower a typed operation
-list directly to tmux command sequences when tmux can preserve the same
-semantics.
+Chain tools run a typed list of tmux operations over a persistent tmux
+control connection, one dispatch per operation, and return one typed
+result per step. They are different from batch tools: batch tools call
+existing MCP tools one by one, while chain tools take a typed tmux
+operation list directly.
 
 ::::{grid} 1 1 2 3
 :gutter: 2 2 3 3
 
-:::{grid-item-card} {tooliconl}`run-tmux-operations`
-Run typed tmux operations with automatic native chaining.
+:::{grid-item-card} {tooliconl}`run-tmux-plan`
+Run a typed plan of tmux operations, one result per step.
 :::
 
 ::::
@@ -19,5 +19,5 @@ Run typed tmux operations with automatic native chaining.
 :hidden:
 :maxdepth: 1
 
-run-tmux-operations
+run-tmux-plan
 ```

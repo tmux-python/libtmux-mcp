@@ -16,7 +16,7 @@ from libtmux_mcp.models import (
     CapturePaneStepResult,
     PaneIdTarget,
     RefTarget,
-    RunTmuxOperationsResult,
+    RunTmuxPlanResult,
     SetOptionOperation,
     SplitPaneOperation,
     SplitPaneStepResult,
@@ -27,7 +27,7 @@ from libtmux_mcp.models import (
 from libtmux_mcp.tools import chain_tools
 from libtmux_mcp.tools.chain_tools import (
     TMUX_OPERATIONS_ADAPTER,
-    run_tmux_operations,
+    run_tmux_plan,
 )
 
 if t.TYPE_CHECKING:
@@ -50,7 +50,7 @@ def test_run_tmux_operations_runs_each_operation(
     """Each operation runs and reports its own typed status."""
     server = mcp_session.server
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(option="@cc_ops_a", value="1", global_=True),
                 SetOptionOperation(option="@cc_ops_b", value="2", global_=True),
@@ -75,7 +75,7 @@ def test_run_tmux_operations_explain_attaches_diagnostics(
     """``explain`` attaches one per-operation dispatch record."""
     server = mcp_session.server
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(option="@cc_ops_x", value="1", global_=True),
                 SetOptionOperation(option="@cc_ops_y", value="2", global_=True),
@@ -108,7 +108,7 @@ def test_run_tmux_operations_capture_returns_lines(
     )
 
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(
                     option="@cc_ops_before_capture",
@@ -138,7 +138,7 @@ def test_run_tmux_operations_captures_split_refs(
     channel = "cc_ops_split_ref"
     keys = f"printf 'CC_OPS_REF\\n'; tmux wait-for -S {channel}"
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SplitPaneOperation(
                     ref="child",
@@ -172,7 +172,7 @@ def test_run_tmux_operations_continue_runs_later_ops(
     """Continue mode records each failure and runs the rest."""
     server = mcp_session.server
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 TmuxSendKeysOperation(
                     target=PaneIdTarget(pane_id="%999999"),
@@ -204,7 +204,7 @@ def test_run_tmux_operations_stop_halts_after_failure(
     """Stop mode (the default) skips every operation after the first failure."""
     server = mcp_session.server
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(option="@cc_ops_cm_a", value="1", global_=True),
                 TmuxSendKeysOperation(
@@ -258,7 +258,7 @@ def test_run_tmux_operations_split_inherits_target_directory(
     ).stdout
 
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SplitPaneOperation(
                     ref="child",
@@ -303,7 +303,7 @@ def test_run_tmux_operations_surfaces_libtmux_scope_error(
     )
 
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(
                     option="@cc_ops_contract_error",
@@ -330,7 +330,7 @@ def test_run_tmux_operations_dry_run_plans_without_mutating(
     """Dry-run returns planned steps without changing tmux state."""
     server = mcp_session.server
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(option="@cc_ops_dry_a", value="1", global_=True),
                 SetOptionOperation(option="@cc_ops_dry_b", value="2", global_=True),
@@ -365,7 +365,7 @@ def test_run_tmux_operations_dry_run_plans_split_ref(
     pane_count = len(mcp_pane.window.panes)
 
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SplitPaneOperation(
                     ref="child",
@@ -401,7 +401,7 @@ def test_run_tmux_operations_dry_run_plans_output_ops(
 ) -> None:
     """Dry-run plans read operations as planned steps."""
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SetOptionOperation(
                     option="@cc_ops_dry_pending",
@@ -442,7 +442,7 @@ def test_run_tmux_operations_dispatch_timeout(
     assert mcp_pane.pane_id is not None
 
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[CapturePaneOperation(target=_pane_target(mcp_pane))],
             dispatch_timeout=0.001,
             explain=True,
@@ -484,7 +484,7 @@ def test_run_tmux_operations_dispatch_timeout_validation(
     """Dispatch timeout must be positive when set."""
     with pytest.raises(ExpectedToolError, match="dispatch_timeout"):
         asyncio.run(
-            run_tmux_operations(
+            run_tmux_plan(
                 operations=[
                     SetOptionOperation(
                         option="@cc_ops_timeout_validation",
@@ -551,7 +551,7 @@ def test_run_tmux_operations_compile_error_paths(
 ) -> None:
     """Compile errors report directly; stop mode skips operations after them."""
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=case.operations,
             socket_name=mcp_session.server.socket_name,
         ),
@@ -569,7 +569,7 @@ def test_run_tmux_operations_split_failure_skips_later_ops(
     """A failed split skips every later operation under stop mode."""
     server = mcp_session.server
     result = asyncio.run(
-        run_tmux_operations(
+        run_tmux_plan(
             operations=[
                 SplitPaneOperation(
                     ref="child",
@@ -629,10 +629,10 @@ def test_run_tmux_operations_rolls_back_created_panes(
     mcp_pane: Pane,
 ) -> None:
     """Rollback kills panes created before a later operation fails."""
-    result: RunTmuxOperationsResult | None = None
+    result: RunTmuxPlanResult | None = None
     try:
         result = asyncio.run(
-            run_tmux_operations(
+            run_tmux_plan(
                 operations=[
                     SplitPaneOperation(
                         ref="child",
@@ -708,7 +708,7 @@ def test_run_tmux_operations_validation(
 
     with pytest.raises(case.expected_error):
         asyncio.run(
-            run_tmux_operations(
+            run_tmux_plan(
                 operations=t.cast("list[TmuxOperation]", case.operations),
                 socket_name=mcp_session.server.socket_name,
             ),

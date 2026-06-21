@@ -1,6 +1,6 @@
-# Run tmux operations
+# Run tmux plan
 
-```{fastmcp-tool} chain_tools.run_tmux_operations
+```{fastmcp-tool} chain_tools.run_tmux_plan
 ```
 
 **Use when** you need several typed tmux operations to run in order over
@@ -51,7 +51,7 @@ fails. The result still reports `created_panes`, and adds
 
 ```json
 {
-  "tool": "run_tmux_operations",
+  "tool": "run_tmux_plan",
   "arguments": {
     "operations": [
       {"kind": "split_pane", "target": {"kind": "pane_id", "pane_id": "%1"},
@@ -64,5 +64,5 @@ fails. The result still reports `created_panes`, and adds
 }
 ```
 
-```{fastmcp-tool-input} chain_tools.run_tmux_operations
+```{fastmcp-tool-input} chain_tools.run_tmux_plan
 ```
