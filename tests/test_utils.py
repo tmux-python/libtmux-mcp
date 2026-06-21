@@ -914,7 +914,6 @@ def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
 
 def test_expected_tool_error_logs_warning_through_server(
     caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Fastmcp's server-layer error log honors ``ExpectedToolError.log_level``.
 
@@ -922,10 +921,6 @@ def test_expected_tool_error_logs_warning_through_server(
     assertion isolates fastmcp's own ``Error calling tool`` record —
     the project middleware's log behavior is covered in
     ``test_middleware.py``.
-
-    fastmcp sets ``propagate = False`` on its logger (it installs a
-    rich handler instead), which hides records from caplog's
-    root-logger handler — re-enable propagation for the test.
     """
     import asyncio
     import logging
@@ -933,8 +928,6 @@ def test_expected_tool_error_logs_warning_through_server(
     from fastmcp import Client, FastMCP
 
     from libtmux_mcp._utils import ExpectedToolError
-
-    monkeypatch.setattr(logging.getLogger("fastmcp"), "propagate", True)
 
     probe = FastMCP(name="probe")
 

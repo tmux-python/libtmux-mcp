@@ -448,7 +448,6 @@ def test_send_keys_batch_schema_validation_redacts_inputs(
     secret: str,
     expected_fragments: tuple[str, ...],
     caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Malformed batch schema errors do not echo raw key payloads."""
     from fastmcp import Client
@@ -456,8 +455,6 @@ def test_send_keys_batch_schema_validation_redacts_inputs(
     from libtmux_mcp.server import build_mcp_server
 
     assert test_id
-    for logger_name in ("fastmcp", "fastmcp.server.server", "fastmcp.errors"):
-        monkeypatch.setattr(logging.getLogger(logger_name), "propagate", True)
 
     async def _call() -> t.Any:
         async with Client(build_mcp_server()) as client:
