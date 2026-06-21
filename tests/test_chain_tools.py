@@ -27,6 +27,8 @@ from libtmux_mcp.tools.chain_tools import (
 )
 
 if t.TYPE_CHECKING:
+    import pathlib
+
     from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
@@ -224,6 +226,54 @@ def test_run_tmux_operations_control_attributes_per_operation(
         TmuxOperationStatus.FAILED,
         TmuxOperationStatus.FAILED,
     ]
+
+
+@pytest.mark.parametrize("transport", ["subprocess", "control"])
+def test_run_tmux_operations_split_inherits_target_directory(
+    transport: t.Literal["subprocess", "control"],
+    mcp_session: Session,
+    tmp_path: pathlib.Path,
+) -> None:
+    """A split's new pane inherits the split target's working directory."""
+    server = mcp_session.server
+    target_dir = str(tmp_path)
+    created = server.cmd(
+        "new-window",
+        "-t",
+        mcp_session.session_id,
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-c",
+        target_dir,
+    )
+    target_pane_id = created.stdout[0]
+    target_cwd = server.cmd(
+        "display-message",
+        "-t",
+        target_pane_id,
+        "-p",
+        "#{pane_current_path}",
+    ).stdout
+
+    result = asyncio.run(
+        run_tmux_operations(
+            operations=[SplitPaneOperation(ref="child", pane_id=target_pane_id)],
+            transport=transport,
+            socket_name=server.socket_name,
+        ),
+    )
+
+    assert result.succeeded
+    new_pane_id = result.created_panes["child"]
+    new_cwd = server.cmd(
+        "display-message",
+        "-t",
+        new_pane_id,
+        "-p",
+        "#{pane_current_path}",
+    ).stdout
+    assert new_cwd == target_cwd
 
 
 class CompileContractCase(t.NamedTuple):
