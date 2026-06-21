@@ -739,6 +739,13 @@ class TmuxSendKeysOperation(BaseModel):
         default=False,
         description="Pass -l so tmux sends keys literally.",
     )
+    suppress_history: bool = Field(
+        default=False,
+        description=(
+            "Prepend a space so the shell ignores the command in history, "
+            "where the shell honors space-prefixed commands."
+        ),
+    )
 
 
 class ResizePaneOperation(BaseModel):

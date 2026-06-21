@@ -28,18 +28,28 @@ can target them, supports a dry-run mode that returns the planned steps without
 touching tmux, applies a per-dispatch timeout, and can roll back panes created
 by typed split refs when a later operation fails. Pass `explain=true` to attach
 per-dispatch diagnostics under `diagnostics`. It keeps
-{tooliconl}`call-mutating-tools-batch` available for workflows that need to call
+{tooliconl}`call-tools-batch` available for workflows that need to call
 arbitrary MCP tools instead of this tool's typed operation set.
+
+**One generic batch tool with {tooliconl}`call-tools-batch`**
+
+{tooliconl}`call-tools-batch` runs an ordered list of existing MCP tools in a
+single call and returns a per-operation result for each, preserving every
+nested tool's structured output. Each nested call still runs through the
+server's safety tier, and an optional `max_tier` caps the batch below that tier
+(`readonly` refuses mutating or destructive nested calls, `mutating` refuses
+destructive ones). It replaces the separate readonly, mutating, and destructive
+batch tools with one tool plus the `max_tier` argument.
 
 ## libtmux-mcp 0.1.0a14 (2026-06-14)
 
-libtmux-mcp 0.1.0a14 adds tier-aware tool batching. {tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.
+libtmux-mcp 0.1.0a14 adds tier-aware tool batching. `call_readonly_tools_batch`, `call_mutating_tools_batch`, and `call_destructive_tools_batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.
 
 ### What's new
 
 **Tier-aware tool batching**
 
-{tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. Large aggregate results stay within the server's response limit — oversized nested payloads are dropped (with the truncation flagged in the result), and very large operation lists are rejected rather than allowed to overflow it. (#79)
+`call_readonly_tools_batch`, `call_mutating_tools_batch`, and `call_destructive_tools_batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. Large aggregate results stay within the server's response limit — oversized nested payloads are dropped (with the truncation flagged in the result), and very large operation lists are rejected rather than allowed to overflow it. (#79)
 
 ## libtmux-mcp 0.1.0a13 (2026-06-13)
 
