@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Development
+
+**Minimum `pytest>=9.1.0`**
+
+The dev and test dependency groups now require pytest 9.1.0 or newer. (#83)
+
 ## libtmux-mcp 0.1.0a14 (2026-06-14)
 
 libtmux-mcp 0.1.0a14 adds tier-aware tool batching. {tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.

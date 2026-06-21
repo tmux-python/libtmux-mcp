@@ -448,7 +448,6 @@ def test_send_keys_batch_schema_validation_redacts_inputs(
     secret: str,
     expected_fragments: tuple[str, ...],
     caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Malformed batch schema errors do not echo raw key payloads."""
     from fastmcp import Client
@@ -456,8 +455,6 @@ def test_send_keys_batch_schema_validation_redacts_inputs(
     from libtmux_mcp.server import build_mcp_server
 
     assert test_id
-    for logger_name in ("fastmcp", "fastmcp.server.server", "fastmcp.errors"):
-        monkeypatch.setattr(logging.getLogger(logger_name), "propagate", True)
 
     async def _call() -> t.Any:
         async with Client(build_mcp_server()) as client:
@@ -1109,7 +1106,6 @@ def test_tool_error_result_logs_at_error_log_level(
     expected_level: int,
     message_fragment: str,
     caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``_log_error`` honors ``log_level``: WARNING expected, ERROR not.
 
@@ -1127,10 +1123,10 @@ def test_tool_error_result_logs_at_error_log_level(
     """
     from fastmcp import Client
 
-    # fastmcp's logger doesn't propagate to root (rich handler);
-    # re-enable propagation so caplog sees the records.
-    monkeypatch.setattr(logging.getLogger("fastmcp"), "propagate", True)
-
+    # fastmcp's logger is non-propagating (rich handler); pytest >=9.1.0
+    # attaches caplog directly to it. ``fastmcp.errors`` records reach
+    # caplog by propagating up to ``fastmcp`` — re-enabling propagation
+    # to root would then double-capture each emit (``fastmcp`` + root).
     probe = _error_probe_server()
 
     async def _call() -> None:

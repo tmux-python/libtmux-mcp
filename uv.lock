@@ -1261,7 +1261,7 @@ dev = [
     { name = "gp-libs" },
     { name = "gp-sphinx", specifier = "==0.0.1a31" },
     { name = "mypy" },
-    { name = "pytest" },
+    { name = "pytest", specifier = ">=9.1.0" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
     { name = "pytest-rerunfailures" },
@@ -1289,7 +1289,7 @@ lint = [
 ]
 testing = [
     { name = "gp-libs" },
-    { name = "pytest" },
+    { name = "pytest", specifier = ">=9.1.0" },
     { name = "pytest-mock" },
     { name = "pytest-rerunfailures" },
     { name = "pytest-watcher" },
