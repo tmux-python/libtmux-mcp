@@ -20,6 +20,15 @@ split refs when a later operation fails. It keeps
 {tooliconl}`call-mutating-tools-batch` available for workflows that need to call
 arbitrary MCP tools instead of this tool's typed operation set.
 
+**Per-operation results over tmux control mode**
+
+{tooliconl}`run-tmux-operations` dispatches over a persistent `tmux -C`
+control connection by default (`transport="control"`), so each operation in a
+folded chain keeps its own stdout and return code and one operation's failure
+does not abort the rest. Pass `transport="subprocess"` to fold into a single
+native `tmux a ; b ; c` sequence that returns one merged result and aborts on
+the first error.
+
 ## libtmux-mcp 0.1.0a14 (2026-06-14)
 
 libtmux-mcp 0.1.0a14 adds tier-aware tool batching. {tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.
