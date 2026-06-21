@@ -15,7 +15,7 @@ src/libtmux_mcp/
     models.py             # Pydantic output models
     middleware.py         # Safety, audit, retry, and error-result middleware
     tools/
-        batch_tools.py    # call_readonly_tools_batch, call_mutating_tools_batch, call_destructive_tools_batch
+        batch_tools.py    # call_tools_batch
         server_tools.py   # list_servers, list_sessions, create_session, kill_server, get_server_info
         session_tools.py  # list_windows, create_window, rename_session, kill_session
         window_tools.py   # list_panes, split_window, rename_window, kill_window, select_layout, resize_window

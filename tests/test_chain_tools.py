@@ -212,6 +212,30 @@ def test_run_tmux_plan_make_grid(
     assert len(mcp_pane.window.panes) == 4
 
 
+def test_run_tmux_plan_send_keys_suppress_history(
+    mcp_session: Session,
+) -> None:
+    """suppress_history space-prefixes the sent keys."""
+    result = asyncio.run(
+        run_tmux_plan(
+            operations=[
+                TmuxSendKeysOperation(
+                    target=PaneIdTarget(pane_id="%999999"),
+                    keys="secret",
+                    enter=False,
+                    suppress_history=True,
+                ),
+            ],
+            on_error="continue",
+            explain=True,
+            socket_name=mcp_session.server.socket_name,
+        ),
+    )
+
+    assert result.diagnostics is not None
+    assert " secret" in result.diagnostics.dispatches[0].argv
+
+
 def test_run_tmux_plan_kill_pane_requires_destructive_tier(
     mcp_session: Session,
     monkeypatch: pytest.MonkeyPatch,

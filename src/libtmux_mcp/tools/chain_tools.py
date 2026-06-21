@@ -180,15 +180,16 @@ def _send_keys_calls(
 ) -> tuple[CommandCall, ...]:
     """Build one operation's ``send-keys`` calls."""
     target = _resolve_target(operation.target, created_panes)
+    keys = (" " if operation.suppress_history else "") + operation.keys
     if operation.literal:
         calls = [
-            CommandCall("send-keys", ("-l", operation.keys), target=target),
+            CommandCall("send-keys", ("-l", keys), target=target),
         ]
         if operation.enter:
             calls.append(CommandCall("send-keys", ("Enter",), target=target))
         return tuple(calls)
 
-    args: list[str] = [operation.keys]
+    args: list[str] = [keys]
     if operation.enter:
         args.append("Enter")
     return (CommandCall("send-keys", tuple(args), target=target),)

@@ -71,19 +71,19 @@ Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 
 Read tmux state without changing anything.
 
-{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`wait-for-content-change` · {toolref}`display-message` · {toolref}`call-readonly-tools-batch`
+{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`wait-for-content-change` · {toolref}`display-message` · {toolref}`call-tools-batch`
 
 ### Act (mutating)
 
 Create or modify tmux objects.
 
-{toolref}`create-session` · {toolref}`send-keys` · {toolref}`send-keys-batch` · {toolref}`run-command` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option` · {toolref}`call-mutating-tools-batch`
+{toolref}`create-session` · {toolref}`send-keys` · {toolref}`send-keys-batch` · {toolref}`run-command` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option`
 
 ### Destroy (destructive)
 
 Tear down tmux objects. Not reversible.
 
-{toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server` · {toolref}`call-destructive-tools-batch`
+{toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server`
 
 ### Example: keep test runs out of persistent history
 

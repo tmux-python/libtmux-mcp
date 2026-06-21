@@ -7,7 +7,7 @@
 one persistent tmux control connection, with a typed result per step.
 
 **Avoid when** you need to call arbitrary MCP tools; use
-{tooliconl}`call-mutating-tools-batch` for that. Use individual tools
+{tooliconl}`call-tools-batch` for that. Use individual tools
 when a workflow has only one step.
 
 **Execution:** Each operation is dispatched on its own over a persistent
