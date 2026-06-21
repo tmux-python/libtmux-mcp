@@ -112,7 +112,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "591a312f78d165816bb95a035a46219657c4b53d" }
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "6fc3db63e3d4dde6f1bcb0116c3d6468ca5adb61" }
 
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
