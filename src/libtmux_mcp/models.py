@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import enum
 import typing as t
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SessionInfo(BaseModel):
@@ -655,3 +656,361 @@ class ContentChangeResult(BaseModel):
     changed: bool = Field(description="Whether the content changed before timeout")
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+
+
+class TmuxOperationStatus(str, enum.Enum):
+    """Execution status for one typed tmux operation."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    PLANNED = "planned"
+
+
+class PaneIdTarget(BaseModel):
+    """Target a concrete pane by its tmux ID."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["pane_id"] = Field(
+        default="pane_id",
+        description="Target discriminator.",
+    )
+    pane_id: str = Field(description="Concrete tmux pane ID, e.g. '%1'.")
+
+
+class RefTarget(BaseModel):
+    """Target a pane created earlier in the same operation list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["ref"] = Field(
+        default="ref",
+        description="Target discriminator.",
+    )
+    ref: str = Field(
+        description="Reference name captured from an earlier split_pane operation.",
+    )
+
+
+PaneTarget: t.TypeAlias = t.Annotated[
+    PaneIdTarget | RefTarget,
+    Field(discriminator="kind"),
+]
+
+
+class SplitPaneOperation(BaseModel):
+    """Split a pane and optionally expose the new pane under ``ref``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["split_pane"] = Field(
+        default="split_pane",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to split.")
+    ref: str | None = Field(
+        default=None,
+        description="Reference name for the created pane ID.",
+    )
+    horizontal: bool = Field(
+        default=False,
+        description="Split left/right (-h) instead of top/bottom.",
+    )
+    shell: str | None = Field(
+        default=None,
+        description="Command to run in the new pane instead of the default shell.",
+    )
+
+
+class TmuxSendKeysOperation(BaseModel):
+    """Send keys to a pane target."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["send_keys"] = Field(
+        default="send_keys",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to send keys to.")
+    keys: str = Field(description="Keys or text to send.")
+    enter: bool = Field(default=True, description="Press Enter after sending keys.")
+    literal: bool = Field(
+        default=False,
+        description="Pass -l so tmux sends keys literally.",
+    )
+    suppress_history: bool = Field(
+        default=False,
+        description=(
+            "Prepend a space so the shell ignores the command in history, "
+            "where the shell honors space-prefixed commands."
+        ),
+    )
+
+
+class ResizePaneOperation(BaseModel):
+    """Resize a pane by dimensions or zoom toggle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["resize_pane"] = Field(
+        default="resize_pane",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to resize.")
+    height: int | None = Field(default=None, description="New height in lines.")
+    width: int | None = Field(default=None, description="New width in columns.")
+    zoom: bool | None = Field(default=None, description="Toggle pane zoom.")
+
+    @model_validator(mode="after")
+    def _validate_resize(self) -> ResizePaneOperation:
+        if self.zoom is not None and (
+            self.height is not None or self.width is not None
+        ):
+            msg = "Cannot combine zoom with height/width."
+            raise ValueError(msg)
+        if self.zoom is None and self.height is None and self.width is None:
+            msg = "Provide height, width, or zoom."
+            raise ValueError(msg)
+        return self
+
+
+class SelectLayoutOperation(BaseModel):
+    """Select a layout for a tmux window."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["select_layout"] = Field(
+        default="select_layout",
+        description="Operation discriminator.",
+    )
+    window_id: str = Field(description="Concrete tmux window ID, e.g. '@1'.")
+    layout: str = Field(description="Layout name or custom layout string.")
+
+
+class SetOptionOperation(BaseModel):
+    """Set a tmux option at server, session, window, or pane scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["set_option"] = Field(
+        default="set_option",
+        description="Operation discriminator.",
+    )
+    option: str = Field(description="Option name to set.")
+    value: str = Field(description="Option value.")
+    scope: t.Literal["server", "session", "window", "pane"] | None = Field(
+        default=None,
+        description="Option scope; omitted means server option.",
+    )
+    target: str | None = Field(
+        default=None,
+        description="Target identifier for session, window, or pane scoped options.",
+    )
+    global_: bool = Field(default=False, description="Set the global option table.")
+
+    @model_validator(mode="after")
+    def _validate_target(self) -> SetOptionOperation:
+        if self.target is not None and self.scope is None:
+            msg = "scope is required when target is specified."
+            raise ValueError(msg)
+        if self.scope in {"session", "window", "pane"} and self.target is None:
+            msg = "target is required when scope is 'session', 'window', or 'pane'."
+            raise ValueError(msg)
+        return self
+
+
+class CapturePaneOperation(BaseModel):
+    """Capture pane output as a standalone read operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["capture_pane"] = Field(
+        default="capture_pane",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to capture.")
+    start: int | None = Field(default=None, description="Start capture line.")
+    end: int | None = Field(default=None, description="End capture line.")
+
+
+class SplitEvenlyOperation(BaseModel):
+    """Split a pane into an evenly sized row or column of panes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["split_evenly"] = Field(
+        default="split_evenly",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to split into even panes.")
+    count: int = Field(description="Total number of resulting panes.", ge=2)
+    axis: t.Literal["horizontal", "vertical"] = Field(
+        default="vertical",
+        description="Lay the panes out side by side (horizontal) or stacked.",
+    )
+
+
+class MakeGridOperation(BaseModel):
+    """Arrange a pane's window into an evenly tiled grid of panes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["make_grid"] = Field(
+        default="make_grid",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane whose window becomes a grid.")
+    rows: int = Field(description="Grid rows.", ge=1)
+    cols: int = Field(description="Grid columns.", ge=1)
+
+    @model_validator(mode="after")
+    def _validate_grid(self) -> MakeGridOperation:
+        if self.rows * self.cols < 2:
+            msg = "make_grid must produce at least 2 panes (rows * cols >= 2)."
+            raise ValueError(msg)
+        return self
+
+
+class KillPaneOperation(BaseModel):
+    """Kill a pane.
+
+    Destructive: a plan that contains this operation runs it only when the
+    server's safety tier is ``destructive``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["kill_pane"] = Field(
+        default="kill_pane",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to kill.")
+
+
+TmuxOperation: t.TypeAlias = t.Annotated[
+    SplitPaneOperation
+    | TmuxSendKeysOperation
+    | ResizePaneOperation
+    | SelectLayoutOperation
+    | SetOptionOperation
+    | CapturePaneOperation
+    | SplitEvenlyOperation
+    | MakeGridOperation
+    | KillPaneOperation,
+    Field(discriminator="kind"),
+]
+
+
+class SplitPaneStepResult(BaseModel):
+    """Result for one ``split_pane`` operation."""
+
+    kind: t.Literal["split_pane"] = Field(
+        default="split_pane",
+        description="Operation kind discriminator.",
+    )
+    index: int = Field(description="Zero-based operation index.")
+    status: TmuxOperationStatus = Field(description="Execution status.")
+    pane_id: str | None = Field(
+        default=None,
+        description="Concrete pane ID created by a ref-producing split, if any.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Failure message when the operation failed.",
+    )
+
+
+class CapturePaneStepResult(BaseModel):
+    """Result for one ``capture_pane`` operation."""
+
+    kind: t.Literal["capture_pane"] = Field(
+        default="capture_pane",
+        description="Operation kind discriminator.",
+    )
+    index: int = Field(description="Zero-based operation index.")
+    status: TmuxOperationStatus = Field(description="Execution status.")
+    lines: list[str] | None = Field(
+        default=None,
+        description="Captured pane lines on success.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Failure message when the operation failed.",
+    )
+
+
+class OperationStepResult(BaseModel):
+    """Result for an operation that returns status only."""
+
+    kind: t.Literal[
+        "send_keys",
+        "resize_pane",
+        "select_layout",
+        "set_option",
+        "split_evenly",
+        "make_grid",
+        "kill_pane",
+    ] = Field(
+        description="Operation kind discriminator.",
+    )
+    index: int = Field(description="Zero-based operation index.")
+    status: TmuxOperationStatus = Field(description="Execution status.")
+    error: str | None = Field(
+        default=None,
+        description="Failure message when the operation failed.",
+    )
+
+
+TmuxStepResult: t.TypeAlias = t.Annotated[
+    SplitPaneStepResult | CapturePaneStepResult | OperationStepResult,
+    Field(discriminator="kind"),
+]
+
+
+class TmuxOperationDispatchResult(BaseModel):
+    """Diagnostics for one native tmux dispatch."""
+
+    index: int = Field(description="Operation index this dispatch ran.")
+    argv: list[str] = Field(description="Rendered tmux argv.")
+    returncode: int | None = Field(description="tmux process exit code, if run.")
+    stdout: list[str] = Field(default_factory=list, description="stdout lines.")
+    stderr: list[str] = Field(default_factory=list, description="stderr lines.")
+
+
+class RunTmuxDiagnostics(BaseModel):
+    """Dispatch diagnostics returned only when ``explain`` is set."""
+
+    dispatch_count: int = Field(description="Number of native tmux dispatches.")
+    dispatches: list[TmuxOperationDispatchResult] = Field(
+        description="Native tmux dispatches used to run the operations.",
+    )
+
+
+class RunTmuxPlanResult(BaseModel):
+    """Result of running typed tmux operations."""
+
+    succeeded: bool = Field(description="False when any operation failed or skipped.")
+    dry_run: bool = Field(
+        default=False,
+        description="True when dispatches were planned but not executed.",
+    )
+    steps: list[TmuxStepResult] = Field(
+        description="Per-operation results in input order.",
+    )
+    created_panes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping of split_pane ref names to concrete pane IDs.",
+    )
+    rolled_back_panes: list[str] = Field(
+        default_factory=list,
+        description="Pane IDs killed by rollback_on_error.",
+    )
+    rollback_errors: list[str] = Field(
+        default_factory=list,
+        description="Errors raised while rolling back created panes.",
+    )
+    diagnostics: RunTmuxDiagnostics | None = Field(
+        default=None,
+        description="Dispatch diagnostics, present only when explain is set.",
+    )

@@ -11,7 +11,6 @@ from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -36,13 +35,7 @@ _TIER_LEVELS: dict[str, int] = {
     TAG_DESTRUCTIVE: 2,
 }
 
-_BATCH_TOOL_NAMES: frozenset[str] = frozenset(
-    {
-        "call_readonly_tools_batch",
-        "call_mutating_tools_batch",
-        "call_destructive_tools_batch",
-    }
-)
+_BATCH_TOOL_NAMES: frozenset[str] = frozenset({"call_tools_batch"})
 
 MAX_BATCH_OPERATIONS = 1_000
 
@@ -285,81 +278,40 @@ async def _call_tools_batch(
 
 
 @handle_tool_errors_async
-async def call_readonly_tools_batch(
+async def call_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    max_tier: t.Literal["readonly", "mutating", "destructive"] | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
-    """Call readonly MCP tools serially and return per-tool results.
+    """Call existing MCP tools serially and return per-tool results.
 
-    Use when several read-only observations should be made in one agent
-    turn. Each nested call still goes through FastMCP validation,
-    middleware, and safety checks. Mutating and destructive tools are
-    rejected even if the server process itself is running at a higher
-    safety tier.
+    Use for ordered tmux workflows where every step is an existing typed MCP
+    tool. Each nested call still goes through FastMCP validation, middleware,
+    and the server's safety tier, so the batch can never run a nested tool the
+    server tier hides. ``max_tier`` optionally caps the batch below the server
+    tier: ``"readonly"`` refuses any mutating or destructive nested call and
+    ``"mutating"`` refuses destructive ones. The default permits every tier the
+    server already allows. Prefer the typed run_tmux_plan tool for tmux
+    operations; reach for this batch only to drive arbitrary registered tools.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
-        max_tier=TAG_READONLY,
-        ctx=ctx,
-    )
-
-
-@handle_tool_errors_async
-async def call_mutating_tools_batch(
-    operations: list[ToolCallOperation],
-    on_error: _OnError = "stop",
-    ctx: Context | None = None,
-) -> ToolCallBatchResult:
-    """Call readonly or mutating MCP tools serially and return per-tool results.
-
-    Use for ordered tmux workflows where every step is still an existing
-    typed MCP tool. Destructive tools are rejected regardless of the
-    process-wide safety tier.
-    """
-    return await _call_tools_batch(
-        operations=operations,
-        on_error=on_error,
-        max_tier=TAG_MUTATING,
-        ctx=ctx,
-    )
-
-
-@handle_tool_errors_async
-async def call_destructive_tools_batch(
-    operations: list[ToolCallOperation],
-    on_error: _OnError = "stop",
-    ctx: Context | None = None,
-) -> ToolCallBatchResult:
-    """Call readonly, mutating, or destructive MCP tools serially.
-
-    This wrapper preserves the normal per-tool schemas and middleware
-    but its tier permits destructive nested operations. Prefer the
-    narrower readonly or mutating wrappers whenever possible.
-    """
-    return await _call_tools_batch(
-        operations=operations,
-        on_error=on_error,
-        max_tier=TAG_DESTRUCTIVE,
+        max_tier=max_tier if max_tier is not None else TAG_DESTRUCTIVE,
         ctx=ctx,
     )
 
 
 def register(mcp: FastMCP) -> None:
-    """Register generic MCP batch tools."""
+    """Register the generic MCP batch tool.
+
+    Tagged ``readonly`` so it stays callable at every safety tier; each nested
+    call is still re-checked against the server tier by the safety middleware,
+    so visibility never widens what the batch can actually run.
+    """
     mcp.tool(
-        title="Call Readonly Tools Batch",
-        annotations=ANNOTATIONS_RO,
+        title="Call Tools Batch",
+        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
         tags={TAG_READONLY},
-    )(call_readonly_tools_batch)
-    mcp.tool(
-        title="Call Mutating Tools Batch",
-        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
-        tags={TAG_MUTATING},
-    )(call_mutating_tools_batch)
-    mcp.tool(
-        title="Call Destructive Tools Batch",
-        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
-        tags={TAG_DESTRUCTIVE},
-    )(call_destructive_tools_batch)
+    )(call_tools_batch)
