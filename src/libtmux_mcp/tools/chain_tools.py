@@ -26,16 +26,20 @@ from libtmux_mcp._utils import (
 )
 from libtmux_mcp.models import (
     CapturePaneOperation,
+    CapturePaneStepResult,
+    OperationStepResult,
     ResizePaneOperation,
+    RunTmuxDiagnostics,
     RunTmuxOperationsResult,
     SelectLayoutOperation,
     SetOptionOperation,
     SplitPaneOperation,
+    SplitPaneStepResult,
     TmuxOperation,
     TmuxOperationDispatchResult,
     TmuxOperationStatus,
-    TmuxOperationStepResult,
     TmuxSendKeysOperation,
+    TmuxStepResult,
 )
 
 if t.TYPE_CHECKING:
@@ -56,6 +60,18 @@ TMUX_OPERATIONS_ADAPTER: TypeAdapter[list[TmuxOperation]] = TypeAdapter(
 
 class _CompileError(Exception):
     """Operation-level compile failure that should become a step result."""
+
+
+@dataclasses.dataclass
+class _Outcome:
+    """Internal per-operation outcome before shaping into a typed result."""
+
+    index: int
+    kind: str
+    status: TmuxOperationStatus
+    stdout: list[str] = dataclasses.field(default_factory=list)
+    stderr: list[str] = dataclasses.field(default_factory=list)
+    created_pane_id: str | None = None
 
 
 @dataclasses.dataclass
@@ -285,8 +301,8 @@ def _dispatch_standalone(
     calls: tuple[CommandCall, ...],
     *,
     capture_created_pane: bool,
-) -> tuple[TmuxOperationDispatchResult, TmuxOperationStepResult, str | None]:
-    """Run one operation and return dispatch, step, and captured pane id."""
+) -> tuple[TmuxOperationDispatchResult, _Outcome, str | None]:
+    """Run one operation and return dispatch, outcome, and captured pane id."""
     argv, result = _run_calls(runner, calls)
     stdout = list(result.stdout)
     stderr = list(result.stderr)
@@ -303,18 +319,16 @@ def _dispatch_standalone(
 
     return (
         TmuxOperationDispatchResult(
-            mode="standalone",
-            operation_indexes=[index],
+            index=index,
             argv=argv,
             returncode=result.returncode,
             stdout=stdout,
             stderr=stderr,
         ),
-        TmuxOperationStepResult(
+        _Outcome(
             index=index,
             kind=kind,
             status=status,
-            returncode=result.returncode,
             stdout=stdout,
             stderr=stderr,
             created_pane_id=created_pane_id,
@@ -328,36 +342,26 @@ def _planned_pane_ref(ref: str) -> str:
     return f"<pane_ref:{ref}>"
 
 
-def _planned_step(
-    index: int,
-    kind: str,
-    created_pane_id: str | None = None,
-) -> TmuxOperationStepResult:
-    """Return a planned step result for dry-run compilation."""
-    return TmuxOperationStepResult(
-        index=index,
-        kind=kind,
-        status=TmuxOperationStatus.PLANNED,
-        created_pane_id=created_pane_id,
-    )
-
-
 def _plan_standalone(
     index: int,
     kind: str,
     calls: tuple[CommandCall, ...],
     *,
     created_pane_id: str | None = None,
-) -> tuple[TmuxOperationDispatchResult, TmuxOperationStepResult, str | None]:
+) -> tuple[TmuxOperationDispatchResult, _Outcome, str | None]:
     """Return the dry-run shape for one operation dispatch."""
     return (
         TmuxOperationDispatchResult(
-            mode="standalone",
-            operation_indexes=[index],
+            index=index,
             argv=_calls_argv(calls),
             returncode=None,
         ),
-        _planned_step(index, kind, created_pane_id),
+        _Outcome(
+            index=index,
+            kind=kind,
+            status=TmuxOperationStatus.PLANNED,
+            created_pane_id=created_pane_id,
+        ),
         created_pane_id,
     )
 
@@ -367,37 +371,27 @@ def _timeout_stderr(dispatch_timeout: float) -> list[str]:
     return [f"tmux dispatch timed out after {dispatch_timeout:g} seconds"]
 
 
-def _timeout_step(
-    index: int,
-    kind: str,
-    stderr: list[str],
-) -> TmuxOperationStepResult:
-    """Return a failed step for a dispatch timeout."""
-    return TmuxOperationStepResult(
-        index=index,
-        kind=kind,
-        status=TmuxOperationStatus.FAILED,
-        stderr=stderr,
-    )
-
-
 def _timeout_standalone(
     index: int,
     kind: str,
     calls: tuple[CommandCall, ...],
     dispatch_timeout: float,
-) -> tuple[TmuxOperationDispatchResult, TmuxOperationStepResult, str | None]:
+) -> tuple[TmuxOperationDispatchResult, _Outcome, str | None]:
     """Return timeout results for one operation dispatch."""
     stderr = _timeout_stderr(dispatch_timeout)
     return (
         TmuxOperationDispatchResult(
-            mode="standalone",
-            operation_indexes=[index],
+            index=index,
             argv=_calls_argv(calls),
             returncode=None,
             stderr=stderr,
         ),
-        _timeout_step(index, kind, stderr),
+        _Outcome(
+            index=index,
+            kind=kind,
+            status=TmuxOperationStatus.FAILED,
+            stderr=stderr,
+        ),
         None,
     )
 
@@ -419,13 +413,13 @@ def _rollback_created_panes(
     return rolled_back_panes, rollback_errors
 
 
-def _compile_failure_step(
+def _compile_failure_outcome(
     index: int,
     operation: TmuxOperation,
     error: Exception,
-) -> TmuxOperationStepResult:
-    """Convert a compile failure into a step result."""
-    return TmuxOperationStepResult(
+) -> _Outcome:
+    """Convert a compile failure into an outcome."""
+    return _Outcome(
         index=index,
         kind=operation.kind,
         status=TmuxOperationStatus.FAILED,
@@ -433,19 +427,51 @@ def _compile_failure_step(
     )
 
 
-def _skipped_step(index: int, operation: TmuxOperation) -> TmuxOperationStepResult:
-    """Return a skipped result for an operation after stop-on-error."""
-    return TmuxOperationStepResult(
+def _skipped_outcome(index: int, operation: TmuxOperation) -> _Outcome:
+    """Return a skipped outcome for an operation after stop-on-error."""
+    return _Outcome(
         index=index,
         kind=operation.kind,
         status=TmuxOperationStatus.SKIPPED,
     )
 
 
-def _step_succeeded(step: TmuxOperationStepResult, *, dry_run: bool) -> bool:
-    """Return whether a step should allow later operations to continue."""
-    return step.status == TmuxOperationStatus.SUCCEEDED or (
-        dry_run and step.status == TmuxOperationStatus.PLANNED
+def _outcome_succeeded(outcome: _Outcome, *, dry_run: bool) -> bool:
+    """Return whether an outcome should allow later operations to continue."""
+    return outcome.status == TmuxOperationStatus.SUCCEEDED or (
+        dry_run and outcome.status == TmuxOperationStatus.PLANNED
+    )
+
+
+def _to_step_result(outcome: _Outcome) -> TmuxStepResult:
+    """Shape an internal outcome into the typed, per-kind step result."""
+    error = "\n".join(outcome.stderr) if outcome.stderr else None
+    if outcome.kind == "split_pane":
+        return SplitPaneStepResult(
+            index=outcome.index,
+            status=outcome.status,
+            pane_id=outcome.created_pane_id,
+            error=error,
+        )
+    if outcome.kind == "capture_pane":
+        lines = (
+            outcome.stdout if outcome.status == TmuxOperationStatus.SUCCEEDED else None
+        )
+        return CapturePaneStepResult(
+            index=outcome.index,
+            status=outcome.status,
+            lines=lines,
+            error=error,
+        )
+    status_kind = t.cast(
+        "t.Literal['send_keys', 'resize_pane', 'select_layout', 'set_option']",
+        outcome.kind,
+    )
+    return OperationStepResult(
+        kind=status_kind,
+        index=outcome.index,
+        status=outcome.status,
+        error=error,
     )
 
 
@@ -456,20 +482,27 @@ async def run_tmux_operations(
     dry_run: bool = False,
     dispatch_timeout: float | None = 10.0,
     rollback_on_error: bool = False,
+    explain: bool = False,
     socket_name: str | None = None,
 ) -> RunTmuxOperationsResult:
     """Run typed tmux operations, one dispatch per operation.
 
     Each operation is dispatched on its own over a persistent ``tmux -C``
     control connection, so every operation keeps its own stdout and return
-    code. ``on_error="stop"`` (the default) stops before the next operation
-    once one fails or its target cannot be resolved, marking the rest as
-    skipped; ``on_error="continue"`` records each failure and runs the rest.
-    ``dry_run`` returns the rendered dispatch plan without touching tmux.
+    code. The result carries one typed, per-kind ``steps`` entry per
+    operation: ``capture_pane`` returns ``lines``, ``split_pane`` returns
+    ``pane_id``, and the rest return status only.
+
+    ``on_error="stop"`` (the default) stops before the next operation once one
+    fails or its target cannot be resolved, marking the rest as skipped;
+    ``on_error="continue"`` records each failure and runs the rest.
+    ``dry_run`` returns the planned steps without touching tmux.
     ``dispatch_timeout`` bounds how long the tool waits for one native tmux
     dispatch; timed-out work may still finish in the background.
     ``rollback_on_error`` kills panes created by ref-producing ``split_pane``
     operations when the overall operation list fails.
+    ``explain`` attaches per-dispatch diagnostics (rendered argv and raw
+    stdout/stderr) under ``diagnostics``.
     """
     validated = TMUX_OPERATIONS_ADAPTER.validate_python(operations)
     if not validated:
@@ -487,7 +520,7 @@ async def run_tmux_operations(
         runner = ControlModeRunner(_get_server(socket_name=socket_name))
     try:
         dispatches: list[TmuxOperationDispatchResult] = []
-        steps_by_index: dict[int, TmuxOperationStepResult] = {}
+        outcomes_by_index: dict[int, _Outcome] = {}
         created_panes: dict[str, str] = {}
         created_pane_order: list[str] = []
 
@@ -498,7 +531,7 @@ async def run_tmux_operations(
 
         def skip_rest(start: int) -> None:
             for skip_index, skipped in enumerate(validated[start:], start=start):
-                steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
+                outcomes_by_index[skip_index] = _skipped_outcome(skip_index, skipped)
 
         index = 0
         while index < len(validated):
@@ -506,7 +539,9 @@ async def run_tmux_operations(
             try:
                 calls = _operation_calls(operation, created_panes)
             except _CompileError as exc:
-                steps_by_index[index] = _compile_failure_step(index, operation, exc)
+                outcomes_by_index[index] = _compile_failure_outcome(
+                    index, operation, exc
+                )
                 if on_error == "stop":
                     skip_rest(index + 1)
                     break
@@ -523,7 +558,7 @@ async def run_tmux_operations(
                     and operation.ref is not None
                     else None
                 )
-                dispatch, step, created_pane_id = _plan_standalone(
+                dispatch, outcome, created_pane_id = _plan_standalone(
                     index,
                     operation.kind,
                     calls,
@@ -541,33 +576,35 @@ async def run_tmux_operations(
                         capture_created_pane=capture_created_pane,
                     )
                     if dispatch_timeout is None:
-                        dispatch, step, created_pane_id = await dispatch_coro
+                        dispatch, outcome, created_pane_id = await dispatch_coro
                     else:
-                        dispatch, step, created_pane_id = await asyncio.wait_for(
+                        dispatch, outcome, created_pane_id = await asyncio.wait_for(
                             dispatch_coro,
                             timeout=dispatch_timeout,
                         )
                 except TimeoutError:
                     assert dispatch_timeout is not None
-                    dispatch, step, created_pane_id = _timeout_standalone(
+                    dispatch, outcome, created_pane_id = _timeout_standalone(
                         index,
                         operation.kind,
                         calls,
                         dispatch_timeout,
                     )
             dispatches.append(dispatch)
-            steps_by_index[index] = step
+            outcomes_by_index[index] = outcome
             if capture_created_pane and created_pane_id is not None:
                 assert isinstance(operation, SplitPaneOperation)
                 assert operation.ref is not None
                 record_created_pane(operation.ref, created_pane_id)
-            if not _step_succeeded(step, dry_run=dry_run) and on_error == "stop":
+            if not _outcome_succeeded(outcome, dry_run=dry_run) and on_error == "stop":
                 skip_rest(index + 1)
                 break
             index += 1
 
-        steps = [steps_by_index[index] for index in range(len(validated))]
-        succeeded = all(_step_succeeded(step, dry_run=dry_run) for step in steps)
+        outcomes = [outcomes_by_index[index] for index in range(len(validated))]
+        succeeded = all(
+            _outcome_succeeded(outcome, dry_run=dry_run) for outcome in outcomes
+        )
         rolled_back_panes: list[str] = []
         rollback_errors: list[str] = []
         if rollback_on_error and not dry_run and not succeeded and created_pane_order:
@@ -577,15 +614,19 @@ async def run_tmux_operations(
                 runner,
                 created_pane_order,
             )
+        diagnostics = (
+            RunTmuxDiagnostics(dispatch_count=len(dispatches), dispatches=dispatches)
+            if explain
+            else None
+        )
         return RunTmuxOperationsResult(
             succeeded=succeeded,
             dry_run=dry_run,
-            dispatch_count=len(dispatches),
-            dispatches=dispatches,
-            steps=steps,
+            steps=[_to_step_result(outcome) for outcome in outcomes],
             created_panes=created_panes,
             rolled_back_panes=rolled_back_panes,
             rollback_errors=rollback_errors,
+            diagnostics=diagnostics,
         )
     finally:
         if runner is not None:

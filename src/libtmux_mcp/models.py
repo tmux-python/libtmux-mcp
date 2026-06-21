@@ -844,58 +844,92 @@ TmuxOperation: t.TypeAlias = t.Annotated[
 ]
 
 
-class TmuxOperationStepResult(BaseModel):
-    """Result for one typed operation."""
+class SplitPaneStepResult(BaseModel):
+    """Result for one ``split_pane`` operation."""
 
+    kind: t.Literal["split_pane"] = Field(
+        default="split_pane",
+        description="Operation kind discriminator.",
+    )
     index: int = Field(description="Zero-based operation index.")
-    kind: str = Field(description="Operation kind.")
     status: TmuxOperationStatus = Field(description="Execution status.")
-    returncode: int | None = Field(
+    pane_id: str | None = Field(
         default=None,
-        description="tmux return code when the operation was dispatched.",
+        description="Concrete pane ID created by a ref-producing split, if any.",
     )
-    stdout: list[str] | None = Field(
+    error: str | None = Field(
         default=None,
-        description="stdout lines for standalone/output operations.",
+        description="Failure message when the operation failed.",
     )
-    stderr: list[str] | None = Field(
+
+
+class CapturePaneStepResult(BaseModel):
+    """Result for one ``capture_pane`` operation."""
+
+    kind: t.Literal["capture_pane"] = Field(
+        default="capture_pane",
+        description="Operation kind discriminator.",
+    )
+    index: int = Field(description="Zero-based operation index.")
+    status: TmuxOperationStatus = Field(description="Execution status.")
+    lines: list[str] | None = Field(
         default=None,
-        description="stderr lines for failed or standalone operations.",
+        description="Captured pane lines on success.",
     )
-    created_pane_id: str | None = Field(
+    error: str | None = Field(
         default=None,
-        description="Pane ID captured from a split_pane operation with ref.",
+        description="Failure message when the operation failed.",
     )
+
+
+class OperationStepResult(BaseModel):
+    """Result for an operation that returns status only."""
+
+    kind: t.Literal["send_keys", "resize_pane", "select_layout", "set_option"] = Field(
+        description="Operation kind discriminator.",
+    )
+    index: int = Field(description="Zero-based operation index.")
+    status: TmuxOperationStatus = Field(description="Execution status.")
+    error: str | None = Field(
+        default=None,
+        description="Failure message when the operation failed.",
+    )
+
+
+TmuxStepResult: t.TypeAlias = t.Annotated[
+    SplitPaneStepResult | CapturePaneStepResult | OperationStepResult,
+    Field(discriminator="kind"),
+]
 
 
 class TmuxOperationDispatchResult(BaseModel):
-    """Result for one native tmux dispatch."""
+    """Diagnostics for one native tmux dispatch."""
 
-    mode: t.Literal["chain", "standalone"] = Field(
-        description="Whether the dispatch used a tmux sequence or one command.",
-    )
-    operation_indexes: list[int] = Field(
-        description="Operation indexes included in this dispatch.",
-    )
+    index: int = Field(description="Operation index this dispatch ran.")
     argv: list[str] = Field(description="Rendered tmux argv.")
     returncode: int | None = Field(description="tmux process exit code, if run.")
     stdout: list[str] = Field(default_factory=list, description="stdout lines.")
     stderr: list[str] = Field(default_factory=list, description="stderr lines.")
 
 
+class RunTmuxDiagnostics(BaseModel):
+    """Dispatch diagnostics returned only when ``explain`` is set."""
+
+    dispatch_count: int = Field(description="Number of native tmux dispatches.")
+    dispatches: list[TmuxOperationDispatchResult] = Field(
+        description="Native tmux dispatches used to run the operations.",
+    )
+
+
 class RunTmuxOperationsResult(BaseModel):
-    """Result of compiling and running typed tmux operations."""
+    """Result of running typed tmux operations."""
 
     succeeded: bool = Field(description="False when any operation failed or skipped.")
     dry_run: bool = Field(
         default=False,
         description="True when dispatches were planned but not executed.",
     )
-    dispatch_count: int = Field(description="Number of native tmux dispatches.")
-    dispatches: list[TmuxOperationDispatchResult] = Field(
-        description="Native tmux dispatches used by the compiler.",
-    )
-    steps: list[TmuxOperationStepResult] = Field(
+    steps: list[TmuxStepResult] = Field(
         description="Per-operation results in input order.",
     )
     created_panes: dict[str, str] = Field(
@@ -909,4 +943,8 @@ class RunTmuxOperationsResult(BaseModel):
     rollback_errors: list[str] = Field(
         default_factory=list,
         description="Errors raised while rolling back created panes.",
+    )
+    diagnostics: RunTmuxDiagnostics | None = Field(
+        default=None,
+        description="Dispatch diagnostics, present only when explain is set.",
     )
