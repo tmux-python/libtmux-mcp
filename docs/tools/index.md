@@ -55,7 +55,7 @@ leave socket selection inside each nested tool's arguments. See
 - Signal a waiter → {tool}`signal-channel`
 
 **Batching typed tool calls?**
-- Native tmux operation chains → {tool}`run-tmux-operations`
+- Native tmux operation chains → {tool}`run-tmux-plan`
 - Read-only observations → {tool}`call-readonly-tools-batch`
 - Ordered readonly + mutating workflows → {tool}`call-mutating-tools-batch`
 - Reviewed workflows that include destructive steps → {tool}`call-destructive-tools-batch`
@@ -271,10 +271,10 @@ Run a shell command and report exit status.
 Call typed readonly or mutating tools in order.
 :::
 
-:::{grid-item-card} run_tmux_operations
-:link: run-tmux-operations
+:::{grid-item-card} run_tmux_plan
+:link: run-tmux-plan
 :link-type: ref
-Compile typed tmux operations into native chains.
+Run a typed plan of tmux operations, one result per step.
 :::
 
 :::{grid-item-card} rename_session

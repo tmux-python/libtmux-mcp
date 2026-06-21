@@ -915,7 +915,7 @@ class RunTmuxDiagnostics(BaseModel):
     )
 
 
-class RunTmuxOperationsResult(BaseModel):
+class RunTmuxPlanResult(BaseModel):
     """Result of running typed tmux operations."""
 
     succeeded: bool = Field(description="False when any operation failed or skipped.")

@@ -176,7 +176,7 @@ conf["fastmcp_model_classes"] = (
     "OperationStepResult",
     "TmuxOperationDispatchResult",
     "RunTmuxDiagnostics",
-    "RunTmuxOperationsResult",
+    "RunTmuxPlanResult",
     "ToolCallOperation",
     "ToolCallOperationResult",
     "ToolCallBatchResult",

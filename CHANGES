@@ -8,9 +8,9 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
-**Typed tmux operation chains with {tooliconl}`run-tmux-operations`**
+**Typed tmux operation chains with {tooliconl}`run-tmux-plan`**
 
-{tooliconl}`run-tmux-operations` accepts an ordered list of typed tmux
+{tooliconl}`run-tmux-plan` accepts an ordered list of typed tmux
 operations and runs each one over a persistent `tmux -C` control connection. It
 returns one typed result per operation, discriminated by `kind`: `capture_pane`
 returns its `lines`, `split_pane` returns the new `pane_id`, and the rest return

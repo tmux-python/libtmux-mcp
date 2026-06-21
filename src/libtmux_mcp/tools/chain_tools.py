@@ -33,7 +33,7 @@ from libtmux_mcp.models import (
     RefTarget,
     ResizePaneOperation,
     RunTmuxDiagnostics,
-    RunTmuxOperationsResult,
+    RunTmuxPlanResult,
     SelectLayoutOperation,
     SetOptionOperation,
     SplitPaneOperation,
@@ -477,7 +477,7 @@ def _to_step_result(outcome: _Outcome) -> TmuxStepResult:
 
 
 @handle_tool_errors_async
-async def run_tmux_operations(
+async def run_tmux_plan(
     operations: list[TmuxOperation],
     on_error: t.Literal["stop", "continue"] = "stop",
     dry_run: bool = False,
@@ -485,7 +485,7 @@ async def run_tmux_operations(
     rollback_on_error: bool = False,
     explain: bool = False,
     socket_name: str | None = None,
-) -> RunTmuxOperationsResult:
+) -> RunTmuxPlanResult:
     """Run typed tmux operations, one dispatch per operation.
 
     Each operation is dispatched on its own over a persistent ``tmux -C``
@@ -620,7 +620,7 @@ async def run_tmux_operations(
             if explain
             else None
         )
-        return RunTmuxOperationsResult(
+        return RunTmuxPlanResult(
             succeeded=succeeded,
             dry_run=dry_run,
             steps=[_to_step_result(outcome) for outcome in outcomes],
@@ -637,7 +637,7 @@ async def run_tmux_operations(
 def register(mcp: FastMCP) -> None:
     """Register typed chain tools with the MCP instance."""
     mcp.tool(
-        title="Run tmux Operations",
+        title="Run tmux Plan",
         annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING},
-    )(run_tmux_operations)
+    )(run_tmux_plan)
