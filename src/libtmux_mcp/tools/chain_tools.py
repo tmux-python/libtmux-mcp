@@ -157,6 +157,11 @@ def _split_calls(
         args.append("-h")
     if operation.ref is not None:
         args.extend(("-P", "-F", "#{pane_id}"))
+    # Pin the new pane to the target pane's directory. Without ``-c`` tmux
+    # resolves the cwd from the issuing client's context, which differs by
+    # transport (the subprocess client's cwd vs. the control client's), so an
+    # explicit format keeps splits deterministic across both.
+    args.extend(("-c", "#{pane_current_path}"))
     if operation.shell is not None:
         args.append(operation.shell)
     return (
