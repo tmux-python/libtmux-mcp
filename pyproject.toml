@@ -64,7 +64,7 @@ dev = [
   # Testing
   "typing-extensions; python_version < '3.11'",
   "gp-libs",
-  "pytest",
+  "pytest>=9.1.0",  # >=9.1.0 attaches caplog to non-propagating loggers; see test_middleware
   "pytest-rerunfailures",
   "pytest-mock",
   "pytest-watcher",
@@ -91,7 +91,7 @@ docs = [
 testing = [
   "typing-extensions; python_version < '3.11'",
   "gp-libs",
-  "pytest",
+  "pytest>=9.1.0",  # >=9.1.0 attaches caplog to non-propagating loggers; see test_middleware
   "pytest-rerunfailures",
   "pytest-mock",
   "pytest-watcher",
