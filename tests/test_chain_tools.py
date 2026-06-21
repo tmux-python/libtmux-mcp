@@ -14,6 +14,8 @@ from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.models import (
     CapturePaneOperation,
     CapturePaneStepResult,
+    PaneIdTarget,
+    RefTarget,
     RunTmuxOperationsResult,
     SetOptionOperation,
     SplitPaneOperation,
@@ -34,6 +36,12 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
+
+
+def _pane_target(pane: Pane) -> PaneIdTarget:
+    """Return a typed pane-id target for a fixture pane."""
+    assert pane.pane_id is not None
+    return PaneIdTarget(pane_id=pane.pane_id)
 
 
 def test_run_tmux_operations_runs_each_operation(
@@ -107,7 +115,7 @@ def test_run_tmux_operations_capture_returns_lines(
                     value="1",
                     global_=True,
                 ),
-                CapturePaneOperation(pane_id=mcp_pane.pane_id),
+                CapturePaneOperation(target=_pane_target(mcp_pane)),
             ],
             socket_name=mcp_server.socket_name,
         ),
@@ -132,8 +140,11 @@ def test_run_tmux_operations_captures_split_refs(
     result = asyncio.run(
         run_tmux_operations(
             operations=[
-                SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
-                TmuxSendKeysOperation(pane_ref="child", keys=keys),
+                SplitPaneOperation(
+                    ref="child",
+                    target=_pane_target(mcp_pane),
+                ),
+                TmuxSendKeysOperation(target=RefTarget(ref="child"), keys=keys),
             ],
             socket_name=mcp_server.socket_name,
         ),
@@ -163,7 +174,11 @@ def test_run_tmux_operations_continue_runs_later_ops(
     result = asyncio.run(
         run_tmux_operations(
             operations=[
-                TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
+                TmuxSendKeysOperation(
+                    target=PaneIdTarget(pane_id="%999999"),
+                    keys="bad",
+                    enter=False,
+                ),
                 SetOptionOperation(
                     option="@cc_ops_after_error",
                     value="set",
@@ -192,7 +207,11 @@ def test_run_tmux_operations_stop_halts_after_failure(
         run_tmux_operations(
             operations=[
                 SetOptionOperation(option="@cc_ops_cm_a", value="1", global_=True),
-                TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
+                TmuxSendKeysOperation(
+                    target=PaneIdTarget(pane_id="%999999"),
+                    keys="bad",
+                    enter=False,
+                ),
                 SetOptionOperation(option="@cc_ops_cm_b", value="2", global_=True),
             ],
             socket_name=server.socket_name,
@@ -240,7 +259,12 @@ def test_run_tmux_operations_split_inherits_target_directory(
 
     result = asyncio.run(
         run_tmux_operations(
-            operations=[SplitPaneOperation(ref="child", pane_id=target_pane_id)],
+            operations=[
+                SplitPaneOperation(
+                    ref="child",
+                    target=PaneIdTarget(pane_id=target_pane_id),
+                ),
+            ],
             socket_name=server.socket_name,
         ),
     )
@@ -343,8 +367,14 @@ def test_run_tmux_operations_dry_run_plans_split_ref(
     result = asyncio.run(
         run_tmux_operations(
             operations=[
-                SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
-                TmuxSendKeysOperation(pane_ref="child", keys="printf 'DRY_RUN_REF\\n'"),
+                SplitPaneOperation(
+                    ref="child",
+                    target=_pane_target(mcp_pane),
+                ),
+                TmuxSendKeysOperation(
+                    target=RefTarget(ref="child"),
+                    keys="printf 'DRY_RUN_REF\\n'",
+                ),
             ],
             dry_run=True,
             socket_name=mcp_server.socket_name,
@@ -378,7 +408,7 @@ def test_run_tmux_operations_dry_run_plans_output_ops(
                     value="1",
                     global_=True,
                 ),
-                CapturePaneOperation(pane_id=mcp_pane.pane_id),
+                CapturePaneOperation(target=_pane_target(mcp_pane)),
             ],
             dry_run=True,
             socket_name=mcp_server.socket_name,
@@ -413,7 +443,7 @@ def test_run_tmux_operations_dispatch_timeout(
 
     result = asyncio.run(
         run_tmux_operations(
-            operations=[CapturePaneOperation(pane_id=mcp_pane.pane_id)],
+            operations=[CapturePaneOperation(target=_pane_target(mcp_pane))],
             dispatch_timeout=0.001,
             explain=True,
             socket_name=mcp_server.socket_name,
@@ -481,18 +511,30 @@ class CompileErrorPathCase(t.NamedTuple):
     "case",
     [
         CompileErrorPathCase(
-            test_id="unknown_pane_ref",
+            test_id="unknown_ref",
             operations=[
-                TmuxSendKeysOperation(pane_ref="missing", keys="bad", enter=False),
+                TmuxSendKeysOperation(
+                    target=RefTarget(ref="missing"),
+                    keys="bad",
+                    enter=False,
+                ),
             ],
             expected_statuses=[TmuxOperationStatus.FAILED],
-            expected_error="unknown pane_ref: missing",
+            expected_error="unknown ref: missing",
         ),
         CompileErrorPathCase(
             test_id="failure_before_compile_error",
             operations=[
-                TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
-                TmuxSendKeysOperation(pane_ref="missing", keys="bad", enter=False),
+                TmuxSendKeysOperation(
+                    target=PaneIdTarget(pane_id="%999999"),
+                    keys="bad",
+                    enter=False,
+                ),
+                TmuxSendKeysOperation(
+                    target=RefTarget(ref="missing"),
+                    keys="bad",
+                    enter=False,
+                ),
             ],
             expected_statuses=[
                 TmuxOperationStatus.FAILED,
@@ -529,8 +571,15 @@ def test_run_tmux_operations_split_failure_skips_later_ops(
     result = asyncio.run(
         run_tmux_operations(
             operations=[
-                SplitPaneOperation(ref="child", pane_id="%999999"),
-                TmuxSendKeysOperation(pane_ref="child", keys="bad", enter=False),
+                SplitPaneOperation(
+                    ref="child",
+                    target=PaneIdTarget(pane_id="%999999"),
+                ),
+                TmuxSendKeysOperation(
+                    target=RefTarget(ref="child"),
+                    keys="bad",
+                    enter=False,
+                ),
                 SetOptionOperation(
                     option="@cc_ops_after_split_failure",
                     value="set",
@@ -585,9 +634,12 @@ def test_run_tmux_operations_rolls_back_created_panes(
         result = asyncio.run(
             run_tmux_operations(
                 operations=[
-                    SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
+                    SplitPaneOperation(
+                        ref="child",
+                        target=_pane_target(mcp_pane),
+                    ),
                     TmuxSendKeysOperation(
-                        pane_id="%999999",
+                        target=PaneIdTarget(pane_id="%999999"),
                         keys="bad",
                         enter=False,
                     ),
@@ -632,6 +684,13 @@ class ValidationCase(t.NamedTuple):
         ValidationCase(
             test_id="unknown_raw_kind",
             operations=[{"kind": "kill_server"}],
+            expected_error=ValidationError,
+        ),
+        ValidationCase(
+            test_id="unknown_target_kind",
+            operations=[
+                {"kind": "send_keys", "keys": "x", "target": {"kind": "bogus"}}
+            ],
             expected_error=ValidationError,
         ),
     ],

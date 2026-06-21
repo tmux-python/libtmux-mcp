@@ -670,13 +670,6 @@ class ContentChangeResult(BaseModel):
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
 
 
-def _require_single_pane_target(pane_id: str | None, pane_ref: str | None) -> None:
-    """Validate exactly one concrete pane target or prior split reference."""
-    if (pane_id is None) == (pane_ref is None):
-        msg = "Provide exactly one of pane_id or pane_ref."
-        raise ValueError(msg)
-
-
 class TmuxOperationStatus(str, enum.Enum):
     """Execution status for one typed tmux operation."""
 
@@ -686,28 +679,48 @@ class TmuxOperationStatus(str, enum.Enum):
     PLANNED = "planned"
 
 
-class _PaneTargetOperation(BaseModel):
-    """Shared target fields for operations that act on one pane."""
+class PaneIdTarget(BaseModel):
+    """Target a concrete pane by its tmux ID."""
 
     model_config = ConfigDict(extra="forbid")
 
-    pane_id: str | None = Field(
-        default=None,
-        description="Concrete tmux pane ID, e.g. '%1'.",
+    kind: t.Literal["pane_id"] = Field(
+        default="pane_id",
+        description="Target discriminator.",
     )
-    pane_ref: str | None = Field(
-        default=None,
+    pane_id: str = Field(description="Concrete tmux pane ID, e.g. '%1'.")
+
+
+class RefTarget(BaseModel):
+    """Target a pane created earlier in the same operation list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["ref"] = Field(
+        default="ref",
+        description="Target discriminator.",
+    )
+    ref: str = Field(
         description="Reference name captured from an earlier split_pane operation.",
     )
 
 
-class SplitPaneOperation(_PaneTargetOperation):
+PaneTarget: t.TypeAlias = t.Annotated[
+    PaneIdTarget | RefTarget,
+    Field(discriminator="kind"),
+]
+
+
+class SplitPaneOperation(BaseModel):
     """Split a pane and optionally expose the new pane under ``ref``."""
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: t.Literal["split_pane"] = Field(
         default="split_pane",
         description="Operation discriminator.",
     )
+    target: PaneTarget = Field(description="Pane to split.")
     ref: str | None = Field(
         default=None,
         description="Reference name for the created pane ID.",
@@ -721,19 +734,17 @@ class SplitPaneOperation(_PaneTargetOperation):
         description="Command to run in the new pane instead of the default shell.",
     )
 
-    @model_validator(mode="after")
-    def _validate_target(self) -> SplitPaneOperation:
-        _require_single_pane_target(self.pane_id, self.pane_ref)
-        return self
 
+class TmuxSendKeysOperation(BaseModel):
+    """Send keys to a pane target."""
 
-class TmuxSendKeysOperation(_PaneTargetOperation):
-    """Send keys to a concrete pane or prior split reference."""
+    model_config = ConfigDict(extra="forbid")
 
     kind: t.Literal["send_keys"] = Field(
         default="send_keys",
         description="Operation discriminator.",
     )
+    target: PaneTarget = Field(description="Pane to send keys to.")
     keys: str = Field(description="Keys or text to send.")
     enter: bool = Field(default=True, description="Press Enter after sending keys.")
     literal: bool = Field(
@@ -741,26 +752,23 @@ class TmuxSendKeysOperation(_PaneTargetOperation):
         description="Pass -l so tmux sends keys literally.",
     )
 
-    @model_validator(mode="after")
-    def _validate_target(self) -> TmuxSendKeysOperation:
-        _require_single_pane_target(self.pane_id, self.pane_ref)
-        return self
 
-
-class ResizePaneOperation(_PaneTargetOperation):
+class ResizePaneOperation(BaseModel):
     """Resize a pane by dimensions or zoom toggle."""
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: t.Literal["resize_pane"] = Field(
         default="resize_pane",
         description="Operation discriminator.",
     )
+    target: PaneTarget = Field(description="Pane to resize.")
     height: int | None = Field(default=None, description="New height in lines.")
     width: int | None = Field(default=None, description="New width in columns.")
     zoom: bool | None = Field(default=None, description="Toggle pane zoom.")
 
     @model_validator(mode="after")
     def _validate_resize(self) -> ResizePaneOperation:
-        _require_single_pane_target(self.pane_id, self.pane_ref)
         if self.zoom is not None and (
             self.height is not None or self.width is not None
         ):
@@ -817,20 +825,18 @@ class SetOptionOperation(BaseModel):
         return self
 
 
-class CapturePaneOperation(_PaneTargetOperation):
+class CapturePaneOperation(BaseModel):
     """Capture pane output as a standalone read operation."""
+
+    model_config = ConfigDict(extra="forbid")
 
     kind: t.Literal["capture_pane"] = Field(
         default="capture_pane",
         description="Operation discriminator.",
     )
+    target: PaneTarget = Field(description="Pane to capture.")
     start: int | None = Field(default=None, description="Start capture line.")
     end: int | None = Field(default=None, description="End capture line.")
-
-    @model_validator(mode="after")
-    def _validate_target(self) -> CapturePaneOperation:
-        _require_single_pane_target(self.pane_id, self.pane_ref)
-        return self
 
 
 TmuxOperation: t.TypeAlias = t.Annotated[
