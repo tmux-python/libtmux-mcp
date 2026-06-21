@@ -11,15 +11,17 @@ _Notes on upcoming releases will be added here_
 **Typed tmux operation chains with {tooliconl}`run-tmux-operations`**
 
 {tooliconl}`run-tmux-operations` accepts an ordered list of typed tmux
-operations and runs each one over a persistent `tmux -C` control connection, so
-every operation keeps its own stdout and return code. With `on_error="stop"`
-(the default) it stops before the next operation once one fails or its target
-cannot be resolved, marking the rest skipped; with `on_error="continue"` it
-records each failure and runs the rest. It returns concrete pane IDs captured
-from referenced splits so later operations can target them through `pane_ref`,
-supports a dry-run mode that returns the rendered dispatch plan without touching
-tmux, applies a per-dispatch timeout, and can roll back panes created by typed
-split refs when a later operation fails. It keeps
+operations and runs each one over a persistent `tmux -C` control connection. It
+returns one typed result per operation, discriminated by `kind`: `capture_pane`
+returns its `lines`, `split_pane` returns the new `pane_id`, and the rest return
+status only. With `on_error="stop"` (the default) it stops before the next
+operation once one fails or its target cannot be resolved, marking the rest
+skipped; with `on_error="continue"` it records each failure and runs the rest.
+It returns concrete pane IDs captured from referenced splits so later operations
+can target them through `pane_ref`, supports a dry-run mode that returns the
+planned steps without touching tmux, applies a per-dispatch timeout, and can
+roll back panes created by typed split refs when a later operation fails. Pass
+`explain=true` to attach per-dispatch diagnostics under `diagnostics`. It keeps
 {tooliconl}`call-mutating-tools-batch` available for workflows that need to call
 arbitrary MCP tools instead of this tool's typed operation set.
 

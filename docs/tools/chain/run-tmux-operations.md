@@ -11,9 +11,15 @@ one persistent tmux control connection, with a typed result per step.
 when a workflow has only one step.
 
 **Execution:** Each operation is dispatched on its own over a persistent
-`tmux -C` control connection, so every operation keeps its own stdout
-and return code. A `split_pane` with a `ref` returns the new pane ID in
-`created_panes`, and later operations can target it through `pane_ref`.
+`tmux -C` control connection, so every operation keeps its own result. A
+`split_pane` with a `ref` returns the new pane ID in `created_panes`, and
+later operations can target it through `pane_ref`.
+
+**Results:** `steps` carries one typed result per operation, discriminated
+by `kind`: `capture_pane` returns its `lines`, `split_pane` returns the
+new `pane_id`, and the rest return status only. Each step also carries an
+`error` message when it fails. Pass `explain` to attach per-dispatch
+diagnostics (rendered argv and raw stdout/stderr) under `diagnostics`.
 
 **Side effects:** Mutates tmux state according to the submitted
 operation list. With `on_error="stop"` (the default), the tool stops
