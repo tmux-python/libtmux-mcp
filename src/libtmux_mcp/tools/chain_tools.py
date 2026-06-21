@@ -27,6 +27,7 @@ from libtmux_mcp._utils import (
 from libtmux_mcp.models import (
     CapturePaneOperation,
     CapturePaneStepResult,
+    MakeGridOperation,
     OperationStepResult,
     PaneIdTarget,
     PaneTarget,
@@ -36,6 +37,7 @@ from libtmux_mcp.models import (
     RunTmuxPlanResult,
     SelectLayoutOperation,
     SetOptionOperation,
+    SplitEvenlyOperation,
     SplitPaneOperation,
     SplitPaneStepResult,
     TmuxOperation,
@@ -99,36 +101,30 @@ def _combine_results(
     return _CombinedResult(stdout=stdout, stderr=stderr, returncode=returncode)
 
 
-def _operation_scope(operation: TmuxOperation) -> CommandScope:
-    """Return the tmux target scope for one typed operation."""
-    if isinstance(
-        operation,
-        (
-            SplitPaneOperation,
-            TmuxSendKeysOperation,
-            ResizePaneOperation,
-            CapturePaneOperation,
-        ),
-    ):
-        return "pane"
-    if isinstance(operation, SelectLayoutOperation):
-        return "window"
+_FIXED_COMMAND_SCOPE: dict[str, CommandScope] = {
+    "split-window": "pane",
+    "send-keys": "pane",
+    "resize-pane": "pane",
+    "capture-pane": "pane",
+    "select-layout": "window",
+}
+
+
+def _call_scope(operation: TmuxOperation, call: CommandCall) -> CommandScope:
+    """Return the tmux target scope for one command of an operation."""
     if isinstance(operation, SetOptionOperation):
-        scope: CommandScope
-        scope = operation.scope if operation.scope is not None else "server"
-        return scope
-    assert_never(operation)
+        return operation.scope if operation.scope is not None else "server"
+    return _FIXED_COMMAND_SCOPE[call.name]
 
 
 def _validate_operation_scope(
     operation: TmuxOperation,
     calls: tuple[CommandCall, ...],
 ) -> None:
-    """Validate typed operation targets against libtmux command metadata."""
-    scope = _operation_scope(operation)
+    """Validate each command's target scope against libtmux command metadata."""
     try:
         for call in calls:
-            validate_command_scope(call.name, scope)
+            validate_command_scope(call.name, _call_scope(operation, call))
     except CommandScopeError as exc:
         raise _CompileError(str(exc)) from exc
 
@@ -256,6 +252,45 @@ def _capture_pane_calls(
     )
 
 
+def _split_evenly_calls(
+    operation: SplitEvenlyOperation,
+    created_panes: dict[str, str],
+) -> tuple[CommandCall, ...]:
+    """Build splits plus an even layout for a typed split-evenly operation."""
+    target = _resolve_target(operation.target, created_panes)
+    flag = "-h" if operation.axis == "horizontal" else "-v"
+    layout = "even-horizontal" if operation.axis == "horizontal" else "even-vertical"
+    calls = [
+        CommandCall(
+            "split-window",
+            (flag, "-c", "#{pane_current_path}"),
+            target=target,
+        )
+        for _ in range(operation.count - 1)
+    ]
+    calls.append(CommandCall("select-layout", (layout,), target=target))
+    return tuple(calls)
+
+
+def _make_grid_calls(
+    operation: MakeGridOperation,
+    created_panes: dict[str, str],
+) -> tuple[CommandCall, ...]:
+    """Build splits plus a tiled layout for a typed make-grid operation."""
+    target = _resolve_target(operation.target, created_panes)
+    panes = operation.rows * operation.cols
+    calls = [
+        CommandCall(
+            "split-window",
+            ("-c", "#{pane_current_path}"),
+            target=target,
+        )
+        for _ in range(panes - 1)
+    ]
+    calls.append(CommandCall("select-layout", ("tiled",), target=target))
+    return tuple(calls)
+
+
 def _operation_calls(
     operation: TmuxOperation,
     created_panes: dict[str, str],
@@ -273,6 +308,10 @@ def _operation_calls(
         calls = _set_option_calls(operation)
     elif isinstance(operation, CapturePaneOperation):
         calls = _capture_pane_calls(operation, created_panes)
+    elif isinstance(operation, SplitEvenlyOperation):
+        calls = _split_evenly_calls(operation, created_panes)
+    elif isinstance(operation, MakeGridOperation):
+        calls = _make_grid_calls(operation, created_panes)
     else:
         assert_never(operation)
     _validate_operation_scope(operation, calls)
@@ -465,7 +504,8 @@ def _to_step_result(outcome: _Outcome) -> TmuxStepResult:
             error=error,
         )
     status_kind = t.cast(
-        "t.Literal['send_keys', 'resize_pane', 'select_layout', 'set_option']",
+        "t.Literal['send_keys', 'resize_pane', 'select_layout', 'set_option', "
+        "'split_evenly', 'make_grid']",
         outcome.kind,
     )
     return OperationStepResult(

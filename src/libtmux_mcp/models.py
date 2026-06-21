@@ -839,13 +839,53 @@ class CapturePaneOperation(BaseModel):
     end: int | None = Field(default=None, description="End capture line.")
 
 
+class SplitEvenlyOperation(BaseModel):
+    """Split a pane into an evenly sized row or column of panes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["split_evenly"] = Field(
+        default="split_evenly",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to split into even panes.")
+    count: int = Field(description="Total number of resulting panes.", ge=2)
+    axis: t.Literal["horizontal", "vertical"] = Field(
+        default="vertical",
+        description="Lay the panes out side by side (horizontal) or stacked.",
+    )
+
+
+class MakeGridOperation(BaseModel):
+    """Arrange a pane's window into an evenly tiled grid of panes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["make_grid"] = Field(
+        default="make_grid",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane whose window becomes a grid.")
+    rows: int = Field(description="Grid rows.", ge=1)
+    cols: int = Field(description="Grid columns.", ge=1)
+
+    @model_validator(mode="after")
+    def _validate_grid(self) -> MakeGridOperation:
+        if self.rows * self.cols < 2:
+            msg = "make_grid must produce at least 2 panes (rows * cols >= 2)."
+            raise ValueError(msg)
+        return self
+
+
 TmuxOperation: t.TypeAlias = t.Annotated[
     SplitPaneOperation
     | TmuxSendKeysOperation
     | ResizePaneOperation
     | SelectLayoutOperation
     | SetOptionOperation
-    | CapturePaneOperation,
+    | CapturePaneOperation
+    | SplitEvenlyOperation
+    | MakeGridOperation,
     Field(discriminator="kind"),
 ]
 
@@ -891,7 +931,14 @@ class CapturePaneStepResult(BaseModel):
 class OperationStepResult(BaseModel):
     """Result for an operation that returns status only."""
 
-    kind: t.Literal["send_keys", "resize_pane", "select_layout", "set_option"] = Field(
+    kind: t.Literal[
+        "send_keys",
+        "resize_pane",
+        "select_layout",
+        "set_option",
+        "split_evenly",
+        "make_grid",
+    ] = Field(
         description="Operation kind discriminator.",
     )
     index: int = Field(description="Zero-based operation index.")
