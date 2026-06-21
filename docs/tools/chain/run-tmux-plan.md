@@ -19,6 +19,11 @@ later operations can target it with a `ref` target.
 `kind`: `pane_id` (a concrete `%id`) or `ref` (a name minted by an earlier
 `split_pane`).
 
+**Layouts:** `split_evenly` splits a pane into an even row or column of
+`count` panes, and `make_grid` tiles a pane's window into a `rows` by `cols`
+grid. Both compile to native splits plus a `select-layout`; use the raw
+`select_layout` operation for any other tmux layout.
+
 **Results:** `steps` carries one typed result per operation, discriminated
 by `kind`: `capture_pane` returns its `lines`, `split_pane` returns the
 new `pane_id`, and the rest return status only. Each step also carries an

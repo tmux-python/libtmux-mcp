@@ -14,10 +14,12 @@ from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.models import (
     CapturePaneOperation,
     CapturePaneStepResult,
+    MakeGridOperation,
     PaneIdTarget,
     RefTarget,
     RunTmuxPlanResult,
     SetOptionOperation,
+    SplitEvenlyOperation,
     SplitPaneOperation,
     SplitPaneStepResult,
     TmuxOperation,
@@ -164,6 +166,49 @@ def test_run_tmux_operations_captures_split_refs(
     new_pane = mcp_pane.window.panes.get(pane_id=new_pane_id)
     assert new_pane is not None
     assert "CC_OPS_REF" in "\n".join(new_pane.capture_pane())
+
+
+def test_run_tmux_plan_split_evenly(
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """split_evenly creates an even row/column of the requested pane count."""
+    result = asyncio.run(
+        run_tmux_plan(
+            operations=[
+                SplitEvenlyOperation(
+                    target=_pane_target(mcp_pane),
+                    count=3,
+                    axis="horizontal",
+                ),
+            ],
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert result.succeeded
+    assert result.steps[0].status == TmuxOperationStatus.SUCCEEDED
+    mcp_pane.window.refresh()
+    assert len(mcp_pane.window.panes) == 3
+
+
+def test_run_tmux_plan_make_grid(
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """make_grid tiles a pane's window into rows * cols panes."""
+    result = asyncio.run(
+        run_tmux_plan(
+            operations=[
+                MakeGridOperation(target=_pane_target(mcp_pane), rows=2, cols=2),
+            ],
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert result.succeeded
+    mcp_pane.window.refresh()
+    assert len(mcp_pane.window.panes) == 4
 
 
 def test_run_tmux_operations_continue_runs_later_ops(
