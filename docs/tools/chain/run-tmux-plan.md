@@ -36,6 +36,11 @@ before the next operation once one fails or its target cannot be
 resolved, and marks the rest `skipped`. With `on_error="continue"`,
 every failure is recorded and the rest still run.
 
+**Destructive operations:** `kill_pane` is destructive. A plan that
+contains it runs that operation only when the server's safety tier is
+`destructive`; otherwise the operation fails closed with an error and the
+rest of the plan is skipped (or recorded, under `on_error="continue"`).
+
 Set `dry_run` to `true` to compile the operation list and return the
 rendered dispatches without touching tmux. Referenced split panes use
 deterministic placeholders in `created_panes` until the plan is run for
