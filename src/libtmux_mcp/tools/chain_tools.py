@@ -1,4 +1,4 @@
-"""Typed MCP tool for compiling tmux operations into native dispatches."""
+"""Typed MCP tool for running tmux operations over a control connection."""
 
 from __future__ import annotations
 
@@ -7,15 +7,12 @@ import dataclasses
 import typing as t
 
 from libtmux._experimental.chain import (
-    ChainabilityError,
     CommandCall,
     CommandChain,
     CommandResultLike,
-    CommandRunner,
     CommandScope,
     CommandScopeError,
     ControlModeRunner,
-    ensure_chainable,
     validate_command_scope,
 )
 from pydantic import TypeAdapter
@@ -55,9 +52,6 @@ else:
 TMUX_OPERATIONS_ADAPTER: TypeAdapter[list[TmuxOperation]] = TypeAdapter(
     list[TmuxOperation],
 )
-
-_PendingCalls: t.TypeAlias = tuple[int, str, tuple[CommandCall, ...]]
-_MarkedDecorate: t.TypeAlias = tuple[int, TmuxOperation]
 
 
 class _CompileError(Exception):
@@ -120,15 +114,6 @@ def _validate_operation_scope(
         raise _CompileError(str(exc)) from exc
 
 
-def _ensure_chainable_calls(calls: tuple[CommandCall, ...]) -> None:
-    """Raise a compile error unless every call may fold into a tmux chain."""
-    try:
-        for call in calls:
-            ensure_chainable(call.name)
-    except ChainabilityError as exc:
-        raise _CompileError(str(exc)) from exc
-
-
 def _target_pane(
     pane_id: str | None,
     pane_ref: str | None,
@@ -158,9 +143,8 @@ def _split_calls(
     if operation.ref is not None:
         args.extend(("-P", "-F", "#{pane_id}"))
     # Pin the new pane to the target pane's directory. Without ``-c`` tmux
-    # resolves the cwd from the issuing client's context, which differs by
-    # transport (the subprocess client's cwd vs. the control client's), so an
-    # explicit format keeps splits deterministic across both.
+    # resolves the cwd from the control client's context rather than the target
+    # pane, so an explicit format keeps splits deterministic.
     args.extend(("-c", "#{pane_current_path}"))
     if operation.shell is not None:
         args.append(operation.shell)
@@ -278,83 +262,24 @@ def _operation_calls(
     return calls
 
 
-def _is_output_operation(operation: TmuxOperation) -> bool:
-    """Return whether an operation must run outside a pending chain."""
-    return isinstance(operation, CapturePaneOperation) or (
-        isinstance(operation, SplitPaneOperation) and operation.ref is not None
-    )
-
-
-def _collect_marked_decorates(
-    operations: list[TmuxOperation],
-    start: int,
-    pane_ref: str,
-) -> tuple[list[_MarkedDecorate], int]:
-    """Collect immediate operations that can target a fresh split via {marked}."""
-    decorates: list[_MarkedDecorate] = []
-    index = start + 1
-    while index < len(operations):
-        operation = operations[index]
-        if (
-            isinstance(operation, (TmuxSendKeysOperation, ResizePaneOperation))
-            and operation.pane_id is None
-            and operation.pane_ref == pane_ref
-        ):
-            decorates.append((index, operation))
-            index += 1
-            continue
-        break
-    return decorates, index
-
-
-def _marked_split_calls(
-    operation: SplitPaneOperation,
-    split_calls: tuple[CommandCall, ...],
-    decorates: list[_MarkedDecorate],
-    created_panes: dict[str, str],
-) -> tuple[CommandCall, ...]:
-    """Build the folded command calls for a ref-producing split."""
-    if operation.ref is None:
-        msg = "marked split dispatch requires a split ref"
-        raise _CompileError(msg)
-
-    marked_created = {**created_panes, operation.ref: "{marked}"}
-    calls = [*split_calls, CommandCall("select-pane", ("-m",))]
-    for _, decorate in decorates:
-        calls.extend(_operation_calls(decorate, marked_created))
-    calls.append(CommandCall("select-pane", ("-M",)))
-    marked_calls = tuple(calls)
-    _ensure_chainable_calls(marked_calls)
-    return marked_calls
-
-
-def _run_calls(
-    runner: CommandRunner,
-    calls: tuple[CommandCall, ...],
-) -> tuple[list[str], CommandResultLike]:
-    """Run one operation's calls as a single native dispatch."""
-    if isinstance(runner, ControlModeRunner):
-        results = runner.run_calls(calls)
-        return _calls_argv(calls), _combine_results(results)
-    if len(calls) == 1:
-        argv = _calls_argv(calls)
-        result = runner.cmd(argv[0], *argv[1:])
-        return argv, result
-
-    chain = CommandChain(calls)
-    result = chain.run(runner)
-    return list(chain.argv()), result
-
-
 def _calls_argv(calls: tuple[CommandCall, ...]) -> list[str]:
-    """Render calls as one native tmux dispatch argv."""
+    """Render an operation's calls for the dispatch record."""
     if len(calls) == 1:
         return list(calls[0].argv())
     return list(CommandChain(calls).argv())
 
 
+def _run_calls(
+    runner: ControlModeRunner,
+    calls: tuple[CommandCall, ...],
+) -> tuple[list[str], CommandResultLike]:
+    """Run one operation's calls over the control connection."""
+    results = runner.run_calls(calls)
+    return _calls_argv(calls), _combine_results(results)
+
+
 def _dispatch_standalone(
-    runner: CommandRunner,
+    runner: ControlModeRunner,
     index: int,
     kind: str,
     calls: tuple[CommandCall, ...],
@@ -398,148 +323,6 @@ def _dispatch_standalone(
     )
 
 
-def _dispatch_marked_split(
-    runner: CommandRunner,
-    index: int,
-    operation: SplitPaneOperation,
-    calls: tuple[CommandCall, ...],
-    decorates: list[_MarkedDecorate],
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult], str | None]:
-    """Run one id-producing split and its immediate decorates via {marked}."""
-    chain = CommandChain(calls)
-    result = chain.run(runner)
-    stdout = list(result.stdout)
-    stderr = list(result.stderr)
-    created_pane_id: str | None = None
-    status = TmuxOperationStatus.SUCCEEDED
-    if result.returncode != 0:
-        status = TmuxOperationStatus.FAILED
-    elif stdout:
-        created_pane_id = stdout[0]
-    else:
-        status = TmuxOperationStatus.FAILED
-        stderr = [*stderr, "split-pane did not return a pane id"]
-
-    dispatch = TmuxOperationDispatchResult(
-        mode="chain",
-        operation_indexes=[index, *(decorate_index for decorate_index, _ in decorates)],
-        argv=list(chain.argv()),
-        returncode=result.returncode,
-        stdout=stdout,
-        stderr=stderr,
-    )
-    steps = [
-        TmuxOperationStepResult(
-            index=index,
-            kind=operation.kind,
-            status=status,
-            returncode=result.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            created_pane_id=created_pane_id,
-        ),
-        *[
-            TmuxOperationStepResult(
-                index=decorate_index,
-                kind=decorate.kind,
-                status=status,
-                returncode=result.returncode,
-                stdout=stdout if status == TmuxOperationStatus.FAILED else None,
-                stderr=stderr if status == TmuxOperationStatus.FAILED else None,
-            )
-            for decorate_index, decorate in decorates
-        ],
-    ]
-    return dispatch, steps, created_pane_id
-
-
-def _dispatch_chain_control(
-    runner: ControlModeRunner,
-    pending: list[_PendingCalls],
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult]]:
-    """Run pending operations over control mode, one result per operation."""
-    flat_calls: list[CommandCall] = []
-    owners: list[int] = []
-    for index, _kind, op_calls in pending:
-        for call in op_calls:
-            flat_calls.append(call)
-            owners.append(index)
-    results = runner.run_calls(tuple(flat_calls))
-    by_index: dict[int, list[CommandResultLike]] = {}
-    for owner_index, result in zip(owners, results, strict=True):
-        by_index.setdefault(owner_index, []).append(result)
-
-    steps: list[TmuxOperationStepResult] = []
-    overall_returncode = 0
-    for index, kind, _op_calls in pending:
-        combined = _combine_results(by_index.get(index, []))
-        if combined.returncode != 0:
-            overall_returncode = combined.returncode
-        status = (
-            TmuxOperationStatus.SUCCEEDED
-            if combined.returncode == 0
-            else TmuxOperationStatus.FAILED
-        )
-        steps.append(
-            TmuxOperationStepResult(
-                index=index,
-                kind=kind,
-                status=status,
-                returncode=combined.returncode,
-                stdout=combined.stdout or None,
-                stderr=combined.stderr or None,
-            )
-        )
-    dispatch = TmuxOperationDispatchResult(
-        mode="chain",
-        operation_indexes=[index for index, _, _ in pending],
-        argv=_calls_argv(tuple(flat_calls)),
-        returncode=overall_returncode,
-        stdout=[line for result in results for line in result.stdout],
-        stderr=[line for result in results for line in result.stderr],
-    )
-    return dispatch, steps
-
-
-def _dispatch_chain(
-    runner: CommandRunner,
-    pending: list[_PendingCalls],
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult]]:
-    """Run pending operations as one tmux command sequence."""
-    if isinstance(runner, ControlModeRunner):
-        return _dispatch_chain_control(runner, pending)
-    calls = tuple(call for _, _, op_calls in pending for call in op_calls)
-    chain = CommandChain(calls)
-    result = chain.run(runner)
-    stdout = list(result.stdout)
-    stderr = list(result.stderr)
-    status = (
-        TmuxOperationStatus.SUCCEEDED
-        if result.returncode == 0
-        else TmuxOperationStatus.FAILED
-    )
-    dispatch = TmuxOperationDispatchResult(
-        mode="chain",
-        operation_indexes=[index for index, _, _ in pending],
-        argv=list(chain.argv()),
-        returncode=result.returncode,
-        stdout=stdout,
-        stderr=stderr,
-    )
-    steps = [
-        TmuxOperationStepResult(
-            index=index,
-            kind=kind,
-            status=status,
-            returncode=result.returncode,
-            stdout=stdout if status == TmuxOperationStatus.FAILED else None,
-            stderr=stderr if status == TmuxOperationStatus.FAILED else None,
-        )
-        for index, kind, _ in pending
-    ]
-    return dispatch, steps
-
-
 def _planned_pane_ref(ref: str) -> str:
     """Return the deterministic placeholder for a dry-run pane ref."""
     return f"<pane_ref:{ref}>"
@@ -566,7 +349,7 @@ def _plan_standalone(
     *,
     created_pane_id: str | None = None,
 ) -> tuple[TmuxOperationDispatchResult, TmuxOperationStepResult, str | None]:
-    """Return the dry-run shape for one standalone dispatch."""
+    """Return the dry-run shape for one operation dispatch."""
     return (
         TmuxOperationDispatchResult(
             mode="standalone",
@@ -577,49 +360,6 @@ def _plan_standalone(
         _planned_step(index, kind, created_pane_id),
         created_pane_id,
     )
-
-
-def _plan_marked_split(
-    index: int,
-    operation: SplitPaneOperation,
-    calls: tuple[CommandCall, ...],
-    decorates: list[_MarkedDecorate],
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult], str | None]:
-    """Return the dry-run shape for one folded split-ref dispatch."""
-    created_pane_id = _planned_pane_ref(operation.ref) if operation.ref else None
-    return (
-        TmuxOperationDispatchResult(
-            mode="chain",
-            operation_indexes=[
-                index,
-                *(decorate_index for decorate_index, _ in decorates),
-            ],
-            argv=list(CommandChain(calls).argv()),
-            returncode=None,
-        ),
-        [
-            _planned_step(index, operation.kind, created_pane_id),
-            *[
-                _planned_step(decorate_index, decorate.kind)
-                for decorate_index, decorate in decorates
-            ],
-        ],
-        created_pane_id,
-    )
-
-
-def _plan_chain(
-    pending: list[_PendingCalls],
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult]]:
-    """Return the dry-run shape for a pending folded chain."""
-    calls = tuple(call for _, _, op_calls in pending for call in op_calls)
-    dispatch = TmuxOperationDispatchResult(
-        mode="chain",
-        operation_indexes=[index for index, _, _ in pending],
-        argv=list(CommandChain(calls).argv()),
-        returncode=None,
-    )
-    return dispatch, [_planned_step(index, kind) for index, kind, _ in pending]
 
 
 def _timeout_stderr(dispatch_timeout: float) -> list[str]:
@@ -647,7 +387,7 @@ def _timeout_standalone(
     calls: tuple[CommandCall, ...],
     dispatch_timeout: float,
 ) -> tuple[TmuxOperationDispatchResult, TmuxOperationStepResult, str | None]:
-    """Return timeout results for one standalone dispatch."""
+    """Return timeout results for one operation dispatch."""
     stderr = _timeout_stderr(dispatch_timeout)
     return (
         TmuxOperationDispatchResult(
@@ -662,59 +402,8 @@ def _timeout_standalone(
     )
 
 
-def _timeout_marked_split(
-    index: int,
-    operation: SplitPaneOperation,
-    calls: tuple[CommandCall, ...],
-    decorates: list[_MarkedDecorate],
-    dispatch_timeout: float,
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult], str | None]:
-    """Return timeout results for one folded split-ref dispatch."""
-    stderr = _timeout_stderr(dispatch_timeout)
-    return (
-        TmuxOperationDispatchResult(
-            mode="chain",
-            operation_indexes=[
-                index,
-                *(decorate_index for decorate_index, _ in decorates),
-            ],
-            argv=list(CommandChain(calls).argv()),
-            returncode=None,
-            stderr=stderr,
-        ),
-        [
-            _timeout_step(index, operation.kind, stderr),
-            *[
-                _timeout_step(decorate_index, decorate.kind, stderr)
-                for decorate_index, decorate in decorates
-            ],
-        ],
-        None,
-    )
-
-
-def _timeout_chain(
-    pending: list[_PendingCalls],
-    dispatch_timeout: float,
-) -> tuple[TmuxOperationDispatchResult, list[TmuxOperationStepResult]]:
-    """Return timeout results for a pending folded chain."""
-    stderr = _timeout_stderr(dispatch_timeout)
-    calls = tuple(call for _, _, op_calls in pending for call in op_calls)
-    dispatch = TmuxOperationDispatchResult(
-        mode="chain",
-        operation_indexes=[index for index, _, _ in pending],
-        argv=list(CommandChain(calls).argv()),
-        returncode=None,
-        stderr=stderr,
-    )
-    return (
-        dispatch,
-        [_timeout_step(index, kind, stderr) for index, kind, _ in pending],
-    )
-
-
 def _rollback_created_panes(
-    runner: CommandRunner,
+    runner: ControlModeRunner,
     pane_ids: list[str],
 ) -> tuple[list[str], list[str]]:
     """Kill created panes in reverse order and report cleanup failures."""
@@ -760,15 +449,6 @@ def _step_succeeded(step: TmuxOperationStepResult, *, dry_run: bool) -> bool:
     )
 
 
-def _steps_succeeded(
-    steps: t.Iterable[TmuxOperationStepResult],
-    *,
-    dry_run: bool,
-) -> bool:
-    """Return whether every step succeeded for control-flow purposes."""
-    return all(_step_succeeded(step, dry_run=dry_run) for step in steps)
-
-
 @handle_tool_errors_async
 async def run_tmux_operations(
     operations: list[TmuxOperation],
@@ -776,28 +456,20 @@ async def run_tmux_operations(
     dry_run: bool = False,
     dispatch_timeout: float | None = 10.0,
     rollback_on_error: bool = False,
-    transport: t.Literal["subprocess", "control"] = "control",
     socket_name: str | None = None,
 ) -> RunTmuxOperationsResult:
-    """Run typed tmux operations with minimum safe native dispatches.
+    """Run typed tmux operations, one dispatch per operation.
 
-    Consecutive chainable, no-output operations fold into one tmux
-    ``a ; b ; c`` sequence. Output operations such as ``capture_pane`` run as
-    standalone dispatches so their stdout can be attributed to the correct
-    operation. A single id-producing ``split_pane`` may still fold with
-    immediate decorations that target its ref through tmux's ``{marked}``
-    register.
-    ``on_error="continue"`` disables folding because tmux sequences abort the
-    rest of the sequence on first failure.
+    Each operation is dispatched on its own over a persistent ``tmux -C``
+    control connection, so every operation keeps its own stdout and return
+    code. ``on_error="stop"`` (the default) stops before the next operation
+    once one fails or its target cannot be resolved, marking the rest as
+    skipped; ``on_error="continue"`` records each failure and runs the rest.
+    ``dry_run`` returns the rendered dispatch plan without touching tmux.
     ``dispatch_timeout`` bounds how long the tool waits for one native tmux
-    dispatch; timed-out subprocess work may still finish in the background.
+    dispatch; timed-out work may still finish in the background.
     ``rollback_on_error`` kills panes created by ref-producing ``split_pane``
     operations when the overall operation list fails.
-    ``transport`` selects the dispatch backend. The default ``"control"`` uses
-    a persistent ``tmux -C`` connection so each operation keeps its own stdout
-    and return code, and a failing operation no longer aborts the rest;
-    ``"subprocess"`` folds into one native ``tmux a ; b ; c`` sequence that
-    returns a single merged result and aborts on first error.
     """
     validated = TMUX_OPERATIONS_ADAPTER.validate_python(operations)
     if not validated:
@@ -810,16 +482,10 @@ async def run_tmux_operations(
         msg = "dispatch_timeout must be greater than 0 or null"
         raise ExpectedToolError(msg)
 
-    use_control = transport == "control" and not dry_run
-    runner: CommandRunner | None
-    if dry_run:
-        runner = None
-    elif use_control:
+    runner: ControlModeRunner | None = None
+    if not dry_run:
         runner = ControlModeRunner(_get_server(socket_name=socket_name))
-    else:
-        runner = _get_server(socket_name=socket_name)
     try:
-        pending: list[_PendingCalls] = []
         dispatches: list[TmuxOperationDispatchResult] = []
         steps_by_index: dict[int, TmuxOperationStepResult] = {}
         created_panes: dict[str, str] = {}
@@ -830,35 +496,9 @@ async def run_tmux_operations(
             if pane_id not in created_pane_order:
                 created_pane_order.append(pane_id)
 
-        async def flush_pending() -> bool:
-            if not pending:
-                return True
-            if dry_run:
-                dispatch, steps = _plan_chain(pending)
-            else:
-                assert runner is not None
-                pending_snapshot = list(pending)
-                try:
-                    chain_dispatch_coro = asyncio.to_thread(
-                        _dispatch_chain,
-                        runner,
-                        pending_snapshot,
-                    )
-                    if dispatch_timeout is None:
-                        dispatch, steps = await chain_dispatch_coro
-                    else:
-                        dispatch, steps = await asyncio.wait_for(
-                            chain_dispatch_coro,
-                            timeout=dispatch_timeout,
-                        )
-                except TimeoutError:
-                    assert dispatch_timeout is not None
-                    dispatch, steps = _timeout_chain(pending_snapshot, dispatch_timeout)
-            dispatches.append(dispatch)
-            pending.clear()
-            for step in steps:
-                steps_by_index[step.index] = step
-            return _steps_succeeded(steps, dry_run=dry_run)
+        def skip_rest(start: int) -> None:
+            for skip_index, skipped in enumerate(validated[start:], start=start):
+                steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
 
         index = 0
         while index < len(validated):
@@ -866,162 +506,12 @@ async def run_tmux_operations(
             try:
                 calls = _operation_calls(operation, created_panes)
             except _CompileError as exc:
-                if not await flush_pending():
-                    for skip_index, skipped in enumerate(
-                        validated[index:], start=index
-                    ):
-                        steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
-                    break
                 steps_by_index[index] = _compile_failure_step(index, operation, exc)
                 if on_error == "stop":
-                    for skip_index, skipped in enumerate(
-                        validated[index + 1 :],
-                        start=index + 1,
-                    ):
-                        steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
+                    skip_rest(index + 1)
                     break
                 index += 1
                 continue
-
-            if (
-                on_error == "stop"
-                and not use_control
-                and isinstance(operation, SplitPaneOperation)
-                and operation.ref is not None
-            ):
-                decorates, next_index = _collect_marked_decorates(
-                    validated,
-                    index,
-                    operation.ref,
-                )
-                if decorates:
-                    if not await flush_pending():
-                        for skip_index, skipped in enumerate(
-                            validated[index:], start=index
-                        ):
-                            steps_by_index[skip_index] = _skipped_step(
-                                skip_index, skipped
-                            )
-                        break
-                    try:
-                        marked_calls = _marked_split_calls(
-                            operation,
-                            calls,
-                            decorates,
-                            created_panes,
-                        )
-                    except _CompileError as exc:
-                        steps_by_index[index] = _compile_failure_step(
-                            index,
-                            operation,
-                            exc,
-                        )
-                        for skip_index, skipped in enumerate(
-                            validated[index + 1 :],
-                            start=index + 1,
-                        ):
-                            steps_by_index[skip_index] = _skipped_step(
-                                skip_index,
-                                skipped,
-                            )
-                        break
-                    if dry_run:
-                        dispatch, steps, created_pane_id = _plan_marked_split(
-                            index,
-                            operation,
-                            marked_calls,
-                            decorates,
-                        )
-                    else:
-                        assert runner is not None
-                        decorates_snapshot = list(decorates)
-                        try:
-                            marked_dispatch_coro = asyncio.to_thread(
-                                _dispatch_marked_split,
-                                runner,
-                                index,
-                                operation,
-                                marked_calls,
-                                decorates_snapshot,
-                            )
-                            if dispatch_timeout is None:
-                                (
-                                    dispatch,
-                                    steps,
-                                    created_pane_id,
-                                ) = await marked_dispatch_coro
-                            else:
-                                (
-                                    dispatch,
-                                    steps,
-                                    created_pane_id,
-                                ) = await asyncio.wait_for(
-                                    marked_dispatch_coro,
-                                    timeout=dispatch_timeout,
-                                )
-                        except TimeoutError:
-                            assert dispatch_timeout is not None
-                            dispatch, steps, created_pane_id = _timeout_marked_split(
-                                index,
-                                operation,
-                                marked_calls,
-                                decorates_snapshot,
-                                dispatch_timeout,
-                            )
-                    dispatches.append(dispatch)
-                    for step in steps:
-                        steps_by_index[step.index] = step
-                    if created_pane_id is not None:
-                        record_created_pane(operation.ref, created_pane_id)
-                    if not _steps_succeeded(steps, dry_run=dry_run):
-                        for skip_index, skipped in enumerate(
-                            validated[next_index:],
-                            start=next_index,
-                        ):
-                            steps_by_index[skip_index] = _skipped_step(
-                                skip_index,
-                                skipped,
-                            )
-                        break
-                    index = next_index
-                    continue
-
-            force_standalone = on_error == "continue" or _is_output_operation(operation)
-            if not force_standalone:
-                try:
-                    _ensure_chainable_calls(calls)
-                except _CompileError as exc:
-                    if not await flush_pending():
-                        for skip_index, skipped in enumerate(
-                            validated[index:],
-                            start=index,
-                        ):
-                            steps_by_index[skip_index] = _skipped_step(
-                                skip_index,
-                                skipped,
-                            )
-                        break
-                    steps_by_index[index] = _compile_failure_step(index, operation, exc)
-                    if on_error == "stop":
-                        for skip_index, skipped in enumerate(
-                            validated[index + 1 :],
-                            start=index + 1,
-                        ):
-                            steps_by_index[skip_index] = _skipped_step(
-                                skip_index,
-                                skipped,
-                            )
-                        break
-                    index += 1
-                    continue
-                pending.append((index, operation.kind, calls))
-                index += 1
-                continue
-
-            if not await flush_pending() and on_error == "stop":
-                for skip_index, skipped in enumerate(validated[index:], start=index):
-                    steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
-                break
 
             capture_created_pane = (
                 isinstance(operation, SplitPaneOperation) and operation.ref is not None
@@ -1037,12 +527,12 @@ async def run_tmux_operations(
                     index,
                     operation.kind,
                     calls,
-                    created_pane_id=planned_pane_id if capture_created_pane else None,
+                    created_pane_id=planned_pane_id,
                 )
             else:
                 assert runner is not None
                 try:
-                    standalone_dispatch_coro = asyncio.to_thread(
+                    dispatch_coro = asyncio.to_thread(
                         _dispatch_standalone,
                         runner,
                         index,
@@ -1051,10 +541,10 @@ async def run_tmux_operations(
                         capture_created_pane=capture_created_pane,
                     )
                     if dispatch_timeout is None:
-                        dispatch, step, created_pane_id = await standalone_dispatch_coro
+                        dispatch, step, created_pane_id = await dispatch_coro
                     else:
                         dispatch, step, created_pane_id = await asyncio.wait_for(
-                            standalone_dispatch_coro,
+                            dispatch_coro,
                             timeout=dispatch_timeout,
                         )
                 except TimeoutError:
@@ -1067,26 +557,17 @@ async def run_tmux_operations(
                     )
             dispatches.append(dispatch)
             steps_by_index[index] = step
-            if (
-                isinstance(operation, SplitPaneOperation)
-                and operation.ref is not None
-                and created_pane_id is not None
-            ):
+            if capture_created_pane and created_pane_id is not None:
+                assert isinstance(operation, SplitPaneOperation)
+                assert operation.ref is not None
                 record_created_pane(operation.ref, created_pane_id)
             if not _step_succeeded(step, dry_run=dry_run) and on_error == "stop":
-                for skip_index, skipped in enumerate(
-                    validated[index + 1 :],
-                    start=index + 1,
-                ):
-                    steps_by_index[skip_index] = _skipped_step(skip_index, skipped)
+                skip_rest(index + 1)
                 break
             index += 1
 
-        if pending:
-            await flush_pending()
-
         steps = [steps_by_index[index] for index in range(len(validated))]
-        succeeded = _steps_succeeded(steps, dry_run=dry_run)
+        succeeded = all(_step_succeeded(step, dry_run=dry_run) for step in steps)
         rolled_back_panes: list[str] = []
         rollback_errors: list[str] = []
         if rollback_on_error and not dry_run and not succeeded and created_pane_order:
@@ -1107,7 +588,7 @@ async def run_tmux_operations(
             rollback_errors=rollback_errors,
         )
     finally:
-        if isinstance(runner, ControlModeRunner):
+        if runner is not None:
             await asyncio.to_thread(runner.close)
 
 
