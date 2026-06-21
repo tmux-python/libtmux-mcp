@@ -7,7 +7,7 @@ import time
 import typing as t
 
 import pytest
-from libtmux._experimental.chain import ChainabilityError, CommandScopeError
+from libtmux._experimental.chain import CommandScopeError
 from pydantic import ValidationError
 
 from libtmux_mcp._utils import ExpectedToolError
@@ -34,58 +34,40 @@ if t.TYPE_CHECKING:
     from libtmux.session import Session
 
 
-class SetOptionChainCase(t.NamedTuple):
-    """Case for option operations that can fold into one dispatch."""
-
-    test_id: str
-    operations: list[TmuxOperation]
-    expected_values: dict[str, str]
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        SetOptionChainCase(
-            test_id="two_global_options",
+def test_run_tmux_operations_dispatches_each_op_standalone(
+    mcp_session: Session,
+) -> None:
+    """Each operation runs as its own control-mode dispatch."""
+    server = mcp_session.server
+    result = asyncio.run(
+        run_tmux_operations(
             operations=[
                 SetOptionOperation(option="@cc_ops_a", value="1", global_=True),
                 SetOptionOperation(option="@cc_ops_b", value="2", global_=True),
             ],
-            expected_values={"@cc_ops_a": "1", "@cc_ops_b": "2"},
-        ),
-    ],
-    ids=lambda case: case.test_id,
-)
-def test_run_tmux_operations_folds_chainable_ops(
-    case: SetOptionChainCase,
-    mcp_session: Session,
-) -> None:
-    """Consecutive no-output mutating operations use one native chain."""
-    server = mcp_session.server
-    result = asyncio.run(
-        run_tmux_operations(
-            operations=case.operations,
             socket_name=server.socket_name,
         ),
     )
 
     assert result.succeeded
-    assert result.dispatch_count == 1
-    assert result.dispatches[0].mode == "chain"
-    assert ";" in result.dispatches[0].argv
+    assert result.dispatch_count == 2
+    assert [dispatch.mode for dispatch in result.dispatches] == [
+        "standalone",
+        "standalone",
+    ]
     assert [step.status for step in result.steps] == [
         TmuxOperationStatus.SUCCEEDED,
         TmuxOperationStatus.SUCCEEDED,
     ]
-    for option, value in case.expected_values.items():
-        assert server.cmd("show-option", "-gv", option).stdout == [value]
+    assert server.cmd("show-option", "-gv", "@cc_ops_a").stdout == ["1"]
+    assert server.cmd("show-option", "-gv", "@cc_ops_b").stdout == ["2"]
 
 
-def test_run_tmux_operations_breaks_before_output_op(
+def test_run_tmux_operations_capture_returns_stdout(
     mcp_server: Server,
     mcp_pane: Pane,
 ) -> None:
-    """Read operations force a standalone dispatch with per-step stdout."""
+    """A read operation returns its own stdout on its own step."""
     from libtmux_mcp.tools.wait_for_tools import wait_for_channel
 
     channel = "cc_ops_capture"
@@ -111,7 +93,7 @@ def test_run_tmux_operations_breaks_before_output_op(
     assert result.succeeded
     assert result.dispatch_count == 2
     assert [dispatch.mode for dispatch in result.dispatches] == [
-        "chain",
+        "standalone",
         "standalone",
     ]
     assert result.steps[1].stdout is not None
@@ -133,15 +115,14 @@ def test_run_tmux_operations_captures_split_refs(
                 SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
                 TmuxSendKeysOperation(pane_ref="child", keys=keys),
             ],
-            transport="subprocess",
             socket_name=mcp_server.socket_name,
         ),
     )
 
     assert result.succeeded
-    assert result.dispatch_count == 1
-    assert result.dispatches[0].mode == "chain"
-    assert result.dispatches[0].operation_indexes == [0, 1]
+    assert result.dispatch_count == 2
+    assert result.dispatches[0].operation_indexes == [0]
+    assert result.dispatches[1].operation_indexes == [1]
     new_pane_id = result.created_panes["child"]
     assert new_pane_id.startswith("%")
 
@@ -154,10 +135,10 @@ def test_run_tmux_operations_captures_split_refs(
     assert "CC_OPS_REF" in "\n".join(new_pane.capture_pane())
 
 
-def test_run_tmux_operations_continue_uses_standalone_dispatches(
+def test_run_tmux_operations_continue_runs_later_ops(
     mcp_session: Session,
 ) -> None:
-    """Continue mode preserves later operations instead of native chain abort."""
+    """Continue mode records each failure and runs the rest."""
     server = mcp_session.server
     result = asyncio.run(
         run_tmux_operations(
@@ -183,54 +164,37 @@ def test_run_tmux_operations_continue_uses_standalone_dispatches(
     assert server.cmd("show-option", "-gv", "@cc_ops_after_error").stdout == ["set"]
 
 
-def test_run_tmux_operations_control_attributes_per_operation(
+def test_run_tmux_operations_stop_halts_after_failure(
     mcp_session: Session,
 ) -> None:
-    """Control transport (the default) gives each folded op its own verdict."""
+    """Stop mode (the default) skips every operation after the first failure."""
     server = mcp_session.server
-    operations: list[TmuxOperation] = [
-        SetOptionOperation(option="@cc_ops_cm_a", value="1", global_=True),
-        TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
-        SetOptionOperation(option="@cc_ops_cm_b", value="2", global_=True),
-    ]
-
-    # Default transport is control: the middle op fails but the last op still
-    # runs, and each op carries its own status.
-    control = asyncio.run(
+    result = asyncio.run(
         run_tmux_operations(
-            operations=operations,
+            operations=[
+                SetOptionOperation(option="@cc_ops_cm_a", value="1", global_=True),
+                TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
+                SetOptionOperation(option="@cc_ops_cm_b", value="2", global_=True),
+            ],
             socket_name=server.socket_name,
         ),
     )
-    assert not control.succeeded
-    assert [step.status for step in control.steps] == [
+
+    assert not result.succeeded
+    assert result.dispatch_count == 2
+    assert [step.status for step in result.steps] == [
         TmuxOperationStatus.SUCCEEDED,
         TmuxOperationStatus.FAILED,
-        TmuxOperationStatus.SUCCEEDED,
+        TmuxOperationStatus.SKIPPED,
     ]
-    assert control.steps[1].stderr is not None
-    assert "%999999" in "\n".join(control.steps[1].stderr)
-    assert server.cmd("show-option", "-gv", "@cc_ops_cm_b").stdout == ["2"]
-
-    # The subprocess transport folds into one ';' group, which aborts on first
-    # error, so every step blurs into the merged failure.
-    native = asyncio.run(
-        run_tmux_operations(
-            operations=operations,
-            transport="subprocess",
-            socket_name=server.socket_name,
-        ),
-    )
-    assert [step.status for step in native.steps] == [
-        TmuxOperationStatus.FAILED,
-        TmuxOperationStatus.FAILED,
-        TmuxOperationStatus.FAILED,
-    ]
+    assert result.steps[1].stderr is not None
+    assert "%999999" in "\n".join(result.steps[1].stderr)
+    # The first op ran; the op after the failure never dispatched.
+    assert server.cmd("show-option", "-gv", "@cc_ops_cm_a").stdout == ["1"]
+    assert server.cmd("show-option", "-gv", "@cc_ops_cm_b").stdout == []
 
 
-@pytest.mark.parametrize("transport", ["subprocess", "control"])
 def test_run_tmux_operations_split_inherits_target_directory(
-    transport: t.Literal["subprocess", "control"],
     mcp_session: Session,
     tmp_path: pathlib.Path,
 ) -> None:
@@ -259,7 +223,6 @@ def test_run_tmux_operations_split_inherits_target_directory(
     result = asyncio.run(
         run_tmux_operations(
             operations=[SplitPaneOperation(ref="child", pane_id=target_pane_id)],
-            transport=transport,
             socket_name=server.socket_name,
         ),
     )
@@ -276,64 +239,26 @@ def test_run_tmux_operations_split_inherits_target_directory(
     assert new_cwd == target_cwd
 
 
-class CompileContractCase(t.NamedTuple):
-    """Case for libtmux compiler contract failures."""
-
-    test_id: str
-    contract: t.Literal["chainable", "scope"]
-    expected_error: str
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        CompileContractCase(
-            test_id="chainability_contract",
-            contract="chainable",
-            expected_error="not chainable from test",
-        ),
-        CompileContractCase(
-            test_id="scope_contract",
-            contract="scope",
-            expected_error="wrong scope from test",
-        ),
-    ],
-    ids=lambda case: case.test_id,
-)
-def test_run_tmux_operations_surfaces_libtmux_contract_errors(
-    case: CompileContractCase,
+def test_run_tmux_operations_surfaces_libtmux_scope_error(
     mcp_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The compiler reports libtmux contract drift as an operation failure.
+    """The compiler reports a libtmux scope-contract failure as a step failure.
 
     The contract metadata is static, so this uses monkeypatch instead of a
-    tmux fixture to simulate libtmux rejecting a command.
+    tmux fixture to simulate libtmux rejecting a command's target scope.
     """
-    if case.contract == "chainable":
 
-        def fail_chainable(command_name: str) -> None:
-            msg = f"{command_name} {case.expected_error}"
-            raise ChainabilityError(msg)
+    def fail_scope(command_name: str, target_scope: str) -> None:
+        msg = f"{command_name} {target_scope} wrong scope from test"
+        raise CommandScopeError(msg)
 
-        monkeypatch.setattr(
-            chain_tools,
-            "ensure_chainable",
-            fail_chainable,
-            raising=False,
-        )
-    else:
-
-        def fail_scope(command_name: str, target_scope: str) -> None:
-            msg = f"{command_name} {target_scope} {case.expected_error}"
-            raise CommandScopeError(msg)
-
-        monkeypatch.setattr(
-            chain_tools,
-            "validate_command_scope",
-            fail_scope,
-            raising=False,
-        )
+    monkeypatch.setattr(
+        chain_tools,
+        "validate_command_scope",
+        fail_scope,
+        raising=False,
+    )
 
     result = asyncio.run(
         run_tmux_operations(
@@ -352,40 +277,20 @@ def test_run_tmux_operations_surfaces_libtmux_contract_errors(
     assert result.dispatch_count == 0
     assert result.steps[0].status == TmuxOperationStatus.FAILED
     assert result.steps[0].stderr is not None
-    assert case.expected_error in result.steps[0].stderr[0]
+    assert "wrong scope from test" in result.steps[0].stderr[0]
 
 
-class DryRunSetOptionCase(t.NamedTuple):
-    """Case for dry-run option chains."""
-
-    test_id: str
-    operations: list[TmuxOperation]
-    absent_options: list[str]
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        DryRunSetOptionCase(
-            test_id="folded_global_options",
-            operations=[
-                SetOptionOperation(option="@cc_ops_dry_a", value="1", global_=True),
-                SetOptionOperation(option="@cc_ops_dry_b", value="2", global_=True),
-            ],
-            absent_options=["@cc_ops_dry_a", "@cc_ops_dry_b"],
-        ),
-    ],
-    ids=lambda case: case.test_id,
-)
 def test_run_tmux_operations_dry_run_plans_without_mutating(
-    case: DryRunSetOptionCase,
     mcp_session: Session,
 ) -> None:
     """Dry-run returns planned dispatches without changing tmux state."""
     server = mcp_session.server
     result = asyncio.run(
         run_tmux_operations(
-            operations=case.operations,
+            operations=[
+                SetOptionOperation(option="@cc_ops_dry_a", value="1", global_=True),
+                SetOptionOperation(option="@cc_ops_dry_b", value="2", global_=True),
+            ],
             dry_run=True,
             socket_name=server.socket_name,
         ),
@@ -393,40 +298,22 @@ def test_run_tmux_operations_dry_run_plans_without_mutating(
 
     assert result.succeeded
     assert result.dry_run
-    assert result.dispatch_count == 1
-    assert result.dispatches[0].mode == "chain"
-    assert result.dispatches[0].returncode is None
-    assert ";" in result.dispatches[0].argv
+    assert result.dispatch_count == 2
+    assert [dispatch.mode for dispatch in result.dispatches] == [
+        "standalone",
+        "standalone",
+    ]
+    assert all(dispatch.returncode is None for dispatch in result.dispatches)
     assert [step.status for step in result.steps] == [
         TmuxOperationStatus.PLANNED,
         TmuxOperationStatus.PLANNED,
     ]
     assert all(step.returncode is None for step in result.steps)
-    for option in case.absent_options:
+    for option in ("@cc_ops_dry_a", "@cc_ops_dry_b"):
         assert server.cmd("show-option", "-gv", option).stdout == []
 
 
-class DryRunSplitRefCase(t.NamedTuple):
-    """Case for dry-run split refs."""
-
-    test_id: str
-    ref: str
-    keys: str
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        DryRunSplitRefCase(
-            test_id="marked_split_ref",
-            ref="child",
-            keys="printf 'DRY_RUN_REF\\n'",
-        ),
-    ],
-    ids=lambda case: case.test_id,
-)
-def test_run_tmux_operations_dry_run_plans_marked_split_ref(
-    case: DryRunSplitRefCase,
+def test_run_tmux_operations_dry_run_plans_split_ref(
     mcp_server: Server,
     mcp_pane: Pane,
 ) -> None:
@@ -437,22 +324,22 @@ def test_run_tmux_operations_dry_run_plans_marked_split_ref(
     result = asyncio.run(
         run_tmux_operations(
             operations=[
-                SplitPaneOperation(ref=case.ref, pane_id=mcp_pane.pane_id),
-                TmuxSendKeysOperation(pane_ref=case.ref, keys=case.keys),
+                SplitPaneOperation(ref="child", pane_id=mcp_pane.pane_id),
+                TmuxSendKeysOperation(pane_ref="child", keys="printf 'DRY_RUN_REF\\n'"),
             ],
             dry_run=True,
             socket_name=mcp_server.socket_name,
         ),
     )
 
-    placeholder = f"<pane_ref:{case.ref}>"
+    placeholder = "<pane_ref:child>"
     assert result.succeeded
     assert result.dry_run
-    assert result.dispatch_count == 1
-    assert result.dispatches[0].mode == "chain"
-    assert result.dispatches[0].returncode is None
-    assert result.dispatches[0].operation_indexes == [0, 1]
-    assert result.created_panes == {case.ref: placeholder}
+    assert result.dispatch_count == 2
+    assert result.dispatches[0].operation_indexes == [0]
+    assert result.dispatches[1].operation_indexes == [1]
+    assert all(dispatch.returncode is None for dispatch in result.dispatches)
+    assert result.created_panes == {"child": placeholder}
     assert result.steps[0].status == TmuxOperationStatus.PLANNED
     assert result.steps[0].created_pane_id == placeholder
     assert result.steps[1].status == TmuxOperationStatus.PLANNED
@@ -461,11 +348,11 @@ def test_run_tmux_operations_dry_run_plans_marked_split_ref(
     assert len(mcp_pane.window.panes) == pane_count
 
 
-def test_run_tmux_operations_dry_run_continues_after_pending_plan(
+def test_run_tmux_operations_dry_run_plans_output_ops(
     mcp_server: Server,
     mcp_pane: Pane,
 ) -> None:
-    """Dry-run treats planned pending dispatches as successful."""
+    """Dry-run plans read operations as planned standalone dispatches."""
     result = asyncio.run(
         run_tmux_operations(
             operations=[
@@ -484,7 +371,7 @@ def test_run_tmux_operations_dry_run_continues_after_pending_plan(
     assert result.succeeded
     assert result.dispatch_count == 2
     assert [dispatch.mode for dispatch in result.dispatches] == [
-        "chain",
+        "standalone",
         "standalone",
     ]
     assert [step.status for step in result.steps] == [
@@ -493,73 +380,15 @@ def test_run_tmux_operations_dry_run_continues_after_pending_plan(
     ]
 
 
-class TimeoutDispatchCase(t.NamedTuple):
-    """Case for bounded native dispatch execution."""
-
-    test_id: str
-    helper_name: str
-    path: t.Literal["chain", "standalone", "marked"]
-    expected_mode: t.Literal["chain", "standalone"]
-    expected_indexes: list[int]
-
-
-def _timeout_operations(
-    case: TimeoutDispatchCase,
-    pane_id: str,
-) -> list[TmuxOperation]:
-    """Return operations that route through the case's dispatch helper."""
-    if case.path == "chain":
-        return [
-            SetOptionOperation(option="@cc_ops_timeout_a", value="1", global_=True),
-            SetOptionOperation(option="@cc_ops_timeout_b", value="2", global_=True),
-        ]
-    if case.path == "standalone":
-        return [CapturePaneOperation(pane_id=pane_id)]
-    if case.path == "marked":
-        return [
-            SplitPaneOperation(ref="child", pane_id=pane_id),
-            TmuxSendKeysOperation(pane_ref="child", keys="echo timeout"),
-        ]
-    raise AssertionError(case.path)
-
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        TimeoutDispatchCase(
-            test_id="pending_chain",
-            helper_name="_dispatch_chain",
-            path="chain",
-            expected_mode="chain",
-            expected_indexes=[0, 1],
-        ),
-        TimeoutDispatchCase(
-            test_id="standalone_output",
-            helper_name="_dispatch_standalone",
-            path="standalone",
-            expected_mode="standalone",
-            expected_indexes=[0],
-        ),
-        TimeoutDispatchCase(
-            test_id="marked_split",
-            helper_name="_dispatch_marked_split",
-            path="marked",
-            expected_mode="chain",
-            expected_indexes=[0, 1],
-        ),
-    ],
-    ids=lambda case: case.test_id,
-)
 def test_run_tmux_operations_dispatch_timeout(
-    case: TimeoutDispatchCase,
     mcp_server: Server,
     mcp_pane: Pane,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A dispatch timeout returns failed per-operation results.
+    """A dispatch timeout returns a failed per-operation result.
 
-    The dispatch helpers are synchronous wrappers around tmux subprocesses, so
-    this uses monkeypatch rather than a blocking tmux command.
+    The dispatch helper is a synchronous wrapper around tmux, so this uses
+    monkeypatch rather than a blocking tmux command.
     """
 
     def sleep_dispatch(*args: object, **kwargs: object) -> t.NoReturn:
@@ -567,32 +396,27 @@ def test_run_tmux_operations_dispatch_timeout(
         msg = "dispatch should have timed out"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(chain_tools, case.helper_name, sleep_dispatch)
+    monkeypatch.setattr(chain_tools, "_dispatch_standalone", sleep_dispatch)
     assert mcp_pane.pane_id is not None
 
     result = asyncio.run(
         run_tmux_operations(
-            operations=_timeout_operations(case, mcp_pane.pane_id),
+            operations=[CapturePaneOperation(pane_id=mcp_pane.pane_id)],
             dispatch_timeout=0.001,
-            transport="subprocess",
             socket_name=mcp_server.socket_name,
         ),
     )
 
     assert not result.succeeded
     assert result.dispatch_count == 1
-    assert result.dispatches[0].mode == case.expected_mode
-    assert result.dispatches[0].operation_indexes == case.expected_indexes
+    assert result.dispatches[0].mode == "standalone"
+    assert result.dispatches[0].operation_indexes == [0]
     assert result.dispatches[0].returncode is None
     assert result.dispatches[0].stderr == [
         "tmux dispatch timed out after 0.001 seconds",
     ]
-    assert [step.status for step in result.steps] == [
-        TmuxOperationStatus.FAILED,
-        *[TmuxOperationStatus.FAILED for _ in case.expected_indexes[1:]],
-    ]
-    assert all(step.returncode is None for step in result.steps)
-    assert all(step.stderr == result.dispatches[0].stderr for step in result.steps)
+    assert result.steps[0].status == TmuxOperationStatus.FAILED
+    assert result.steps[0].stderr == result.dispatches[0].stderr
 
 
 class TimeoutValidationCase(t.NamedTuple):
@@ -654,7 +478,7 @@ class CompileErrorPathCase(t.NamedTuple):
             expected_error="unknown pane_ref: missing",
         ),
         CompileErrorPathCase(
-            test_id="pending_failure_before_compile_error",
+            test_id="failure_before_compile_error",
             operations=[
                 TmuxSendKeysOperation(pane_id="%999999", keys="bad", enter=False),
                 TmuxSendKeysOperation(pane_ref="missing", keys="bad", enter=False),
@@ -673,7 +497,7 @@ def test_run_tmux_operations_compile_error_paths(
     case: CompileErrorPathCase,
     mcp_session: Session,
 ) -> None:
-    """Compile errors report directly unless pending work fails first."""
+    """Compile errors report directly; stop mode skips operations after them."""
     result = asyncio.run(
         run_tmux_operations(
             operations=case.operations,
@@ -689,10 +513,10 @@ def test_run_tmux_operations_compile_error_paths(
         assert result.steps[0].stderr == [case.expected_error]
 
 
-def test_run_tmux_operations_marked_split_failure_skips_later_ops(
+def test_run_tmux_operations_split_failure_skips_later_ops(
     mcp_session: Session,
 ) -> None:
-    """A failed marked split skips operations after its folded decorations."""
+    """A failed split skips every later operation under stop mode."""
     server = mcp_session.server
     result = asyncio.run(
         run_tmux_operations(
@@ -700,25 +524,23 @@ def test_run_tmux_operations_marked_split_failure_skips_later_ops(
                 SplitPaneOperation(ref="child", pane_id="%999999"),
                 TmuxSendKeysOperation(pane_ref="child", keys="bad", enter=False),
                 SetOptionOperation(
-                    option="@cc_ops_after_marked_failure",
+                    option="@cc_ops_after_split_failure",
                     value="set",
                     global_=True,
                 ),
             ],
-            transport="subprocess",
             socket_name=server.socket_name,
         ),
     )
 
     assert not result.succeeded
     assert result.dispatch_count == 1
-    assert result.dispatches[0].operation_indexes == [0, 1]
     assert [step.status for step in result.steps] == [
         TmuxOperationStatus.FAILED,
-        TmuxOperationStatus.FAILED,
+        TmuxOperationStatus.SKIPPED,
         TmuxOperationStatus.SKIPPED,
     ]
-    assert server.cmd("show-option", "-gv", "@cc_ops_after_marked_failure").stdout == []
+    assert server.cmd("show-option", "-gv", "@cc_ops_after_split_failure").stdout == []
 
 
 class RollbackCase(t.NamedTuple):

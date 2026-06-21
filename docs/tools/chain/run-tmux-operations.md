@@ -3,25 +3,23 @@
 ```{fastmcp-tool} chain_tools.run_tmux_operations
 ```
 
-**Use when** you need several typed tmux operations to run in order and
-want libtmux-mcp to fold safe no-output steps into one native tmux
-sequence.
+**Use when** you need several typed tmux operations to run in order over
+one persistent tmux control connection, with a typed result per step.
 
 **Avoid when** you need to call arbitrary MCP tools; use
 {tooliconl}`call-mutating-tools-batch` for that. Use individual tools
 when a workflow has only one step.
 
-**Dispatch boundaries:** Output operations such as `capture_pane` run as
-standalone dispatches so their stdout belongs to one step. Referenced
-`split_pane` operations also run at a boundary unless their immediate
-`send_keys` or `resize_pane` followers target the new pane through the
-same `pane_ref`.
+**Execution:** Each operation is dispatched on its own over a persistent
+`tmux -C` control connection, so every operation keeps its own stdout
+and return code. A `split_pane` with a `ref` returns the new pane ID in
+`created_panes`, and later operations can target it through `pane_ref`.
 
 **Side effects:** Mutates tmux state according to the submitted
-operation list. With `on_error="stop"`, chainable operations may share
-one tmux sequence and native tmux failure semantics stop later steps.
-With `on_error="continue"`, operations run as standalone dispatches so
-later steps can still run after an earlier failure.
+operation list. With `on_error="stop"` (the default), the tool stops
+before the next operation once one fails or its target cannot be
+resolved, and marks the rest `skipped`. With `on_error="continue"`,
+every failure is recorded and the rest still run.
 
 Set `dry_run` to `true` to compile the operation list and return the
 rendered dispatches without touching tmux. Referenced split panes use
@@ -30,19 +28,14 @@ real.
 
 `dispatch_timeout` defaults to 10 seconds and bounds how long the tool
 waits for each native tmux dispatch. A timed-out dispatch marks the
-included operations failed with `returncode: null`; because dispatches
-run in a worker thread, the underlying tmux subprocess may still finish
-after the tool returns.
+operation failed with `returncode: null`; because dispatches run in a
+worker thread, the underlying tmux work may still finish after the tool
+returns.
 
 Set `rollback_on_error` to `true` to kill panes created by
 ref-producing `split_pane` operations when the overall operation list
 fails. The result still reports `created_panes`, and adds
 `rolled_back_panes` plus `rollback_errors` for cleanup visibility.
-
-An id-producing `split_pane` can fold with immediate `send_keys` or
-`resize_pane` operations that target its `pane_ref`; the tool uses
-tmux's `{marked}` target internally and still returns the concrete pane
-ID in `created_panes`.
 
 **Example:**
 
