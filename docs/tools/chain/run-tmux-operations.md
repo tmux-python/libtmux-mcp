@@ -13,7 +13,11 @@ when a workflow has only one step.
 **Execution:** Each operation is dispatched on its own over a persistent
 `tmux -C` control connection, so every operation keeps its own result. A
 `split_pane` with a `ref` returns the new pane ID in `created_panes`, and
-later operations can target it through `pane_ref`.
+later operations can target it with a `ref` target.
+
+**Targets:** Each pane operation takes one typed `target`, discriminated by
+`kind`: `pane_id` (a concrete `%id`) or `ref` (a name minted by an earlier
+`split_pane`).
 
 **Results:** `steps` carries one typed result per operation, discriminated
 by `kind`: `capture_pane` returns its `lines`, `split_pane` returns the
@@ -50,8 +54,10 @@ fails. The result still reports `created_panes`, and adds
   "tool": "run_tmux_operations",
   "arguments": {
     "operations": [
-      {"kind": "split_pane", "pane_id": "%1", "ref": "work"},
-      {"kind": "send_keys", "pane_ref": "work", "keys": "uv run pytest"}
+      {"kind": "split_pane", "target": {"kind": "pane_id", "pane_id": "%1"},
+       "ref": "work"},
+      {"kind": "send_keys", "target": {"kind": "ref", "ref": "work"},
+       "keys": "uv run pytest"}
     ],
     "on_error": "stop"
   }

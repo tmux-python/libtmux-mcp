@@ -163,6 +163,8 @@ conf["fastmcp_model_classes"] = (
     "SendKeysOperation",
     "SendKeysOperationResult",
     "SendKeysBatchResult",
+    "PaneIdTarget",
+    "RefTarget",
     "SplitPaneOperation",
     "TmuxSendKeysOperation",
     "ResizePaneOperation",

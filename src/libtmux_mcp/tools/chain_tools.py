@@ -28,6 +28,9 @@ from libtmux_mcp.models import (
     CapturePaneOperation,
     CapturePaneStepResult,
     OperationStepResult,
+    PaneIdTarget,
+    PaneTarget,
+    RefTarget,
     ResizePaneOperation,
     RunTmuxDiagnostics,
     RunTmuxOperationsResult,
@@ -130,22 +133,20 @@ def _validate_operation_scope(
         raise _CompileError(str(exc)) from exc
 
 
-def _target_pane(
-    pane_id: str | None,
-    pane_ref: str | None,
+def _resolve_target(
+    target: PaneTarget,
     created_panes: dict[str, str],
 ) -> str:
-    """Return the concrete pane target for an operation."""
-    if pane_id is not None:
-        return pane_id
-    if pane_ref is None:
-        msg = "operation is missing pane_id or pane_ref"
-        raise _CompileError(msg)
-    try:
-        return created_panes[pane_ref]
-    except KeyError as exc:
-        msg = f"unknown pane_ref: {pane_ref}"
-        raise _CompileError(msg) from exc
+    """Resolve a typed pane target to a concrete tmux target token."""
+    if isinstance(target, PaneIdTarget):
+        return target.pane_id
+    if isinstance(target, RefTarget):
+        try:
+            return created_panes[target.ref]
+        except KeyError as exc:
+            msg = f"unknown ref: {target.ref}"
+            raise _CompileError(msg) from exc
+    assert_never(target)
 
 
 def _split_calls(
@@ -168,7 +169,7 @@ def _split_calls(
         CommandCall(
             "split-window",
             tuple(args),
-            target=_target_pane(operation.pane_id, operation.pane_ref, created_panes),
+            target=_resolve_target(operation.target, created_panes),
         ),
     )
 
@@ -178,7 +179,7 @@ def _send_keys_calls(
     created_panes: dict[str, str],
 ) -> tuple[CommandCall, ...]:
     """Build one operation's ``send-keys`` calls."""
-    target = _target_pane(operation.pane_id, operation.pane_ref, created_panes)
+    target = _resolve_target(operation.target, created_panes)
     if operation.literal:
         calls = [
             CommandCall("send-keys", ("-l", operation.keys), target=target),
@@ -209,7 +210,7 @@ def _resize_pane_calls(
         CommandCall(
             "resize-pane",
             tuple(args),
-            target=_target_pane(operation.pane_id, operation.pane_ref, created_panes),
+            target=_resolve_target(operation.target, created_panes),
         ),
     )
 
@@ -250,7 +251,7 @@ def _capture_pane_calls(
         CommandCall(
             "capture-pane",
             tuple(args),
-            target=_target_pane(operation.pane_id, operation.pane_ref, created_panes),
+            target=_resolve_target(operation.target, created_panes),
         ),
     )
 
