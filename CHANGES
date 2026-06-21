@@ -20,7 +20,9 @@ skipped; with `on_error="continue"` it records each failure and runs the rest.
 Each pane operation takes one typed `target`, discriminated by `kind`: a
 concrete `pane_id` or a `ref` minted by an earlier split. Typed `split_evenly`
 and `make_grid` operations build an even row or column or a tiled grid of panes
-without hand-written layout strings. It
+without hand-written layout strings. A typed `kill_pane` operation closes a
+pane, and runs only when the server's safety tier is `destructive` so a
+mutating-tier plan cannot smuggle a destructive command past the safety gate. It
 returns concrete pane IDs captured from referenced splits so later operations
 can target them, supports a dry-run mode that returns the planned steps without
 touching tmux, applies a per-dispatch timeout, and can roll back panes created

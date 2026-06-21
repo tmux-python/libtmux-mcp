@@ -341,6 +341,26 @@ TAG_DESTRUCTIVE = "destructive"
 
 VALID_SAFETY_LEVELS = frozenset({TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE})
 
+
+def _resolve_safety_level(value: str | None) -> str:
+    """Return the effective safety level for a ``LIBTMUX_SAFETY`` value."""
+    if value is None:
+        return TAG_MUTATING
+    if value in VALID_SAFETY_LEVELS:
+        return value
+    logger.warning(
+        "invalid LIBTMUX_SAFETY=%r, falling back to %s",
+        value,
+        TAG_READONLY,
+    )
+    return TAG_READONLY
+
+
+def effective_safety_level() -> str:
+    """Resolve the current process safety level from the environment."""
+    return _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
+
+
 # ---------------------------------------------------------------------------
 # Reusable annotation presets for tool registration
 # ---------------------------------------------------------------------------

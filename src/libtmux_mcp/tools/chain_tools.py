@@ -19,14 +19,17 @@ from pydantic import TypeAdapter
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_SHELL,
+    TAG_DESTRUCTIVE,
     TAG_MUTATING,
     ExpectedToolError,
     _get_server,
+    effective_safety_level,
     handle_tool_errors_async,
 )
 from libtmux_mcp.models import (
     CapturePaneOperation,
     CapturePaneStepResult,
+    KillPaneOperation,
     MakeGridOperation,
     OperationStepResult,
     PaneIdTarget,
@@ -107,6 +110,7 @@ _FIXED_COMMAND_SCOPE: dict[str, CommandScope] = {
     "resize-pane": "pane",
     "capture-pane": "pane",
     "select-layout": "window",
+    "kill-pane": "pane",
 }
 
 
@@ -291,11 +295,31 @@ def _make_grid_calls(
     return tuple(calls)
 
 
+def _kill_pane_calls(
+    operation: KillPaneOperation,
+    created_panes: dict[str, str],
+) -> tuple[CommandCall, ...]:
+    """Build ``kill-pane`` calls for a typed kill operation."""
+    return (
+        CommandCall(
+            "kill-pane",
+            (),
+            target=_resolve_target(operation.target, created_panes),
+        ),
+    )
+
+
 def _operation_calls(
     operation: TmuxOperation,
     created_panes: dict[str, str],
 ) -> tuple[CommandCall, ...]:
     """Lower one typed operation to tmux command calls."""
+    if (
+        isinstance(operation, KillPaneOperation)
+        and effective_safety_level() != TAG_DESTRUCTIVE
+    ):
+        msg = "kill_pane requires the destructive safety tier"
+        raise _CompileError(msg)
     if isinstance(operation, SplitPaneOperation):
         calls = _split_calls(operation, created_panes)
     elif isinstance(operation, TmuxSendKeysOperation):
@@ -312,6 +336,8 @@ def _operation_calls(
         calls = _split_evenly_calls(operation, created_panes)
     elif isinstance(operation, MakeGridOperation):
         calls = _make_grid_calls(operation, created_panes)
+    elif isinstance(operation, KillPaneOperation):
+        calls = _kill_pane_calls(operation, created_panes)
     else:
         assert_never(operation)
     _validate_operation_scope(operation, calls)
@@ -505,7 +531,7 @@ def _to_step_result(outcome: _Outcome) -> TmuxStepResult:
         )
     status_kind = t.cast(
         "t.Literal['send_keys', 'resize_pane', 'select_layout', 'set_option', "
-        "'split_evenly', 'make_grid']",
+        "'split_evenly', 'make_grid', 'kill_pane']",
         outcome.kind,
     )
     return OperationStepResult(

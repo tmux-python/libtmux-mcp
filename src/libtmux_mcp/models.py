@@ -877,6 +877,22 @@ class MakeGridOperation(BaseModel):
         return self
 
 
+class KillPaneOperation(BaseModel):
+    """Kill a pane.
+
+    Destructive: a plan that contains this operation runs it only when the
+    server's safety tier is ``destructive``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: t.Literal["kill_pane"] = Field(
+        default="kill_pane",
+        description="Operation discriminator.",
+    )
+    target: PaneTarget = Field(description="Pane to kill.")
+
+
 TmuxOperation: t.TypeAlias = t.Annotated[
     SplitPaneOperation
     | TmuxSendKeysOperation
@@ -885,7 +901,8 @@ TmuxOperation: t.TypeAlias = t.Annotated[
     | SetOptionOperation
     | CapturePaneOperation
     | SplitEvenlyOperation
-    | MakeGridOperation,
+    | MakeGridOperation
+    | KillPaneOperation,
     Field(discriminator="kind"),
 ]
 
@@ -938,6 +955,7 @@ class OperationStepResult(BaseModel):
         "set_option",
         "split_evenly",
         "make_grid",
+        "kill_pane",
     ] = Field(
         description="Operation kind discriminator.",
     )

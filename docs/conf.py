@@ -178,6 +178,7 @@ conf["fastmcp_model_classes"] = (
     "CapturePaneOperation",
     "SplitEvenlyOperation",
     "MakeGridOperation",
+    "KillPaneOperation",
     "SplitPaneStepResult",
     "CapturePaneStepResult",
     "OperationStepResult",

@@ -14,6 +14,7 @@ from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.models import (
     CapturePaneOperation,
     CapturePaneStepResult,
+    KillPaneOperation,
     MakeGridOperation,
     PaneIdTarget,
     RefTarget,
@@ -209,6 +210,51 @@ def test_run_tmux_plan_make_grid(
     assert result.succeeded
     mcp_pane.window.refresh()
     assert len(mcp_pane.window.panes) == 4
+
+
+def test_run_tmux_plan_kill_pane_requires_destructive_tier(
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """kill_pane fails closed unless the server runs at the destructive tier."""
+    monkeypatch.setenv("LIBTMUX_SAFETY", "mutating")
+    result = asyncio.run(
+        run_tmux_plan(
+            operations=[KillPaneOperation(target=PaneIdTarget(pane_id="%999999"))],
+            explain=True,
+            socket_name=mcp_session.server.socket_name,
+        ),
+    )
+
+    assert not result.succeeded
+    assert result.diagnostics is not None
+    assert result.diagnostics.dispatch_count == 0
+    assert result.steps[0].status == TmuxOperationStatus.FAILED
+    assert result.steps[0].error == "kill_pane requires the destructive safety tier"
+
+
+def test_run_tmux_plan_kill_pane_at_destructive_tier(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """kill_pane removes a pane when the server runs at the destructive tier."""
+    monkeypatch.setenv("LIBTMUX_SAFETY", "destructive")
+    result = asyncio.run(
+        run_tmux_plan(
+            operations=[
+                SplitPaneOperation(ref="child", target=_pane_target(mcp_pane)),
+                KillPaneOperation(target=RefTarget(ref="child")),
+            ],
+            socket_name=mcp_server.socket_name,
+        ),
+    )
+
+    assert result.succeeded
+    new_pane_id = result.created_panes["child"]
+    mcp_pane.window.refresh()
+    pane_ids = [pane.pane_id for pane in mcp_pane.window.panes]
+    assert new_pane_id not in pane_ids
 
 
 def test_run_tmux_operations_continue_runs_later_ops(
