@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `libtmux>=0.60.0`** (was `>=0.58.0`). Picks up libtmux 0.59.0's initial tmux 3.7 support and 0.60.0's completion of tmux 3.7 feature parity — floating panes, typed tmux 3.7 server, session, window, and pane options, new pane format variables, and new command flags. Every 3.7-only surface is version-gated, so tmux 3.2a-3.6 keep working unchanged, and the bump requires no server code or test changes. (#85)
+
 ### Development
 
 **Minimum `pytest>=9.1.0`**
