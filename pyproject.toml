@@ -40,7 +40,7 @@ include = [
 ]
 
 dependencies = [
-  "libtmux>=0.58.0,<1.0",
+  "libtmux>=0.60.0,<1.0",
   "fastmcp>=3.4.2,<4.0.0",
 ]
 
