@@ -3,7 +3,8 @@
 # Logging
 
 libtmux-mcp uses Python's standard {mod}`logging` module under the
-``libtmux_mcp.*`` namespace. FastMCP forwards server-side log
+``libtmux_mcp.*`` namespace. [FastMCP](https://gofastmcp.com)
+forwards server-side log
 records to connected MCP clients via the
 [MCP logging capability](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).
 No manual wiring needed.
@@ -20,7 +21,7 @@ are:
 - ``libtmux_mcp.retry`` — warnings from
   {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` when a
   readonly tool retried after a transient
-  {exc}`libtmux.exc.LibTmuxException`.
+  {exc}`~libtmux.exc.LibTmuxException`.
 - ``libtmux_mcp.server`` / ``libtmux_mcp.tools.*`` / etc. — ad-hoc
   warnings and debug messages from the codebase.
 - ``fastmcp.errors`` — one record per failed tool call, emitted by

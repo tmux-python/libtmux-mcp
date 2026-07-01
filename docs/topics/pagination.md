@@ -4,8 +4,9 @@
 
 The
 [MCP pagination spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/pagination)
-defines opaque cursors for list-style protocol calls. FastMCP supports
-that protocol pagination when a server is configured with
+defines opaque cursors for list-style protocol calls.
+[FastMCP](https://gofastmcp.com) supports that protocol pagination
+when a server is configured with
 ``list_page_size``. libtmux-mcp does not currently configure
 protocol-level list pagination, so its registry lists normally return
 as one page under FastMCP's defaults.
@@ -20,7 +21,7 @@ current configuration, clients should expect those lists to arrive in
 one response unless libtmux-mcp later enables FastMCP's
 ``list_page_size`` setting.
 
-### Tool-level result paging on ``search_panes``
+### Search result paging
 
 One libtmux-mcp tool owns its own paging surface because a
 single tmux server can carry tens of thousands of pane lines:
@@ -35,7 +36,7 @@ single tmux server can carry tens of thousands of pane lines:
 This is application-level paging (not MCP-cursor pagination) —
 the agent decides how many matches it needs and when to stop.
 
-### Tool-level observation cursors on ``capture_since``
+### Observation cursors
 
 {tool}`capture-since` also has a ``cursor`` parameter, but it is
 not a pagination cursor. The first call captures the current visible
@@ -75,8 +76,8 @@ of pretending live terminal state is one stable list.
 
 - [MCP pagination spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/pagination)
 - {class}`~libtmux_mcp.models.SearchPanesResult` — the structured
-  wrapper for ``search_panes``
+  wrapper for {toolref}`search-panes`
 - {tool}`search-panes` — the tool itself
 - {class}`~libtmux_mcp.models.CaptureSinceResult` — the structured
-  response for ``capture_since``
+  response for {toolref}`capture-since`
 - {tool}`capture-since` — incremental observation for a known pane

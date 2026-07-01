@@ -9,7 +9,7 @@ need to push it into a target pane. Use bracketed paste mode
 escape sequences signal "this is pasted text, not typed input".
 
 **Avoid when** the buffer name doesn't match the MCP namespace —
-`paste_buffer` refuses non-`libtmux_mcp_*` names so it cannot be
+{tooliconl}`paste-buffer` refuses non-`libtmux_mcp_*` names so it cannot be
 turned into an arbitrary-buffer paster.
 
 **Side effects:** Pastes content into the target pane (the pane's

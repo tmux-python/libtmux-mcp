@@ -479,5 +479,5 @@ name, pane title, cwd) rather than trusting remembered `%N` values.
 For the principles that recur across these recipes -- discover before acting,
 wait instead of polling, content vs. metadata, prefer IDs, escalate
 gracefully -- see the {ref}`prompting guide <prompting>`. For specific
-pitfalls like `enter: false` and the `send_keys`/`capture_pane` race
-condition, see {ref}`gotchas <gotchas>`.
+pitfalls like `enter: false` and the {toolref}`send-keys` /
+{toolref}`capture-pane` race condition, see {ref}`gotchas <gotchas>`.

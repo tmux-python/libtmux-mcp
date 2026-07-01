@@ -11,8 +11,8 @@ libtmux-mcp uses a three-tier safety system to control which tools are available
 | Tier | Label | Access | Use case |
 |------|-------|--------|----------|
 | `readonly` | {badge}`readonly` | List, capture, search, info, readonly batches | Monitoring, browsing |
-| `mutating` (default) | {badge}`mutating` | + create, send_keys, send_keys_batch, mutating batches, rename, resize | Normal agent workflow |
-| `destructive` | {badge}`destructive` | + destructive batches, kill_server, kill_session, kill_window, kill_pane | Full control |
+| `mutating` (default) | {badge}`mutating` | + create, {toolref}`send-keys`, {toolref}`send-keys-batch`, mutating batches, rename, resize | Normal agent workflow |
+| `destructive` | {badge}`destructive` | + destructive batches, {toolref}`kill-server`, {toolref}`kill-session`, {toolref}`kill-window`, {toolref}`kill-pane` | Full control |
 
 ## Configuration
 
@@ -36,7 +36,7 @@ Set the safety tier via the {envvar}`LIBTMUX_SAFETY` environment variable:
 
 ### Dual-layer gating
 
-1. **FastMCP tag visibility**: Tools are tagged with their tier. Only tags at or below the configured tier are enabled via `mcp.enable(tags=..., only=True)`.
+1. **[FastMCP](https://gofastmcp.com) tag visibility**: Tools are tagged with their tier. Only tags at or below the configured tier are enabled via `mcp.enable(tags=..., only=True)`.
 
 2. **Safety middleware**: A secondary middleware layer hides tools from listings and blocks execution with clear error messages if a tool above the tier is somehow invoked.
 
@@ -65,19 +65,24 @@ These protections read both the `TMUX` and `TMUX_PANE` environment variables tha
 
 ### macOS `TMUX_TMPDIR` caveat
 
-The self-kill guard resolves the target server's socket path in three steps (`_effective_socket_path` in `src/libtmux_mcp/_utils.py`):
+The self-kill guard resolves the target server's socket path in three
+steps ({func}`~libtmux_mcp._utils._effective_socket_path` in
+`src/libtmux_mcp/_utils.py`):
 
 1. Use {attr}`libtmux.Server.socket_path` if {external+libtmux:doc}`libtmux <index>` already has it.
 2. Otherwise query the running server via `display-message -p '#{socket_path}'` — authoritative because tmux itself reports the path it is actually using, regardless of the MCP process environment. This closes the launchd-vs-interactive-shell gap on macOS where {envvar}`TMUX_TMPDIR` commonly differs between contexts.
-3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and `_caller_is_on_server`'s None-socket branch blocks conservatively.
+3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and {func}`~libtmux_mcp._utils._caller_is_on_server`'s None-socket branch blocks conservatively.
 
 The structural fix shipped in 0.1.x; setting {envvar}`TMUX_TMPDIR` explicitly is no longer required for the guard to work, though it remains a useful diagnostic when investigating mismatched-path bug reports.
 
 ## Footguns inside the `mutating` tier
 
-Most `mutating` tools are bounded: `resize_pane` only resizes, `rename_window` only renames. A few have broader reach because tmux itself exposes broader reach. Treat these as elevated risk even though they share the default tier:
+Most `mutating` tools are bounded: {toolref}`resize-pane` only
+resizes, {toolref}`rename-window` only renames. A few have broader
+reach because tmux itself exposes broader reach. Treat these as
+elevated risk even though they share the default tier:
 
-### `pipe_pane`
+### Piping pane output
 
 {tool}`pipe-pane` pipes a pane's output to a shell command that the server runs. In practice this means the caller chooses an arbitrary path or pipeline on the server host. There is no allow-list. Assume it can create files anywhere the server process can write.
 
@@ -87,16 +92,16 @@ Mitigations:
 - Consider `LIBTMUX_SAFETY=readonly` for untrusted MCP clients.
 - Audit log records (see below) capture the `output_path` argument so reviewers can spot unexpected destinations.
 
-### `set_environment`
+### Setting tmux environment
 
 {tool}`set-environment` writes into tmux's global, session, or window environment. Those values propagate into every shell tmux spawns afterwards. An agent that writes `PATH`, `LD_PRELOAD`, or `AWS_*` variables can influence every future command on that scope — including commands the user runs directly, not just commands the agent issues.
 
 Mitigations:
 
 - The audit log redacts the `value` argument to a `{len, sha256_prefix}` digest so log files don't leak the secrets agents set, but operators should still treat the tool as high-privilege.
-- If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via `send_keys` instead — the blast radius is one command, not every future child.
+- If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child.
 
-### `respawn_pane`
+### Respawning panes
 
 {tool}`respawn-pane` restarts a pane's process while preserving the pane id and layout — exactly what an agent wants when a shell wedges. Default `kill=True` terminates the running process before relaunch. The `pane_id` and layout are preserved (the point of the tool), but any unsaved REPL state, ssh session, or in-flight job in that pane is lost. Repeated calls are *not* idempotent — each call kills a new process.
 
@@ -109,7 +114,7 @@ Mitigations:
 - The optional `environment` argument (`dict[str, str]`) maps to one tmux `-e KEY=VALUE` flag per item. The audit log redacts each *value* via a `{len, sha256_prefix}` digest while keeping the *keys* visible — env var names like `DATABASE_URL` are usually operator-debug-useful, but their values are the secret. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
-### `send_keys` / `send_keys_batch` / `paste_text`
+### Raw pane input
 
 These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in logs.
 
@@ -131,32 +136,32 @@ Each tool carries MCP tool annotations that hint at its behavior:
 
 | Tool | Tier | readOnly | destructive | idempotent |
 |------|------|----------|-------------|------------|
-| {ref}`list-sessions` | {badge}`readonly` | true | false | true |
-| {ref}`get-server-info` | {badge}`readonly` | true | false | true |
-| {ref}`list-windows` | {badge}`readonly` | true | false | true |
-| {ref}`list-panes` | {badge}`readonly` | true | false | true |
-| {ref}`capture-pane` | {badge}`readonly` | true | false | true |
-| {ref}`capture-since` | {badge}`readonly` | true | false | true |
-| {ref}`get-pane-info` | {badge}`readonly` | true | false | true |
-| {ref}`search-panes` | {badge}`readonly` | true | false | true |
-| {ref}`wait-for-text` | {badge}`readonly` | true | false | true |
-| {ref}`show-option` | {badge}`readonly` | true | false | true |
-| {ref}`show-environment` | {badge}`readonly` | true | false | true |
-| {ref}`create-session` | {badge}`mutating` | false | false | false |
-| {ref}`create-window` | {badge}`mutating` | false | false | false |
-| {ref}`split-window` | {badge}`mutating` | false | false | false |
-| {ref}`send-keys` | {badge}`mutating` | false | false | false |
-| {ref}`rename-session` | {badge}`mutating` | false | false | true |
-| {ref}`rename-window` | {badge}`mutating` | false | false | true |
-| {ref}`resize-pane` | {badge}`mutating` | false | false | true |
-| {ref}`resize-window` | {badge}`mutating` | false | false | true |
-| {ref}`set-pane-title` | {badge}`mutating` | false | false | true |
-| {ref}`clear-pane` | {badge}`mutating` | false | true | false |
-| {ref}`select-layout` | {badge}`mutating` | false | false | true |
-| {ref}`set-option` | {badge}`mutating` | false | false | true |
-| {ref}`set-environment` | {badge}`mutating` | false | false | true |
-| {ref}`respawn-pane` | {badge}`mutating` | false | true | false |
-| {ref}`kill-server` | {badge}`destructive` | false | true | false |
-| {ref}`kill-session` | {badge}`destructive` | false | true | false |
-| {ref}`kill-window` | {badge}`destructive` | false | true | false |
-| {ref}`kill-pane` | {badge}`destructive` | false | true | false |
+| {toolref}`list-sessions` | {badge}`readonly` | true | false | true |
+| {toolref}`get-server-info` | {badge}`readonly` | true | false | true |
+| {toolref}`list-windows` | {badge}`readonly` | true | false | true |
+| {toolref}`list-panes` | {badge}`readonly` | true | false | true |
+| {toolref}`capture-pane` | {badge}`readonly` | true | false | true |
+| {toolref}`capture-since` | {badge}`readonly` | true | false | true |
+| {toolref}`get-pane-info` | {badge}`readonly` | true | false | true |
+| {toolref}`search-panes` | {badge}`readonly` | true | false | true |
+| {toolref}`wait-for-text` | {badge}`readonly` | true | false | true |
+| {toolref}`show-option` | {badge}`readonly` | true | false | true |
+| {toolref}`show-environment` | {badge}`readonly` | true | false | true |
+| {toolref}`create-session` | {badge}`mutating` | false | false | false |
+| {toolref}`create-window` | {badge}`mutating` | false | false | false |
+| {toolref}`split-window` | {badge}`mutating` | false | false | false |
+| {toolref}`send-keys` | {badge}`mutating` | false | false | false |
+| {toolref}`rename-session` | {badge}`mutating` | false | false | true |
+| {toolref}`rename-window` | {badge}`mutating` | false | false | true |
+| {toolref}`resize-pane` | {badge}`mutating` | false | false | true |
+| {toolref}`resize-window` | {badge}`mutating` | false | false | true |
+| {toolref}`set-pane-title` | {badge}`mutating` | false | false | true |
+| {toolref}`clear-pane` | {badge}`mutating` | false | true | false |
+| {toolref}`select-layout` | {badge}`mutating` | false | false | true |
+| {toolref}`set-option` | {badge}`mutating` | false | false | true |
+| {toolref}`set-environment` | {badge}`mutating` | false | false | true |
+| {toolref}`respawn-pane` | {badge}`mutating` | false | true | false |
+| {toolref}`kill-server` | {badge}`destructive` | false | true | false |
+| {toolref}`kill-session` | {badge}`destructive` | false | true | false |
+| {toolref}`kill-window` | {badge}`destructive` | false | true | false |
+| {toolref}`kill-pane` | {badge}`destructive` | false | true | false |

@@ -45,9 +45,22 @@ For pane tools, you can combine parameters to narrow the search: `session_name` 
 
 Tools fall into three categories:
 
-- **Discovery** — Read-only operations: `list_sessions`, `list_windows`, `list_panes`, `capture_pane`, `capture_since`, `get_pane_info`, `find_pane_by_position`, `search_panes`, `wait_for_text`, `show_option`, `show_environment`
-- **Mutation** — Create, modify, or send input: `create_session`, `create_window`, `split_window`, `send_keys`, {tooliconl}`send-keys-batch`, `rename_*`, `resize_*`, `set_pane_title`, `clear_pane`, `select_layout`, `set_option`, `set_environment`
-- **Destruction** — Remove tmux objects: `kill_server`, `kill_session`, `kill_window`, `kill_pane`
+- **Discovery** — Read-only operations: {toolref}`list-sessions`,
+  {toolref}`list-windows`, {toolref}`list-panes`,
+  {toolref}`capture-pane`, {toolref}`capture-since`,
+  {toolref}`get-pane-info`, {toolref}`find-pane-by-position`,
+  {toolref}`search-panes`, {toolref}`wait-for-text`,
+  {toolref}`show-option`, {toolref}`show-environment`
+- **Mutation** — Create, modify, or send input:
+  {toolref}`create-session`, {toolref}`create-window`,
+  {toolref}`split-window`, {toolref}`send-keys`,
+  {toolref}`send-keys-batch`, {toolref}`rename-session`,
+  {toolref}`rename-window`, {toolref}`resize-pane`,
+  {toolref}`resize-window`, {toolref}`set-pane-title`,
+  {toolref}`clear-pane`, {toolref}`select-layout`,
+  {toolref}`set-option`, {toolref}`set-environment`
+- **Destruction** — Remove tmux objects: {toolref}`kill-server`,
+  {toolref}`kill-session`, {toolref}`kill-window`, {toolref}`kill-pane`
 
 These map to {ref}`safety tiers <safety>`.
 
@@ -67,7 +80,8 @@ Server instances are cached by `(socket_name, socket_path, tmux_bin)` tuple with
 
 ## Filtering
 
-List tools (`list_sessions`, `list_windows`, `list_panes`) support Django-style filters:
+List tools ({toolref}`list-sessions`, {toolref}`list-windows`, and
+{toolref}`list-panes`) support Django-style filters:
 
 ```json
 {"session_name__contains": "dev"}

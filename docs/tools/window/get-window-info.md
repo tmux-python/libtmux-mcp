@@ -5,9 +5,9 @@
 
 **Use when** you need metadata for a single window (name, index, layout,
 dimensions, pane count) and you already know the `window_id` or
-`window_index`. Avoids the `list_windows` + filter dance.
+`window_index`. Avoids the {toolref}`list-windows` + filter dance.
 
-**Avoid when** you need every window in a session — call `list_windows` with
+**Avoid when** you need every window in a session — call {tooliconl}`list-windows` with
 `session_id` or iterate via the `tmux://sessions/{name}/windows` resource.
 
 **Side effects:** None. Readonly.

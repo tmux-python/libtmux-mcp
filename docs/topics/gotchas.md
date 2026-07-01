@@ -10,11 +10,16 @@ Things that will bite you if you don't know about them in advance. For symptom-b
 
 To find text that is visible in terminals, use {tooliconl}`search-panes`. To read what a specific pane shows once, use {tooliconl}`capture-pane`; to keep watching that pane, use {tooliconl}`capture-since`.
 
-This is the most common source of agent confusion. The server instructions already warn about this, but it bears repeating: if a user asks "which pane mentions error", the answer is `search_panes`, not `list_panes`.
+This is the most common source of agent confusion. The server
+instructions already warn about this, but it bears repeating: if a
+user asks "which pane mentions error", the answer is
+{toolref}`search-panes`, not {toolref}`list-panes`.
 
-## `send_keys` sends Enter by default
+## Enter after control keys
 
-When you call `send_keys` with `keys: "C-c"`, it sends Ctrl-C **and then presses Enter**. For control sequences, set `enter: false`:
+When you call {tooliconl}`send-keys` with `keys: "C-c"`, it sends
+Ctrl-C **and then presses Enter**. For control sequences, set
+`enter: false`:
 
 ```json
 {"tool": "send_keys", "arguments": {"keys": "C-c", "pane_id": "%0", "enter": false}}
@@ -22,9 +27,11 @@ When you call `send_keys` with `keys: "C-c"`, it sends Ctrl-C **and then presses
 
 The `enter` parameter defaults to `true`, which is correct for commands (`make test` + Enter) but wrong for control keys, partial input, or key sequences.
 
-## `capture_pane` after `send_keys` is a race condition
+## Capturing immediately after input is a race condition
 
-`send_keys` returns immediately after sending keystrokes to tmux. It does **not** wait for the command to execute or produce output.
+{tooliconl}`send-keys` returns immediately after sending keystrokes to
+tmux. It does **not** wait for the command to execute or produce
+output.
 
 ```json
 {"tool": "send_keys", "arguments": {"keys": "pytest", "pane_id": "%0"}}
@@ -46,7 +53,7 @@ For custom shell composition outside {tooliconl}`run-command`, compose
 {tooliconl}`wait-for-text` or observe with {tooliconl}`capture-since`.
 See {ref}`recipes` for complete patterns.
 
-## Repeated `capture_pane` calls resend old output
+## Repeated captures resend old output
 
 If you are tailing a pane or checking a long-running process over several
 turns, repeated {tooliconl}`capture-pane` calls keep returning the same visible
@@ -65,7 +72,7 @@ Pane IDs (`%0`, `%1`, etc.) are globally unique and are the preferred targeting 
 
 Pane IDs like `%0`, `%5`, `%12` are unique across all sessions and windows within a tmux server. They do not reset when windows are created or destroyed.
 
-However, they reset when the tmux **server** restarts. Do not cache pane IDs across server restarts. After killing and recreating a session, re-discover pane IDs with {ref}`list-panes`.
+However, they reset when the tmux **server** restarts. Do not cache pane IDs across server restarts. After killing and recreating a session, re-discover pane IDs with {tooliconl}`list-panes`.
 
 ## `suppress_history` requires shell support
 
@@ -87,4 +94,4 @@ This has been observed with stock Gemini CLI behavior (no extensions involved). 
 
 Tool schemas are strict (`additionalProperties: false`), so the call is rejected with a validation error — classified as expected (WARNING log, `expected: true` in the result's `_meta`) and carrying a suggestion that names the rejected argument and identifies `wait_for_previous` as a client scheduling flag to retry without. Gemini's model reads it, drops the flag, and retries successfully on its own.
 
-The visible symptom is harmless noise: `Error executing tool mcp_tmux_<name>: ... reported an error` lines in Gemini's output for calls that then succeed on retry, and matching WARNING records in the server log. Similar reports in other MCP servers have handled this injected key by stripping it or whitelisting arguments against the schema ([MemPalace/mempalace#816](https://github.com/MemPalace/mempalace/issues/816)). This server deliberately keeps the rejection: silently dropping unknown arguments would also swallow genuine argument typos from every client — on a server with mutating and destructive tools, a mis-named flag (`enter` on `send_keys`, say) must fail loudly, not run with defaults.
+The visible symptom is harmless noise: `Error executing tool mcp_tmux_<name>: ... reported an error` lines in Gemini's output for calls that then succeed on retry, and matching WARNING records in the server log. Similar reports in other MCP servers have handled this injected key by stripping it or whitelisting arguments against the schema ([MemPalace/mempalace#816](https://github.com/MemPalace/mempalace/issues/816)). This server deliberately keeps the rejection: silently dropping unknown arguments would also swallow genuine argument typos from every client — on a server with mutating and destructive tools, a mis-named flag (`enter` on {toolref}`send-keys`, say) must fail loudly, not run with defaults.

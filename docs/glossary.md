@@ -8,10 +8,10 @@ MCP
     Model Context Protocol. A standard for AI agents to interact with tools and resources.
 
 FastMCP
-    A Python framework for building MCP servers. libtmux-mcp uses FastMCP to expose tmux operations as MCP tools.
+    A Python framework for building MCP servers. libtmux-mcp uses [FastMCP](https://gofastmcp.com) to expose tmux operations as MCP tools.
 
 libtmux
-    A typed Python library that provides an ORM wrapper for tmux. libtmux-mcp depends on libtmux for all tmux interactions.
+    A typed Python library that provides an ORM wrapper for tmux. libtmux-mcp depends on [libtmux](https://libtmux.git-pull.com/) for all tmux interactions.
 
 tmux
     A terminal multiplexer. It lets you switch easily between several programs in one terminal, detach them, and reattach them to a different terminal. See https://github.com/tmux/tmux.

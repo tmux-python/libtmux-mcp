@@ -56,7 +56,7 @@ tools instead.
 **Use when** the agent needs to execute a single shell command, wait
 for completion, and inspect exit status plus output.
 
-**Why use this instead of `send_keys` + `capture_pane` polling?**
+**Why use this instead of {tooliconl}`send-keys` + {tooliconl}`capture-pane` polling?**
 {tooliconl}`run-command` sends the command, waits through a private
 tmux signal, captures tail-preserved output, and returns exit status
 in one typed result. That removes the manual channel plumbing from
@@ -104,10 +104,10 @@ not the default command-running recipe.
 needs to investigate before deciding what to fix. Produces a plan,
 not an action.
 
-**Why use this instead of just calling `capture_pane`?** The recipe
+**Why use this instead of just calling {tooliconl}`capture-pane`?** The recipe
 prefers {tool}`snapshot-pane`, which returns content + cursor
 position + pane mode + scroll state in one call — saving a
-follow-up ``get_pane_info`` round-trip. It also explicitly forbids
+follow-up {toolref}`get-pane-info` round-trip. It also explicitly forbids
 the agent from acting before it has a hypothesis, which prevents
 "fix the symptom" anti-patterns. For repeated observation, it routes
 follow-up reads through {tool}`capture-since` cursors instead of full
@@ -174,7 +174,7 @@ a logs tail on the bottom-right:
 3. `split_window(pane_id="%B", direction="right")` — splits pane B
    horizontally (pane C, the logs pane). Capture the returned
    `pane_id` as `%C`.
-4. Launch the editor and the log command via `send_keys`:
+4. Launch the editor and the log command via {tooliconl}`send-keys`:
    `send_keys(pane_id="%A", keys="vim")` and
    `send_keys(pane_id="%C", keys='watch -n 1 date')`. Leave pane B
    at its fresh shell prompt — nothing needs to be sent there. No

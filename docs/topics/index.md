@@ -54,7 +54,7 @@ the Model Context Protocol specification.
 :::{grid-item-card} Completion
 :link: completion
 :link-type: doc
-Argument auto-complete — what FastMCP derives automatically and
+Argument auto-complete — what [FastMCP](https://gofastmcp.com) derives automatically and
 what libtmux-mcp does not yet wire up.
 :::
 
@@ -68,7 +68,8 @@ hierarchy.
 :::{grid-item-card} Pagination
 :link: pagination
 :link-type: doc
-Protocol cursors, ``search_panes`` paging, and ``capture_since``
+Protocol cursors, {toolref}`search-panes` paging, and
+{toolref}`capture-since`
 observation cursors.
 :::
 

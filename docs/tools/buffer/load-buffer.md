@@ -8,7 +8,7 @@ shell script, prepared input for an interactive prompt, or content
 that's too long for a clean {tooliconl}`send-keys` invocation.
 
 **Avoid when** the text is a single command line that {tooliconl}`send-keys`
-can deliver directly. `load_buffer` allocates server-side state that
+can deliver directly. {tooliconl}`load-buffer` allocates server-side state that
 must be cleaned up via {tooliconl}`delete-buffer`.
 
 **Side effects:** Allocates a tmux paste buffer. Use the returned

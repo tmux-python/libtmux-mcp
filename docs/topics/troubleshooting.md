@@ -6,7 +6,7 @@ Symptom-based guide. Find your problem, follow the steps.
 
 ## Server doesn't appear in client
 
-**Symptoms**: Client shows no libtmux tools, or "server not found" errors.
+**Symptoms**: Client shows no tmux MCP tools, or "server not found" errors.
 
 **Check**:
 
@@ -27,7 +27,8 @@ Symptom-based guide. Find your problem, follow the steps.
 
 ## Tools fail with "no sessions found"
 
-**Symptoms**: `list_sessions` returns empty, other tools can't find targets.
+**Symptoms**: {tooliconl}`list-sessions` returns empty, other tools
+can't find targets.
 
 **Check**:
 
@@ -63,15 +64,20 @@ Symptom-based guide. Find your problem, follow the steps.
 
 **Cause**: Using ambiguous targeting (session name + window name) instead of direct IDs.
 
-**Fix**: Use `pane_id` (e.g. `%1`) for unambiguous targeting. Pane IDs are globally unique within a tmux server. Run `list_panes` first to discover IDs.
+**Fix**: Use `pane_id` (e.g. `%1`) for unambiguous targeting. Pane IDs
+are globally unique within a tmux server. Run {tooliconl}`list-panes`
+first to discover IDs.
 
 ## Command works in shell but not via MCP
 
-**Symptoms**: `send_keys` sends the command but output isn't what you expect.
+**Symptoms**: {tooliconl}`send-keys` sends the command but output isn't
+what you expect.
 
 **Check**:
 
-1. **Enter key**: `send_keys` sends Enter by default (`enter=true`). If you're sending a partial command, set `enter=false`.
+1. **Enter key**: {tooliconl}`send-keys` sends Enter by default
+   (`enter=true`). If you're sending a partial command, set
+   `enter=false`.
 
 2. **Special characters**: tmux interprets some key names (e.g. `C-c`, `Enter`). If sending literal text, use `literal=true`.
 
@@ -83,7 +89,7 @@ Symptom-based guide. Find your problem, follow the steps.
 
 **Check**:
 
-1. Missing dependency — ensure `fastmcp` is installed:
+1. Missing dependency — ensure [FastMCP](https://gofastmcp.com) is installed:
 
    ```console
    $ uvx libtmux-mcp

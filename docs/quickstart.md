@@ -23,7 +23,10 @@ Ask your LLM:
 List all my tmux sessions and show me what's running in each pane.
 ```
 
-The agent will call `list_sessions`, then `list_panes` and `capture_pane` to inspect your workspace. You should see your tmux sessions, windows, and pane contents in the response.
+The agent will call {tooliconl}`list-sessions`, then
+{tooliconl}`list-panes` and {tooliconl}`capture-pane` to inspect your
+workspace. You should see your tmux sessions, windows, and pane
+contents in the response.
 
 ## 3. Try it
 

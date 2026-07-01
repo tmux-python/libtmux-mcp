@@ -5,8 +5,8 @@
 
 **Use when** you need a complete picture of a pane in a single call — visible
 text plus cursor position, whether the pane is in copy mode, scroll offset,
-and scrollback history size. Replaces separate `capture_pane` +
-`get_pane_info` calls when you need to reason about cursor location or
+and scrollback history size. Replaces separate {tooliconl}`capture-pane` +
+{tooliconl}`get-pane-info` calls when you need to reason about cursor location or
 terminal mode.
 
 **Avoid when** you only need raw text — {tooliconl}`capture-pane` is lighter.

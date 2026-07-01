@@ -38,9 +38,11 @@ Response:
 ```{tip}
 The returned ``active_pane_id`` is the pane ID (``%N``) of the
 session's initial pane. It's guaranteed non-``None`` immediately
-after ``create_session`` (libtmux always creates the session with
-one initial pane), so you can target subsequent ``send_keys`` /
-``split_window`` / ``capture_pane`` calls directly without a
+after {toolref}`create-session` (the
+{external+libtmux:doc}`libtmux <index>` layer always creates the
+session with one initial pane), so you can target subsequent
+{toolref}`send-keys` / {toolref}`split-window` /
+{toolref}`capture-pane` calls directly without a
 follow-up {tooliconl}`list-panes` round-trip — saving an MCP call
 in the most common "new session, then act on it" workflow.
 ```
