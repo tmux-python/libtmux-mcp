@@ -116,6 +116,11 @@ conf = merge_sphinx_config(
 )
 
 conf["myst_enable_extensions"] = [*conf["myst_enable_extensions"], "attrs_inline"]
+conf["exclude_patterns"] = [
+    *conf.get("exclude_patterns", ()),
+    "AGENTS.md",
+    "CLAUDE.md",
+]
 
 conf["fastmcp_tool_modules"] = [
     "libtmux_mcp.tools.batch_tools",
