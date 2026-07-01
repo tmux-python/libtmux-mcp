@@ -62,6 +62,18 @@ def fake_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
                 config_path=tmp_path / ".gemini" / "settings.json",
                 fmt="json",
             ),
+            "grok": mcp_swap.CLIInfo(
+                name="grok",
+                binary="grok",
+                config_path=tmp_path / ".grok" / "config.toml",
+                fmt="toml",
+            ),
+            "agy": mcp_swap.CLIInfo(
+                name="agy",
+                binary="agy",
+                config_path=tmp_path / ".gemini" / "antigravity" / "mcp_config.json",
+                fmt="json",
+            ),
         },
     )
     state_dir = tmp_path / "state"
@@ -130,11 +142,11 @@ def test_resolve_repo_meta_uses_name_when_no_suffix(tmp_path: pathlib.Path) -> N
 
 
 # ---------------------------------------------------------------------------
-# JSON round-trip: cursor / gemini
+# JSON round-trip: cursor / gemini / agy
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("cli", ["cursor", "gemini"])
+@pytest.mark.parametrize("cli", ["cursor", "gemini", "agy"])
 def test_json_swap_and_revert_round_trip(
     fake_home: pathlib.Path, fake_repo: pathlib.Path, cli: str
 ) -> None:
@@ -161,6 +173,43 @@ def test_json_swap_and_revert_round_trip(
     revert_args = mcp_swap.build_parser().parse_args(["revert", "--cli", cli])
     assert mcp_swap.cmd_revert(revert_args) == 0
     assert info.config_path.read_bytes() == original
+
+
+def test_grok_and_agy_registered() -> None:
+    """The Grok and agy CLIs are exposed as first-class choices."""
+    assert "grok" in mcp_swap.ALL_CLIS
+    assert "agy" in mcp_swap.ALL_CLIS
+    assert mcp_swap.CLIS["grok"].fmt == "toml"
+    assert mcp_swap.CLIS["grok"].config_path.name == "config.toml"
+    assert mcp_swap.CLIS["agy"].fmt == "json"
+    assert mcp_swap.CLIS["agy"].config_path.name == "mcp_config.json"
+    parser = mcp_swap.build_parser()
+    assert parser.parse_args(["status", "--cli", "grok"]).cli == ["grok"]
+    assert parser.parse_args(["status", "--cli", "agy"]).cli == ["agy"]
+
+
+def test_grok_set_get_delete_roundtrip(fake_repo: pathlib.Path) -> None:
+    """The Grok CLI reads/writes the TOML ``[mcp_servers]`` table like Codex."""
+    config = tomlkit.parse("")
+    spec = mcp_swap.McpServerSpec(
+        command="uv", args=["--directory", str(fake_repo), "run", "libtmux-mcp"]
+    )
+    assert mcp_swap.set_server("grok", config, "libtmux", spec, fake_repo) == "added"
+    assert "mcp_servers" in config
+    got = mcp_swap.get_server("grok", config, "libtmux", fake_repo)
+    assert got is not None
+    assert got.is_local_uv_directory()
+    assert mcp_swap.set_server("grok", config, "libtmux", spec, fake_repo) == "replaced"
+    assert mcp_swap.delete_server("grok", config, "libtmux", fake_repo)
+    assert mcp_swap.get_server("grok", config, "libtmux", fake_repo) is None
+
+
+def test_load_config_tolerates_empty_json(tmp_path: pathlib.Path) -> None:
+    """An empty JSON config can be seeded with the first MCP server entry."""
+    cfg = tmp_path / "mcp_config.json"
+    cfg.write_text("")
+    info = mcp_swap.CLIInfo(name="agy", binary="agy", config_path=cfg, fmt="json")
+    assert mcp_swap.load_config(info) == {}
 
 
 def test_use_local_preserves_existing_env_when_replacing(
