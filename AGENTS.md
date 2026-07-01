@@ -379,6 +379,23 @@ EOF
 - `{toolref}` — code chip only, no badge. Use for **dense inline sequences** or explanatory text where the safety tier is already established.
 - `{tooliconil}` / `{tooliconir}` — bare emoji inside code chip. Use for **compact lists and scan-heavy surfaces**.
 
+Link the first prose mention of any symbol that has a useful destination on
+that page. This includes Python objects, libtmux APIs, MCP tool pages,
+topic/configuration pages, and external tools or projects. Use the most
+specific target available: `{class}`, `{meth}`, `{func}`, `{mod}`, `{exc}`, or
+`{attr}` for API objects; `{tooliconl}` or `{toolref}` for MCP tools; `{ref}`
+or `{doc}` for documentation pages and section anchors; and a Markdown link or
+reference link for external projects. After the first linked mention on a
+page, later mentions can stay plain unless the distance or context makes
+another link useful.
+
+Do not rely on a later reference section to satisfy the first-mention rule. If
+the first occurrence would be a heading, grid-card teaser, or introductory
+sentence, link that occurrence or retitle the heading so the first prose
+mention can carry the link. Leave command examples, code blocks, Mermaid node
+labels, and literal configuration values as code; link the surrounding prose
+instead.
+
 ### Code Blocks in Documentation
 
 When writing documentation (README, CHANGES, docs/), follow these rules for code blocks:
@@ -568,4 +585,3 @@ to identify which commits this branch actually introduced. Then:
 - **Scope guard:** If cleaning prior slop would touch a colleague's
   work or expand the branch beyond its stated goal, stay in lane:
   protect the current goal and leave prior slop alone.
-
