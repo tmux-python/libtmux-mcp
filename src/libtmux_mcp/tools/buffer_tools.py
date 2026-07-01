@@ -11,15 +11,18 @@ allocates a unique name of the form::
 
     libtmux_mcp_<uuid4hex>_<logical_name>
 
-and returns the full name in a :class:`BufferRef` so the caller can
-round-trip with :func:`paste_buffer`, :func:`show_buffer`, and
-:func:`delete_buffer` without ambiguity.
+and returns the full name in a :class:`~libtmux_mcp.models.BufferRef` so
+the caller can round-trip with
+:func:`~libtmux_mcp.tools.buffer_tools.paste_buffer`,
+:func:`~libtmux_mcp.tools.buffer_tools.show_buffer`, and
+:func:`~libtmux_mcp.tools.buffer_tools.delete_buffer` without ambiguity.
 
 ``list_buffers`` is **not** exposed in the default safety tier —
 buffer contents often include the user's OS clipboard history (passwords,
 private snippets), and a blanket enumeration would leak that to the
-agent. Callers track the buffers they own via the ``BufferRef``s
-returned from ``load_buffer``.
+agent. Callers track the buffers they own via the
+:class:`~libtmux_mcp.models.BufferRef` objects returned from
+:func:`~libtmux_mcp.tools.buffer_tools.load_buffer`.
 """
 
 from __future__ import annotations
@@ -49,8 +52,9 @@ from libtmux_mcp.tools.pane_tools.io import (
     _truncate_lines_tail,
 )
 
-#: Default line cap for :func:`show_buffer`. Reuses the scrollback
-#: default so agents see one consistent bound across read-heavy tools.
+#: Default line cap for :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`.
+#: Reuses the scrollback default so agents see one consistent bound across
+#: read-heavy tools.
 SHOW_BUFFER_DEFAULT_MAX_LINES = CAPTURE_DEFAULT_MAX_LINES
 
 if t.TYPE_CHECKING:
@@ -177,7 +181,8 @@ def load_buffer(
 
     Each call allocates a fresh buffer name — two concurrent calls will
     land in distinct buffers even if they pass the same ``logical_name``.
-    Agents MUST use the returned :attr:`BufferRef.buffer_name` on
+    Agents MUST use the returned
+    :attr:`~libtmux_mcp.models.BufferRef.buffer_name` on
     subsequent paste/show/delete calls.
 
     **When to use this vs. paste_text:** ``load_buffer`` is the
@@ -242,8 +247,9 @@ def paste_buffer(
     ----------
     buffer_name : str
         Must match the full MCP-namespaced form returned by
-        :func:`load_buffer`. Non-MCP buffers are rejected so the tool
-        cannot be turned into an arbitrary-buffer reader.
+        :func:`~libtmux_mcp.tools.buffer_tools.load_buffer`.
+        Non-MCP buffers are rejected so the tool cannot be turned into
+        an arbitrary-buffer reader.
     pane_id : str, optional
         Target pane ID.
     bracket : bool
@@ -280,11 +286,12 @@ def show_buffer(
     """Read back the contents of an MCP-owned buffer.
 
     Output is tail-preserved: when the buffer exceeds ``max_lines`` the
-    oldest lines are dropped and :attr:`BufferContent.content_truncated`
-    is set so the caller can tell truncation happened and opt in to a
-    full read via ``max_lines=None``. This mirrors ``capture_pane`` —
-    one consistent bounded-output contract across read-heavy tools so
-    a pathological ``load_buffer`` staging cannot blow the agent's
+    oldest lines are dropped and
+    :attr:`~libtmux_mcp.models.BufferContent.content_truncated` is set
+    so the caller can tell truncation happened and opt in to a full
+    read via ``max_lines=None``. This mirrors ``capture_pane`` — one
+    consistent bounded-output contract across read-heavy tools so a
+    pathological ``load_buffer`` staging cannot blow the agent's
     context window on a single ``show_buffer`` call.
 
     Parameters
@@ -373,11 +380,11 @@ def delete_buffer(
 def register(mcp: FastMCP) -> None:
     """Register buffer tools with the MCP instance.
 
-    ``load_buffer`` is tagged with :data:`ANNOTATIONS_SHELL` because its
-    ``content`` argument is arbitrary user text that may carry
-    interactive-environment side effects (commands about to be pasted
-    into a shell). Other buffer tools are plain mutating ops on the
-    tmux buffer store.
+    ``load_buffer`` is tagged with
+    :data:`~libtmux_mcp._utils.ANNOTATIONS_SHELL` because its ``content``
+    argument is arbitrary user text that may carry interactive-environment
+    side effects (commands about to be pasted into a shell). Other buffer
+    tools are plain mutating ops on the tmux buffer store.
     """
     mcp.tool(
         title="Load tmux Buffer", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING}

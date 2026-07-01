@@ -191,7 +191,7 @@ def _compute_is_caller(pane: Pane) -> bool | None:
 def _effective_socket_path(server: Server) -> str | None:
     """Return the filesystem socket path a Server will actually use.
 
-    libtmux leaves ``Server.socket_path`` as ``None`` when only
+    libtmux leaves :attr:`libtmux.Server.socket_path` as ``None`` when only
     ``socket_name`` (or neither) was supplied, but tmux still resolves to
     a real path under ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/<name>``. This
     helper reproduces that resolution so :func:`_caller_is_on_server` can
@@ -199,7 +199,7 @@ def _effective_socket_path(server: Server) -> str | None:
 
     Resolution order:
 
-    1. ``Server.socket_path`` if libtmux already has it.
+    1. :attr:`libtmux.Server.socket_path` if libtmux already has it.
     2. ``tmux display-message -p '#{socket_path}'`` against the target
        server — authoritative because tmux itself reports the path it
        is actually using, regardless of our process environment.
@@ -433,7 +433,7 @@ def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
 
     Internal helper shared by every module that has to invoke the tmux
     binary directly via :func:`subprocess.run` (the buffer, wait-for,
-    and paste_text tools). libtmux's own :meth:`Server.cmd` wraps the
+    and paste_text tools). libtmux's own :meth:`libtmux.Server.cmd` wraps the
     same logic but does not expose a timeout, so tools that need
     bounded blocking have to shell out themselves — and when they do
     they must honour the caller's socket.

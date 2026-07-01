@@ -2,7 +2,7 @@
 
 # Logging
 
-libtmux-mcp uses Python's standard ``logging`` module under the
+libtmux-mcp uses Python's standard {mod}`logging` module under the
 ``libtmux_mcp.*`` namespace. FastMCP forwards server-side log
 records to connected MCP clients via the
 [MCP logging capability](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).

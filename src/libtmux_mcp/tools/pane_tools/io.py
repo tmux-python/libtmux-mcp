@@ -178,10 +178,13 @@ def send_keys_batch(
     """Send an ordered batch of raw key/text operations to tmux panes.
 
     Use this for bulk TUI or persistent-shell input where each item is the
-    same kind of low-level terminal interaction as :func:`send_keys`. For
-    authored shell commands that need exit status and captured output, use
-    :func:`run_command` instead. For repeated observation after sending input,
-    use :func:`capture_since` with its returned cursor.
+    same kind of low-level terminal interaction as
+    :func:`~libtmux_mcp.tools.pane_tools.send_keys`. For authored shell
+    commands that need exit status and captured output, use
+    :func:`~libtmux_mcp.tools.pane_tools.run_command` instead. For
+    repeated observation after sending input, use
+    :func:`~libtmux_mcp.tools.pane_tools.capture_since` with its returned
+    cursor.
 
     This tool intentionally does not compose heterogeneous operations such
     as send → wait → capture. Keeping the batch homogeneous preserves clear
@@ -615,7 +618,7 @@ def capture_pane(
         End line number.
     max_lines : int or None
         Maximum number of lines to return. Defaults to
-        :data:`CAPTURE_DEFAULT_MAX_LINES`. Pass ``None`` to return the
+        ``CAPTURE_DEFAULT_MAX_LINES``. Pass ``None`` to return the
         full capture with no truncation.
     socket_name : str, optional
         tmux socket name.

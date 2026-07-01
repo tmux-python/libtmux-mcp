@@ -134,7 +134,7 @@ def _flatten_hook_value(
     * ``None`` — hook is unset.
     * scalar string / int — single command with no array index.
     * ``dict[int, str]`` — array hook returned by ``show_hook(name)``.
-    * :class:`SparseArray` — array hook returned by some paths.
+    * ``SparseArray`` — array hook returned by some paths.
 
     Both array shapes implement ``.items()`` yielding ``(int, str)``,
     so a single ``hasattr`` check handles them uniformly. Scalars
@@ -175,7 +175,7 @@ def show_hooks(
     etc.) live in the global-window tree enumerated by
     ``show-hooks -gw``. This tool consults both trees and merges the
     results so the enumeration matches what a name-targeted
-    :func:`show_hook` call would return.
+    :func:`~libtmux_mcp.tools.hook_tools.show_hook` call would return.
 
     Parameters
     ----------
@@ -225,20 +225,22 @@ def show_hook(
 ) -> HookListResult:
     """Look up a specific tmux hook by name.
 
-    Returns a :class:`HookListResult` with zero or more :class:`HookEntry`
-    rows — zero if the hook is unset, one if it is a scalar hook, and
-    multiple if it is an array hook with sparse indices.
+    Returns a :class:`~libtmux_mcp.models.HookListResult` with zero or
+    more :class:`~libtmux_mcp.models.HookEntry` rows — zero if the hook
+    is unset, one if it is a scalar hook, and multiple if it is an
+    array hook with sparse indices.
 
     Parameters
     ----------
     hook_name : str
         Hook to look up (e.g. ``"pane-exited"``).
-    scope, target, global_, socket_name : see :func:`show_hooks`.
+    scope, target, global_, socket_name : see
+        :func:`~libtmux_mcp.tools.hook_tools.show_hooks`.
 
     Returns
     -------
     HookListResult
-        One or more :class:`HookEntry` rows, or empty if unset.
+        One or more :class:`~libtmux_mcp.models.HookEntry` rows, or empty if unset.
     """
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
     try:

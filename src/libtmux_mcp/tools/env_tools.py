@@ -80,8 +80,9 @@ def set_environment(
        elevated-risk within the ``mutating`` safety tier. The audit log
        redacts the ``value`` argument, but the side effects persist on
        disk/memory until tmux is restarted. Prefer ``env VAR=value
-       command`` via :func:`send_keys` when you only need the override
-       for a single command. See :doc:`/topics/safety`.
+       command`` via :func:`~libtmux_mcp.tools.pane_tools.send_keys`
+       when you only need the override for a single command. See
+       :doc:`/topics/safety`.
 
     Parameters
     ----------

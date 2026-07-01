@@ -138,7 +138,7 @@ Get detailed window metadata.
 :::{grid-item-card} find_pane_by_position
 :link: find-pane-by-position
 :link-type: ref
-Resolve "the bottom-right pane" (or any corner) to a `PaneInfo`.
+Resolve "the bottom-right pane" (or any corner) to a {class}`~libtmux_mcp.models.PaneInfo`.
 :::
 
 :::{grid-item-card} search_panes

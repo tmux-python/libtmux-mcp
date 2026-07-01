@@ -303,7 +303,10 @@ class RunCommandResult(BaseModel):
 
 
 class SendKeysOperation(BaseModel):
-    """One raw-input operation for :func:`send_keys_batch`."""
+    """One raw-input operation for batch sending.
+
+    Used by :func:`~libtmux_mcp.tools.pane_tools.send_keys_batch`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -342,7 +345,10 @@ class SendKeysOperation(BaseModel):
 
 
 class SendKeysOperationResult(BaseModel):
-    """Per-operation result from :func:`send_keys_batch`."""
+    """Per-operation result from batch sending.
+
+    Returned by :func:`~libtmux_mcp.tools.pane_tools.send_keys_batch`.
+    """
 
     index: int = Field(description="Zero-based index in the submitted operation list.")
     pane_id: str | None = Field(
@@ -540,13 +546,14 @@ class PaneSnapshot(BaseModel):
 
 
 class SearchPanesResult(BaseModel):
-    """Paginated result of :func:`search_panes`.
+    """Paginated result of :func:`~libtmux_mcp.tools.pane_tools.search_panes`.
 
     Wrapping the match list lets us surface bounded-output information
-    that a bare ``list[PaneContentMatch]`` cannot: whether pagination
-    truncated the result set, which panes were skipped, and the
-    ``offset``/``limit`` that produced this page. Agents can re-request
-    with a higher ``offset`` to retrieve subsequent pages.
+    that a bare ``list`` of
+    :class:`~libtmux_mcp.models.PaneContentMatch` rows cannot: whether
+    pagination truncated the result set, which panes were skipped, and
+    the ``offset``/``limit`` that produced this page. Agents can
+    re-request with a higher ``offset`` to retrieve subsequent pages.
     """
 
     matches: list[PaneContentMatch] = Field(
@@ -582,8 +589,9 @@ class HookEntry(BaseModel):
     """One entry in a tmux hook array.
 
     Hooks like ``session-renamed`` are arrays — they can have multiple
-    commands registered at sparse indices. :class:`HookEntry` flattens
-    one index+command pair into a serialisable row.
+    commands registered at sparse indices.
+    :class:`~libtmux_mcp.models.HookEntry` flattens one index+command
+    pair into a serialisable row.
     """
 
     hook_name: str = Field(description="Hook name (e.g. 'pane-exited').")
@@ -598,25 +606,29 @@ class HookEntry(BaseModel):
 
 
 class HookListResult(BaseModel):
-    """Structured result of :func:`show_hooks` / :func:`show_hook`.
+    """Structured result for hook introspection.
 
-    Flat list of :class:`HookEntry` instances so MCP clients can iterate
-    without caring whether the underlying tmux hook is scalar or array-
-    shaped.
+    Returned by :func:`~libtmux_mcp.tools.hook_tools.show_hooks` and
+    :func:`~libtmux_mcp.tools.hook_tools.show_hook`.
+    Flat list of :class:`~libtmux_mcp.models.HookEntry` instances so
+    MCP clients can iterate without caring whether the underlying tmux
+    hook is scalar or array-shaped.
     """
 
     entries: list[HookEntry] = Field(default_factory=list)
 
 
 class BufferRef(BaseModel):
-    """Handle returned by :func:`load_buffer` for later buffer operations.
+    """Handle returned by :func:`~libtmux_mcp.tools.buffer_tools.load_buffer`.
 
     Agent-created tmux paste buffers are namespaced with a per-call UUID
     to avoid collisions on the server-global buffer namespace when
     concurrent agents (or parallel tool calls from a single agent) are
     staging content. Callers must use the ``buffer_name`` this model
-    carries on subsequent ``paste_buffer`` / ``show_buffer`` /
-    ``delete_buffer`` calls.
+    carries on subsequent
+    :func:`~libtmux_mcp.tools.buffer_tools.paste_buffer`,
+    :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`, and
+    :func:`~libtmux_mcp.tools.buffer_tools.delete_buffer` calls.
     """
 
     buffer_name: str = Field(
@@ -632,7 +644,7 @@ class BufferRef(BaseModel):
 
 
 class BufferContent(BaseModel):
-    """Structured result of :func:`show_buffer`."""
+    """Structured result of :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`."""
 
     buffer_name: str = Field(description="Agent-namespaced buffer name.")
     content: str = Field(description="Buffer contents as text.")

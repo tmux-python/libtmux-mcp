@@ -469,11 +469,11 @@ async def capture_since(
         Window ID for pane resolution.
     max_lines : int or None
         Maximum number of lines to return. Defaults to
-        :data:`CAPTURE_SINCE_DEFAULT_MAX_LINES`. Pass ``None`` to
+        ``CAPTURE_SINCE_DEFAULT_MAX_LINES``. Pass ``None`` to
         disable line truncation.
     max_bytes : int or None
         Maximum UTF-8 bytes to return across ``lines``. Defaults to
-        :data:`CAPTURE_SINCE_DEFAULT_MAX_BYTES`. Pass ``None`` to
+        ``CAPTURE_SINCE_DEFAULT_MAX_BYTES``. Pass ``None`` to
         disable byte truncation.
     socket_name : str, optional
         tmux socket name.

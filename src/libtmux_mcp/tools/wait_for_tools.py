@@ -8,8 +8,8 @@ the agent composes the shell command with ``tmux wait-for -S NAME`` and
 then calls :func:`wait_for_channel` which blocks server-side until the
 signal fires.
 
-Safety
-------
+Wait channel safety
+-------------------
 ``tmux wait-for`` without a timeout blocks indefinitely at the OS level.
 If the shell command that was supposed to emit the signal crashes
 before it ran, the wait would deadlock the MCP server and every agent

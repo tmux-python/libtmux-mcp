@@ -24,7 +24,7 @@ for a one-shot read, or {tooliconl}`capture-since` for repeated observation.
 }
 ```
 
-Response is a `SearchPanesResult` wrapper: the matching panes live under
+Response is a {class}`~libtmux_mcp.models.SearchPanesResult` wrapper: the matching panes live under
 `matches`, and the wrapper fields (`truncated`, `truncated_panes`,
 `total_panes_matched`, `offset`, `limit`) support pagination. For larger
 result sets, iterate by re-calling with `offset += len(matches)`; stop when
@@ -36,7 +36,8 @@ That path is quick, but it cannot match text split by terminal wrapping. Pass
 test, or log lines may cross the pane's wrap column.
 
 :::{note} Migrating from the flat-list shape
-Earlier alpha releases returned a bare `list[PaneContentMatch]`.
+Earlier alpha releases returned a bare list of
+{class}`~libtmux_mcp.models.PaneContentMatch` rows.
 Clients iterating the old shape directly (e.g. `for m in search_panes(...)`)
 must switch to `for m in search_panes(...).matches`. See the
 [CHANGES](../../../CHANGES) entry for context.

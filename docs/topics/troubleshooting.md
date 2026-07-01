@@ -111,7 +111,8 @@ Symptom-based guide. Find your problem, follow the steps.
 
 ## How to see logs
 
-The MCP server uses Python's `logging` module. To see debug output, set the log level before starting:
+The MCP server uses Python's standard {mod}`logging` module. To see debug
+output, set the log level before starting:
 
 ```console
 $ PYTHONUNBUFFERED=1 uvx libtmux-mcp 2>server.log

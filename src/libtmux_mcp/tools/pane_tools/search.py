@@ -127,10 +127,10 @@ def search_panes(
         End line for capture.
     max_matched_lines_per_pane : int
         Per-pane cap on ``matched_lines``. Defaults to
-        :data:`SEARCH_DEFAULT_MAX_LINES_PER_PANE`.
+        ``SEARCH_DEFAULT_MAX_LINES_PER_PANE``.
     limit : int or None
         Maximum matching panes returned on this call. Defaults to
-        :data:`SEARCH_DEFAULT_LIMIT`. Pass ``None`` to disable the cap.
+        ``SEARCH_DEFAULT_LIMIT``. Pass ``None`` to disable the cap.
     offset : int
         Skip this many matching panes from the start. Use with
         ``limit`` for pagination.

@@ -45,6 +45,33 @@
    :show-inheritance:
 ```
 
+## Buffer tools
+
+```{eval-rst}
+.. automodule:: libtmux_mcp.tools.buffer_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## Wait-for tools
+
+```{eval-rst}
+.. automodule:: libtmux_mcp.tools.wait_for_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## Hook tools
+
+```{eval-rst}
+.. automodule:: libtmux_mcp.tools.hook_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
 ## Option tools
 
 ```{eval-rst}

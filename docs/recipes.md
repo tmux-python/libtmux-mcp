@@ -105,7 +105,7 @@ Spin up the dev server in the bottom-right pane.
 
 I do not need to list every pane and compute geometry. tmux already
 tracks each pane's edge predicates -- there is a tool that resolves a
-corner directly to a `PaneInfo`.
+corner directly to a {class}`~libtmux_mcp.models.PaneInfo`.
 ```
 
 The agent calls {tooliconl}`find-pane-by-position` with
@@ -143,7 +143,7 @@ follow-up; reuse the ID.
 Before {toolref}`find-pane-by-position`, the only way to resolve a
 corner was {toolref}`display-message` with `#{pane_at_bottom}` and
 `#{pane_at_right}` per pane, then parsing the string output. The
-structured `PaneInfo` response now carries `pane_left`, `pane_top`,
+structured {class}`~libtmux_mcp.models.PaneInfo` response now carries `pane_left`, `pane_top`,
 `pane_right`, `pane_bottom` and the four `pane_at_*` predicates as
 typed fields, so agents reasoning about layout no longer need a
 parsing detour through {toolref}`display-message`.

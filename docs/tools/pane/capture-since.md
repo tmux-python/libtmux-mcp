@@ -87,7 +87,7 @@ see tmux's grid and capture implementation in
 [grid.c](https://github.com/tmux/tmux/blob/134ba6c/grid.c) and
 [cmd-capture-pane.c](https://github.com/tmux/tmux/blob/134ba6c/cmd-capture-pane.c),
 and libtmux's
-[`Pane.capture_pane()`](https://github.com/tmux-python/libtmux/blob/v0.58.0/src/libtmux/pane.py).
+{meth}`~libtmux.Pane.capture_pane`.
 
 ```{fastmcp-tool-input} pane_tools.capture_since
 ```

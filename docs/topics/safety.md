@@ -1,4 +1,6 @@
-(safety)=
+```{eval-rst}
+.. _safety:
+```
 
 # Safety tiers
 
@@ -65,7 +67,7 @@ These protections read both the `TMUX` and `TMUX_PANE` environment variables tha
 
 The self-kill guard resolves the target server's socket path in three steps (`_effective_socket_path` in `src/libtmux_mcp/_utils.py`):
 
-1. Use `Server.socket_path` if libtmux already has it.
+1. Use {attr}`libtmux.Server.socket_path` if {external+libtmux:doc}`libtmux <index>` already has it.
 2. Otherwise query the running server via `display-message -p '#{socket_path}'` — authoritative because tmux itself reports the path it is actually using, regardless of the MCP process environment. This closes the launchd-vs-interactive-shell gap on macOS where {envvar}`TMUX_TMPDIR` commonly differs between contexts.
 3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and `_caller_is_on_server`'s None-socket branch blocks conservatively.
 

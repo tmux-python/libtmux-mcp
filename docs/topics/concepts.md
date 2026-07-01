@@ -63,7 +63,7 @@ This means agents can safely explore and manage tmux without accidentally termin
 
 ## Server caching
 
-Server instances are cached by `(socket_name, socket_path, tmux_bin)` tuple with thread-safe access. Dead servers are automatically evicted via `is_alive()` checks. This means multiple tool calls reuse the same server connection efficiently.
+Server instances are cached by `(socket_name, socket_path, tmux_bin)` tuple with thread-safe access. Dead servers are automatically evicted via {meth}`libtmux.Server.is_alive` checks. This means multiple tool calls reuse the same server connection efficiently.
 
 ## Filtering
 

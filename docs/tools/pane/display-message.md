@@ -14,7 +14,7 @@ the format string with `display-message -p` and returns the value.
 {tooliconl}`get-pane-info` for standard metadata (including the new
 `pane_left` / `pane_top` / `pane_at_*` geometry block), or
 {tooliconl}`find-pane-by-position` to resolve a window corner to a
-`PaneInfo` without parsing `#{pane_at_bottom}` / `#{pane_at_right}`
+{class}`~libtmux_mcp.models.PaneInfo` without parsing `#{pane_at_bottom}` / `#{pane_at_right}`
 yourself.
 
 **Side effects:** None. Readonly.

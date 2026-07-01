@@ -85,16 +85,17 @@ def snapshot_pane(
 
     Use for terminal-contents inspection — 'what's in my pane', 'the
     current shell output' — not editor panes or browser viewports.
-    Returns everything capture_pane and get_pane_info return, plus cursor
-    position, copy-mode state, and scroll position — in a single call.
-    Prefer this over separate capture_pane + get_pane_info calls when
-    you need to reason about cursor location or pane mode.
+    Returns everything :func:`~libtmux_mcp.tools.pane_tools.capture_pane`
+    and :func:`~libtmux_mcp.tools.pane_tools.get_pane_info` return, plus
+    cursor position, copy-mode state, and scroll position — in a single
+    call. Prefer this over separate capture_pane + get_pane_info calls
+    when you need to reason about cursor location or pane mode.
 
     The ``content`` field is tail-preserved: when the captured pane
     exceeds ``max_lines``, the oldest lines are dropped and the result
     is reported via ``content_truncated`` / ``content_truncated_lines``
-    fields on the returned :class:`PaneSnapshot`. Pass ``max_lines=None``
-    to opt out of truncation entirely.
+    fields on the returned :class:`~libtmux_mcp.models.PaneSnapshot`.
+    Pass ``max_lines=None`` to opt out of truncation entirely.
 
     Parameters
     ----------
@@ -108,7 +109,7 @@ def snapshot_pane(
         Window ID for pane resolution.
     max_lines : int or None
         Maximum number of content lines to return. Defaults to
-        :data:`libtmux_mcp.tools.pane_tools.io.CAPTURE_DEFAULT_MAX_LINES`.
+        ``CAPTURE_DEFAULT_MAX_LINES``.
         Pass ``None`` to return the full capture untrimmed.
     socket_name : str, optional
         tmux socket name.

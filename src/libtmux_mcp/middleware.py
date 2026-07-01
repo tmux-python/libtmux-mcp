@@ -679,7 +679,7 @@ class ReadonlyRetryMiddleware(Middleware):
     (``list_sessions``, ``capture_pane``, ``snapshot_pane``, …) are
     safe to retry because they observe state without mutating it.
 
-    Default retry trigger is :class:`libtmux.exc.LibTmuxException` —
+    Default retry trigger is :exc:`libtmux.exc.LibTmuxException` —
     libtmux wraps the subprocess failures we actually want to retry
     (socket EAGAIN, transient connect errors). The fastmcp default
     ``(ConnectionError, TimeoutError)`` does NOT match these, so the
@@ -747,7 +747,7 @@ _TRUNCATION_HEADER_TEMPLATE = "[... truncated {dropped} bytes ...]\n"
 class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     """Response-limiter that keeps the tail of oversized output.
 
-    FastMCP's stock :class:`ResponseLimitingMiddleware` truncates the
+    FastMCP's stock ``ResponseLimitingMiddleware`` truncates the
     tail of the response (keeps the start, appends a suffix). That's
     exactly wrong for terminal scrollback, where the active shell
     prompt and most recent command output live at the **bottom** of
@@ -755,10 +755,10 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     drop the head instead, prefixing a single truncation-header line
     so callers can detect the cap fired.
 
-    Used as a global backstop for :func:`libtmux_mcp.tools.pane_tools.io.capture_pane`,
-    :func:`libtmux_mcp.tools.pane_tools.capture_since.capture_since`,
-    :func:`libtmux_mcp.tools.pane_tools.meta.snapshot_pane`, and
-    :func:`libtmux_mcp.tools.pane_tools.search.search_panes`. Per-tool
+    Used as a global backstop for :func:`libtmux_mcp.tools.pane_tools.capture_pane`,
+    :func:`libtmux_mcp.tools.pane_tools.capture_since`,
+    :func:`libtmux_mcp.tools.pane_tools.snapshot_pane`, and
+    :func:`libtmux_mcp.tools.pane_tools.search_panes`. Per-tool
     caps at the tool layer fire first under normal operation; this
     middleware catches pathological output from future tools that
     forget to declare their own bounds.
