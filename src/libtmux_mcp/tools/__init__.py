@@ -13,6 +13,7 @@ def register_tools(mcp: FastMCP) -> None:
     from libtmux_mcp.tools import (
         batch_tools,
         buffer_tools,
+        engine_plan,
         env_tools,
         hook_tools,
         option_tools,
@@ -33,3 +34,5 @@ def register_tools(mcp: FastMCP) -> None:
     wait_for_tools.register(mcp)
     buffer_tools.register(mcp)
     hook_tools.register(mcp)
+    # Opt-in (LIBTMUX_MCP_ENGINE_OPS=1): chained plan tools over engine-ops.
+    engine_plan.register(mcp)
