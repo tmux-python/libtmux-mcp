@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `libtmux>=0.61.0`** (was `>=0.60.0`). Picks up libtmux 0.61.0's hardening of the tmux 3.7 patch line, so the server runs cleanly against tmux 3.7a and 3.7b. Every 3.7-only surface stays version-gated, so tmux 3.2a-3.6 keep working unchanged, and the bump requires no server code or test changes. (#86)
+
 ## libtmux-mcp 0.1.0a15 (2026-06-28)
 
 libtmux-mcp 0.1.0a15 raises the libtmux floor to 0.60.0, which completes tmux 3.7 feature parity at the library layer the server wraps — floating panes, typed tmux 3.7 options, new pane format variables, and new command flags. Every 3.7-only surface is version-gated, so tmux 3.2a-3.6 keep working unchanged. The dev and test dependency groups also move to pytest 9.1.0.
