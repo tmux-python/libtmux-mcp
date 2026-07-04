@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a16 (2026-07-04)
+
+libtmux-mcp 0.1.0a16 raises the libtmux floor to 0.61.0, picking up libtmux 0.61.0's hardening of the tmux 3.7 patch line. The server runs cleanly against tmux 3.7a and 3.7b, and tmux 3.2a-3.6 keep working unchanged. The bump requires no server code or test changes.
+
 ### Dependencies
 
 **Minimum `libtmux>=0.61.0`** (was `>=0.60.0`). Picks up libtmux 0.61.0's hardening of the tmux 3.7 patch line, so the server runs cleanly against tmux 3.7a and 3.7b. Every 3.7-only surface stays version-gated, so tmux 3.2a-3.6 keep working unchanged, and the bump requires no server code or test changes. (#86)
