@@ -279,9 +279,14 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
     if shutil.which("tmux") is None:
         msg = "tmux binary not found on PATH"
         raise RuntimeError(msg)
+    # Start/stop the opt-in engine-ops control-mode engine (no-op when off).
+    from libtmux_mcp.tools import engine_watch
+
+    await engine_watch.astartup()
     try:
         yield
     finally:
+        await engine_watch.ashutdown()
         _gc_mcp_buffers(_server_cache)
         _server_cache.clear()
 
