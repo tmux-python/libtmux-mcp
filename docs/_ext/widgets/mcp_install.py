@@ -1,13 +1,13 @@
 """MCP install picker widget: client x method x scope x cooldown matrix.
 
 Each MCP client carries its own ``scopes`` tuple (Claude Code has three,
-Claude Desktop has one, the rest have two). On top of that, every panel
-exists in three **cooldown** modes — ``off`` (no extra flag), ``days``
-(insert a ``--exclude-newer`` / ``--uploaded-prior-to`` flag with a
-user-configurable day count), and ``bypass`` (skip any global uv
-cooldown via ``--no-config`` / ``UV_NO_CONFIG``). Together these
-produce 90 server-rendered panels (3 + 1 + 2 + 2 + 2 = 10 scopes,
-times 3 methods, times 3 cooldown modes).
+Claude Desktop and Antigravity have one, the rest have two). On top of
+that, every panel exists in three **cooldown** modes — ``off`` (no extra
+flag), ``days`` (insert a ``--exclude-newer`` / ``--uploaded-prior-to``
+flag with a user-configurable day count), and ``bypass`` (skip any global
+uv cooldown via ``--no-config`` / ``UV_NO_CONFIG``). Together these
+produce 117 server-rendered panels (3 + 1 + 2 + 2 + 2 + 2 + 1 = 13
+scopes, times 3 methods, times 3 cooldown modes).
 
 Cooldown state is split across three orthogonal axes:
 ``DEFAULT_COOLDOWN_ENABLED`` (master on/off), ``DEFAULT_COOLDOWN_TYPE``
@@ -170,6 +170,30 @@ _CURSOR_SCOPES: tuple[Scope, ...] = (
     ),
 )
 
+_GROK_SCOPES: tuple[Scope, ...] = (
+    Scope(
+        id="user",
+        label="User",
+        config_file="~/.grok/config.toml",
+        note=None,
+    ),
+    Scope(
+        id="project",
+        label="Project",
+        config_file="./.grok/config.toml (in repo)",
+        note=None,
+    ),
+)
+
+_ANTIGRAVITY_SCOPES: tuple[Scope, ...] = (
+    Scope(
+        id="global",
+        label="Global",
+        config_file="~/.gemini/config/mcp_config.json",
+        note=None,
+    ),
+)
+
 
 CLIENTS: tuple[Client, ...] = (
     Client(
@@ -201,6 +225,18 @@ CLIENTS: tuple[Client, ...] = (
         label="Cursor",
         kind="json",
         scopes=_CURSOR_SCOPES,
+    ),
+    Client(
+        id="grok",
+        label="Grok CLI",
+        kind="cli",
+        scopes=_GROK_SCOPES,
+    ),
+    Client(
+        id="antigravity",
+        label="Antigravity",
+        kind="json",
+        scopes=_ANTIGRAVITY_SCOPES,
     ),
 )
 
@@ -334,6 +370,13 @@ def _cli_body(client: Client, scope: Scope, method: Method, cooldown: Cooldown) 
     if client.id == "claude-code":
         flag = "" if scope.id == "local" else f"--scope {scope.id} "
         return f"claude mcp add tmux {flag}-- {tool_cmd}".replace("  ", " ")
+    # grok: ``grok mcp add --scope <user|project> <name> -- <cmd>`` writes
+    # both scopes itself (``~/.grok/config.toml`` / ``./.grok/config.toml``,
+    # TOML ``[mcp_servers.<name>]`` — same shape as Codex), so unlike Codex
+    # no manual-paste path is needed for project scope. Everything after
+    # ``--`` is handed to the server process verbatim.
+    if client.id == "grok":
+        return f"grok mcp add --scope {scope.id} tmux -- {tool_cmd}"
     # codex: CLI doesn't write project scope; the project-scope panel
     # uses the TOML body path (see ``_body_for``).
     return f"codex mcp add tmux -- {tool_cmd}"

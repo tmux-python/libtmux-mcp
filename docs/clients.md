@@ -33,6 +33,8 @@ $ npx @modelcontextprotocol/inspector
 | Codex CLI | `~/.codex/config.toml` (user) or `.codex/config.toml` (project, manual) | TOML |
 | Gemini CLI | `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project) | JSON |
 | Cursor | `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global) | JSON |
+| Grok CLI | `~/.grok/config.toml` (user) or `./.grok/config.toml` (project) | TOML |
+| Antigravity | `~/.gemini/config/mcp_config.json` (global) | JSON |
 
 ## Local checkout (development)
 
@@ -49,7 +51,7 @@ $ claude mcp add \
 ```
 
 <details>
-<summary>Codex CLI / Gemini CLI / Cursor</summary>
+<summary>Codex CLI / Gemini CLI / Grok CLI / Cursor / Antigravity</summary>
 
 **Codex CLI:**
 
@@ -69,7 +71,33 @@ $ gemini mcp add \
     run libtmux-mcp
 ```
 
+**Grok CLI:**
+
+```console
+$ grok mcp add \
+    --scope user \
+    tmux -- \
+    uv --directory ~/work/python/libtmux-mcp \
+    run libtmux-mcp
+```
+
 **Cursor** — add to `~/.cursor/mcp.json`:
+
+```json
+{
+    "mcpServers": {
+        "tmux": {
+            "command": "uv",
+            "args": [
+                "--directory", "~/work/python/libtmux-mcp",
+                "run", "libtmux-mcp"
+            ]
+        }
+    }
+}
+```
+
+**Antigravity** — add to `~/.gemini/config/mcp_config.json`:
 
 ```json
 {
