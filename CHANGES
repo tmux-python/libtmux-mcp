@@ -6,6 +6,12 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Documentation
+
+**Grok CLI and Antigravity in the MCP install picker**
+
+The MCP client picker now covers Grok CLI and Antigravity (Google's agy) alongside Claude, Codex, Gemini, and Cursor. Grok registers through its own `grok mcp add` verb (`~/.grok/config.toml`); Antigravity has no such verb, so its `mcpServers` snippet is pasted into `~/.gemini/config/mcp_config.json`. (#89)
+
 ## libtmux-mcp 0.1.0a16 (2026-07-04)
 
 libtmux-mcp 0.1.0a16 raises the libtmux floor to 0.61.0, picking up libtmux 0.61.0's hardening of the tmux 3.7 patch line. The server runs cleanly against tmux 3.7a and 3.7b, and tmux 3.2a-3.6 keep working unchanged. The bump requires no server code or test changes.
