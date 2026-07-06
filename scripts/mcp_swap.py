@@ -34,9 +34,9 @@ This script is best-effort and intentionally narrow:
   ``~/.claude.json``, ``~/.codex/config.toml``,
   ``~/.gemini/settings.json``, ``~/.grok/config.toml`` (TOML
   ``mcp_servers``, same shape as Codex), and
-  ``~/.gemini/antigravity/mcp_config.json`` (agy, JSON
-  ``mcpServers``). The agy CLI may read a different profile from the
-  desktop app; only the profile path above is written. Workspace / project-local configs
+  ``~/.gemini/config/mcp_config.json`` (agy / Antigravity CLI, JSON
+  ``mcpServers`` — the shared-config file the CLI reads, sibling to the
+  ``config.json`` it loads at startup). Workspace / project-local configs
   (``$PWD/.cursor/mcp.json``, ``$PWD/.gemini/settings.json``,
   per-project ``projects.<abs>.mcpServers`` entries inside
   ``~/.claude.json`` *are* recognised for Claude only) are NOT
@@ -227,9 +227,7 @@ CLIS: dict[CLIName, CLIInfo] = {
     "agy": CLIInfo(
         name="agy",
         binary="agy",
-        config_path=(
-            pathlib.Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
-        ),
+        config_path=(pathlib.Path.home() / ".gemini" / "config" / "mcp_config.json"),
         fmt="json",
     ),
 }
