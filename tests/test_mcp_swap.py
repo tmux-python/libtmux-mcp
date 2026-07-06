@@ -71,7 +71,7 @@ def fake_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
             "agy": mcp_swap.CLIInfo(
                 name="agy",
                 binary="agy",
-                config_path=tmp_path / ".gemini" / "antigravity" / "mcp_config.json",
+                config_path=tmp_path / ".gemini" / "config" / "mcp_config.json",
                 fmt="json",
             ),
         },

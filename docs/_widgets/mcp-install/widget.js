@@ -44,7 +44,7 @@
   };
 
   // Mirror of docs/_ext/widgets/mcp_install.py:DEFAULT_SCOPES. The prehydrate
-  // <head> script emits the same map; this duplicate is small enough (5
+  // <head> script emits the same map; this duplicate is small enough (7
   // entries) that the cost of keeping them in sync beats reading the literal
   // back out of the DOM. Update both when adding a client.
   var DEFAULT_SCOPES = {
@@ -53,6 +53,8 @@
     "codex": "user",
     "gemini": "user",
     "cursor": "project",
+    "grok": "user",
+    "antigravity": "global",
   };
 
   var DEFAULT_COOLDOWN_ENABLED = false;

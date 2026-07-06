@@ -23,7 +23,10 @@ from docs._ext.widgets.mcp_install import (
     DEFAULT_COOLDOWN_ENABLED,
     DEFAULT_COOLDOWN_TYPE,
     METHODS,
+    Client,
+    Cooldown,
     MCPInstallWidget,
+    Method,
     _body_for,
     build_panels,
 )
@@ -292,12 +295,194 @@ def test_pip_panel_has_bare_pip_prereq_across_modes() -> None:
 
 def test_body_for_unknown_kind_raises() -> None:
     """An unrecognised ``client.kind`` surfaces as a ``ValueError``."""
-    from docs._ext.widgets.mcp_install import Client, Scope
+    from docs._ext.widgets.mcp_install import Scope
 
     fake_scope = Scope(id="user", label="User", config_file="", note=None)
     fake = Client(id="x", label="X", kind="bogus", scopes=(fake_scope,))
     with pytest.raises(ValueError, match="unknown client kind"):
         _body_for(fake, METHODS[0], fake_scope, _OFF)
+
+
+# ---------- unit: Grok CLI + Antigravity clients -------------------------
+
+
+def _client(client_id: str) -> Client:
+    """Look up a registered client by id."""
+    return next(c for c in CLIENTS if c.id == client_id)
+
+
+def _method(method_id: str) -> Method:
+    """Look up a registered install method by id."""
+    return next(m for m in METHODS if m.id == method_id)
+
+
+def _cooldown(cooldown_id: str) -> Cooldown:
+    """Look up a cooldown mode by id."""
+    return next(c for c in COOLDOWNS if c.id == cooldown_id)
+
+
+def test_grok_and_antigravity_registered_with_expected_scopes() -> None:
+    """Grok (CLI, user+project) and Antigravity (JSON, single global) are registered.
+
+    Locks the config-file paths so a future edit can't silently regress
+    them — in particular Antigravity's ``~/.gemini/config/mcp_config.json``,
+    the file the ``agy`` binary actually reads (it has no ``mcp add`` verb).
+    """
+    grok = _client("grok")
+    assert grok.label == "Grok CLI"
+    assert grok.kind == "cli"
+    assert [s.id for s in grok.scopes] == ["user", "project"]
+    assert grok.scopes[0].config_file == "~/.grok/config.toml"
+    assert grok.scopes[1].config_file == "./.grok/config.toml (in repo)"
+
+    agy = _client("antigravity")
+    assert agy.label == "Antigravity"
+    assert agy.kind == "json"
+    assert [s.id for s in agy.scopes] == ["global"]
+    assert agy.scopes[0].config_file == "~/.gemini/config/mcp_config.json"
+
+
+class GrokBodyCase(t.NamedTuple):
+    """One ``_body_for`` expectation for the Grok CLI client."""
+
+    test_id: str
+    method_id: str
+    scope_id: str
+    cooldown_id: str
+    expected: str
+
+
+_GROK_BODY_CASES: list[GrokBodyCase] = [
+    GrokBodyCase(
+        test_id="uvx-user-off",
+        method_id="uvx",
+        scope_id="user",
+        cooldown_id="off",
+        expected="grok mcp add --scope user tmux -- uvx libtmux-mcp",
+    ),
+    GrokBodyCase(
+        test_id="uvx-project-off",
+        method_id="uvx",
+        scope_id="project",
+        cooldown_id="off",
+        expected="grok mcp add --scope project tmux -- uvx libtmux-mcp",
+    ),
+    GrokBodyCase(
+        test_id="pipx-user-off",
+        method_id="pipx",
+        scope_id="user",
+        cooldown_id="off",
+        expected="grok mcp add --scope user tmux -- pipx run libtmux-mcp",
+    ),
+    GrokBodyCase(
+        test_id="pip-user-off",
+        method_id="pip",
+        scope_id="user",
+        cooldown_id="off",
+        expected="grok mcp add --scope user tmux -- libtmux-mcp",
+    ),
+    GrokBodyCase(
+        test_id="uvx-user-days",
+        method_id="uvx",
+        scope_id="user",
+        cooldown_id="days",
+        expected=(
+            "grok mcp add --scope user tmux -- uvx --exclude-newer"
+            " <COOLDOWN_DURATION> --exclude-newer-package"
+            " libtmux-mcp=2099-01-01 libtmux-mcp"
+        ),
+    ),
+    GrokBodyCase(
+        test_id="uvx-user-bypass",
+        method_id="uvx",
+        scope_id="user",
+        cooldown_id="bypass",
+        expected="grok mcp add --scope user tmux -- uvx --no-config libtmux-mcp",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    list(GrokBodyCase._fields),
+    _GROK_BODY_CASES,
+    ids=[c.test_id for c in _GROK_BODY_CASES],
+)
+def test_body_for_grok_cli(
+    test_id: str,
+    method_id: str,
+    scope_id: str,
+    cooldown_id: str,
+    expected: str,
+) -> None:
+    """Grok renders ``grok mcp add --scope <s> tmux -- <cmd>`` for both scopes.
+
+    Unlike Codex, Grok's CLI writes both user and project scopes itself
+    (``~/.grok/config.toml`` / ``./.grok/config.toml``), so there is no
+    manual-TOML-paste cell — every Grok panel is a ``console`` command.
+    """
+    grok = _client("grok")
+    scope = next(s for s in grok.scopes if s.id == scope_id)
+    body, language, _ = _body_for(
+        grok, _method(method_id), scope, _cooldown(cooldown_id)
+    )
+    assert body == expected
+    assert language == "console"
+
+
+class AntigravityBodyCase(t.NamedTuple):
+    """One ``_body_for`` expectation for the Antigravity (agy) JSON client."""
+
+    test_id: str
+    method_id: str
+    cooldown_id: str
+    expected_substrings: tuple[str, ...]
+
+
+_ANTIGRAVITY_BODY_CASES: list[AntigravityBodyCase] = [
+    AntigravityBodyCase(
+        test_id="uvx-off",
+        method_id="uvx",
+        cooldown_id="off",
+        expected_substrings=('"mcpServers"', '"command": "uvx"', '"libtmux-mcp"'),
+    ),
+    AntigravityBodyCase(
+        test_id="uvx-days",
+        method_id="uvx",
+        cooldown_id="days",
+        expected_substrings=('"--exclude-newer"', '"<COOLDOWN_DURATION>"'),
+    ),
+    AntigravityBodyCase(
+        test_id="uvx-bypass",
+        method_id="uvx",
+        cooldown_id="bypass",
+        expected_substrings=('"env":', '"UV_NO_CONFIG": "1"'),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    list(AntigravityBodyCase._fields),
+    _ANTIGRAVITY_BODY_CASES,
+    ids=[c.test_id for c in _ANTIGRAVITY_BODY_CASES],
+)
+def test_body_for_antigravity_json(
+    test_id: str,
+    method_id: str,
+    cooldown_id: str,
+    expected_substrings: tuple[str, ...],
+) -> None:
+    """Antigravity reuses the JSON ``mcpServers`` body — ``agy`` has no ``mcp add``.
+
+    The rendered snippet is what the user pastes into
+    ``~/.gemini/config/mcp_config.json`` (single global scope).
+    """
+    agy = _client("antigravity")
+    body, language, _ = _body_for(
+        agy, _method(method_id), agy.scopes[0], _cooldown(cooldown_id)
+    )
+    assert language == "json"
+    for needle in expected_substrings:
+        assert needle in body
 
 
 # ---------- unit: cooldown_days_slot Jinja filter ------------------------
