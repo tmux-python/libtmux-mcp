@@ -566,7 +566,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
         raises=True,
     )
 
-    respawn_target = mcp_pane.window.split(shell="sleep 30")
+    respawn_target = later_pane
     assert respawn_target.pane_id is not None
     try:
         respawn_pane(
