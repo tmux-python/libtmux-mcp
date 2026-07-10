@@ -49,7 +49,7 @@ def _exercise_spawned_shell_history(
         shell=shell,
         socket_name=mcp_server.socket_name,
         environment={"HOME": str(home), "XDG_DATA_HOME": str(data_home)},
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     assert pane_info.pane_id is not None
     pane = mcp_server.panes.get(pane_id=pane_info.pane_id, default=None)
@@ -204,7 +204,7 @@ def _exercise_shell_startup_override(
         shell=shlex.join((executable, *arguments)),
         socket_name=mcp_server.socket_name,
         environment=environment,
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     assert pane_info.pane_id is not None
     pane = mcp_server.panes.get(pane_id=pane_info.pane_id, default=None)

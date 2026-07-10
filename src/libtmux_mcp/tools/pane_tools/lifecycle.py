@@ -73,7 +73,7 @@ def respawn_pane(
     environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
     *,
-    suppress_history: bool = False,
+    suppress_persistent_history: bool = False,
 ) -> PaneInfo:
     """Restart a pane's process in place, preserving pane_id and layout.
 
@@ -134,10 +134,11 @@ def respawn_pane(
         host-resident agent or other tenant could observe ``ps``.
     socket_name : str, optional
         tmux socket name.
-    suppress_history : bool
-        For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
-        default; an explicit value overrides it. Direct Python calls default
-        to False. Startup files may override these controls.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shell. Defaults
+        to False for MCP and direct Python calls. This per-call option does not
+        inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
+        controls.
 
     Returns
     -------
@@ -147,7 +148,7 @@ def respawn_pane(
     """
     spawn_environment = _prepare_spawn_environment(
         environment,
-        suppress_history=suppress_history,
+        suppress_persistent_history=suppress_persistent_history,
     )
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(server, pane_id=pane_id)

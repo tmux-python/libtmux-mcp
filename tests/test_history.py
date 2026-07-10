@@ -50,10 +50,11 @@ MCP_HISTORY_BEHAVIOR_FIXTURES = [
     McpHistoryBehaviorFixture("startup_enabled", "1", False),
 ]
 
-SPAWN_SUPPRESS_HISTORY_DESCRIPTION = (
-    "For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY "
-    "default; an explicit value overrides it. Direct Python calls default to "
-    "False. Startup files may override these controls."
+SPAWN_SUPPRESS_PERSISTENT_HISTORY_DESCRIPTION = (
+    "Whether to suppress persistent history for the spawned shell. Defaults "
+    "to False for MCP and direct Python calls. This per-call option does not "
+    "inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these "
+    "controls."
 )
 
 
@@ -124,7 +125,8 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
         "split_window",
         "respawn_pane",
     }
-    history_tools = command_tools | spawn_tools | {"send_keys"}
+    raw_tools = {"send_keys"}
+    history_tools = command_tools | raw_tools
 
     async def _schemas(enabled: bool) -> dict[str, dict[str, t.Any]]:
         mcp = FastMCP(f"history-transform-{enabled}")
@@ -132,11 +134,15 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
         _configure_history_defaults(mcp, enabled)
         async with Client(mcp) as client:
             tools = await client.list_tools()
-        return {
-            tool.name: tool.inputSchema["properties"]["suppress_history"]
-            for tool in tools
-            if "suppress_history" in tool.inputSchema["properties"]
-        }
+        schemas: dict[str, dict[str, t.Any]] = {}
+        for tool in tools:
+            properties = tool.inputSchema["properties"]
+            if tool.name in spawn_tools:
+                assert "suppress_history" not in properties
+                schemas[tool.name] = properties["suppress_persistent_history"]
+            elif "suppress_history" in properties:
+                schemas[tool.name] = properties["suppress_history"]
+        return schemas
 
     disabled = asyncio.run(_schemas(False))
     enabled = asyncio.run(_schemas(True))
@@ -146,11 +152,11 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
         if schema["default"] != disabled[name]["default"]
     }
 
-    assert set(disabled) == history_tools
-    assert set(enabled) == history_tools
+    assert set(disabled) == history_tools | spawn_tools
+    assert set(enabled) == history_tools | spawn_tools
     assert changed == command_tools
     for default, schemas in ((False, disabled), (True, enabled)):
-        for name in history_tools:
+        for name in history_tools | spawn_tools:
             schema = schemas[name]
             assert schema["type"] == "boolean"
             expected = default if name in command_tools else False
@@ -158,7 +164,7 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
             assert "anyOf" not in schema
             if name in spawn_tools:
                 description = " ".join(schema["description"].split())
-                assert description == SPAWN_SUPPRESS_HISTORY_DESCRIPTION
+                assert description == SPAWN_SUPPRESS_PERSISTENT_HISTORY_DESCRIPTION
 
 
 class SpawnEnvironmentFixture(t.NamedTuple):
@@ -166,7 +172,7 @@ class SpawnEnvironmentFixture(t.NamedTuple):
 
     test_id: str
     environment: dict[str, str] | str | None
-    suppress_history: bool
+    suppress_persistent_history: bool
     expected: dict[str, str] | None
 
 
@@ -231,7 +237,7 @@ SPAWN_ENVIRONMENT_FIXTURES = [
 def test_prepare_spawn_environment_normalizes_copies_and_merges(
     test_id: str,
     environment: dict[str, str] | str | None,
-    suppress_history: bool,
+    suppress_persistent_history: bool,
     expected: dict[str, str] | None,
 ) -> None:
     """Spawn environments are normalized without modifying caller input."""
@@ -239,7 +245,10 @@ def test_prepare_spawn_environment_normalizes_copies_and_merges(
 
     assert test_id
     original = environment.copy() if isinstance(environment, dict) else environment
-    result = _prepare_spawn_environment(environment, suppress_history=suppress_history)
+    result = _prepare_spawn_environment(
+        environment,
+        suppress_persistent_history=suppress_persistent_history,
+    )
 
     assert result == expected
     if isinstance(environment, dict):
@@ -281,12 +290,13 @@ def test_prepare_spawn_environment_rejects_conflicts_without_values(
     environment = {"UNCHANGED": "caller", name: supplied}
     original = environment.copy()
     expected = (
-        f"environment variable {name} conflicts with suppress_history=True; "
+        f"environment variable {name} conflicts with "
+        "suppress_persistent_history=True; "
         f"{correction}"
     )
 
     with pytest.raises(ToolError) as excinfo:
-        _prepare_spawn_environment(environment, suppress_history=True)
+        _prepare_spawn_environment(environment, suppress_persistent_history=True)
 
     assert str(excinfo.value) == expected
     assert supplied not in str(excinfo.value)
@@ -312,7 +322,7 @@ def test_prepare_spawn_environment_rejects_non_string_items(
 
     original = environment.copy() if isinstance(environment, dict) else environment
     with pytest.raises(ToolError) as excinfo:
-        _prepare_spawn_environment(environment, suppress_history=False)
+        _prepare_spawn_environment(environment, suppress_persistent_history=False)
 
     assert str(excinfo.value) == "environment keys and values must be strings"
     if isinstance(environment, dict):
@@ -324,12 +334,12 @@ def test_prepare_spawn_environment_rejects_non_string_items(
     SUPPRESS_HISTORY_SETTING_FIXTURES,
     ids=[fixture.test_id for fixture in SUPPRESS_HISTORY_SETTING_FIXTURES],
 )
-def test_production_mcp_schema_uses_startup_history_default(
+def test_production_mcp_schema_scopes_startup_default_to_run_command(
     test_id: str,
     value: str | None,
     expected: bool,
 ) -> None:
-    """A fresh server publishes one stable transform with retained metadata."""
+    """Startup configuration never changes persistent-history spawn defaults."""
     script = textwrap.dedent(
         """
         import asyncio
@@ -367,7 +377,7 @@ def test_production_mcp_schema_uses_startup_history_default(
                 },
                 "spawn_defaults": {
                     name: tools[name].inputSchema["properties"]
-                    ["suppress_history"]["default"]
+                    ["suppress_persistent_history"]["default"]
                     for name in (
                         "create_session",
                         "create_window",
@@ -377,7 +387,7 @@ def test_production_mcp_schema_uses_startup_history_default(
                 },
                 "spawn_descriptions": {
                     name: tools[name].inputSchema["properties"]
-                    ["suppress_history"]["description"]
+                    ["suppress_persistent_history"]["description"]
                     for name in (
                         "create_session",
                         "create_window",
@@ -430,7 +440,7 @@ def test_production_mcp_schema_uses_startup_history_default(
     }
     expected_descriptions = dict.fromkeys(
         ("create_session", "create_window", "split_window", "respawn_pane"),
-        SPAWN_SUPPRESS_HISTORY_DESCRIPTION,
+        SPAWN_SUPPRESS_PERSISTENT_HISTORY_DESCRIPTION,
     )
     assert {
         name: " ".join(description.split())

@@ -76,7 +76,7 @@ def create_session(
     environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
     *,
-    suppress_history: bool = False,
+    suppress_persistent_history: bool = False,
 ) -> SessionInfo:
     """Create a new tmux session.
 
@@ -103,10 +103,11 @@ def create_session(
         :func:`libtmux_mcp._utils._coerce_dict_arg`.
     socket_name : str, optional
         tmux socket name. Defaults to LIBTMUX_SOCKET env var.
-    suppress_history : bool
-        For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
-        default; an explicit value overrides it. Direct Python calls default
-        to False. Startup files may override these controls.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shell. Defaults
+        to False for MCP and direct Python calls. This per-call option does not
+        inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
+        controls.
 
     Returns
     -------
@@ -115,7 +116,7 @@ def create_session(
     """
     spawn_environment = _prepare_spawn_environment(
         environment,
-        suppress_history=suppress_history,
+        suppress_persistent_history=suppress_persistent_history,
     )
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}

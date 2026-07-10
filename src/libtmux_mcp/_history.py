@@ -55,7 +55,7 @@ def _configure_history_defaults(
 def _prepare_spawn_environment(
     environment: dict[str, str] | str | None,
     *,
-    suppress_history: bool,
+    suppress_persistent_history: bool,
 ) -> dict[str, str] | None:
     """Copy and normalize an environment for a newly spawned process.
 
@@ -63,7 +63,7 @@ def _prepare_spawn_environment(
     ----------
     environment : dict, str, or None
         Environment mapping or JSON-object string supplied by the caller.
-    suppress_history : bool
+    suppress_persistent_history : bool
         Whether to merge the best-effort shell-history controls.
 
     Returns
@@ -92,7 +92,7 @@ def _prepare_spawn_environment(
             raise ExpectedToolError(msg)
         result = dict(coerced)
 
-    if not suppress_history:
+    if not suppress_persistent_history:
         return None if coerced is None else result
 
     required_values = {
@@ -109,7 +109,7 @@ def _prepare_spawn_environment(
         if name in result and result[name] != required:
             msg = (
                 f"environment variable {name} conflicts with "
-                f"suppress_history=True; {corrections[name]}"
+                f"suppress_persistent_history=True; {corrections[name]}"
             )
             raise ExpectedToolError(msg)
         result[name] = required

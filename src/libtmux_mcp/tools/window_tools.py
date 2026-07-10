@@ -165,7 +165,7 @@ def split_window(
     socket_name: str | None = None,
     *,
     environment: dict[str, str] | str | None = None,
-    suppress_history: bool = False,
+    suppress_persistent_history: bool = False,
 ) -> PaneInfo:
     """Split a tmux window to create a new pane.
 
@@ -198,10 +198,11 @@ def split_window(
     environment : dict or str, optional
         Per-process environment as a mapping or JSON object string. Values do
         not modify the tmux session environment.
-    suppress_history : bool
-        For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
-        default; an explicit value overrides it. Direct Python calls default
-        to False. Startup files may override these controls.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shell. Defaults
+        to False for MCP and direct Python calls. This per-call option does not
+        inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
+        controls.
 
     Returns
     -------
@@ -210,7 +211,7 @@ def split_window(
     """
     spawn_environment = _prepare_spawn_environment(
         environment,
-        suppress_history=suppress_history,
+        suppress_persistent_history=suppress_persistent_history,
     )
     server = _get_server(socket_name=socket_name)
 

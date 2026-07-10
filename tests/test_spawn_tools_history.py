@@ -39,7 +39,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
                 "environment",
                 "socket_name",
             ),
-            ("suppress_history",),
+            ("suppress_persistent_history",),
         ),
         create_window: (
             (
@@ -51,7 +51,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
                 "direction",
                 "socket_name",
             ),
-            ("environment", "suppress_history"),
+            ("environment", "suppress_persistent_history"),
         ),
         split_window: (
             (
@@ -66,7 +66,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
                 "shell",
                 "socket_name",
             ),
-            ("environment", "suppress_history"),
+            ("environment", "suppress_persistent_history"),
         ),
         respawn_pane: (
             (
@@ -77,7 +77,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
                 "environment",
                 "socket_name",
             ),
-            ("suppress_history",),
+            ("suppress_persistent_history",),
         ),
     }
 
@@ -93,7 +93,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
             parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
             for name in keyword_only_names
         )
-        assert parameters["suppress_history"].default is False
+        assert parameters["suppress_persistent_history"].default is False
         bound = signature.bind(*([None] * len(positional_names)))
         assert tuple(bound.arguments) == positional_names
         with pytest.raises(TypeError):
@@ -115,9 +115,12 @@ def test_spawn_environment_schemas_are_client_compatible() -> None:
             "string",
             "null",
         }
-        suppress_history = tools[name].parameters["properties"]["suppress_history"]
-        assert suppress_history["type"] == "boolean"
-        assert suppress_history["default"] is False
+        suppress_persistent_history = tools[name].parameters["properties"][
+            "suppress_persistent_history"
+        ]
+        assert "suppress_history" not in tools[name].parameters["properties"]
+        assert suppress_persistent_history["type"] == "boolean"
+        assert suppress_persistent_history["default"] is False
 
 
 def _assert_value_free_spawn_conflict(call: t.Callable[[], t.Any], name: str) -> None:
@@ -129,7 +132,8 @@ def _assert_value_free_spawn_conflict(call: t.Callable[[], t.Any], name: str) ->
         call()
 
     assert str(excinfo.value) == (
-        f"environment variable {name} conflicts with suppress_history=True; "
+        f"environment variable {name} conflicts with "
+        "suppress_persistent_history=True; "
         "omit it or set it to an empty string"
     )
     assert supplied not in str(excinfo.value)
@@ -156,20 +160,20 @@ def test_spawn_validation_precedes_every_server_lookup(
     spawn_calls = (
         lambda: server_tools.create_session(
             environment=environment,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
         lambda: session_tools.create_window(
             environment=environment,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
         lambda: window_tools.split_window(
             environment=environment,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
         lambda: lifecycle.respawn_pane(
             pane_id="%1",
             environment=environment,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
     )
 
@@ -198,7 +202,7 @@ def test_spawn_conflicts_create_nothing_and_never_retry_unsuppressed(
             session_name="history_conflict_session",
             environment=environment,
             socket_name=mcp_server.socket_name,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
         "HISTFILE",
     )
@@ -211,7 +215,7 @@ def test_spawn_conflicts_create_nothing_and_never_retry_unsuppressed(
             window_name="history_conflict_window",
             socket_name=mcp_server.socket_name,
             environment=environment,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
         "HISTFILE",
     )
@@ -224,7 +228,7 @@ def test_spawn_conflicts_create_nothing_and_never_retry_unsuppressed(
             window_id=window.window_id,
             socket_name=mcp_server.socket_name,
             environment=environment,
-            suppress_history=True,
+            suppress_persistent_history=True,
         ),
         "HISTFILE",
     )
@@ -240,7 +244,7 @@ def test_spawn_conflicts_create_nothing_and_never_retry_unsuppressed(
                 pane_id=t.cast("str", pane.pane_id),
                 environment=environment,
                 socket_name=mcp_server.socket_name,
-                suppress_history=True,
+                suppress_persistent_history=True,
             ),
             "HISTFILE",
         )
@@ -250,11 +254,11 @@ def test_spawn_conflicts_create_nothing_and_never_retry_unsuppressed(
         pane.kill()
 
 
-def test_mcp_spawn_explicit_false_overrides_enabled_default(
+def test_mcp_spawn_omission_ignores_enabled_command_default(
     mcp_server: Server,
     mcp_session: Session,
 ) -> None:
-    """An explicit false override permits a caller history environment."""
+    """The command-history default never enables persistent spawn controls."""
     from libtmux_mcp._history import _configure_history_defaults
     from libtmux_mcp.tools import session_tools
 
@@ -271,46 +275,44 @@ def test_mcp_spawn_explicit_false_overrides_enabled_default(
 
     async def _exercise() -> None:
         async with Client(mcp) as client:
-            inherited = await client.call_tool(
+            omitted = await client.call_tool(
                 "create_window",
-                {**base, "window_name": "spawn_default_conflict"},
+                {**base, "window_name": "spawn_omitted"},
                 raise_on_error=False,
             )
-            assert inherited.is_error is True
-            assert inherited.content
-            error = inherited.content[0].text
-            assert error == (
-                "environment variable HISTFILE conflicts with "
-                "suppress_history=True; omit it or set it to an empty string"
-            )
-            assert supplied not in error
-            assert {window.window_id for window in mcp_session.windows} == before
+            assert omitted.is_error is False
+            assert omitted.structured_content is not None
+            assert omitted.structured_content["window_name"] == "spawn_omitted"
 
-            overridden = await client.call_tool(
+            suppressed = await client.call_tool(
                 "create_window",
                 {
                     **base,
-                    "window_name": "spawn_explicit_false",
-                    "suppress_history": False,
+                    "window_name": "spawn_explicit_true_conflict",
+                    "suppress_persistent_history": True,
                 },
                 raise_on_error=False,
             )
-            assert overridden.is_error is False
-            assert overridden.structured_content is not None
-            assert overridden.structured_content["window_name"] == (
-                "spawn_explicit_false"
+            assert suppressed.is_error is True
+            assert suppressed.content
+            error = suppressed.content[0].text
+            assert error == (
+                "environment variable HISTFILE conflicts with "
+                "suppress_persistent_history=True; "
+                "omit it or set it to an empty string"
             )
+            assert supplied not in error
 
     asyncio.run(_exercise())
     created = [
         window for window in mcp_session.windows if window.window_id not in before
     ]
     assert len(created) == 1
-    assert created[0].window_name == "spawn_explicit_false"
+    assert created[0].window_name == "spawn_omitted"
 
 
 def _spawn_history_server(enabled: bool) -> FastMCP:
-    """Build a complete server for spawn transforms and generic batches."""
+    """Build a complete server for command transforms and generic batches."""
     from libtmux_mcp._history import _configure_history_defaults
     from libtmux_mcp.tools import register_tools
 
@@ -320,11 +322,11 @@ def _spawn_history_server(enabled: bool) -> FastMCP:
     return mcp
 
 
-def test_generic_batch_spawn_uses_default_and_explicit_false_override(
+def test_generic_batch_spawn_ignores_command_default_unless_opted_in(
     mcp_server: Server,
     mcp_session: Session,
 ) -> None:
-    """Nested spawn calls retain transform defaults, errors, and inner state."""
+    """Nested spawn calls retain their explicit persistent-history option."""
     supplied = "private-nested-history-path"
     before = {window.window_id for window in mcp_session.windows}
     base = {
@@ -344,15 +346,15 @@ def test_generic_batch_spawn_uses_default_and_explicit_false_override(
                             "tool": "create_window",
                             "arguments": {
                                 **base,
-                                "window_name": "batch_spawn_default_conflict",
+                                "window_name": "batch_spawn_omitted",
                             },
                         },
                         {
                             "tool": "create_window",
                             "arguments": {
                                 **base,
-                                "window_name": "batch_spawn_explicit_false",
-                                "suppress_history": False,
+                                "window_name": "batch_spawn_explicit_true_conflict",
+                                "suppress_persistent_history": True,
                             },
                         },
                     ],
@@ -367,17 +369,16 @@ def test_generic_batch_spawn_uses_default_and_explicit_false_override(
     assert result.structured_content["succeeded"] == 1
     assert result.structured_content["failed"] == 1
     assert result.structured_content["stopped_at"] is None
-    failed, succeeded = result.structured_content["results"]
+    succeeded, failed = result.structured_content["results"]
+    assert succeeded["success"] is True
+    assert succeeded["structured_content"]["window_name"] == "batch_spawn_omitted"
     assert failed["success"] is False
     assert failed["error"] == (
-        "environment variable HISTFILE conflicts with suppress_history=True; "
+        "environment variable HISTFILE conflicts with "
+        "suppress_persistent_history=True; "
         "omit it or set it to an empty string"
     )
     assert supplied not in failed["error"]
-    assert succeeded["success"] is True
-    assert succeeded["structured_content"]["window_name"] == (
-        "batch_spawn_explicit_false"
-    )
     created = {window.window_id for window in mcp_session.windows} - before
     assert len(created) == 1
 
@@ -401,7 +402,7 @@ def test_spawn_conflict_is_absent_from_tool_results_and_logs(
                     "window_name": "spawn_log_conflict",
                     "environment": {"HISTFILE": supplied},
                     "socket_name": mcp_server.socket_name,
-                    "suppress_history": True,
+                    "suppress_persistent_history": True,
                 },
                 raise_on_error=False,
             )
@@ -412,7 +413,8 @@ def test_spawn_conflict_is_absent_from_tool_results_and_logs(
     assert result.is_error is True
     assert result.content
     assert result.content[0].text == (
-        "environment variable HISTFILE conflicts with suppress_history=True; "
+        "environment variable HISTFILE conflicts with "
+        "suppress_persistent_history=True; "
         "omit it or set it to an empty string"
     )
     assert supplied not in repr(result)
@@ -472,7 +474,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
         window_name="history_process_window",
         socket_name=mcp_server.socket_name,
         environment='{"SPAWN_SCOPE_MARKER":"window"}',
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     assert window_info.active_pane_id is not None
     window_pane = mcp_server.panes.get(
@@ -503,7 +505,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
             "SPAWN_SCOPE_MARKER": "split",
             "HISTCONTROL": "ignoredups",
         },
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     assert pane_info.pane_id is not None
     split_pane = mcp_server.panes.get(pane_id=pane_info.pane_id, default=None)
@@ -525,7 +527,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
             "SPAWN_SCOPE_MARKER": "window-branch",
             "HISTCONTROL": "ignoredups",
         },
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     assert window_branch_info.pane_id is not None
     window_branch_pane = mcp_server.panes.get(
@@ -574,7 +576,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
             shell="sh",
             environment=('{"SPAWN_SCOPE_MARKER":"respawn","HISTCONTROL":"ignoredups"}'),
             socket_name=mcp_server.socket_name,
-            suppress_history=True,
+            suppress_persistent_history=True,
         )
         _assert_pane_environment(
             respawn_target,
@@ -626,7 +628,7 @@ def test_create_session_history_environment_reaches_future_panes(
         session_name=session_name,
         environment={"SPAWN_SCOPE_MARKER": "session", "HISTCONTROL": "ignoredups"},
         socket_name=mcp_server.socket_name,
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     session = mcp_server.sessions.get(session_name=session_name, default=None)
     assert session is not None
@@ -670,7 +672,7 @@ def test_explicit_false_keeps_inherited_session_history_environment(
         session_name=session_name,
         environment={"HISTCONTROL": "ignoredups"},
         socket_name=mcp_server.socket_name,
-        suppress_history=True,
+        suppress_persistent_history=True,
     )
     session = mcp_server.sessions.get(session_name=session_name, default=None)
     assert session is not None
@@ -692,7 +694,7 @@ def test_explicit_false_keeps_inherited_session_history_environment(
             window_name="explicit_false_inherited",
             socket_name=mcp_server.socket_name,
             environment={"EXPLICIT_FALSE_MARKER": "process"},
-            suppress_history=False,
+            suppress_persistent_history=False,
         )
         assert window_info.active_pane_id is not None
         pane = mcp_server.panes.get(
@@ -733,13 +735,13 @@ def test_spawn_tools_preserve_direct_launch_strings(
             pane_id=mcp_pane.pane_id,
             shell=pane_branch_shell,
             socket_name=mcp_server.socket_name,
-            suppress_history=True,
+            suppress_persistent_history=True,
         )
         window_branch = split_window(
             window_id=mcp_pane.window.window_id,
             shell=window_branch_shell,
             socket_name=mcp_server.socket_name,
-            suppress_history=True,
+            suppress_persistent_history=True,
         )
     split_commands = [
         shlex.split(t.cast("str", record.__dict__["tmux_cmd"]))
@@ -762,7 +764,7 @@ def test_spawn_tools_preserve_direct_launch_strings(
                 pane_id=pane_branch.pane_id,
                 shell=respawn_shell,
                 socket_name=mcp_server.socket_name,
-                suppress_history=True,
+                suppress_persistent_history=True,
             )
         respawn_commands = [
             shlex.split(t.cast("str", record.__dict__["tmux_cmd"]))
