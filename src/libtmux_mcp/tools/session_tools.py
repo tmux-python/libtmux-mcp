@@ -6,6 +6,7 @@ import typing as t
 
 from libtmux.constants import WindowDirection
 
+from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -117,6 +118,9 @@ def create_window(
     attach: bool = False,
     direction: t.Literal["before", "after"] | None = None,
     socket_name: str | None = None,
+    *,
+    environment: dict[str, str] | str | None = None,
+    suppress_history: bool = False,
 ) -> WindowInfo:
     """Create a new window in a tmux session.
 
@@ -138,12 +142,22 @@ def create_window(
         Window placement direction.
     socket_name : str, optional
         tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+    environment : dict or str, optional
+        Per-process environment as a mapping or JSON object string. Values do
+        not modify the tmux session environment.
+    suppress_history : bool
+        Request best-effort shell-history suppression for the spawned shell.
+        Direct Python calls default to False.
 
     Returns
     -------
     WindowInfo
         Serialized window object.
     """
+    spawn_environment = _prepare_spawn_environment(
+        environment,
+        suppress_history=suppress_history,
+    )
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
@@ -163,6 +177,8 @@ def create_window(
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ExpectedToolError(msg)
         kwargs["direction"] = resolved
+    if spawn_environment is not None:
+        kwargs["environment"] = spawn_environment
     window = session.new_window(**kwargs)
     return _serialize_window(window)
 

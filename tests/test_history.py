@@ -106,28 +106,191 @@ def test_resolve_suppress_history_rejects_invalid_without_echoing_value() -> Non
     assert rejected not in str(excinfo.value)
 
 
-@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
-def test_history_transform_publishes_non_nullable_run_command_default(
-    enabled: bool,
-) -> None:
-    """The MCP schema publishes the resolved semantic-command default."""
+def test_history_transform_changes_exact_semantic_tool_set() -> None:
+    """Only run-command and the four spawn tools inherit one boolean default."""
     from libtmux_mcp._history import _configure_history_defaults
-    from libtmux_mcp.tools import pane_tools
+    from libtmux_mcp.tools import register_tools
 
-    mcp = FastMCP("history-schema-probe")
-    pane_tools.register(mcp)
-    _configure_history_defaults(mcp, enabled)
+    semantic_tools = {
+        "run_command",
+        "create_session",
+        "create_window",
+        "split_window",
+        "respawn_pane",
+    }
 
-    async def _list_tools() -> dict[str, t.Any]:
+    async def _schemas(enabled: bool) -> dict[str, dict[str, t.Any]]:
+        mcp = FastMCP(f"history-transform-{enabled}")
+        register_tools(mcp)
+        _configure_history_defaults(mcp, enabled)
         async with Client(mcp) as client:
-            return {tool.name: tool for tool in await client.list_tools()}
+            tools = await client.list_tools()
+        return {
+            tool.name: tool.inputSchema["properties"]["suppress_history"]
+            for tool in tools
+            if "suppress_history" in tool.inputSchema["properties"]
+        }
 
-    tools = asyncio.run(_list_tools())
-    schema = tools["run_command"].inputSchema["properties"]["suppress_history"]
+    disabled = asyncio.run(_schemas(False))
+    enabled = asyncio.run(_schemas(True))
+    changed = {
+        name
+        for name, schema in enabled.items()
+        if schema["default"] != disabled[name]["default"]
+    }
 
-    assert schema["type"] == "boolean"
-    assert schema["default"] is enabled
-    assert "anyOf" not in schema
+    assert changed == semantic_tools
+    for default, schemas in ((False, disabled), (True, enabled)):
+        for name in semantic_tools:
+            schema = schemas[name]
+            assert schema["type"] == "boolean"
+            assert schema["default"] is default
+            assert "anyOf" not in schema
+
+
+class SpawnEnvironmentFixture(t.NamedTuple):
+    """Fixture for successful spawn-environment preparation."""
+
+    test_id: str
+    environment: dict[str, str] | str | None
+    suppress_history: bool
+    expected: dict[str, str] | None
+
+
+SPAWN_ENVIRONMENT_FIXTURES = [
+    SpawnEnvironmentFixture("none_disabled", None, False, None),
+    SpawnEnvironmentFixture("empty_disabled", {}, False, {}),
+    SpawnEnvironmentFixture("dict_copied", {"FOO": "bar"}, False, {"FOO": "bar"}),
+    SpawnEnvironmentFixture("json_normalized", '{"FOO":"bar"}', False, {"FOO": "bar"}),
+    SpawnEnvironmentFixture(
+        "enabled_defaults",
+        None,
+        True,
+        {
+            "HISTFILE": "",
+            "HISTCONTROL": "ignorespace",
+            "fish_private_mode": "1",
+            "fish_history": "",
+        },
+    ),
+    SpawnEnvironmentFixture(
+        "history_control_merged",
+        {"FOO": "bar", "HISTCONTROL": "ignoredups"},
+        True,
+        {
+            "FOO": "bar",
+            "HISTFILE": "",
+            "HISTCONTROL": "ignoredups:ignorespace",
+            "fish_private_mode": "1",
+            "fish_history": "",
+        },
+    ),
+    SpawnEnvironmentFixture(
+        "history_control_ignorespace_preserved",
+        {"HISTCONTROL": "erasedups:ignorespace"},
+        True,
+        {
+            "HISTFILE": "",
+            "HISTCONTROL": "erasedups:ignorespace",
+            "fish_private_mode": "1",
+            "fish_history": "",
+        },
+    ),
+    SpawnEnvironmentFixture(
+        "history_control_ignoreboth_preserved",
+        {"HISTCONTROL": "ignoreboth"},
+        True,
+        {
+            "HISTFILE": "",
+            "HISTCONTROL": "ignoreboth",
+            "fish_private_mode": "1",
+            "fish_history": "",
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    SpawnEnvironmentFixture._fields,
+    SPAWN_ENVIRONMENT_FIXTURES,
+    ids=[fixture.test_id for fixture in SPAWN_ENVIRONMENT_FIXTURES],
+)
+def test_prepare_spawn_environment_normalizes_copies_and_merges(
+    test_id: str,
+    environment: dict[str, str] | str | None,
+    suppress_history: bool,
+    expected: dict[str, str] | None,
+) -> None:
+    """Spawn environments are normalized without modifying caller input."""
+    from libtmux_mcp._history import _prepare_spawn_environment
+
+    assert test_id
+    original = environment.copy() if isinstance(environment, dict) else environment
+    result = _prepare_spawn_environment(environment, suppress_history=suppress_history)
+
+    assert result == expected
+    if isinstance(environment, dict):
+        assert environment == original
+        if result is not None:
+            assert result is not environment
+
+
+@pytest.mark.parametrize(
+    ("name", "supplied"),
+    [
+        ("HISTFILE", "private-bash-history-path"),
+        ("fish_history", "private-fish-history-name"),
+        ("fish_private_mode", "private-fish-mode-value"),
+    ],
+)
+def test_prepare_spawn_environment_rejects_conflicts_without_values(
+    name: str,
+    supplied: str,
+) -> None:
+    """Policy conflicts identify only the variable, never its supplied value."""
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp._history import _prepare_spawn_environment
+
+    environment = {"UNCHANGED": "caller", name: supplied}
+    original = environment.copy()
+    expected = (
+        f"environment variable {name} conflicts with suppress_history=True; "
+        "omit it or use the required empty value"
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        _prepare_spawn_environment(environment, suppress_history=True)
+
+    assert str(excinfo.value) == expected
+    assert supplied not in str(excinfo.value)
+    assert environment == original
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        t.cast("t.Any", {1: "value"}),
+        t.cast("t.Any", {"NAME": 1}),
+        '{"NAME":1}',
+    ],
+    ids=["non_string_key", "non_string_value", "json_non_string_value"],
+)
+def test_prepare_spawn_environment_rejects_non_string_items(
+    environment: dict[str, str] | str,
+) -> None:
+    """Tmux environment keys and values must both be strings."""
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp._history import _prepare_spawn_environment
+
+    original = environment.copy() if isinstance(environment, dict) else environment
+    with pytest.raises(ToolError) as excinfo:
+        _prepare_spawn_environment(environment, suppress_history=False)
+
+    assert str(excinfo.value) == "environment keys and values must be strings"
+    if isinstance(environment, dict):
+        assert environment == original
 
 
 @pytest.mark.parametrize(

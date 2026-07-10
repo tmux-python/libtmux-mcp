@@ -6,6 +6,7 @@ import typing as t
 
 from libtmux.constants import PaneDirection
 
+from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -162,6 +163,9 @@ def split_window(
     start_directory: str | None = None,
     shell: str | None = None,
     socket_name: str | None = None,
+    *,
+    environment: dict[str, str] | str | None = None,
+    suppress_history: bool = False,
 ) -> PaneInfo:
     """Split a tmux window to create a new pane.
 
@@ -191,12 +195,22 @@ def split_window(
         Shell command to run in the new pane.
     socket_name : str, optional
         tmux socket name.
+    environment : dict or str, optional
+        Per-process environment as a mapping or JSON object string. Values do
+        not modify the tmux session environment.
+    suppress_history : bool
+        Request best-effort shell-history suppression for the spawned shell.
+        Direct Python calls default to False.
 
     Returns
     -------
     PaneInfo
         Serialized pane object.
     """
+    spawn_environment = _prepare_spawn_environment(
+        environment,
+        suppress_history=suppress_history,
+    )
     server = _get_server(socket_name=socket_name)
 
     pane_dir: PaneDirection | None = None
@@ -214,6 +228,7 @@ def split_window(
             size=size,
             start_directory=start_directory,
             shell=shell,
+            environment=spawn_environment,
         )
     else:
         window = _resolve_window(
@@ -228,6 +243,7 @@ def split_window(
             size=size,
             start_directory=start_directory,
             shell=shell,
+            environment=spawn_environment,
         )
     return _serialize_pane(new_pane)
 
