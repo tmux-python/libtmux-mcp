@@ -432,7 +432,8 @@ def test_run_command_describes_mcp_precedence_and_direct_python_default() -> Non
         "For MCP calls, omission uses the server's "
         "LIBTMUX_SUPPRESS_HISTORY default; an explicit value overrides it. "
         "Direct Python calls default to False. Best effort: the shell must honor "
-        "space-prefixed history suppression."
+        "space-prefixed history suppression. Suppression requires a single-line "
+        "command; multiline commands remain available when suppression is false."
     )
     parameter = inspect.signature(pane_tools.run_command).parameters["suppress_history"]
     mcp = FastMCP("run-command-description")
@@ -888,89 +889,73 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
     assert paste_calls[1] == (existing_buffer, True, False)
 
 
-def test_mcp_run_command_protects_complete_multiline_bash_history_event(
+@pytest.mark.parametrize(
+    "line_break",
+    [pytest.param("\n", id="line-feed"), pytest.param("\r", id="carriage-return")],
+)
+def test_mcp_run_command_rejects_multiline_suppression_before_tmux(
+    monkeypatch: pytest.MonkeyPatch,
+    line_break: str,
+) -> None:
+    """The enabled omitted default rejects breakouts before tmux resolution."""
+    from libtmux_mcp.tools.pane_tools import io
+
+    private_marker = "PRIVATE_MULTILINE_MARKER"
+    command = f"){line_break}printf '%s' {private_marker}{line_break}("
+
+    def _unexpected_get_server(**_kwargs: t.Any) -> t.NoReturn:
+        msg = "multiline validation must precede _get_server"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(io, "_get_server", _unexpected_get_server)
+
+    async def _exercise() -> t.Any:
+        async with Client(_history_server("1")) as client:
+            return await client.call_tool(
+                "run_command",
+                {"command": command},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_exercise())
+
+    assert result.is_error is True
+    assert result.content
+    assert result.content[0].text == (
+        "command must be a single line when suppress_history=True"
+    )
+    assert private_marker not in repr(result)
+
+
+def test_mcp_run_command_preserves_multiline_when_suppression_disabled(
     mcp_server: Server,
     mcp_pane: Pane,
     tmp_path: pathlib.Path,
 ) -> None:
-    """One grouped multiline command executes fully without disk history."""
-    histfile = tmp_path / "multiline.bash_history"
-    mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
-    retry_until(
-        lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
-        2,
-        raises=True,
+    """An explicit false keeps the existing multiline command behavior."""
+    first = "MULTILINE_CONTROL_FIRST"
+    second = "MULTILINE_CONTROL_SECOND"
+    output = tmp_path / "multiline-control.txt"
+    command = (
+        f"printf '%s\\n' {first} > {shlex.quote(str(output))}\n"
+        f"printf '%s\\n' {second} >> {shlex.quote(str(output))}"
     )
-    setup = (
-        f"HISTFILE={shlex.quote(str(histfile))}; "
-        "HISTCONTROL=ignorespace; shopt -s cmdhist; shopt -u lithist; "
-        "set -o history; history -c; history -w"
-    )
-    mcp_pane.send_keys(setup, enter=True)
-    retry_until(histfile.exists, 2, raises=True)
-
-    control_first = "MULTILINE_CONTROL_FIRST"
-    control_second = "MULTILINE_CONTROL_SECOND"
-    protected_first = "MULTILINE_PROTECTED_FIRST"
-    protected_second = "MULTILINE_PROTECTED_SECOND"
-    control_output = tmp_path / "multiline-control.txt"
-    protected_output = tmp_path / "multiline-protected.txt"
-    control_command = (
-        f"printf '%s\\n' {control_first} > {shlex.quote(str(control_output))}\n"
-        f"printf '%s\\n' {control_second} >> {shlex.quote(str(control_output))}"
-    )
-    protected_command = (
-        f"printf '%s\\n' {protected_first} > {shlex.quote(str(protected_output))}\n"
-        f"printf '%s\\n' {protected_second} >> {shlex.quote(str(protected_output))}"
-    )
-    base = {
-        "pane_id": mcp_pane.pane_id,
-        "timeout": 3.0,
-        "socket_name": mcp_server.socket_name,
-    }
 
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
-            control = await client.call_tool(
+            result = await client.call_tool(
                 "run_command",
                 {
-                    **base,
-                    "command": control_command,
+                    "command": command,
+                    "pane_id": mcp_pane.pane_id,
+                    "timeout": 3.0,
+                    "socket_name": mcp_server.socket_name,
                     "suppress_history": False,
                 },
                 raise_on_error=False,
             )
-            _assert_run_command_succeeded(control)
-            protected = await client.call_tool(
-                "run_command",
-                {**base, "command": protected_command},
-                raise_on_error=False,
-            )
-            _assert_run_command_succeeded(protected)
-            flushed = await client.call_tool(
-                "run_command",
-                {
-                    **base,
-                    "command": "history -w",
-                    "suppress_history": True,
-                },
-                raise_on_error=False,
-            )
-            _assert_run_command_succeeded(flushed)
+            _assert_run_command_succeeded(result)
 
     asyncio.run(_exercise())
-    saved_lines = histfile.read_text().splitlines()
-    control_entries = [
-        line for line in saved_lines if control_first in line or control_second in line
-    ]
 
-    assert control_output.read_text().splitlines() == [control_first, control_second]
-    assert protected_output.read_text().splitlines() == [
-        protected_first,
-        protected_second,
-    ]
-    assert len(control_entries) == 1
-    assert control_first in control_entries[0]
-    assert control_second in control_entries[0]
-    assert all(protected_first not in line for line in saved_lines)
-    assert all(protected_second not in line for line in saved_lines)
+    assert output.read_text().splitlines() == [first, second]

@@ -365,7 +365,8 @@ async def run_command(
         For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
         default; an explicit value overrides it. Direct Python calls default
         to False. Best effort: the shell must honor space-prefixed history
-        suppression.
+        suppression. Suppression requires a single-line command; multiline
+        commands remain available when suppression is false.
     socket_name : str, optional
         tmux socket name.
 
@@ -377,6 +378,9 @@ async def run_command(
     """
     if not command.strip():
         msg = "command must not be empty"
+        raise ExpectedToolError(msg)
+    if suppress_history and ("\n" in command or "\r" in command):
+        msg = "command must be a single line when suppress_history=True"
         raise ExpectedToolError(msg)
     if timeout <= 0:
         msg = "timeout must be positive"
