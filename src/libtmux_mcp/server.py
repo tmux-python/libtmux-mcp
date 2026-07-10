@@ -18,6 +18,10 @@ if t.TYPE_CHECKING:
     from libtmux.server import Server
 
 from libtmux_mcp.__about__ import __version__
+from libtmux_mcp._history import (
+    _configure_history_defaults,
+    _resolve_suppress_history,
+)
 from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
@@ -106,17 +110,16 @@ _INSTR_WAIT_NOT_POLL = (
 #: comment above for when to add another ``_GAP`` segment vs. push the
 #: explanation into a tool description.
 _INSTR_HOOKS_GAP = (
-    "HOOKS ARE READ-ONLY: inspect via show_hooks / show_hook. "
-    "Write-hooks survive process death; keep them in your tmux config file, "
-    "not a transient MCP session."
+    "HOOKS ARE READ-ONLY: inspect via show_hooks/show_hook. "
+    "Write hooks survive process death; keep them in your tmux config file."
 )
 
 #: Gap-explainer: ``list_buffers`` is intentionally absent because tmux
 #: buffers can include OS clipboard history. See module comment above.
 _INSTR_BUFFERS_GAP = (
     "BUFFERS: load_buffer stages, paste_buffer delivers, delete_buffer "
-    "removes. Track via the BufferRef returned from load_buffer — no "
-    "list_buffers tool because tmux buffers may include OS clipboard history."
+    "removes via returned BufferRef. No list_buffers: tmux buffers may include "
+    "clipboard history."
 )
 
 _BASE_INSTRUCTIONS = "\n\n".join(
@@ -131,8 +134,13 @@ _BASE_INSTRUCTIONS = "\n\n".join(
     )
 )
 
+_INSTRUCTIONS_MAX_BYTES = 2048
 
-def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
+
+def _build_instructions(
+    safety_level: str = TAG_MUTATING,
+    suppress_history: bool = False,
+) -> str:
     """Build server instructions with agent context and safety level.
 
     When the MCP server process runs inside a tmux pane, ``TMUX_PANE`` and
@@ -143,6 +151,8 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     ----------
     safety_level : str
         Active safety tier (readonly, mutating, or destructive).
+    suppress_history : bool
+        Effective MCP default for semantic shell-command suppression.
 
     Returns
     -------
@@ -157,6 +167,11 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
         "(values: readonly, mutating, destructive). "
         "Set LIBTMUX_SAFETY; off-tier tools are hidden."
     )
+    history_default = "true" if suppress_history else "false"
+    parts.append(
+        f"\n\nHistory: run_command suppression defaults {history_default}. "
+        "Raw send_keys/send_keys_batch/paste tools never inherit."
+    )
 
     # Tier-conditioned discoverability hint. False-positive activation is
     # cheap on readonly (worst case: an extra list_panes call) and
@@ -165,11 +180,18 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
     # separate LIBTMUX_DISCOVERABILITY knob.
     if safety_level == TAG_READONLY:
         parts.append(
-            "\n\nReadonly mode: if uncertain, prefer "
-            "one read-only probe (snapshot_pane, list_panes, search_panes)."
+            "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
         )
 
-    # Agent tmux context
+    instructions = "".join(parts)
+    if len(instructions.encode("utf-8")) > _INSTRUCTIONS_MAX_BYTES:
+        msg = "required server instructions exceed the 2048-byte MCP budget"
+        raise RuntimeError(msg)
+
+    # Agent tmux context is optional. Prefer the complete form, then discard
+    # the untrusted socket name and explanatory workflow before omitting the
+    # context entirely. Never byte-slice text because UTF-8 characters may be
+    # split across bytes.
     tmux_pane = os.environ.get("TMUX_PANE")
     if tmux_pane:
         # Parse TMUX env: "/tmp/tmux-1000/default,48188,10"
@@ -178,16 +200,25 @@ def _build_instructions(safety_level: str = TAG_MUTATING) -> str:
         socket_path = env_parts[0] if env_parts else None
         socket_name = socket_path.rsplit("/", 1)[-1] if socket_path else None
 
-        context = f"\n\nAgent context: this MCP runs inside tmux pane {tmux_pane}"
+        context_start = f"\n\nAgent context: this MCP runs inside tmux pane {tmux_pane}"
+        context = context_start
         if socket_name:
             context += f" (socket {socket_name})"
         context += (
             ". Tool results mark is_caller=true; filter list_panes for it to answer "
             "'which pane am I in?' (no whoami tool)."
         )
-        parts.append(context)
+        pane_context = (
+            f"{context_start}. Tool results mark is_caller=true; filter list_panes "
+            "for it to answer 'which pane am I in?' (no whoami tool)."
+        )
+        minimal_context = f"\n\nAgent context: tmux pane {tmux_pane}."
+        for candidate in (context, pane_context, minimal_context):
+            combined = instructions + candidate
+            if len(combined.encode("utf-8")) <= _INSTRUCTIONS_MAX_BYTES:
+                return combined
 
-    return "".join(parts)
+    return instructions
 
 
 def _resolve_safety_level(value: str | None) -> str:
@@ -205,6 +236,9 @@ def _resolve_safety_level(value: str | None) -> str:
 
 
 _safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
+_suppress_history = _resolve_suppress_history(
+    os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
+)
 
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output is terminal scrollback benefit from this backstop;
@@ -279,7 +313,10 @@ def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
 mcp = FastMCP(
     name="tmux",
     version=__version__,
-    instructions=_build_instructions(safety_level=_safety_level),
+    instructions=_build_instructions(
+        safety_level=_safety_level,
+        suppress_history=_suppress_history,
+    ),
     website_url="https://libtmux-mcp.git-pull.com/",
     lifespan=_lifespan,
     # Middleware runs outermost-first. Order rationale:
@@ -340,6 +377,7 @@ def _register_all() -> None:
     from libtmux_mcp.tools import register_tools
 
     register_tools(mcp)
+    _configure_history_defaults(mcp, _suppress_history)
     register_resources(mcp)
     register_prompts(mcp)
     _mcp_registered = True
