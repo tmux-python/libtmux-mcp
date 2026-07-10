@@ -227,6 +227,25 @@ def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
     assert "libtmux, FastMCP, shells, or MCP clients" in text
     assert "A JSON string is redacted as one scalar digest" in text
     assert "dict-shaped sensitive key `environment`" not in text
+    process_visibility = next(
+        line
+        for line in text.splitlines()
+        if line.startswith("- **process visibility:**")
+    )
+    for tool in (
+        "create-session",
+        "create-window",
+        "split-window",
+        "respawn-pane",
+    ):
+        assert f"{{toolref}}`{tool}`" in process_visibility
+    for boundary in (
+        "tmux client argv",
+        "child process environment",
+        "tmux session state",
+        "MCP audit redaction",
+    ):
+        assert boundary in process_visibility
 
 
 def test_respawn_page_distinguishes_environment_audit_shapes(

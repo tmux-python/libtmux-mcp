@@ -123,6 +123,35 @@ def test_spawn_environment_schemas_are_client_compatible() -> None:
         assert suppress_persistent_history["default"] is False
 
 
+def test_process_scoped_spawn_environment_schemas_disclose_visibility() -> None:
+    """Process-scoped tools disclose environment observation surfaces."""
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP("spawn-environment-disclosure")
+    register_tools(mcp)
+
+    async def _list_tools() -> dict[str, t.Any]:
+        async with Client(mcp) as client:
+            return {tool.name: tool for tool in await client.list_tools()}
+
+    tools = asyncio.run(_list_tools())
+
+    for name in ("create_window", "split_window"):
+        description = tools[name].inputSchema["properties"]["environment"][
+            "description"
+        ]
+        for fragment in (
+            "-e",
+            "tmux client",
+            "child environment",
+            "host process inspection",
+            "MCP audit redaction",
+            "credential references",
+            "not literal credentials",
+        ):
+            assert fragment in description
+
+
 def _assert_value_free_spawn_conflict(call: t.Callable[[], t.Any], name: str) -> None:
     """Assert one spawn call rejects a policy conflict without its value."""
     from fastmcp.exceptions import ToolError

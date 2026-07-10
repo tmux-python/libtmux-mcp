@@ -197,7 +197,11 @@ def split_window(
         tmux socket name.
     environment : dict or str, optional
         Per-process environment as a mapping or JSON object string. Values do
-        not modify the tmux session environment.
+        not modify the tmux session environment. Each item becomes a tmux
+        ``-e`` launch option. Values may be visible to host process inspection
+        in the tmux client argv during launch and in the child environment
+        afterward; MCP audit redaction does not hide either surface. Pass
+        credential references, not literal credentials.
     suppress_persistent_history : bool
         Whether to suppress persistent history for the spawned shell. Defaults
         to False for MCP and direct Python calls. This per-call option does not
