@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 
 import pytest
@@ -75,8 +76,6 @@ def test_run_and_wait_does_not_render_manual_channel_recipe() -> None:
 
 def test_run_and_wait_handles_quoted_commands() -> None:
     """Single quotes in the command don't corrupt the rendered call."""
-    import ast
-
     from libtmux_mcp.prompts.recipes import run_and_wait
 
     text = run_and_wait(command="python -c 'print(1)'", pane_id="%1")
@@ -88,6 +87,31 @@ def test_run_and_wait_handles_quoted_commands() -> None:
     parsed = ast.literal_eval(payload)
     assert isinstance(parsed, str)
     assert "python -c 'print(1)'" in parsed
+    assert "suppress_history=" not in text
+
+
+@pytest.mark.parametrize(
+    ("command", "suppression_disabled"),
+    [
+        pytest.param("printf first\nprintf second", True, id="line-feed"),
+        pytest.param("printf first\rprintf second", True, id="carriage-return"),
+        pytest.param(r"printf first\nprintf second", False, id="escaped-line-feed"),
+    ],
+)
+def test_run_and_wait_disables_suppression_for_multiline_commands(
+    command: str,
+    suppression_disabled: bool,
+) -> None:
+    """Multiline recipes remain executable and disclose history behavior."""
+    from libtmux_mcp.prompts.recipes import run_and_wait
+
+    text = run_and_wait(command=command, pane_id="%1")
+
+    sample = text.split("```python\n", 1)[1].split("\n```", 1)[0]
+    ast.parse(sample)
+    assert f"command={command!r}," in text
+    assert ("suppress_history=False," in text) is suppression_disabled
+    assert ("may be recorded by the shell" in text) is suppression_disabled
 
 
 def test_interrupt_gracefully_does_not_escalate() -> None:
