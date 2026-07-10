@@ -10,12 +10,9 @@ result with exit status, timeout state, and captured pane output.
 {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` for TUIs, key
 names, and partial commands.
 
-**Side effects:** Sends a command to the pane's interactive shell. The
-command may read or write files, start processes, or access the network
-depending on what the shell command does. Each command runs in a subshell,
-so directory or environment changes do not persist across calls.
-Set `suppress_history=true` for secret-bearing commands on shells that
-honor leading-space history suppression.
+**Side effects:** Sends a command to the pane's interactive shell. The command may read or write files, start processes, or access the network depending on what the shell command does. Each command runs in a subshell, so directory or environment changes do not persist across calls.
+
+For MCP calls, the {ref}`configuration <configuration>` setting {envvar}`LIBTMUX_SUPPRESS_HISTORY` supplies the value when this argument is omitted, and an explicit `suppress_history` value wins. Direct Python calls default to `False`. Suppression is best effort: {tooliconl}`run-command` prefixes the complete grouped history event with one space, but the existing shell must be configured to ignore space-prefixed commands. An explicit `false` skips the prefix; it does not change or undo that shell's history environment or startup configuration. Do not use history suppression as secret transport. See {ref}`history-hygiene` for shell behavior and {ref}`safety` before handling credentials.
 
 **Example:**
 

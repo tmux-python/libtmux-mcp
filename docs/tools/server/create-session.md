@@ -11,6 +11,10 @@ container — create one before creating windows or panes.
 
 **Side effects:** Creates a new tmux session with one window and one pane.
 
+For MCP calls, an omitted `suppress_history` follows the startup default in {ref}`configuration`, and an explicit `true` or `false` wins. Direct Python calls default to `False`. When suppression is effective, {tooliconl}`create-session` copies and merges supported shell-history controls into the tmux session environment, so they reach the initial pane and future panes in that session. An explicit `false` prevents new controls but does not remove compatible values already supplied in `environment`. Shell startup files can override the controls, and suppression does not remove terminal output or other traces; see {ref}`history-hygiene` and {ref}`safety`.
+
+The history policy only copies and merges environment values; it does not rewrite command text or tmux launch arguments. If you also pass `environment`, any history-control values must agree with the suppression policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression.
+
 **Example:**
 
 ```json

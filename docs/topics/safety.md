@@ -98,8 +98,8 @@ Mitigations:
 
 Mitigations:
 
-- The audit log redacts the `value` argument to a `{len, sha256_prefix}` digest so log files don't leak the secrets agents set, but operators should still treat the tool as high-privilege.
-- If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child.
+- The server audit record replaces the `value` argument with a `{len, sha256_prefix}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
+- If only a single command needs a non-sensitive env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child. For credentials, pass a reference that the child resolves instead of a literal value through tmux.
 
 ### Respawning panes
 
@@ -116,7 +116,20 @@ Mitigations:
 
 ### Raw pane input
 
-These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in logs.
+These can execute anything the pane's shell accepts. There is no payload validation. The server audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in that audit record.
+
+### History suppression is not secret transport
+
+Best-effort history suppression asks a shell not to persist selected commands in its disk history. It does not hide the command from other observation surfaces:
+
+- **pane echo and scrollback:** the terminal can display input, tmux can retain it in pane history, and an attached terminal can keep its own scrollback.
+- **capture tools and piping:** {tooliconl}`capture-pane`, {tooliconl}`capture-since`, {tooliconl}`snapshot-pane`, {tooliconl}`search-panes`, and {tooliconl}`pipe-pane` can return or route displayed and retained text.
+- **hooks:** configured tmux hooks, including state visible through {tooliconl}`show-hooks`, and shell instrumentation can observe process or pane activity independently of shell history.
+- **process visibility:** command arguments, launch strings, and environment values may be visible to host process inspection while a process starts or runs.
+- **MCP client transcripts:** clients can retain the original request and response outside the server's control.
+- **logs:** `libtmux_mcp.audit` records redacted arguments and whether the call succeeded or raised; it does not contain tool return values. Redaction applies only to these audit records and does not rewrite separate records emitted by libtmux, FastMCP, shells, or MCP clients. libtmux DEBUG or error records may contain shell-joined tmux arguments, while MCP client request logs and application logs remain outside the server's guarantee.
+
+Prefer credential references that a process resolves from a secret manager, scoped file descriptor, or preconfigured host lookup. Avoid literal credentials in `command`, raw `keys` or `text`, `shell`, and `environment` arguments; history suppression cannot retract a value after another surface records it.
 
 ## Audit log
 

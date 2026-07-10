@@ -74,13 +74,25 @@ Pane IDs like `%0`, `%5`, `%12` are unique across all sessions and windows withi
 
 However, they reset when the tmux **server** restarts. Do not cache pane IDs across server restarts. After killing and recreating a session, re-discover pane IDs with {tooliconl}`list-panes`.
 
-## `suppress_history` requires shell support
+(history-hygiene)=
 
-The `suppress_history` parameter on {tooliconl}`send-keys` and
-{tooliconl}`run-command` prepends a space before the command, which prevents it
-from being saved in shell history. This only works if the shell's `HISTCONTROL`
-variable includes `ignorespace` (the default for bash, but not universal across
-all shells).
+## Shell-history suppression is best effort
+
+The `suppress_history` argument reduces one history-persistence path; it does not make terminal input secret. {tooliconl}`run-command` prepends one ASCII space to its complete grouped history event. For [Bash 5.3](https://git.savannah.gnu.org/gitweb/?p=bash.git;a=blob;f=doc/bashref.texi;hb=b8c60bc), the event is skipped only when `HISTCONTROL` contains `ignorespace` or `ignoreboth`. `ignorespace` is not a Bash default, although system or user configuration may enable it.
+
+[Zsh 5.9](https://github.com/zsh-users/zsh/blob/zsh-5.9/Doc/Zsh/options.yo) requires `HIST_IGNORE_SPACE` for the same prefix convention, and an ignored event can linger in internal history until the next event. [Fish 4.8](https://github.com/fish-shell/fish-shell/blob/4.8.0/doc_src/interactive.rst) normally keeps a leading-space command off disk but leaves it recallable until the next command. A custom [`fish_should_add_to_history`](https://github.com/fish-shell/fish-shell/blob/4.8.0/doc_src/cmds/fish_should_add_to_history.rst) function takes over that decision and can store leading-space commands, while [bracketed paste handling](https://github.com/fish-shell/fish-shell/blob/4.8.0/CHANGELOG.rst) can strip leading spaces from pasted text. Do not treat the prefix convention as protection for paste or multiline input.
+
+The startup setting {envvar}`LIBTMUX_SUPPRESS_HISTORY` also supplies the omitted default for {toolref}`create-session`, {toolref}`create-window`, {toolref}`split-window`, and {toolref}`respawn-pane`. Those spawn tools copy and merge an empty `HISTFILE`, Bash's `HISTCONTROL`, and private-history variables into the new process environment. The result is deliberately described as best effort:
+
+| Shell | Spawn controls | Remaining caveat |
+|-------|----------------|------------------|
+| Bash | Empty `HISTFILE`; add `ignorespace` unless `ignoreboth` is already present | The interactive process can retain in-memory history. |
+| Zsh | Empty `HISTFILE` | The interactive process can retain in-memory history. |
+| Fish | Empty `fish_history`; non-empty `fish_private_mode` | The interactive process can retain in-memory history. |
+
+Startup files can override any of these environment values after the process begins, so the shell can resume writing history to disk. An explicit `suppress_history=false` prevents the tool from adding controls, but it cannot erase controls already inherited from a tmux session, parent environment, or startup file.
+
+{tooliconl}`send-keys` and {tooliconl}`send-keys-batch` do not inherit `LIBTMUX_SUPPRESS_HISTORY`; their `suppress_history` values remain explicit and default to `false`. Enabling it adds one leading space, so do not use it for control keys such as `C-c`, TUI input, or partial text unless that byte is intentional. In a batch, choose suppression separately for each operation. Paste tools have no suppression argument: {toolref}`paste-text` and {toolref}`paste-buffer` add no history prefix, but the active program can still interpret the paste or its whitespace. See {ref}`safety` for pane output, capture, process, transcript, hook, and log surfaces that remain visible.
 
 ## Gemini CLI injects `wait_for_previous` into tool arguments
 

@@ -8,6 +8,10 @@ window.
 
 **Side effects:** Creates a new pane by splitting an existing one.
 
+For MCP calls, an omitted `suppress_history` follows the startup default in {ref}`configuration`, and an explicit `true` or `false` wins. Direct Python calls default to `False`. When suppression is effective, {tooliconl}`split-window` adds an environment that applies to only the spawned process; it does not change the tmux session environment, and later panes do not inherit it. An explicit `false` prevents new controls but does not remove controls inherited from the session environment. Shell startup files can override the controls; see {ref}`history-hygiene` and {ref}`safety`.
+
+The history policy only copies and merges environment values; it does not rewrite command text. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the suppression policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression.
+
 **Example:**
 
 ```json
