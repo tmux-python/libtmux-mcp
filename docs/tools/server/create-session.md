@@ -11,9 +11,11 @@ container — create one before creating windows or panes.
 
 **Side effects:** Creates a new tmux session with one window and one pane.
 
-For MCP calls, an omitted `suppress_history` follows the startup default in {ref}`configuration`, and an explicit `true` or `false` wins. Direct Python calls default to `False`. When suppression is effective, {tooliconl}`create-session` copies and merges supported shell-history controls into the tmux session environment, so they reach the initial pane and future panes in that session. An explicit `false` prevents new controls but does not remove compatible values already supplied in `environment`. Shell startup files can override the controls, and suppression does not remove terminal output or other traces; see {ref}`history-hygiene` and {ref}`safety`.
+`suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
-The history policy only copies and merges environment values; it does not rewrite command text or tmux launch arguments. If you also pass `environment`, any history-control values must agree with the suppression policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression.
+Set it to `true` and {tooliconl}`create-session` copies and merges best-effort no-disk history controls into the tmux session environment. They reach the initial pane and future panes in that session. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
+
+The history policy does not rewrite command text or tmux launch arguments. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
 
 **Example:**
 

@@ -120,7 +120,7 @@ These can execute anything the pane's shell accepts. There is no payload validat
 
 ### History suppression is not secret transport
 
-Best-effort history suppression asks a shell not to persist selected commands in its disk history. It does not hide the command from other observation surfaces:
+`suppress_history` on {tooliconl}`run-command` asks the current shell not to persist one space-prefixed command event. `suppress_persistent_history=true` on the four spawn tools adds best-effort no-disk controls to a new environment. Shell behavior and startup files can defeat either request. History suppression does not isolate the process, does not clear in-memory history or scrollback, and does not hide the command from other observation surfaces:
 
 - **pane echo and scrollback:** the terminal can display input, tmux can retain it in pane history, and an attached terminal can keep its own scrollback.
 - **capture tools and piping:** {tooliconl}`capture-pane`, {tooliconl}`capture-since`, {tooliconl}`snapshot-pane`, {tooliconl}`search-panes`, and {tooliconl}`pipe-pane` can return or route displayed and retained text.

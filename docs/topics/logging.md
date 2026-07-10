@@ -59,6 +59,10 @@ their log pane (e.g. Claude Desktop's "MCP server logs" panel, or
 server name (``libtmux-mcp``), level, and the log message — but not
 the Python logger name, which the protocol doesn't model.
 
+## History controls stay observable
+
+`suppress_history` and `suppress_persistent_history` affect shell-history behavior only. They do not disable audit logging and do not clear pane echo or scrollback. The audit logger still summarizes the call's arguments and outcome, other library or application loggers keep their own behavior, and an MCP client can still retain the original request and response. See {ref}`safety` for every observation boundary that remains outside history suppression.
+
 ```{tip}
 If a tool call has no user-visible error or side effect, the ``libtmux_mcp.audit`` log shows the invocation and whether it returned or raised, not the tool's return value. Use the MCP response and current tmux state to determine what the tool returned or changed.
 ```

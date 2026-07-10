@@ -19,9 +19,11 @@ the layout: `respawn-pane` preserves the pane in place.
 starts a new one. **The `pane_id` is preserved** — that's the whole
 point of the tool. `pane_pid` updates to the new process.
 
-For MCP calls, an omitted `suppress_history` follows the startup default in {ref}`configuration`, and an explicit `true` or `false` wins. Direct Python calls default to `False`. When suppression is effective, {tooliconl}`respawn-pane` adds an environment that applies to only the spawned process; it does not change the tmux session environment or affect later panes. An explicit `false` prevents new controls but does not remove controls inherited by the pane process. Shell startup files can override the controls; see {ref}`history-hygiene` and {ref}`safety`.
+`suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
-The history policy only copies and merges environment values; it does not rewrite command text. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the suppression policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression.
+Set it to `true` and {tooliconl}`respawn-pane` copies and merges best-effort no-disk history controls for only the spawned process. It does not change the tmux session environment or affect later panes. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
+
+The history policy does not rewrite command text. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
 
 **Tip:** Call {tooliconl}`get-pane-info` first if you need to capture
 `pane_current_command` before respawn — the new process loses its argv.

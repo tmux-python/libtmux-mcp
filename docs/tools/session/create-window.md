@@ -7,9 +7,11 @@
 
 **Side effects:** Creates a new window. Attaches to it if `attach` is true.
 
-For MCP calls, an omitted `suppress_history` follows the startup default in {ref}`configuration`, and an explicit `true` or `false` wins. Direct Python calls default to `False`. When suppression is effective, {tooliconl}`create-window` adds an environment that applies to only the spawned process; it does not change the tmux session environment, and future windows or panes do not inherit it. An explicit `false` prevents new controls but does not remove controls inherited from the session environment. Shell startup files can override the controls; see {ref}`history-hygiene` and {ref}`safety`.
+`suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
-The history policy only copies and merges environment values; it does not rewrite command text or tmux launch arguments. If you also pass `environment`, any history-control values must agree with the suppression policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression.
+Set it to `true` and {tooliconl}`create-window` copies and merges best-effort no-disk history controls for only the spawned process. It does not change the tmux session environment, so future windows and panes do not receive the controls from this call. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
+
+The history policy does not rewrite command text or tmux launch arguments. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
 
 **Example:**
 

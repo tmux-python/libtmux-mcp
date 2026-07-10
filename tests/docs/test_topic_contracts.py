@@ -48,25 +48,42 @@ def test_topic_docs_do_not_overclaim_runtime_features(
     assert forbidden_text not in text
 
 
-def test_configuration_documents_history_default_precedence_and_restart(
+def test_configuration_documents_command_history_default_and_restart(
     docs_dir: pathlib.Path,
 ) -> None:
-    """History configuration names its scope, precedence, and lifecycle."""
+    """The startup setting controls only omitted MCP run-command arguments."""
     text = (docs_dir / "configuration.md").read_text(encoding="utf-8")
 
     assert "```{envvar} LIBTMUX_SUPPRESS_HISTORY" in text
-    assert "**Default:** `0`" in text
-    assert "Unset and `0` disable suppression; `1` enables it" in text
+    assert "**Default:** `1` (enabled)" in text
+    assert "Unset and `1` enable suppression; `0` disables it" in text
     assert "Any other value fails server startup" in text
     assert "LIBTMUX_SUPPRESS_HISTORY must be unset, '0', or '1'" in text
+    assert (
+        "applies only when an MCP caller omits `suppress_history` from "
+        "{tooliconl}`run-command`"
+    ) in text
     assert "explicit `suppress_history` value wins" in text
-    assert "restart the MCP server" in text
     assert "prefixes one space" in text
-    assert "copies and merges" in text
-    assert "does not remove controls that the target process already inherits" in text
+    assert "set `suppress_history=false` for intentional multiline input" in text
+    assert "Direct Python calls default to `False`" in text
+    assert "Restart the MCP server only after changing this startup setting" in text
+
+
+def test_configuration_separates_spawn_persistent_history_control(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Spawn history controls stay explicit and independent of startup."""
+    text = (docs_dir / "configuration.md").read_text(encoding="utf-8")
+
+    assert "`suppress_persistent_history`" in text
+    assert "defaults to `false` for MCP and direct Python calls" in text
+    assert "never inherits this startup setting" in text
+    assert "Setting it to `true` copies and merges" in text
+    assert "Leaving it `false` adds no history controls" in text
+    assert "cannot remove inherited, session, or startup-file controls" in text
     assert "without including the conflicting value" in text
     for tool in (
-        "run-command",
         "create-session",
         "create-window",
         "split-window",
@@ -92,8 +109,14 @@ def test_history_gotcha_documents_shell_limits_and_raw_input_boundary(
     assert "fish_should_add_to_history" in text
     assert "bracketed paste" in text
     assert "recallable until the next command" in text
+    assert "enabled by default for omitted MCP calls" in text
+    assert "`suppress_persistent_history=true`" in text
+    assert "defaults to `false`" in text
+    assert "initial pane and future panes in that session" in text
+    assert "only the process that each call starts" in text
+    assert "cannot remove inherited, session, or startup-file controls" in text
     assert "{tooliconl}`send-keys-batch`" in text
-    assert "do not inherit `LIBTMUX_SUPPRESS_HISTORY`" in text
+    assert "do not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`" in text
     assert "control keys such as `C-c`, TUI input, or partial text" in text
     assert "Paste tools have no suppression argument" in text
     assert "github.com/tianon/mirror-bash/blob/bash-5.3" in text
@@ -134,12 +157,18 @@ def test_spawn_tool_pages_document_history_environment_scope(
     """Each spawn page says how far its history environment propagates."""
     text = (docs_dir / relative_path).read_text(encoding="utf-8")
 
-    assert "`suppress_history`" in text
+    assert "`suppress_persistent_history`" in text
     assert required_scope in text
-    assert "startup files" in text
-    assert "Direct Python calls default to `False`" in text
+    assert "defaults to `false` for MCP and direct Python calls" in text
+    assert "does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`" in text
+    assert "Leave it `false` to add no history controls" in text
+    assert "cannot remove inherited, session, or startup-file controls" in text
+    assert "in-memory history" in text
+    assert "startup file can override" in text
     assert "does not rewrite command text" in text
     assert f"{{tooliconl}}`{tool_slug}`" in text
+    assert "`suppress_history`" not in text
+    assert "follows the startup default" not in text
 
 
 def test_run_command_page_documents_effective_history_policy(
@@ -148,9 +177,12 @@ def test_run_command_page_documents_effective_history_policy(
     """The semantic command page distinguishes startup and explicit policy."""
     text = (docs_dir / "tools" / "pane" / "run-command.md").read_text(encoding="utf-8")
 
-    assert "`LIBTMUX_SUPPRESS_HISTORY`" in text
+    assert "{envvar}`LIBTMUX_SUPPRESS_HISTORY`" in text
+    assert "enabled by default" in text
+    assert "only omitted MCP `suppress_history` arguments" in text
     assert "explicit `suppress_history` value wins" in text
     assert "Direct Python calls default to `False`" in text
+    assert "`suppress_history=false` permits intentional multiline input" in text
     assert "existing shell" in text
     assert "best effort" in text
 
@@ -173,6 +205,10 @@ def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
         assert surface in text
     assert "credential references" in text
     assert "literal credentials" in text
+    assert "`suppress_history`" in text
+    assert "`suppress_persistent_history=true`" in text
+    assert "does not isolate the process" in text
+    assert "does not clear in-memory history or scrollback" in text
     assert "{tooliconl}`pipe-pane`" in text
     assert "attached terminal" in text
     assert "application logs" in text
@@ -205,6 +241,10 @@ def test_logging_docs_describe_audit_outcomes_without_return_values(
         "the ``libtmux_mcp.audit`` log shows the invocation and whether it "
         "returned or raised, not the tool's return value."
     ) in text
+    assert "`suppress_history` and `suppress_persistent_history`" in text
+    assert "do not disable audit logging" in text
+    assert "do not clear pane echo or scrollback" in text
+    assert "MCP client can still retain the original request and response" in text
 
 
 def test_unreleased_changelog_documents_history_suppression(
@@ -227,7 +267,11 @@ def test_unreleased_changelog_documents_history_suppression(
     assert "**Best-effort shell-history suppression**" in unreleased
     assert "{tooliconl}`run-command`" in unreleased
     assert "{tooliconl}`create-session`" in unreleased
+    assert "{tooliconl}`create-window`" in unreleased
+    assert "{tooliconl}`split-window`" in unreleased
+    assert "{tooliconl}`respawn-pane`" in unreleased
     assert "{envvar}`LIBTMUX_SUPPRESS_HISTORY`" in unreleased
+    assert "`suppress_persistent_history=false`" in unreleased
     assert "{toolref}`send-keys-batch`" in unreleased
     assert "{toolref}`paste-text`" in unreleased
     assert "{ref}`configuration`" in unreleased
