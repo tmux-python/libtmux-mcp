@@ -12,7 +12,7 @@ window.
 
 Set it to `true` and {tooliconl}`split-window` copies and merges best-effort no-disk history controls for only the spawned process. It does not change the tmux session environment, so later panes do not receive the controls from this call. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
 
-The history policy does not rewrite command text. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
+When you enable it, tmux environment arguments are added, but the spawned process command text is not prefixed or rewritten. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
 
 **Example:**
 

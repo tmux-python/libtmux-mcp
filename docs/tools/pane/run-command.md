@@ -43,5 +43,9 @@ Response:
 }
 ```
 
+```{note}
+The generated parameter table below reflects the direct Python signature, so it shows `suppress_history=False`. MCP `tools/list` advertises the effective suppression default instead: `true` unless {envvar}`LIBTMUX_SUPPRESS_HISTORY` is `0`. An MCP call that omits the argument uses that advertised default.
+```
+
 ```{fastmcp-tool-input} pane_tools.run_command
 ```

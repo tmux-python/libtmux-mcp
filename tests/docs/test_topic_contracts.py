@@ -165,10 +165,12 @@ def test_spawn_tool_pages_document_history_environment_scope(
     assert "cannot remove inherited, session, or startup-file controls" in text
     assert "in-memory history" in text
     assert "startup file can override" in text
-    assert "does not rewrite command text" in text
+    assert "tmux environment arguments are added" in text
+    assert "spawned process command text is not prefixed or rewritten" in text
     assert f"{{tooliconl}}`{tool_slug}`" in text
     assert "`suppress_history`" not in text
     assert "follows the startup default" not in text
+    assert "does not rewrite command text or tmux launch arguments" not in text
 
 
 def test_run_command_page_documents_effective_history_policy(
@@ -185,6 +187,12 @@ def test_run_command_page_documents_effective_history_policy(
     assert "`suppress_history=false` permits intentional multiline input" in text
     assert "existing shell" in text
     assert "best effort" in text
+    assert (
+        "generated parameter table below reflects the direct Python signature" in text
+    )
+    assert "`suppress_history=False`" in text
+    assert "MCP `tools/list` advertises the effective suppression default" in text
+    assert "`true` unless {envvar}`LIBTMUX_SUPPRESS_HISTORY` is `0`" in text
 
 
 def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
@@ -264,6 +272,14 @@ def test_unreleased_changelog_documents_history_suppression(
     )
     unreleased = "\n".join(after_placeholder_lines[:next_release_index])
 
+    breaking_index = unreleased.index("### Breaking changes")
+    whats_new_index = unreleased.index("### What's new")
+
+    assert breaking_index < whats_new_index
+    assert "**MCP command-history suppression defaults on**" in unreleased
+    assert "MCP calls that omit `suppress_history`" in unreleased
+    assert "pass `suppress_history=false` for that call" in unreleased
+    assert "set {envvar}`LIBTMUX_SUPPRESS_HISTORY` to `0`" in unreleased
     assert "**Best-effort shell-history suppression**" in unreleased
     assert "{tooliconl}`run-command`" in unreleased
     assert "{tooliconl}`create-session`" in unreleased

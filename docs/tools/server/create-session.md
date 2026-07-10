@@ -15,7 +15,7 @@ container — create one before creating windows or panes.
 
 Set it to `true` and {tooliconl}`create-session` copies and merges best-effort no-disk history controls into the tmux session environment. They reach the initial pane and future panes in that session. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
 
-The history policy does not rewrite command text or tmux launch arguments. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
+When you enable it, tmux environment arguments are added, but the spawned process command text is not prefixed or rewritten. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
 
 **Example:**
 
