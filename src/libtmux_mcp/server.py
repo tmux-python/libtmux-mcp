@@ -169,8 +169,8 @@ def _build_instructions(
     )
     history_default = "true" if suppress_history else "false"
     parts.append(
-        f"\n\nHistory: run_command suppression defaults {history_default}. "
-        "Raw send_keys/send_keys_batch/paste tools never inherit."
+        f"\n\nsuppress_history={history_default}: run_command/spawn inherit; "
+        "raw send/batch/paste do not."
     )
 
     # Tier-conditioned discoverability hint. False-positive activation is

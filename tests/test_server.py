@@ -414,8 +414,8 @@ def test_build_instructions_documents_semantic_history_default_and_raw_boundary(
     instructions = _build_instructions(suppress_history=suppress_history)
 
     assert (
-        f"History: run_command suppression defaults {expected_default}. "
-        "Raw send_keys/send_keys_batch/paste tools never inherit."
+        f"suppress_history={expected_default}: run_command/spawn inherit; "
+        "raw send/batch/paste do not."
     ) in instructions
 
 
@@ -505,8 +505,7 @@ def test_instruction_budget_drops_oversized_socket_before_required_text(
     assert len(instructions.encode("utf-8")) <= 2048
     assert _BASE_INSTRUCTIONS in instructions
     assert (
-        "History: run_command suppression defaults true. "
-        "Raw send_keys/send_keys_batch/paste tools never inherit."
+        "suppress_history=true: run_command/spawn inherit; raw send/batch/paste do not."
     ) in instructions
     assert "Agent context" in instructions
     assert "%42" in instructions
@@ -529,8 +528,8 @@ def test_instruction_budget_can_drop_all_oversized_optional_context(
     assert len(instructions.encode("utf-8")) <= 2048
     assert _BASE_INSTRUCTIONS in instructions
     assert (
-        "History: run_command suppression defaults false. "
-        "Raw send_keys/send_keys_batch/paste tools never inherit."
+        "suppress_history=false: run_command/spawn inherit; "
+        "raw send/batch/paste do not."
     ) in instructions
     assert "Agent context" not in instructions
 
