@@ -50,6 +50,12 @@ MCP_HISTORY_BEHAVIOR_FIXTURES = [
     McpHistoryBehaviorFixture("startup_enabled", "1", False),
 ]
 
+SPAWN_SUPPRESS_HISTORY_DESCRIPTION = (
+    "For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY "
+    "default; an explicit value overrides it. Direct Python calls default to "
+    "False. Startup files may override these controls."
+)
+
 
 def _history_server(value: str) -> FastMCP:
     """Build a focused MCP server with one resolved history transform."""
@@ -146,6 +152,9 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
             assert schema["type"] == "boolean"
             assert schema["default"] is default
             assert "anyOf" not in schema
+            if name != "run_command":
+                description = " ".join(schema["description"].split())
+                assert description == SPAWN_SUPPRESS_HISTORY_DESCRIPTION
 
 
 class SpawnEnvironmentFixture(t.NamedTuple):
@@ -236,16 +245,29 @@ def test_prepare_spawn_environment_normalizes_copies_and_merges(
 
 
 @pytest.mark.parametrize(
-    ("name", "supplied"),
+    ("name", "supplied", "correction"),
     [
-        ("HISTFILE", "private-bash-history-path"),
-        ("fish_history", "private-fish-history-name"),
-        ("fish_private_mode", "private-fish-mode-value"),
+        (
+            "HISTFILE",
+            "private-bash-history-path",
+            "omit it or set it to an empty string",
+        ),
+        (
+            "fish_history",
+            "private-fish-history-name",
+            "omit it or set it to an empty string",
+        ),
+        (
+            "fish_private_mode",
+            "private-fish-mode-value",
+            "omit it or set it to '1'",
+        ),
     ],
 )
 def test_prepare_spawn_environment_rejects_conflicts_without_values(
     name: str,
     supplied: str,
+    correction: str,
 ) -> None:
     """Policy conflicts identify only the variable, never its supplied value."""
     from fastmcp.exceptions import ToolError
@@ -256,7 +278,7 @@ def test_prepare_spawn_environment_rejects_conflicts_without_values(
     original = environment.copy()
     expected = (
         f"environment variable {name} conflicts with suppress_history=True; "
-        "omit it or use the required empty value"
+        f"{correction}"
     )
 
     with pytest.raises(ToolError) as excinfo:
@@ -332,6 +354,16 @@ def test_production_mcp_schema_uses_startup_history_default(
                     mode="json", exclude_none=True
                 ),
                 "tags": tool.meta["fastmcp"]["tags"],
+                "spawn_descriptions": {
+                    name: tools[name].inputSchema["properties"]
+                    ["suppress_history"]["description"]
+                    for name in (
+                        "create_session",
+                        "create_window",
+                        "split_window",
+                        "respawn_pane",
+                    )
+                },
             }, sort_keys=True))
 
         asyncio.run(main())
@@ -365,6 +397,14 @@ def test_production_mcp_schema_uses_startup_history_default(
         "readOnlyHint": False,
     }
     assert payload["tags"] == ["mutating"]
+    expected_descriptions = dict.fromkeys(
+        ("create_session", "create_window", "split_window", "respawn_pane"),
+        SPAWN_SUPPRESS_HISTORY_DESCRIPTION,
+    )
+    assert {
+        name: " ".join(description.split())
+        for name, description in payload["spawn_descriptions"].items()
+    } == expected_descriptions
 
 
 def test_invalid_history_setting_fails_server_startup_without_echoing_value() -> None:

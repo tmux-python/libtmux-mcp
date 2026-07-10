@@ -130,7 +130,7 @@ def _assert_value_free_spawn_conflict(call: t.Callable[[], t.Any], name: str) ->
 
     assert str(excinfo.value) == (
         f"environment variable {name} conflicts with suppress_history=True; "
-        "omit it or use the required empty value"
+        "omit it or set it to an empty string"
     )
     assert supplied not in str(excinfo.value)
 
@@ -281,7 +281,7 @@ def test_mcp_spawn_explicit_false_overrides_enabled_default(
             error = inherited.content[0].text
             assert error == (
                 "environment variable HISTFILE conflicts with "
-                "suppress_history=True; omit it or use the required empty value"
+                "suppress_history=True; omit it or set it to an empty string"
             )
             assert supplied not in error
             assert {window.window_id for window in mcp_session.windows} == before
@@ -371,7 +371,7 @@ def test_generic_batch_spawn_uses_default_and_explicit_false_override(
     assert failed["success"] is False
     assert failed["error"] == (
         "environment variable HISTFILE conflicts with suppress_history=True; "
-        "omit it or use the required empty value"
+        "omit it or set it to an empty string"
     )
     assert supplied not in failed["error"]
     assert succeeded["success"] is True
@@ -413,7 +413,7 @@ def test_spawn_conflict_is_absent_from_tool_results_and_logs(
     assert result.content
     assert result.content[0].text == (
         "environment variable HISTFILE conflicts with suppress_history=True; "
-        "omit it or use the required empty value"
+        "omit it or set it to an empty string"
     )
     assert supplied not in repr(result)
     assert supplied not in "\n".join(record.getMessage() for record in caplog.records)

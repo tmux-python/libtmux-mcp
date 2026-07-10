@@ -133,8 +133,9 @@ def respawn_pane(
     socket_name : str, optional
         tmux socket name.
     suppress_history : bool
-        Request best-effort shell-history suppression for the relaunched
-        process. Direct Python calls default to False.
+        For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
+        default; an explicit value overrides it. Direct Python calls default
+        to False. Startup files may override these controls.
 
     Returns
     -------

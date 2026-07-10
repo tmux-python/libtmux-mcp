@@ -146,8 +146,9 @@ def create_window(
         Per-process environment as a mapping or JSON object string. Values do
         not modify the tmux session environment.
     suppress_history : bool
-        Request best-effort shell-history suppression for the spawned shell.
-        Direct Python calls default to False.
+        For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
+        default; an explicit value overrides it. Direct Python calls default
+        to False. Startup files may override these controls.
 
     Returns
     -------

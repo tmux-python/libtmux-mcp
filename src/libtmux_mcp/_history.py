@@ -107,11 +107,16 @@ def _prepare_spawn_environment(
         "fish_history": "",
         "fish_private_mode": "1",
     }
+    corrections = {
+        "HISTFILE": "omit it or set it to an empty string",
+        "fish_history": "omit it or set it to an empty string",
+        "fish_private_mode": "omit it or set it to '1'",
+    }
     for name, required in required_values.items():
         if name in result and result[name] != required:
             msg = (
                 f"environment variable {name} conflicts with "
-                "suppress_history=True; omit it or use the required empty value"
+                f"suppress_history=True; {corrections[name]}"
             )
             raise ExpectedToolError(msg)
         result[name] = required
