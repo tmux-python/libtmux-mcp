@@ -111,7 +111,7 @@ Mitigations:
 
 - `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get an {exc}`~libtmux_mcp._utils.ExpectedToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
 - Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
-- The optional `environment` argument (`dict[str, str]`) maps to one tmux `-e KEY=VALUE` flag per item. The audit log redacts each *value* via a `{len, sha256_prefix}` digest while keeping the *keys* visible — env var names like `DATABASE_URL` are usually operator-debug-useful, but their values are the secret. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
+- The optional `environment` argument accepts either a mapping of string keys and values or a JSON object string, then maps each item to one tmux `-e KEY=VALUE` flag. For a mapping, the audit log keeps each *key* visible and replaces each *value* with a `{len, sha256_prefix}` digest. A JSON string is redacted as one scalar digest, so its keys are not retained in the audit record. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
 ### Raw pane input

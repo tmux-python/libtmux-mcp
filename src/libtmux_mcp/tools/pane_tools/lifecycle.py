@@ -124,11 +124,13 @@ def respawn_pane(
         Environment variables to set for the relaunched process. Each
         item becomes one ``-e KEY=VALUE`` flag (tmux's
         ``cmd-respawn-pane.c`` supports the flag repeatedly). Values
-        are redacted in the audit log on a per-key basis — keys like
-        ``DATABASE_URL`` remain visible but their values are replaced
-        by ``{len, sha256_prefix}`` digests. Note that the values may
-        still appear briefly in the OS process table while tmux spawns
-        the new process; do not pass long-lived secrets here when a
+        supplied in a mapping are redacted in the audit log on a
+        per-key basis — keys like ``DATABASE_URL`` remain visible but
+        their values are replaced by ``{len, sha256_prefix}`` digests.
+        A JSON object string is redacted as one scalar digest, so its
+        keys are not retained in the audit record. Values may still
+        appear briefly in the OS process table while tmux spawns the
+        new process; do not pass long-lived secrets here when a
         host-resident agent or other tenant could observe ``ps``.
     socket_name : str, optional
         tmux socket name.
