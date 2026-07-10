@@ -96,6 +96,7 @@ def test_history_gotcha_documents_shell_limits_and_raw_input_boundary(
     assert "do not inherit `LIBTMUX_SUPPRESS_HISTORY`" in text
     assert "control keys such as `C-c`, TUI input, or partial text" in text
     assert "Paste tools have no suppression argument" in text
+    assert "github.com/tianon/mirror-bash/blob/bash-5.3" in text
     assert "the default for bash" not in text
 
 
@@ -180,6 +181,18 @@ def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
     assert "does not contain tool return values" in text
     assert "Redaction applies only to these audit records" in text
     assert "libtmux, FastMCP, shells, or MCP clients" in text
+    assert "A JSON string is redacted as one scalar digest" in text
+    assert "dict-shaped sensitive key `environment`" not in text
+
+
+def test_respawn_page_distinguishes_environment_audit_shapes(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Respawn guidance distinguishes mapping and JSON string redaction."""
+    text = (docs_dir / "tools" / "pane" / "respawn-pane.md").read_text(encoding="utf-8")
+
+    assert "Mapping input keeps the keys visible" in text
+    assert "A JSON object string is redacted as one scalar digest" in text
 
 
 def test_logging_docs_describe_audit_outcomes_without_return_values(

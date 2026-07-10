@@ -69,7 +69,7 @@ time).
 }
 ```
 
-The audit log redacts each `environment` *value* via `{len, sha256_prefix}` digests but keeps the keys visible (env var names like `DATABASE_URL` are operator-debug-useful, while their values are the secret). Note that values may still appear briefly in the OS process table while tmux spawns the new process — see {ref}`safety` for details.
+Mapping input keeps the keys visible in the audit log but replaces each `environment` *value* with a `{len, sha256_prefix}` digest. A JSON object string is redacted as one scalar digest, so its keys are not retained in the audit record. Values may still appear briefly in the OS process table while tmux spawns the new process — see {ref}`safety` for details.
 
 Response (PaneInfo):
 
