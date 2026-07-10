@@ -31,7 +31,7 @@ class SuppressHistorySettingFixture(t.NamedTuple):
 
 
 SUPPRESS_HISTORY_SETTING_FIXTURES = [
-    SuppressHistorySettingFixture("unset", None, False),
+    SuppressHistorySettingFixture("unset", None, True),
     SuppressHistorySettingFixture("disabled", "0", False),
     SuppressHistorySettingFixture("enabled", "1", True),
 ]
@@ -113,17 +113,18 @@ def test_resolve_suppress_history_rejects_invalid_without_echoing_value() -> Non
 
 
 def test_history_transform_changes_exact_semantic_tool_set() -> None:
-    """Only run-command and the four spawn tools inherit one boolean default."""
+    """Only run-command inherits the command-history boolean default."""
     from libtmux_mcp._history import _configure_history_defaults
     from libtmux_mcp.tools import register_tools
 
-    semantic_tools = {
-        "run_command",
+    command_tools = {"run_command"}
+    spawn_tools = {
         "create_session",
         "create_window",
         "split_window",
         "respawn_pane",
     }
+    history_tools = command_tools | spawn_tools | {"send_keys"}
 
     async def _schemas(enabled: bool) -> dict[str, dict[str, t.Any]]:
         mcp = FastMCP(f"history-transform-{enabled}")
@@ -145,14 +146,17 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
         if schema["default"] != disabled[name]["default"]
     }
 
-    assert changed == semantic_tools
+    assert set(disabled) == history_tools
+    assert set(enabled) == history_tools
+    assert changed == command_tools
     for default, schemas in ((False, disabled), (True, enabled)):
-        for name in semantic_tools:
+        for name in history_tools:
             schema = schemas[name]
             assert schema["type"] == "boolean"
-            assert schema["default"] is default
+            expected = default if name in command_tools else False
+            assert schema["default"] is expected
             assert "anyOf" not in schema
-            if name != "run_command":
+            if name in spawn_tools:
                 description = " ".join(schema["description"].split())
                 assert description == SPAWN_SUPPRESS_HISTORY_DESCRIPTION
 
@@ -354,6 +358,23 @@ def test_production_mcp_schema_uses_startup_history_default(
                     mode="json", exclude_none=True
                 ),
                 "tags": tool.meta["fastmcp"]["tags"],
+                "raw_defaults": {
+                    "send_keys": tools["send_keys"].inputSchema["properties"]
+                    ["suppress_history"]["default"],
+                    "send_keys_batch": tools["send_keys_batch"].inputSchema
+                    ["properties"]["operations"]["items"]["properties"]
+                    ["suppress_history"]["default"],
+                },
+                "spawn_defaults": {
+                    name: tools[name].inputSchema["properties"]
+                    ["suppress_history"]["default"]
+                    for name in (
+                        "create_session",
+                        "create_window",
+                        "split_window",
+                        "respawn_pane",
+                    )
+                },
                 "spawn_descriptions": {
                     name: tools[name].inputSchema["properties"]
                     ["suppress_history"]["description"]
@@ -397,6 +418,16 @@ def test_production_mcp_schema_uses_startup_history_default(
         "readOnlyHint": False,
     }
     assert payload["tags"] == ["mutating"]
+    assert payload["raw_defaults"] == {
+        "send_keys": False,
+        "send_keys_batch": False,
+    }
+    assert payload["spawn_defaults"] == {
+        "create_session": False,
+        "create_window": False,
+        "split_window": False,
+        "respawn_pane": False,
+    }
     expected_descriptions = dict.fromkeys(
         ("create_session", "create_window", "split_window", "respawn_pane"),
         SPAWN_SUPPRESS_HISTORY_DESCRIPTION,

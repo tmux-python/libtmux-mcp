@@ -139,7 +139,7 @@ _INSTRUCTIONS_MAX_BYTES = 2048
 
 def _build_instructions(
     safety_level: str = TAG_MUTATING,
-    suppress_history: bool = False,
+    suppress_history: bool = True,
 ) -> str:
     """Build server instructions with agent context and safety level.
 
@@ -169,8 +169,8 @@ def _build_instructions(
     )
     history_default = "true" if suppress_history else "false"
     parts.append(
-        f"\n\nsuppress_history={history_default}: run_command/spawn inherit; "
-        "raw send/batch/paste do not."
+        f"\n\nsuppress_history={history_default}: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
     )
 
     # Tier-conditioned discoverability hint. False-positive activation is

@@ -414,8 +414,18 @@ def test_build_instructions_documents_semantic_history_default_and_raw_boundary(
     instructions = _build_instructions(suppress_history=suppress_history)
 
     assert (
-        f"suppress_history={expected_default}: run_command/spawn inherit; "
-        "raw send/batch/paste do not."
+        f"suppress_history={expected_default}: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
+    ) in instructions
+
+
+def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
+    """Instructions default command-history suppression to enabled."""
+    instructions = _build_instructions()
+
+    assert (
+        "suppress_history=true: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
     ) in instructions
 
 
@@ -505,7 +515,8 @@ def test_instruction_budget_drops_oversized_socket_before_required_text(
     assert len(instructions.encode("utf-8")) <= 2048
     assert _BASE_INSTRUCTIONS in instructions
     assert (
-        "suppress_history=true: run_command/spawn inherit; raw send/batch/paste do not."
+        "suppress_history=true: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
     ) in instructions
     assert "Agent context" in instructions
     assert "%42" in instructions
@@ -528,8 +539,8 @@ def test_instruction_budget_can_drop_all_oversized_optional_context(
     assert len(instructions.encode("utf-8")) <= 2048
     assert _BASE_INSTRUCTIONS in instructions
     assert (
-        "suppress_history=false: run_command/spawn inherit; "
-        "raw send/batch/paste do not."
+        "suppress_history=false: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
     ) in instructions
     assert "Agent context" not in instructions
 

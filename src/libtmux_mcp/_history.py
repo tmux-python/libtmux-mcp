@@ -8,21 +8,15 @@ if t.TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
-_HISTORY_DEFAULT_TOOLS = (
-    "run_command",
-    "create_session",
-    "create_window",
-    "split_window",
-    "respawn_pane",
-)
+_COMMAND_HISTORY_DEFAULT_TOOLS = ("run_command",)
 
 
 def _resolve_suppress_history(value: str | None) -> bool:
     """Resolve the strict startup history-suppression setting."""
-    if value is None or value == "0":
-        return False
-    if value == "1":
+    if value is None or value == "1":
         return True
+    if value == "0":
+        return False
     msg = "LIBTMUX_SUPPRESS_HISTORY must be unset, '0', or '1'"
     raise ValueError(msg)
 
@@ -31,9 +25,9 @@ def _configure_history_defaults(
     mcp: FastMCP,
     enabled: bool,
     *,
-    tool_names: tuple[str, ...] = _HISTORY_DEFAULT_TOOLS,
+    tool_names: tuple[str, ...] = _COMMAND_HISTORY_DEFAULT_TOOLS,
 ) -> None:
-    """Publish the effective MCP default for semantic command and spawn tools.
+    """Publish the effective MCP default for semantic command tools.
 
     Parameters
     ----------
@@ -42,8 +36,7 @@ def _configure_history_defaults(
     enabled : bool
         Effective startup default to publish.
     tool_names : tuple[str, ...]
-        Semantic tool names that inherit the default when omitted by an MCP
-        caller.
+        Command tool names that inherit the default when omitted by an MCP caller.
     """
     from fastmcp.server.transforms import ToolTransform
     from fastmcp.tools.tool_transform import ArgTransformConfig, ToolTransformConfig
