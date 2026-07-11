@@ -94,8 +94,13 @@ The server-side moves are:
 **Running.** [`run_command`](https://libtmux-mcp.git-pull.com/tools/pane/run-command/)
 sends an authored shell command, waits for deterministic completion,
 and returns exit status plus tail-preserved output as one typed value.
-The alternative is teaching every agent to compose `send-keys`,
-`wait-for`, and a pane capture correctly.
+The command and its completion signal reach the shell as one
+space-prefixed event, so best-effort
+[history suppression](https://libtmux-mcp.git-pull.com/topics/history-suppression/)
+keeps agent-generated input out of shell history by default. The
+alternative — hand-rolled `send-keys` plus `wait-for` plus a pane
+capture — leaves every typed command, signal included, in shell
+history.
 
 **Driving.** [`send_keys_batch`](https://libtmux-mcp.git-pull.com/tools/pane/send-keys-batch/)
 sends several ordered raw-input operations for TUIs and persistent
