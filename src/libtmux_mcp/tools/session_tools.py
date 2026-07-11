@@ -6,6 +6,7 @@ import typing as t
 
 from libtmux.constants import WindowDirection
 
+from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -117,6 +118,9 @@ def create_window(
     attach: bool = False,
     direction: t.Literal["before", "after"] | None = None,
     socket_name: str | None = None,
+    *,
+    environment: dict[str, str] | str | None = None,
+    suppress_persistent_history: bool = False,
 ) -> WindowInfo:
     """Create a new window in a tmux session.
 
@@ -138,12 +142,28 @@ def create_window(
         Window placement direction.
     socket_name : str, optional
         tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+    environment : dict or str, optional
+        Per-process environment as a mapping or JSON object string. Values do
+        not modify the tmux session environment. Each item becomes a tmux
+        ``-e`` launch option. Values may be visible to host process inspection
+        in the tmux client argv during launch and in the child environment
+        afterward; MCP audit redaction does not hide either surface. Pass
+        credential references, not literal credentials.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shell. Defaults
+        to False for MCP and direct Python calls. This per-call option does not
+        inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
+        controls.
 
     Returns
     -------
     WindowInfo
         Serialized window object.
     """
+    spawn_environment = _prepare_spawn_environment(
+        environment,
+        suppress_persistent_history=suppress_persistent_history,
+    )
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
@@ -163,6 +183,8 @@ def create_window(
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ExpectedToolError(msg)
         kwargs["direction"] = resolved
+    if spawn_environment is not None:
+        kwargs["environment"] = spawn_environment
     window = session.new_window(**kwargs)
     return _serialize_window(window)
 

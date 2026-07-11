@@ -19,6 +19,12 @@ the layout: `respawn-pane` preserves the pane in place.
 starts a new one. **The `pane_id` is preserved** — that's the whole
 point of the tool. `pane_pid` updates to the new process.
 
+`suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
+
+Set it to `true` and {tooliconl}`respawn-pane` copies and merges best-effort no-disk history controls for only the spawned process. It does not change the tmux session environment or affect later panes. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
+
+When you enable it, tmux environment arguments are added, but the spawned process command text is not prefixed or rewritten. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
+
 **Tip:** Call {tooliconl}`get-pane-info` first if you need to capture
 `pane_current_command` before respawn — the new process loses its argv.
 Omitting `shell` makes tmux replay the original argv (good default for
@@ -65,9 +71,9 @@ time).
 }
 ```
 
-The audit log redacts each `environment` *value* via `{len, sha256_prefix}` digests but keeps the keys visible (env var names like `DATABASE_URL` are operator-debug-useful, while their values are the secret). Note that values may still appear briefly in the OS process table while tmux spawns the new process — see {ref}`safety` for details.
+Mapping input keeps the keys visible in the audit log but replaces each `environment` *value* with a `{len, sha256_prefix}` digest. A JSON object string is redacted as one scalar digest, so its keys are not retained in the audit record. Values may still appear briefly in the OS process table while tmux spawns the new process — see {ref}`safety` for details.
 
-Response (PaneInfo):
+Response ({class}`~libtmux_mcp.models.PaneInfo`):
 
 ```json5
 {

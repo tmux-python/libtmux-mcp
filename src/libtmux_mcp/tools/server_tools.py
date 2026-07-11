@@ -11,6 +11,7 @@ import typing as t
 
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -21,7 +22,6 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
-    _coerce_dict_arg,
     _get_caller_identity,
     _get_server,
     _invalidate_server,
@@ -75,11 +75,14 @@ def create_session(
     y: int | None = None,
     environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
+    *,
+    suppress_persistent_history: bool = False,
 ) -> SessionInfo:
     """Create a new tmux session.
 
     Check list_sessions first to avoid name conflicts. A new session
-    starts with one window and one pane.
+    starts with one window and one pane. Values in ``environment`` are stored
+    in the tmux session environment, so future panes inherit them too.
 
     Parameters
     ----------
@@ -94,18 +97,33 @@ def create_session(
     y : int, optional
         Height of the initial window.
     environment : dict or str, optional
-        Environment variables to set. Accepts either a dict of env
-        vars or a JSON-serialized string of the same — the latter is
-        the cursor-composer-1 workaround described in
-        :func:`libtmux_mcp._utils._coerce_dict_arg`.
+        Environment variables to store in the session environment. Accepts
+        either a dict of env vars or a JSON-serialized string of the same —
+        the latter is the cursor-composer-1 workaround described in
+        :func:`libtmux_mcp._utils._coerce_dict_arg`. Each item appears in the
+        tmux client argv as one ``-eKEY=VALUE`` element and may be visible to
+        host process inspection during launch. tmux retains the values in
+        tmux session state, where ``show-environment`` can reveal them. They reach
+        the initial and future child environments unless a later spawn
+        overrides them. MCP audit redaction does not hide these surfaces. Pass
+        credential references, not literal credentials.
     socket_name : str, optional
         tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shell. Defaults
+        to False for MCP and direct Python calls. This per-call option does not
+        inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
+        controls.
 
     Returns
     -------
     SessionInfo
         The created session.
     """
+    spawn_environment = _prepare_spawn_environment(
+        environment,
+        suppress_persistent_history=suppress_persistent_history,
+    )
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}
     if session_name is not None:
@@ -118,9 +136,8 @@ def create_session(
         kwargs["x"] = x
     if y is not None:
         kwargs["y"] = y
-    coerced_env = _coerce_dict_arg("environment", environment)
-    if coerced_env is not None:
-        kwargs["environment"] = coerced_env
+    if spawn_environment is not None:
+        kwargs["environment"] = spawn_environment
     session = server.new_session(**kwargs)
     return _serialize_session(session)
 

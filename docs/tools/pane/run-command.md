@@ -3,19 +3,19 @@
 ```{fastmcp-tool} pane_tools.run_command
 ```
 
-**Use when** you need to run a shell command in a pane and get a typed
-result with exit status, timeout state, and captured pane output.
+**Use when** you need to run a shell command in a pane and get a
+{class}`~libtmux_mcp.models.RunCommandResult` with exit status, timeout state,
+and captured pane output.
 
 **Avoid when** you need raw interactive key driving — use
 {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` for TUIs, key
 names, and partial commands.
 
-**Side effects:** Sends a command to the pane's interactive shell. The
-command may read or write files, start processes, or access the network
-depending on what the shell command does. Each command runs in a subshell,
-so directory or environment changes do not persist across calls.
-Set `suppress_history=true` for secret-bearing commands on shells that
-honor leading-space history suppression.
+**Side effects:** Sends a command to the pane's interactive shell. The command may read or write files, start processes, or access the network depending on what the shell command does. Each command runs in a subshell, so directory or environment changes do not persist across calls.
+
+For MCP calls, lightweight suppression is enabled by default. The {ref}`configuration <configuration>` setting {envvar}`LIBTMUX_SUPPRESS_HISTORY` controls only omitted MCP `suppress_history` arguments, and an explicit `suppress_history` value wins. Direct Python calls default to `False`. `suppress_history=false` permits intentional multiline input.
+
+Suppression is best effort: {tooliconl}`run-command` prefixes one space to the grouped event that carries your single-line command, but the existing shell must be configured to ignore space-prefixed commands. When suppression is effective, a command containing a carriage return or line feed is rejected before tmux receives input because one prefix cannot protect multiple shell events. This control does not change the shell's environment or startup configuration, clear its memory or pane scrollback, or hide the command from other observers. See {ref}`history-hygiene` for shell behavior and {ref}`safety` before handling credentials.
 
 **Example:**
 
@@ -30,7 +30,7 @@ honor leading-space history suppression.
 }
 ```
 
-Response:
+Response ({class}`~libtmux_mcp.models.RunCommandResult`):
 
 ```json
 {
@@ -42,6 +42,10 @@ Response:
   "output_truncated": false,
   "output_truncated_lines": 0
 }
+```
+
+```{note}
+The generated parameter table below reflects the direct Python signature, so it shows `suppress_history=False`. MCP `tools/list` advertises the effective suppression default instead: `true` unless {envvar}`LIBTMUX_SUPPRESS_HISTORY` is `0`. An MCP call that omits the argument uses that advertised default.
 ```
 
 ```{fastmcp-tool-input} pane_tools.run_command

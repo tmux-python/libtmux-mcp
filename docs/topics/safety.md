@@ -98,8 +98,8 @@ Mitigations:
 
 Mitigations:
 
-- The audit log redacts the `value` argument to a `{len, sha256_prefix}` digest so log files don't leak the secrets agents set, but operators should still treat the tool as high-privilege.
-- If only a single command needs an env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child.
+- The server audit record replaces the `value` argument with a `{len, sha256_prefix}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
+- If only a single command needs a non-sensitive env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child. For credentials, pass a reference that the child resolves instead of a literal value through tmux.
 
 ### Respawning panes
 
@@ -111,12 +111,25 @@ Mitigations:
 
 - `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get an {exc}`~libtmux_mcp._utils.ExpectedToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
 - Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
-- The optional `environment` argument (`dict[str, str]`) maps to one tmux `-e KEY=VALUE` flag per item. The audit log redacts each *value* via a `{len, sha256_prefix}` digest while keeping the *keys* visible — env var names like `DATABASE_URL` are usually operator-debug-useful, but their values are the secret. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
+- The optional `environment` argument accepts either a mapping of string keys and values or a JSON object string, then maps each item to one tmux `-e KEY=VALUE` flag. For a mapping, the audit log keeps each *key* visible and replaces each *value* with a `{len, sha256_prefix}` digest. A JSON string is redacted as one scalar digest, so its keys are not retained in the audit record. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
 ### Raw pane input
 
-These can execute anything the pane's shell accepts. There is no payload validation. The audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in logs.
+These can execute anything the pane's shell accepts. There is no payload validation. The server audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in that audit record.
+
+### History suppression is not secret transport
+
+`suppress_history` on {tooliconl}`run-command` asks the current shell not to persist one space-prefixed command event. `suppress_persistent_history=true` on the four spawn tools adds best-effort no-disk controls to a new environment. Shell behavior and startup files can defeat either request. History suppression does not isolate the process, does not clear in-memory history or scrollback, and does not hide the command from other observation surfaces:
+
+- **pane echo and scrollback:** the terminal can display input, tmux can retain it in pane history, and an attached terminal can keep its own scrollback.
+- **capture tools and piping:** {toolref}`capture-pane`, {toolref}`capture-since`, {toolref}`snapshot-pane`, {toolref}`search-panes`, and {toolref}`pipe-pane` can return or route displayed and retained text.
+- **hooks:** configured tmux hooks, including state visible through {tooliconl}`show-hooks`, and shell instrumentation can observe process or pane activity independently of shell history.
+- **process visibility:** command arguments and launch strings can appear in the tmux client argv. Environment values passed to {toolref}`create-session`, {toolref}`create-window`, {toolref}`split-window`, and {toolref}`respawn-pane` can also remain in a child process environment; {toolref}`create-session` retains them in tmux session state for future panes, where {toolref}`show-environment` can reveal them. MCP audit redaction does not hide any of these surfaces from host process or tmux environment inspection.
+- **MCP client transcripts:** clients can retain the original request and response outside the server's control.
+- **logs:** `libtmux_mcp.audit` records redacted arguments and whether the call succeeded or raised; it does not contain tool return values. Redaction applies only to these audit records and does not rewrite separate records emitted by libtmux, FastMCP, shells, or MCP clients. libtmux DEBUG or error records may contain shell-joined tmux arguments, while MCP client request logs and application logs remain outside the server's guarantee.
+
+Prefer credential references that a process resolves from a secret manager, scoped file descriptor, or preconfigured host lookup. Avoid literal credentials in `command`, raw `keys` or `text`, `shell`, and `environment` arguments; history suppression cannot retract a value after another surface records it.
 
 ## Audit log
 
@@ -126,7 +139,7 @@ Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carryi
 - `outcome` — `ok` or `error`, with `error_type` on failure
 - `duration_ms`
 - `client_id` / `request_id` — from the fastmcp context when available
-- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `value`, `content`, `shell`) are replaced by `{len, sha256_prefix}`; the dict-shaped sensitive key `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
+- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `command`, `value`, `content`, `shell`, and string-form `environment`) are replaced by `{len, sha256_prefix}`. Mapping-form `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
 
 Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 

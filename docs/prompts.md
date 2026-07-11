@@ -58,9 +58,9 @@ for completion, and inspect exit status plus output.
 
 **Why use this instead of {tooliconl}`send-keys` + {tooliconl}`capture-pane` polling?**
 {tooliconl}`run-command` sends the command, waits through a private
-tmux signal, captures tail-preserved output, and returns exit status
-in one typed result. That removes the manual channel plumbing from
-the common authored-command workflow.
+tmux signal, captures tail-preserved output, and returns a
+{class}`~libtmux_mcp.models.RunCommandResult`. That removes the manual
+channel plumbing from the common authored-command workflow.
 
 ```{fastmcp-prompt-input} run_and_wait
 ```
@@ -89,6 +89,12 @@ If the task needs persistent shell state or TUI keystrokes instead of
 a one-shot shell command, use `send_keys` or `send_keys_batch`, then
 observe later output with `capture_since`.
 ````
+
+Single-line renders omit `suppress_history`, so MCP calls use the server's
+enabled-by-default setting. If `command` contains a carriage return or line
+feed, the prompt instead renders `suppress_history=False` and warns that the
+shell may record the multiline command. See {ref}`history-suppression` for
+the Bash, Zsh, and Fish behavior behind both cases.
 
 For custom shell composition that falls outside {tooliconl}`run-command`,
 compose ``tmux wait-for -S <channel>`` yourself and call

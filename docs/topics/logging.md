@@ -14,10 +14,7 @@ No manual wiring needed.
 All loggers are children of ``libtmux_mcp``. The primary streams
 are:
 
-- ``libtmux_mcp.audit`` — one structured line per tool call, emitted
-  by {class}`~libtmux_mcp.middleware.AuditMiddleware`. Includes
-  tool name, digest-redacted arguments, latency, outcome. See
-  {doc}`/topics/safety` for the argument-redaction rules.
+- ``libtmux_mcp.audit`` — one structured line per tool call, emitted by {class}`~libtmux_mcp.middleware.AuditMiddleware`. Includes tool name, digest-redacted arguments, latency, and outcome. See {doc}`/topics/safety` for the argument-redaction rules. It does not record tool return values.
 - ``libtmux_mcp.retry`` — warnings from
   {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` when a
   readonly tool retried after a transient
@@ -62,11 +59,12 @@ their log pane (e.g. Claude Desktop's "MCP server logs" panel, or
 server name (``libtmux-mcp``), level, and the log message — but not
 the Python logger name, which the protocol doesn't model.
 
+## History controls stay observable
+
+`suppress_history` and `suppress_persistent_history` affect shell-history behavior only. They do not disable audit logging and do not clear pane echo or scrollback. The audit logger still summarizes the call's arguments and outcome, other library or application loggers keep their own behavior, and an MCP client can still retain the original request and response. See {ref}`safety` for every observation boundary that remains outside history suppression.
+
 ```{tip}
-If a tool call fails silently (no user-visible error, no side
-effect), the ``libtmux_mcp.audit`` log will show the invocation and
-its return value. That's usually the fastest way to tell whether a
-tool ran at all.
+If a tool call has no user-visible error or side effect, the ``libtmux_mcp.audit`` log shows the invocation and whether it returned or raised, not the tool's return value. Use the MCP response and current tmux state to determine what the tool returned or changed.
 ```
 
 ## Further reading

@@ -362,8 +362,11 @@ async def run_command(
         Maximum pane output lines to return. Defaults to all captured
         visible output; pass a small value for a tail-only summary.
     suppress_history : bool
-        Suppress shell history by prepending a space; only effective where
-        the shell ignores space-prefixed commands. Default False.
+        For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
+        default; an explicit value overrides it. Direct Python calls default
+        to False. Best effort: the shell must honor space-prefixed history
+        suppression. Suppression requires a single-line command; multiline
+        commands remain available when suppression is false.
     socket_name : str, optional
         tmux socket name.
 
@@ -375,6 +378,9 @@ async def run_command(
     """
     if not command.strip():
         msg = "command must not be empty"
+        raise ExpectedToolError(msg)
+    if suppress_history and ("\n" in command or "\r" in command):
+        msg = "command must be a single line when suppress_history=True"
         raise ExpectedToolError(msg)
     if timeout <= 0:
         msg = "timeout must be positive"

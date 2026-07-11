@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
+from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _caller_is_on_server,
@@ -69,8 +70,10 @@ def respawn_pane(
     kill: bool = True,
     shell: str | None = None,
     start_directory: str | None = None,
-    environment: dict[str, str] | None = None,
+    environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
+    *,
+    suppress_persistent_history: bool = False,
 ) -> PaneInfo:
     """Restart a pane's process in place, preserving pane_id and layout.
 
@@ -117,18 +120,25 @@ def respawn_pane(
     start_directory : str, optional
         Working directory for the relaunched command (maps to
         ``respawn-pane -c``).
-    environment : dict[str, str], optional
+    environment : dict or str, optional
         Environment variables to set for the relaunched process. Each
         item becomes one ``-e KEY=VALUE`` flag (tmux's
         ``cmd-respawn-pane.c`` supports the flag repeatedly). Values
-        are redacted in the audit log on a per-key basis — keys like
-        ``DATABASE_URL`` remain visible but their values are replaced
-        by ``{len, sha256_prefix}`` digests. Note that the values may
-        still appear briefly in the OS process table while tmux spawns
-        the new process; do not pass long-lived secrets here when a
+        supplied in a mapping are redacted in the audit log on a
+        per-key basis — keys like ``DATABASE_URL`` remain visible but
+        their values are replaced by ``{len, sha256_prefix}`` digests.
+        A JSON object string is redacted as one scalar digest, so its
+        keys are not retained in the audit record. Values may still
+        appear briefly in the OS process table while tmux spawns the
+        new process; do not pass long-lived secrets here when a
         host-resident agent or other tenant could observe ``ps``.
     socket_name : str, optional
         tmux socket name.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shell. Defaults
+        to False for MCP and direct Python calls. This per-call option does not
+        inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
+        controls.
 
     Returns
     -------
@@ -136,6 +146,10 @@ def respawn_pane(
         Serialized pane metadata after respawn. The pane_id is
         preserved; pane_pid reflects the new process.
     """
+    spawn_environment = _prepare_spawn_environment(
+        environment,
+        suppress_persistent_history=suppress_persistent_history,
+    )
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(server, pane_id=pane_id)
     caller = _get_caller_identity()
@@ -152,7 +166,7 @@ def respawn_pane(
     pane.respawn(
         kill=kill,
         start_directory=start_directory,
-        environment=environment,
+        environment=spawn_environment,
         shell=shell,
     )
     # Pick up fresh pane_pid and any command/path updates; tmux does

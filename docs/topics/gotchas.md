@@ -74,13 +74,16 @@ Pane IDs like `%0`, `%5`, `%12` are unique across all sessions and windows withi
 
 However, they reset when the tmux **server** restarts. Do not cache pane IDs across server restarts. After killing and recreating a session, re-discover pane IDs with {tooliconl}`list-panes`.
 
-## `suppress_history` requires shell support
+## Shell-history suppression is best effort
 
-The `suppress_history` parameter on {tooliconl}`send-keys` and
-{tooliconl}`run-command` prepends a space before the command, which prevents it
-from being saved in shell history. This only works if the shell's `HISTCONTROL`
-variable includes `ignorespace` (the default for bash, but not universal across
-all shells).
+MCP calls to {tooliconl}`run-command` request lightweight suppression by
+default, but Bash, Zsh, and Fish each decide whether and how a command reaches
+history. Stronger no-disk controls for newly spawned shells are available only
+when you opt into `suppress_persistent_history=true`.
+
+Neither control makes commands secret, and raw TUI or paste input stays
+outside the default. See {ref}`history-suppression` for the two-level model,
+shell-specific behavior, multiline commands, scope, and remaining visibility.
 
 ## Gemini CLI injects `wait_for_previous` into tool arguments
 

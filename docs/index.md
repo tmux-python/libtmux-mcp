@@ -85,6 +85,32 @@ Tear down tmux objects. Not reversible.
 
 {toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server` · {toolref}`call-destructive-tools-batch`
 
+### Example: keep test runs out of persistent history
+
+libtmux-mcp provides best-effort history suppression for Bash, Zsh, and Fish.
+MCP calls to {tooliconl}`run-command` use lightweight command suppression by
+default. When you create a new shell, opt into stronger no-disk controls with
+`suppress_persistent_history=true`.
+
+```{admonition} Prompt
+:class: prompt
+
+Create a tmux session called "checks" with best-effort no-disk shell-history
+controls, run `pytest -q` in its initial pane, and show me the result.
+```
+
+The agent calls {tooliconl}`create-session` with
+`suppress_persistent_history=true`, reuses `active_pane_id` from the returned
+{class}`~libtmux_mcp.models.SessionInfo`, and calls
+{tooliconl}`run-command` without an override. The same spawn option on
+{toolref}`create-window`, {toolref}`split-window`, or
+{toolref}`respawn-pane` applies only to the process that call starts.
+
+These controls reduce history noise; they do not make commands secret. See
+{ref}`history-suppression` for shell-specific behavior,
+{ref}`configuration` for the server default, and {ref}`safety` for other
+observation surfaces.
+
 [Browse all tools →](tools/index)
 
 ---

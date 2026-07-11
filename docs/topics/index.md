@@ -23,6 +23,12 @@ tmux hierarchy, MCP protocol, and the mental model.
 Three-tier safety system for controlling tool access.
 :::
 
+:::{grid-item-card} History Suppression
+:link: history-suppression
+:link-type: doc
+Best-effort Bash, Zsh, and Fish history controls and their limits.
+:::
+
 :::{grid-item-card} Troubleshooting
 :link: troubleshooting
 :link-type: doc
@@ -81,6 +87,7 @@ observation cursors.
 architecture
 concepts
 safety
+history-suppression
 gotchas
 prompting
 completion

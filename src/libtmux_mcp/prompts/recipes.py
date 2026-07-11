@@ -34,6 +34,14 @@ def run_and_wait(
     timeout : float
         Maximum seconds to wait for command completion. Default 60.
     """
+    multiline = "\n" in command or "\r" in command
+    history_argument = "    suppress_history=False,\n" if multiline else ""
+    history_warning = (
+        "\n\nThis multiline command disables best-effort shell-history "
+        "suppression and may be recorded by the shell."
+        if multiline
+        else ""
+    )
     return f"""Run this shell command in tmux pane {pane_id}, wait until it
 finishes, and inspect the typed result:
 
@@ -41,10 +49,10 @@ finishes, and inspect the typed result:
 result = run_command(
     pane_id={pane_id!r},
     command={command!r},
-    timeout={timeout},
+{history_argument}    timeout={timeout},
     max_lines=100,
 )
-```
+```{history_warning}
 
 Use `result.exit_status`, `result.timed_out`, and `result.output`
 to decide what happened. Do NOT use a `send_keys` + `capture_pane`

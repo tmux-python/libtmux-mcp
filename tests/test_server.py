@@ -402,6 +402,39 @@ def test_build_instructions_always_includes_safety() -> None:
 
 
 @pytest.mark.parametrize(
+    ("suppress_history", "expected_default"),
+    [(False, "false"), (True, "true")],
+    ids=["history-disabled", "history-enabled"],
+)
+def test_build_instructions_documents_semantic_history_default_and_raw_boundary(
+    suppress_history: bool,
+    expected_default: str,
+) -> None:
+    """Instructions expose the active semantic default and raw exclusion."""
+    instructions = _build_instructions(suppress_history=suppress_history)
+
+    assert (
+        f"suppress_history={expected_default}: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
+    ) in instructions
+
+
+def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
+    """Instructions default command-history suppression to enabled."""
+    instructions = _build_instructions()
+
+    assert (
+        "suppress_history=true: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
+    ) in instructions
+
+
+@pytest.mark.parametrize(
+    "suppress_history",
+    [False, True],
+    ids=["history-disabled", "history-enabled"],
+)
+@pytest.mark.parametrize(
     ("tier", "tmux_pane", "tmux_env"),
     [
         (TAG_READONLY, "%42", "/tmp/tmux-1000/default,12345,0"),
@@ -423,6 +456,7 @@ def test_build_instructions_always_includes_safety() -> None:
 )
 def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
     monkeypatch: pytest.MonkeyPatch,
+    suppress_history: bool,
     tier: str,
     tmux_pane: str,
     tmux_env: str,
@@ -449,12 +483,66 @@ def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
         monkeypatch.delenv("TMUX_PANE", raising=False)
         monkeypatch.delenv("TMUX", raising=False)
 
-    instructions = _build_instructions(safety_level=tier)
+    instructions = _build_instructions(
+        safety_level=tier,
+        suppress_history=suppress_history,
+    )
     size = len(instructions.encode())
     assert size <= 2048, (
         f"tier={tier} tmux_pane={tmux_pane!r}: "
         f"{size} bytes exceeds Claude Code's 2KB ceiling"
     )
+
+
+@pytest.mark.parametrize(
+    "socket_name",
+    ["s" * 4096, "界" * 2048],
+    ids=["long-ascii", "long-multibyte"],
+)
+def test_instruction_budget_drops_oversized_socket_before_required_text(
+    monkeypatch: pytest.MonkeyPatch,
+    socket_name: str,
+) -> None:
+    """Untrusted socket names cannot displace required UTF-8 instructions."""
+    monkeypatch.setenv("TMUX_PANE", "%42")
+    monkeypatch.setenv("TMUX", f"/tmp/tmux-1000/{socket_name},12345,0")
+
+    instructions = _build_instructions(
+        safety_level=TAG_READONLY,
+        suppress_history=True,
+    )
+
+    assert len(instructions.encode("utf-8")) <= 2048
+    assert _BASE_INSTRUCTIONS in instructions
+    assert (
+        "suppress_history=true: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
+    ) in instructions
+    assert "Agent context" in instructions
+    assert "%42" in instructions
+    assert socket_name not in instructions
+
+
+def test_instruction_budget_can_drop_all_oversized_optional_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Required instructions survive when even pane-only context is too large."""
+    oversized_pane = "%" + ("界" * 2048)
+    monkeypatch.setenv("TMUX_PANE", oversized_pane)
+    monkeypatch.setenv("TMUX", f"/tmp/tmux-1000/{'s' * 4096},12345,0")
+
+    instructions = _build_instructions(
+        safety_level=TAG_READONLY,
+        suppress_history=False,
+    )
+
+    assert len(instructions.encode("utf-8")) <= 2048
+    assert _BASE_INSTRUCTIONS in instructions
+    assert (
+        "suppress_history=false: run_command inherits; "
+        "raw send/batch/paste and spawn do not."
+    ) in instructions
+    assert "Agent context" not in instructions
 
 
 def test_base_instructions_document_scope() -> None:

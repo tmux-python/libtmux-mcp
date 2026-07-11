@@ -440,11 +440,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: secrets, or arbitrary large strings.
 #: Matched by exact name, case-sensitive, to mirror the tool signatures.
 #:
-#: ``environment`` is dict-shaped (``dict[str, str]``); the redaction logic
-#: in :func:`_summarize_args` recognises this and digests each *value* while
-#: leaving the *keys* (env var names like ``DATABASE_URL``) visible — env
-#: var names are operator-debug-useful, but their values are the secret.
-#: All other entries are scalar strings; mixing the two is intentional.
+#: ``environment`` accepts a mapping or a JSON object string. The redaction
+#: logic in :func:`_summarize_args` digests each mapping *value* while leaving
+#: its *keys* (env var names like ``DATABASE_URL``) visible. A JSON string is
+#: instead redacted as one scalar digest, so its keys are not retained.
 #:
 #: Note on ``shell`` and ``environment`` redaction: this redacts the MCP
 #: audit log only. ``respawn_pane(shell="env SECRET=... bash")`` and
