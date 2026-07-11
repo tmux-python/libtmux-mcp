@@ -123,8 +123,8 @@ def test_spawn_environment_schemas_are_client_compatible() -> None:
         assert suppress_persistent_history["default"] is False
 
 
-def test_process_scoped_spawn_environment_schemas_disclose_visibility() -> None:
-    """Process-scoped tools disclose environment observation surfaces."""
+def test_spawn_environment_schemas_disclose_visibility() -> None:
+    """Spawn tools disclose their distinct environment observation surfaces."""
     from libtmux_mcp.tools import register_tools
 
     mcp = FastMCP("spawn-environment-disclosure")
@@ -150,6 +150,25 @@ def test_process_scoped_spawn_environment_schemas_disclose_visibility() -> None:
             "not literal credentials",
         ):
             assert fragment in description
+
+    session_description = tools["create_session"].inputSchema["properties"][
+        "environment"
+    ]["description"]
+    for fragment in (
+        "dict",
+        "JSON",
+        "string",
+        "tmux client argv",
+        "initial and future child environments",
+        "tmux session state",
+        "show-environment",
+        "later spawn",
+        "overrides",
+        "MCP audit redaction",
+        "credential references",
+        "not literal credentials",
+    ):
+        assert fragment in session_description
 
 
 def _assert_value_free_spawn_conflict(call: t.Callable[[], t.Any], name: str) -> None:

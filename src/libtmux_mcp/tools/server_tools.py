@@ -100,7 +100,13 @@ def create_session(
         Environment variables to store in the session environment. Accepts
         either a dict of env vars or a JSON-serialized string of the same —
         the latter is the cursor-composer-1 workaround described in
-        :func:`libtmux_mcp._utils._coerce_dict_arg`.
+        :func:`libtmux_mcp._utils._coerce_dict_arg`. Each item appears in the
+        tmux client argv as one ``-eKEY=VALUE`` element and may be visible to
+        host process inspection during launch. tmux retains the values in
+        tmux session state, where ``show-environment`` can reveal them. They reach
+        the initial and future child environments unless a later spawn
+        overrides them. MCP audit redaction does not hide these surfaces. Pass
+        credential references, not literal credentials.
     socket_name : str, optional
         tmux socket name. Defaults to LIBTMUX_SOCKET env var.
     suppress_persistent_history : bool

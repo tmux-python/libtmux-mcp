@@ -173,6 +173,27 @@ def test_spawn_tool_pages_document_history_environment_scope(
     assert "does not rewrite command text or tmux launch arguments" not in text
 
 
+def test_create_session_page_warns_against_literal_credentials(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Create-session gives an early warning and keeps generated detail."""
+    text = (docs_dir / "tools" / "server" / "create-session.md").read_text(
+        encoding="utf-8"
+    )
+    caution = "**Do not pass credentials directly in `environment`.**"
+    caution_index = text.index(caution)
+    history_index = text.index("`suppress_persistent_history`")
+    caution_block = text[caution_index:history_index]
+    normalized = " ".join(caution_block.split())
+
+    assert text.index("**Side effects:**") < caution_index < history_index
+    assert "Values persist in the new session" in normalized
+    assert "initial pane and future panes" in normalized
+    assert "Pass credential references instead" in normalized
+    assert "{ref}`safety`" in caution_block
+    assert "```{fastmcp-tool-input} server_tools.create_session" in text
+
+
 def test_run_command_page_documents_effective_history_policy(
     docs_dir: pathlib.Path,
 ) -> None:

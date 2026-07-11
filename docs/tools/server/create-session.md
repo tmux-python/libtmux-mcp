@@ -11,6 +11,10 @@ container — create one before creating windows or panes.
 
 **Side effects:** Creates a new tmux session with one window and one pane.
 
+**Do not pass credentials directly in `environment`.** Values persist in the
+new session and reach its initial pane and future panes. Pass credential
+references instead; see {ref}`safety` for details.
+
 `suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
 Set it to `true` and {tooliconl}`create-session` copies and merges best-effort no-disk history controls into the tmux session environment. They reach the initial pane and future panes in that session. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
