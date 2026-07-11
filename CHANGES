@@ -6,6 +6,24 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**History suppression now defaults on for run commands**
+
+MCP clients now see the effective server default for `suppress_history` on {tooliconl}`run-command`, and calls that omit the argument inherit it. The default requests best-effort history suppression. To run multiline input while suppression is enabled, pass `suppress_history=false`; to retain the previous omitted-call behavior, set {envvar}`LIBTMUX_SUPPRESS_HISTORY` to `0` and restart the server. Direct Python calls remain unchanged. See {ref}`configuration` for details. (#91)
+
+### What's new
+
+**History controls for spawned shells**
+
+{tooliconl}`create-session`, {tooliconl}`create-window`, {tooliconl}`split-window`, and {tooliconl}`respawn-pane` now let callers opt into best-effort no-disk shell-history controls with `suppress_persistent_history=true`. Session controls reach the initial and future panes, while the other tools limit the setting to the process launched by that call.
+
+History suppression reduces accidental persistence, but it is not secret transport: shells can override the controls, and terminal output and other observation surfaces remain visible. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for the remaining boundaries. (#91)
+
+**Per-process environments for windows and panes**
+
+{tooliconl}`create-window` and {tooliconl}`split-window` now accept per-process `environment` mappings or JSON object strings, so callers can configure new windows and panes without changing the tmux session environment. {tooliconl}`respawn-pane` now accepts the same JSON object form for its existing environment input. Values can still surface in host process inspection and child environments; use credential references, not literal credentials. See {ref}`safety` for details. (#91)
+
 ### Documentation
 
 **Grok CLI and Antigravity in the MCP install picker**
