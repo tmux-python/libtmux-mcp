@@ -330,32 +330,28 @@ def test_logging_docs_describe_audit_outcomes_without_return_values(
     assert "MCP client can still retain the original request and response" in text
 
 
-def test_unreleased_changelog_summarizes_history_features(
+def test_a17_changelog_summarizes_history_features(
     docs_dir: pathlib.Path,
 ) -> None:
-    """The unreleased changelog stays focused on product-level features."""
+    """The 0.1.0a17 changelog stays focused on product-level features."""
     text = (docs_dir.parent / "CHANGES").read_text(encoding="utf-8")
-    placeholder_end = (
-        "<!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->"
-    )
-    after_placeholder = text.split(placeholder_end, maxsplit=1)[1]
-    after_placeholder_lines = after_placeholder.splitlines()
+    release_lines = text.split("## libtmux-mcp 0.1.0a17 ", maxsplit=1)[1].splitlines()
     next_release_index = next(
         index
-        for index, line in enumerate(after_placeholder_lines)
+        for index, line in enumerate(release_lines)
         if line.startswith("## libtmux-mcp ")
     )
-    unreleased = "\n".join(after_placeholder_lines[:next_release_index])
+    release = "\n".join(release_lines[:next_release_index])
 
-    breaking_index = unreleased.index("### Breaking changes")
-    whats_new_index = unreleased.index("### What's new")
+    breaking_index = release.index("### Breaking changes")
+    whats_new_index = release.index("### What's new")
     history_heading = "**History controls for spawned shells**"
     environment_heading = "**Per-process environments for windows and panes**"
-    breaking_entry = unreleased[:whats_new_index]
-    history_entry = unreleased.split(history_heading, maxsplit=1)[1].split(
+    breaking_entry = release[:whats_new_index]
+    history_entry = release.split(history_heading, maxsplit=1)[1].split(
         environment_heading, maxsplit=1
     )[0]
-    environment_entry = unreleased.split(environment_heading, maxsplit=1)[1].split(
+    environment_entry = release.split(environment_heading, maxsplit=1)[1].split(
         "### Documentation", maxsplit=1
     )[0]
 

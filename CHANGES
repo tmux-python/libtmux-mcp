@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a17 (2026-07-11)
+
+libtmux-mcp 0.1.0a17 makes best-effort shell-history suppression the default for {tooliconl}`run-command` — calls that omit `suppress_history` now inherit the server default, and setting {envvar}`LIBTMUX_SUPPRESS_HISTORY` to `0` restores the previous behavior. Spawned shells gain the same hygiene: {tooliconl}`create-session`, {tooliconl}`create-window`, {tooliconl}`split-window`, and {tooliconl}`respawn-pane` accept `suppress_persistent_history=true` for best-effort no-disk history controls. {tooliconl}`create-window` and {tooliconl}`split-window` also accept per-process `environment` mappings, and the MCP install picker now covers Grok CLI and Antigravity.
+
 ### Breaking changes
 
 **History suppression now defaults on for run commands**
