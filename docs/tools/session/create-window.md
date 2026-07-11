@@ -7,6 +7,12 @@
 
 **Side effects:** Creates a new window. Attaches to it if `attach` is true.
 
+`environment` accepts a mapping or JSON object string and applies only to the
+process started in the new window; it does not change the tmux session
+environment. Values can remain visible in the tmux client argv and child
+environment even though the MCP audit record is redacted. Pass credential
+references, not literal credentials; see {ref}`safety`.
+
 `suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
 Set it to `true` and {tooliconl}`create-window` copies and merges best-effort no-disk history controls for only the spawned process. It does not change the tmux session environment, so future windows and panes do not receive the controls from this call. The shell can retain in-memory history, and a startup file can override these controls after the process starts.
@@ -25,7 +31,23 @@ When you enable it, tmux environment arguments are added, but the spawned proces
 }
 ```
 
-Response:
+**Example — launch a test window with scoped settings:**
+
+```json
+{
+  "tool": "create_window",
+  "arguments": {
+    "session_name": "dev",
+    "window_name": "tests",
+    "environment": {
+      "PYTHONPATH": "src"
+    },
+    "suppress_persistent_history": true
+  }
+}
+```
+
+Response ({class}`~libtmux_mcp.models.WindowInfo`):
 
 ```json
 {

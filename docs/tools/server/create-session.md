@@ -12,8 +12,9 @@ container — create one before creating windows or panes.
 **Side effects:** Creates a new tmux session with one window and one pane.
 
 **Do not pass credentials directly in `environment`.** Values persist in the
-new session and reach its initial pane and future panes. Pass credential
-references instead; see {ref}`safety` for details.
+new session, can be inspected with {tooliconl}`show-environment`, and reach
+its initial pane and future panes. Pass credential references instead; see
+{ref}`safety` for details.
 
 `suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
@@ -32,7 +33,7 @@ When you enable it, tmux environment arguments are added, but the spawned proces
 }
 ```
 
-Response:
+Response ({class}`~libtmux_mcp.models.SessionInfo`):
 
 ```json
 {

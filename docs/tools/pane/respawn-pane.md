@@ -73,7 +73,7 @@ time).
 
 Mapping input keeps the keys visible in the audit log but replaces each `environment` *value* with a `{len, sha256_prefix}` digest. A JSON object string is redacted as one scalar digest, so its keys are not retained in the audit record. Values may still appear briefly in the OS process table while tmux spawns the new process — see {ref}`safety` for details.
 
-Response (PaneInfo):
+Response ({class}`~libtmux_mcp.models.PaneInfo`):
 
 ```json5
 {

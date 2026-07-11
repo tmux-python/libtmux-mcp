@@ -3,8 +3,9 @@
 ```{fastmcp-tool} pane_tools.run_command
 ```
 
-**Use when** you need to run a shell command in a pane and get a typed
-result with exit status, timeout state, and captured pane output.
+**Use when** you need to run a shell command in a pane and get a
+{class}`~libtmux_mcp.models.RunCommandResult` with exit status, timeout state,
+and captured pane output.
 
 **Avoid when** you need raw interactive key driving — use
 {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` for TUIs, key
@@ -29,7 +30,7 @@ Suppression is best effort: {tooliconl}`run-command` prefixes one space to the g
 }
 ```
 
-Response:
+Response ({class}`~libtmux_mcp.models.RunCommandResult`):
 
 ```json
 {

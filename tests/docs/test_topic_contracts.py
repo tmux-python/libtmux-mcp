@@ -100,46 +100,49 @@ def test_configuration_separates_spawn_persistent_history_control(
         assert f"{{toolref}}`{tool}`" in text
 
 
-def test_history_gotcha_documents_shell_limits_and_raw_input_boundary(
+def test_history_topic_documents_shell_limits_and_raw_input_boundary(
     docs_dir: pathlib.Path,
 ) -> None:
     """History guidance stays best effort and corrects the Bash default claim."""
-    text = (docs_dir / "topics" / "gotchas.md").read_text(encoding="utf-8")
+    text = (docs_dir / "topics" / "history-suppression.md").read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
 
-    assert "## Shell-history suppression is best effort" in text
-    assert "`ignorespace` is not a Bash default" in text
+    assert "# History suppression" in text
+    assert "`ignorespace` is not a Bash default" in normalized
     assert "(history-hygiene)=" in text
-    assert "Startup files can override" in text
-    assert "in-memory history" in text
+    assert "(history-suppression)=" in text
+    assert "Startup files can still replace" in normalized
+    assert "in-memory history" in normalized
     assert "HIST_IGNORE_SPACE" in text
     assert "fish_should_add_to_history" in text
-    assert "bracketed paste" in text
-    assert "recallable until the next command" in text
-    assert "enabled by default for omitted MCP calls" in text
+    assert "bracketed paste" in normalized
+    assert "recallable until the next command" in normalized
+    assert "enabled by default for omitted MCP calls" in normalized
     assert "`suppress_persistent_history=true`" in text
-    assert "defaults to `false`" in text
-    assert "initial pane and future panes in that session" in text
-    assert "only the process that each call starts" in text
-    assert "cannot remove inherited, session, or startup-file controls" in text
+    assert "disabled by default, so you opt in per call" in normalized
+    assert "initial pane and future panes inherit" in normalized
+    assert "only to the process started by" in normalized
+    assert "cannot remove settings inherited" in normalized
+    assert "fill an interactive shell's history with orchestration noise" in normalized
+    assert "deliberately stays out of the way on raw input" in normalized
     assert "{tooliconl}`send-keys-batch`" in text
-    assert "do not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`" in text
-    assert "control keys such as `C-c`, TUI input, or partial text" in text
-    assert "Paste tools have no suppression argument" in text
+    assert "do not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`" in normalized
+    assert "control keys such as `C-c`, TUI input, or partial text" in normalized
+    assert "Paste tools have no suppression argument" in normalized
     assert "github.com/tianon/mirror-bash/blob/bash-5.3" in text
     assert "the default for bash" not in text
-    spawn_scope = next(
-        paragraph
-        for paragraph in text.split("\n\n")
-        if paragraph.startswith("For a process you are about to spawn")
-    )
+    assert "| Workflow |" not in text
+    assert "| Shell |" not in text
+    spawn_scope = text.split("## Opt into stronger controls for a new shell", 1)[
+        1
+    ].split("## Raw input and paste stay explicit", 1)[0]
     for tool in (
         "create-session",
         "create-window",
         "split-window",
         "respawn-pane",
     ):
-        assert f"{{toolref}}`{tool}`" in spawn_scope
-        assert f"{{tooliconl}}`{tool}`" not in spawn_scope
+        assert f"{{tooliconl}}`{tool}`" in spawn_scope
 
 
 @pytest.mark.parametrize(
