@@ -1177,11 +1177,11 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.61.0"
-source = { git = "https://github.com/tmux-python/libtmux.git?branch=engine-ops#cd20516568058244192028b3df69764851440588" }
+source = { git = "https://github.com/tmux-python/libtmux.git?branch=engine-ops#22557d9815bb332bfa0ef96fc1d7050f953aeba8" }
 
 [[package]]
 name = "libtmux-mcp"
-version = "0.1.0a17"
+version = "0.1.0a18"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
