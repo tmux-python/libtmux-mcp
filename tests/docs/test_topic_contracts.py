@@ -327,10 +327,10 @@ def test_logging_docs_describe_audit_outcomes_without_return_values(
     assert "MCP client can still retain the original request and response" in text
 
 
-def test_unreleased_changelog_documents_history_suppression(
+def test_unreleased_changelog_summarizes_history_features(
     docs_dir: pathlib.Path,
 ) -> None:
-    """The unreleased changelog exposes the history-control deliverable."""
+    """The unreleased changelog stays focused on product-level features."""
     text = (docs_dir.parent / "CHANGES").read_text(encoding="utf-8")
     placeholder_end = (
         "<!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->"
@@ -346,20 +346,48 @@ def test_unreleased_changelog_documents_history_suppression(
 
     breaking_index = unreleased.index("### Breaking changes")
     whats_new_index = unreleased.index("### What's new")
+    history_heading = "**History controls for spawned shells**"
+    environment_heading = "**Per-process environments for windows and panes**"
+    breaking_entry = unreleased[:whats_new_index]
+    history_entry = unreleased.split(history_heading, maxsplit=1)[1].split(
+        environment_heading, maxsplit=1
+    )[0]
+    environment_entry = unreleased.split(environment_heading, maxsplit=1)[1].split(
+        "### Documentation", maxsplit=1
+    )[0]
 
     assert breaking_index < whats_new_index
-    assert "**MCP command-history suppression defaults on**" in unreleased
-    assert "MCP calls that omit `suppress_history`" in unreleased
-    assert "pass `suppress_history=false` for that call" in unreleased
-    assert "set {envvar}`LIBTMUX_SUPPRESS_HISTORY` to `0`" in unreleased
-    assert "**Best-effort shell-history suppression**" in unreleased
-    assert "{tooliconl}`run-command`" in unreleased
-    assert "{tooliconl}`create-session`" in unreleased
-    assert "{tooliconl}`create-window`" in unreleased
-    assert "{tooliconl}`split-window`" in unreleased
-    assert "{tooliconl}`respawn-pane`" in unreleased
-    assert "{envvar}`LIBTMUX_SUPPRESS_HISTORY`" in unreleased
-    assert "`suppress_persistent_history=false`" in unreleased
-    assert "{toolref}`send-keys-batch`" in unreleased
-    assert "{toolref}`paste-text`" in unreleased
-    assert "{ref}`configuration`" in unreleased
+    assert "**History suppression now defaults on for run commands**" in breaking_entry
+    assert "MCP clients now see the effective server default" in breaking_entry
+    assert "calls that omit the argument inherit it" in breaking_entry
+    assert (
+        "while suppression is enabled, pass `suppress_history=false`" in breaking_entry
+    )
+    assert "set {envvar}`LIBTMUX_SUPPRESS_HISTORY` to `0`" in breaking_entry
+    assert "{tooliconl}`run-command`" in breaking_entry
+    assert "{ref}`configuration`" in breaking_entry
+    assert "space-prefixed" not in breaking_entry
+
+    for tool in (
+        "create-session",
+        "create-window",
+        "split-window",
+        "respawn-pane",
+    ):
+        assert f"{{tooliconl}}`{tool}`" in history_entry
+    assert "`suppress_persistent_history=true`" in history_entry
+    assert "Session controls reach the initial and future panes" in history_entry
+    assert "{ref}`history-hygiene`" in history_entry
+    assert "{ref}`safety`" in history_entry
+    assert "space-prefixed" not in history_entry
+
+    assert "{tooliconl}`create-window`" in environment_entry
+    assert "{tooliconl}`split-window`" in environment_entry
+    assert (
+        "per-process `environment` mappings or JSON object strings" in environment_entry
+    )
+    assert "without changing the tmux session environment" in environment_entry
+    assert "{tooliconl}`respawn-pane`" in environment_entry
+    assert "same JSON object form" in environment_entry
+    assert "credential references, not literal credentials" in environment_entry
+    assert "{ref}`safety`" in environment_entry
