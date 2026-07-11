@@ -83,13 +83,19 @@ def test_configuration_separates_spawn_persistent_history_control(
     assert "Leaving it `false` adds no history controls" in text
     assert "cannot remove inherited, session, or startup-file controls" in text
     assert "without including the conflicting value" in text
+    spawn_control = next(
+        paragraph
+        for paragraph in text.split("\n\n")
+        if paragraph.startswith("Process creation uses a separate control")
+    )
     for tool in (
         "create-session",
         "create-window",
         "split-window",
         "respawn-pane",
     ):
-        assert f"{{tooliconl}}`{tool}`" in text
+        assert f"{{toolref}}`{tool}`" in spawn_control
+        assert f"{{tooliconl}}`{tool}`" not in spawn_control
     for tool in ("send-keys", "send-keys-batch", "paste-text", "paste-buffer"):
         assert f"{{toolref}}`{tool}`" in text
 
@@ -121,6 +127,19 @@ def test_history_gotcha_documents_shell_limits_and_raw_input_boundary(
     assert "Paste tools have no suppression argument" in text
     assert "github.com/tianon/mirror-bash/blob/bash-5.3" in text
     assert "the default for bash" not in text
+    spawn_scope = next(
+        paragraph
+        for paragraph in text.split("\n\n")
+        if paragraph.startswith("For a process you are about to spawn")
+    )
+    for tool in (
+        "create-session",
+        "create-window",
+        "split-window",
+        "respawn-pane",
+    ):
+        assert f"{{toolref}}`{tool}`" in spawn_scope
+        assert f"{{tooliconl}}`{tool}`" not in spawn_scope
 
 
 @pytest.mark.parametrize(
@@ -238,7 +257,6 @@ def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
     assert "`suppress_persistent_history=true`" in text
     assert "does not isolate the process" in text
     assert "does not clear in-memory history or scrollback" in text
-    assert "{tooliconl}`pipe-pane`" in text
     assert "attached terminal" in text
     assert "application logs" in text
     assert "shell-joined tmux arguments" in text
@@ -248,6 +266,20 @@ def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
     assert "libtmux, FastMCP, shells, or MCP clients" in text
     assert "A JSON string is redacted as one scalar digest" in text
     assert "dict-shaped sensitive key `environment`" not in text
+    capture_visibility = next(
+        line
+        for line in text.splitlines()
+        if line.startswith("- **capture tools and piping:**")
+    )
+    for tool in (
+        "capture-pane",
+        "capture-since",
+        "snapshot-pane",
+        "search-panes",
+        "pipe-pane",
+    ):
+        assert f"{{toolref}}`{tool}`" in capture_visibility
+        assert f"{{tooliconl}}`{tool}`" not in capture_visibility
     process_visibility = next(
         line
         for line in text.splitlines()
