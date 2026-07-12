@@ -6,6 +6,32 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `libtmux>=0.62.0`** (was `>=0.61.0`). Picks up libtmux 0.62.0, which
+re-parents {exc}`libtmux.exc.MultipleObjectsReturned` and
+{exc}`libtmux.exc.ObjectDoesNotExist` under {exc}`libtmux.exc.LibTmuxException`.
+The retry and error-mapping fixes below rely on that hierarchy. (#98)
+
+### Fixes
+
+**A stale id fails once instead of twice**
+
+Readonly tools retried on any {exc}`libtmux.exc.LibTmuxException`, the right
+trigger for the transient socket errors libtmux wraps but wrong for the rest of
+that family — a pane that does not exist will not exist on the second look, and
+an ambiguous match does not become unambiguous during a backoff window. A lookup
+that a retry cannot change now fails on the first attempt, without the redundant
+tmux round-trip and its backoff delay. (#98)
+
+**An ambiguous target says how to disambiguate it**
+
+A window shared between sessions — through a grouped session or `link-window` —
+is listed once per session that holds it, so a name or index can match more than
+one row and the lookup raises {exc}`libtmux.exc.MultipleObjectsReturned`. That
+reached the agent with no recovery hint. It now says to target the object by id
+instead. (#98)
+
 ## libtmux-mcp 0.1.0a17 (2026-07-11)
 
 libtmux-mcp 0.1.0a17 makes best-effort shell-history suppression the default for {tooliconl}`run-command` — calls that omit `suppress_history` now inherit the server default, and setting {envvar}`LIBTMUX_SUPPRESS_HISTORY` to `0` restores the previous behavior. Spawned shells gain the same hygiene: {tooliconl}`create-session`, {tooliconl}`create-window`, {tooliconl}`split-window`, and {tooliconl}`respawn-pane` accept `suppress_persistent_history=true` for best-effort no-disk history controls. {tooliconl}`create-window` and {tooliconl}`split-window` also accept per-process `environment` mappings, and the MCP install picker now covers Grok CLI and Antigravity.
