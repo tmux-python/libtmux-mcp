@@ -674,9 +674,18 @@ DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 #:
 #: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
 #: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
+#:
+#: ``MultipleObjectsReturned`` only joined ``libtmux.exc`` in libtmux 0.62.0
+#: (the release floor). It is guarded so this module still imports under the
+#: dev-only ``[tool.uv.sources]`` engine-ops pin, which resolves an older
+#: libtmux that predates it; on the real floor the guard is a no-op.
 NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     libtmux_exc.ObjectDoesNotExist,
-    libtmux_exc.MultipleObjectsReturned,
+    *(
+        (libtmux_exc.MultipleObjectsReturned,)
+        if hasattr(libtmux_exc, "MultipleObjectsReturned")
+        else ()
+    ),
     libtmux_exc.PaneNotFound,
     libtmux_exc.NoWindowsExist,
     libtmux_exc.BadSessionName,

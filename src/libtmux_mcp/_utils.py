@@ -1008,7 +1008,11 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
                 "Call list_sessions / list_windows / list_panes to discover valid ids."
             ),
         )
-    if isinstance(e, exc.MultipleObjectsReturned):
+    # ``MultipleObjectsReturned`` only joined ``libtmux.exc`` in libtmux 0.62.0
+    # (the release floor). ``getattr(..., ())`` keeps this path a safe no-op
+    # under the dev-only engine-ops pin, which resolves an older libtmux that
+    # predates it; on the real floor it resolves to the class as written.
+    if isinstance(e, getattr(exc, "MultipleObjectsReturned", ())):
         return ExpectedToolError(
             f"Ambiguous target: {e}",
             suggestion=(
