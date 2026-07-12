@@ -9,7 +9,9 @@ import typing as t
 
 import pydantic
 import pytest
+from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import MiddlewareContext
+from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams
 
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
@@ -913,6 +915,90 @@ def test_readonly_retry_recovers_on_decorated_tool(
         f"retry did not fire (calls={calls['count']}). Likely cause: "
         f"fastmcp<3.2.4 RetryMiddleware._should_retry not walking "
         f"__cause__. Bump pyproject.toml fastmcp pin to >=3.2.4."
+    )
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        libtmux_exc.TmuxObjectDoesNotExist("@99"),
+        libtmux_exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
+        libtmux_exc.PaneNotFound("%99"),
+        libtmux_exc.NoWindowsExist,
+        libtmux_exc.BadSessionName(reason="contains periods", session_name="a.b"),
+        libtmux_exc.TmuxSessionExists("session exists"),
+    ],
+    ids=lambda e: type(e).__name__ if isinstance(e, Exception) else e.__name__,
+)
+def test_readonly_retry_skips_deterministic_failures(raised: Exception) -> None:
+    """A failure a second attempt cannot change is not retried.
+
+    Every one of these descends from ``LibTmuxException``, which is the retry
+    trigger — so without :data:`NON_RETRYABLE_EXCEPTIONS` they would all be
+    retried. None of them can succeed on the second look: a pane that is not
+    there will not appear during a backoff window, and an ambiguous match does
+    not become unambiguous. Retrying buys a second tmux round-trip and 100 ms
+    of latency in order to fail identically.
+    """
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_READONLY})
+    call_next = _FlakyCallNext(raises_n_times=1, exception=raised)
+
+    with pytest.raises(libtmux_exc.LibTmuxException):
+        asyncio.run(middleware.on_call_tool(ctx, call_next))
+
+    assert call_next.calls == 1, (
+        f"{type(raised).__name__} was retried. It descends from LibTmuxException, "
+        f"so it must be listed in NON_RETRYABLE_EXCEPTIONS."
+    )
+
+
+def test_readonly_retry_skips_not_found_on_decorated_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: a stale id is not retried through the production wrap path.
+
+    The unit test above raises straight into the middleware. This one goes
+    through ``handle_tool_errors``, which re-raises every libtmux failure as an
+    ``ExpectedToolError`` chained off the original — so at the middleware layer
+    the exception is an ``ExpectedToolError`` and the real failure is only
+    visible one hop down, on ``__cause__``. The retry decision walks that hop
+    (which is what makes retries work at all), so the *skip* decision has to
+    walk it too, or it never fires in production.
+
+    Guards the shape libtmux tmux-python/libtmux#718 introduced:
+    ``TmuxObjectDoesNotExist`` became a ``LibTmuxException``, which silently
+    made every stale session or window id retryable.
+    """
+    from libtmux import Server
+
+    from libtmux_mcp.tools.server_tools import list_sessions
+
+    calls = {"count": 0}
+
+    def _missing_sessions(_self: Server) -> list[t.Any]:
+        calls["count"] += 1
+        raise libtmux_exc.TmuxObjectDoesNotExist(
+            obj_key="session_id",
+            obj_id="$99",
+            list_cmd="list-sessions",
+            list_extra_args=None,
+        )
+
+    monkeypatch.setattr(Server, "sessions", property(_missing_sessions))
+
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_READONLY})
+
+    async def real_call_next(_context: t.Any) -> t.Any:
+        return list_sessions(socket_name="retry-skip-smoke")
+
+    with pytest.raises(ToolError):
+        asyncio.run(middleware.on_call_tool(ctx, real_call_next))
+
+    assert calls["count"] == 1, (
+        f"a missing object was retried (calls={calls['count']}). The skip must "
+        f"walk __cause__, because handle_tool_errors wraps it in ExpectedToolError."
     )
 
 

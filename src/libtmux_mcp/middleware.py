@@ -666,6 +666,45 @@ class AuditMiddleware(Middleware):
 DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 
 
+#: Failures a retry cannot fix. Each one names a thing that is not there, or a
+#: request that cannot succeed as written, so re-running it buys a second tmux
+#: round-trip and a backoff window in order to fail identically. They all
+#: descend from :exc:`libtmux.exc.LibTmuxException`, which is the retry
+#: trigger, so without this set they would all be retried.
+#:
+#: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
+#: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
+NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
+    libtmux_exc.ObjectDoesNotExist,
+    libtmux_exc.MultipleObjectsReturned,
+    libtmux_exc.PaneNotFound,
+    libtmux_exc.NoWindowsExist,
+    libtmux_exc.BadSessionName,
+    libtmux_exc.TmuxSessionExists,
+    libtmux_exc.TmuxCommandNotFound,
+)
+
+
+class _SkipDeterministicFailures(RetryMiddleware):
+    """A :class:`RetryMiddleware` that declines to retry what cannot succeed.
+
+    fastmcp decides whether to retry in ``_should_retry``, matching the error
+    and, one hop down, its ``__cause__`` -- which is where the real failure
+    lives, because ``handle_tool_errors`` re-raises every libtmux error as an
+    ``ExpectedToolError`` chained off the original. This narrows that decision
+    with :data:`NON_RETRYABLE_EXCEPTIONS`, checking the same two places.
+    """
+
+    def _should_retry(self, error: Exception) -> bool:
+        """Return ``False`` for a failure a second attempt cannot change."""
+        cause = error.__cause__
+        if isinstance(error, NON_RETRYABLE_EXCEPTIONS) or (
+            cause is not None and isinstance(cause, NON_RETRYABLE_EXCEPTIONS)
+        ):
+            return False
+        return super()._should_retry(error)
+
+
 class ReadonlyRetryMiddleware(Middleware):
     """Retry transient libtmux failures, but only for readonly tools.
 
@@ -683,6 +722,12 @@ class ReadonlyRetryMiddleware(Middleware):
     (socket EAGAIN, transient connect errors). The fastmcp default
     ``(ConnectionError, TimeoutError)`` does NOT match these, so the
     upstream defaults would be a silent no-op.
+
+    That trigger is a whole family, though, and most of it is not
+    transient: a pane that does not exist will not exist on the second
+    look. :data:`NON_RETRYABLE_EXCEPTIONS` carves those out, so a stale
+    id fails once instead of costing a backoff window and a second tmux
+    round-trip to fail again.
 
     Place this in the middleware stack **inside** ``AuditMiddleware``
     (so retried calls are audited once each) and **outside**
@@ -715,7 +760,7 @@ class ReadonlyRetryMiddleware(Middleware):
         """
         if logger_ is None:
             logger_ = logging.getLogger("libtmux_mcp.retry")
-        self._retry = RetryMiddleware(
+        self._retry = _SkipDeterministicFailures(
             max_retries=max_retries,
             base_delay=base_delay,
             max_delay=max_delay,
