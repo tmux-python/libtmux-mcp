@@ -1001,11 +1001,20 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
         return ExpectedToolError(str(e))
     if isinstance(e, exc.BadSessionName):
         return ExpectedToolError(str(e))
-    if isinstance(e, exc.TmuxObjectDoesNotExist):
+    if isinstance(e, exc.ObjectDoesNotExist):
         return ExpectedToolError(
             f"Object not found: {e}",
             suggestion=(
                 "Call list_sessions / list_windows / list_panes to discover valid ids."
+            ),
+        )
+    if isinstance(e, exc.MultipleObjectsReturned):
+        return ExpectedToolError(
+            f"Ambiguous target: {e}",
+            suggestion=(
+                "A window shared between sessions is listed once per session that "
+                "holds it, so a name or index can match more than one row. Target "
+                "it by id (session_id / window_id / pane_id) instead."
             ),
         )
     if isinstance(e, exc.PaneNotFound):

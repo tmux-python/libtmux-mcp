@@ -875,6 +875,8 @@ def test_handle_tool_errors_async_wraps_unexpected_exception() -> None:
         exc.TmuxSessionExists("session foo already exists"),
         exc.BadSessionName("bad name"),
         exc.TmuxObjectDoesNotExist("@99"),
+        exc.ObjectDoesNotExist(query={"window_name": "gone"}),
+        exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
         exc.PaneNotFound("%99"),
         exc.LibTmuxException("server gone"),
     ],
@@ -952,6 +954,10 @@ def test_expected_tool_error_logs_warning_through_server(
     ("raised", "expected_suggestion_fragment"),
     [
         (exc.TmuxObjectDoesNotExist("@99"), "list_sessions / list_windows"),
+        (
+            exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
+            "Target it by id",
+        ),
         (exc.PaneNotFound("%99"), "list_panes"),
         (exc.TmuxSessionExists("dup"), None),
         (exc.BadSessionName("bad:name"), None),
