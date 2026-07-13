@@ -28,6 +28,7 @@ from libtmux_mcp._utils import (
     handle_tool_errors,
 )
 from libtmux_mcp.models import PaneInfo, WindowInfo
+from libtmux_mcp.tools.session_tools import _resolve_caller_session
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -49,6 +50,7 @@ def list_panes(
     window_index: str | None = None,
     socket_name: str | None = None,
     filters: dict[str, t.Any] | str | None = None,
+    scope: t.Literal["server", "caller_session"] = "server",
 ) -> list[PaneInfo]:
     """List tmux panes (terminal multiplexer splits) in a window, session, or server.
 
@@ -75,14 +77,35 @@ def list_panes(
         Django-style filters as a dict
         (e.g. ``{"pane_current_command__contains": "vim"}``)
         or as a JSON string. Some MCP clients require the string form.
+    scope : {"server", "caller_session"}, optional
+        Discovery scope. ``"server"`` preserves the existing hierarchy
+        selectors and server-wide default. ``"caller_session"`` limits
+        results to the frozen caller pane's live session and cannot be
+        combined with session or window selectors.
 
     Returns
     -------
     list[PaneInfo]
         List of serialized pane objects.
     """
+    if scope not in ("server", "caller_session"):
+        msg = f"Invalid scope {scope!r}; expected 'server' or 'caller_session'."
+        raise ExpectedToolError(msg)
+    if scope == "caller_session" and any(
+        selector is not None
+        for selector in (session_name, session_id, window_id, window_index)
+    ):
+        msg = (
+            "scope='caller_session' cannot be combined with explicit hierarchy "
+            "selectors (session_name, session_id, window_id, or window_index); "
+            "omit the selectors or use scope='server'."
+        )
+        raise ExpectedToolError(msg)
+
     server = _get_server(socket_name=socket_name)
-    if window_id is not None or window_index is not None:
+    if scope == "caller_session":
+        panes = _resolve_caller_session(server).panes
+    elif window_id is not None or window_index is not None:
         window = _resolve_window(
             server,
             window_id=window_id,

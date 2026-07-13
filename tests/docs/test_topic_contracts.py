@@ -130,6 +130,23 @@ def test_where_am_i_tool_page_is_indexed_and_documents_typed_states(
     assert "{toolref}`where-am-i`" in prompting
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    ("tools/session/list-windows.md", "tools/window/list-panes.md"),
+)
+def test_caller_session_tool_pages_name_lookup_tradeoff(
+    docs_dir: pathlib.Path,
+    relative_path: str,
+) -> None:
+    """Caller-local discovery states the extra lookup and its benefit."""
+    normalized = " ".join(
+        (docs_dir / relative_path).read_text(encoding="utf-8").split()
+    )
+
+    assert "extra targeted tmux lookup" in normalized
+    assert "fail-closed live-session accuracy" in normalized
+
+
 def test_configuration_separates_spawn_persistent_history_control(
     docs_dir: pathlib.Path,
 ) -> None:

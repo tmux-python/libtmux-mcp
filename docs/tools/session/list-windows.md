@@ -10,6 +10,18 @@ session before selecting a window to work with.
 
 **Side effects:** None. Readonly.
 
+{tooliconl}`list-windows` keeps `scope="server"` as its default. With no
+session selector, that lists windows across the effective server; existing
+selectors still narrow the result. Set `scope="caller_session"` to list
+windows in the session containing the frozen caller pane.
+That scope performs an extra targeted tmux lookup; the added work buys
+fail-closed live-session accuracy instead of trusting stale session metadata.
+
+Caller-session scope cannot be combined with `session_name` or `session_id`.
+It raises a tool error instead of widening the search when the MCP invocation
+started outside tmux, the caller pane no longer resolves, or the caller socket
+differs from the effective target.
+
 **Example:**
 
 ```json

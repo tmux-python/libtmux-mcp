@@ -8,6 +8,18 @@ sending keys or capturing output.
 
 **Side effects:** None. Readonly.
 
+{tooliconl}`list-panes` keeps `scope="server"` as its default. With no
+session or window selector, that lists panes across the effective server;
+existing selectors still narrow the result. Set `scope="caller_session"`
+to list every pane in the session containing the frozen caller pane.
+That scope performs an extra targeted tmux lookup; the added work buys
+fail-closed live-session accuracy instead of trusting stale session metadata.
+
+Caller-session scope cannot be combined with `session_name`, `session_id`,
+`window_id`, or `window_index`. It raises a tool error instead of widening
+the search when the MCP invocation started outside tmux, the caller pane no
+longer resolves, or the caller socket differs from the effective target.
+
 **Example:**
 
 ```json

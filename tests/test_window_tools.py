@@ -36,6 +36,135 @@ def test_list_panes(mcp_server: Server, mcp_session: Session) -> None:
     assert result[0].pane_id is not None
 
 
+@pytest.mark.parametrize("explicit_scope", [False, True], ids=["default", "explicit"])
+def test_list_panes_server_scope_remains_server_wide(
+    mcp_server: Server,
+    mcp_session: Session,
+    explicit_scope: bool,
+) -> None:
+    """The default and explicit server scope include every session."""
+    second_session = mcp_server.new_session(session_name="list_panes_server_scope")
+    kwargs: dict[str, t.Any] = {"socket_name": mcp_server.socket_name}
+    if explicit_scope:
+        kwargs["scope"] = "server"
+
+    result = list_panes(**kwargs)
+
+    session_ids = {pane.session_id for pane in result}
+    assert mcp_session.session_id in session_ids
+    assert second_session.session_id in session_ids
+
+
+def test_list_panes_caller_session_scope_uses_live_caller_session(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller scope resolves the pane instead of trusting stale TMUX metadata."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    caller_pane = mcp_session.active_pane
+    assert caller_pane is not None and caller_pane.pane_id is not None
+    mcp_session.new_window(window_name="list_panes_caller_window")
+    other_session = mcp_server.new_session(session_name="list_panes_other_session")
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$stale")
+    monkeypatch.setenv("TMUX_PANE", caller_pane.pane_id)
+
+    result = list_panes(
+        scope="caller_session",
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result
+    assert {pane.session_id for pane in result} == {mcp_session.session_id}
+    assert other_session.session_id not in {pane.session_id for pane in result}
+
+
+@pytest.mark.parametrize(
+    ("selector", "value"),
+    [
+        ("session_name", "dev"),
+        ("session_id", "$1"),
+        ("window_id", "@1"),
+        ("window_index", "1"),
+    ],
+)
+def test_list_panes_caller_session_rejects_explicit_selectors(
+    mcp_server: Server,
+    selector: str,
+    value: str,
+) -> None:
+    """Caller scope cannot be mixed with hierarchy selectors."""
+    with pytest.raises(
+        ExpectedToolError,
+        match=r"scope='caller_session'.*cannot be combined.*scope='server'",
+    ):
+        list_panes(
+            scope="caller_session",
+            socket_name=mcp_server.socket_name,
+            **{selector: value},
+        )
+
+
+def test_list_panes_caller_session_rejects_outside_tmux(
+    mcp_server: Server,
+) -> None:
+    """Caller scope fails explicitly when the invocation has no caller."""
+    with pytest.raises(
+        ExpectedToolError,
+        match=r"scope='caller_session'.*inside tmux.*scope='server'",
+    ):
+        list_panes(
+            scope="caller_session",
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_list_panes_caller_session_rejects_effective_socket_mismatch(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller scope never crosses from the effective target to another socket."""
+    from libtmux.pane import Pane
+
+    caller_pane = mcp_session.active_pane
+    assert caller_pane is not None and caller_pane.pane_id is not None
+    monkeypatch.setenv("TMUX", "/tmp/tmux-99999/caller-only,12345,$0")
+    monkeypatch.setenv("TMUX_PANE", caller_pane.pane_id)
+
+    def fail_from_env(
+        cls: type[Pane], environment: t.Mapping[str, str] | None = None
+    ) -> Pane:
+        del cls, environment
+        pytest.fail("Pane.from_env must not run across a target mismatch")
+
+    monkeypatch.setattr(Pane, "from_env", classmethod(fail_from_env))
+
+    with pytest.raises(
+        ExpectedToolError,
+        match=r"scope='caller_session'.*socket.*effective.*scope='server'",
+    ):
+        list_panes(
+            scope="caller_session",
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_list_panes_rejects_invalid_scope(mcp_server: Server) -> None:
+    """Direct callers cannot widen a misspelled scope to the server."""
+    with pytest.raises(
+        ExpectedToolError,
+        match=r"Invalid scope.*expected.*server.*caller_session",
+    ):
+        list_panes(
+            scope=t.cast("t.Any", "caller"),
+            socket_name=mcp_server.socket_name,
+        )
+
+
 def test_get_window_info(mcp_server: Server, mcp_session: Session) -> None:
     """get_window_info returns a WindowInfo for a single window."""
     window = mcp_session.active_window
