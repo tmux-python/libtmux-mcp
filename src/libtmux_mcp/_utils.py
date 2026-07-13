@@ -1002,6 +1002,28 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
+class _NeverRaised(Exception):
+    """Stand-in for a libtmux exception this libtmux build does not define.
+
+    ``isinstance(e, _NeverRaised)`` is always ``False``, so a mapping arm keyed
+    on a missing type falls through to the generic
+    :exc:`~libtmux.exc.LibTmuxException` handler instead of raising
+    ``AttributeError``.
+    """
+
+
+# libtmux 0.62.0 re-parented these query errors under LibTmuxException. The
+# chainable-commands experiment pins an older libtmux that may not define them,
+# so resolve by name and fall back to a sentinel isinstance never matches. On
+# the libtmux>=0.62.0 floor the package targets, both resolve to the real types.
+_ObjectDoesNotExist: type[BaseException] = getattr(
+    exc, "ObjectDoesNotExist", _NeverRaised
+)
+_MultipleObjectsReturned: type[BaseException] = getattr(
+    exc, "MultipleObjectsReturned", _NeverRaised
+)
+
+
 def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
     """Translate a libtmux / unexpected exception into a ``ToolError``.
 
@@ -1021,14 +1043,14 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
         return ExpectedToolError(str(e))
     if isinstance(e, exc.BadSessionName):
         return ExpectedToolError(str(e))
-    if isinstance(e, exc.ObjectDoesNotExist):
+    if isinstance(e, _ObjectDoesNotExist):
         return ExpectedToolError(
             f"Object not found: {e}",
             suggestion=(
                 "Call list_sessions / list_windows / list_panes to discover valid ids."
             ),
         )
-    if isinstance(e, exc.MultipleObjectsReturned):
+    if isinstance(e, _MultipleObjectsReturned):
         return ExpectedToolError(
             f"Ambiguous target: {e}",
             suggestion=(

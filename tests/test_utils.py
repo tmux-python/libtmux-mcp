@@ -38,6 +38,34 @@ if t.TYPE_CHECKING:
     from libtmux.window import Window
 
 
+# libtmux 0.62.0 re-parented ObjectDoesNotExist / MultipleObjectsReturned under
+# LibTmuxException and gave ObjectDoesNotExist a ``query=`` constructor. The
+# chainable-commands experiment pins an older libtmux, so build the parametrize
+# cases that need that API only when it is present. They run on the
+# ``libtmux>=0.62.0`` floor the package targets.
+_HAS_QUERY_ERRORS = hasattr(exc, "MultipleObjectsReturned")
+
+_QUERY_ERROR_WARNING_CASES: list[Exception] = (
+    [
+        exc.ObjectDoesNotExist(query={"window_name": "gone"}),
+        exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
+    ]
+    if _HAS_QUERY_ERRORS
+    else []
+)
+
+_QUERY_ERROR_SUGGESTION_CASES: list[tuple[Exception, str]] = (
+    [
+        (
+            exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
+            "Target it by id",
+        ),
+    ]
+    if _HAS_QUERY_ERRORS
+    else []
+)
+
+
 def test_get_server_creates_server() -> None:
     """_get_server creates a Server instance."""
     server = _get_server(socket_name="test_mcp_util")
@@ -875,8 +903,7 @@ def test_handle_tool_errors_async_wraps_unexpected_exception() -> None:
         exc.TmuxSessionExists("session foo already exists"),
         exc.BadSessionName("bad name"),
         exc.TmuxObjectDoesNotExist("@99"),
-        exc.ObjectDoesNotExist(query={"window_name": "gone"}),
-        exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
+        *_QUERY_ERROR_WARNING_CASES,
         exc.PaneNotFound("%99"),
         exc.LibTmuxException("server gone"),
     ],
@@ -954,10 +981,7 @@ def test_expected_tool_error_logs_warning_through_server(
     ("raised", "expected_suggestion_fragment"),
     [
         (exc.TmuxObjectDoesNotExist("@99"), "list_sessions / list_windows"),
-        (
-            exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
-            "Target it by id",
-        ),
+        *_QUERY_ERROR_SUGGESTION_CASES,
         (exc.PaneNotFound("%99"), "list_panes"),
         (exc.TmuxSessionExists("dup"), None),
         (exc.BadSessionName("bad:name"), None),

@@ -918,11 +918,26 @@ def test_readonly_retry_recovers_on_decorated_tool(
     )
 
 
-@pytest.mark.parametrize(
-    "raised",
+# libtmux 0.62.0 (tmux-python/libtmux#718) re-parented TmuxObjectDoesNotExist
+# and MultipleObjectsReturned under LibTmuxException, which is the retry trigger
+# this test asserts against. The chainable-commands experiment pins an older
+# libtmux where TmuxObjectDoesNotExist is not a LibTmuxException and
+# MultipleObjectsReturned does not exist, so include those cases only when that
+# hierarchy is present. They run on the libtmux>=0.62.0 floor the package targets.
+_LIBTMUX_718_CASES: list[Exception] = (
     [
         libtmux_exc.TmuxObjectDoesNotExist("@99"),
         libtmux_exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
+    ]
+    if hasattr(libtmux_exc, "MultipleObjectsReturned")
+    else []
+)
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        *_LIBTMUX_718_CASES,
         libtmux_exc.PaneNotFound("%99"),
         libtmux_exc.NoWindowsExist,
         libtmux_exc.BadSessionName(reason="contains periods", session_name="a.b"),
