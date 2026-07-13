@@ -114,6 +114,21 @@ SAFETY_LEVEL_FIXTURES: list[SafetyLevelFixture] = [
 ]
 
 
+class AllowServerStartSettingFixture(t.NamedTuple):
+    """Fixture for valid ``LIBTMUX_ALLOW_SERVER_START`` values."""
+
+    test_id: str
+    env_value: str | None
+    expected: bool
+
+
+ALLOW_SERVER_START_SETTING_FIXTURES: list[AllowServerStartSettingFixture] = [
+    AllowServerStartSettingFixture("unset_defaults_disabled", None, False),
+    AllowServerStartSettingFixture("disabled", "0", False),
+    AllowServerStartSettingFixture("enabled", "1", True),
+]
+
+
 @pytest.mark.parametrize(
     BuildInstructionsFixture._fields,
     BUILD_INSTRUCTIONS_FIXTURES,
@@ -176,6 +191,102 @@ def test_resolve_safety_level(
 
     assert test_id
     assert _resolve_safety_level(env_value) == expected_level
+
+
+@pytest.mark.parametrize(
+    AllowServerStartSettingFixture._fields,
+    ALLOW_SERVER_START_SETTING_FIXTURES,
+    ids=[fixture.test_id for fixture in ALLOW_SERVER_START_SETTING_FIXTURES],
+)
+def test_resolve_allow_server_start_setting(
+    test_id: str,
+    env_value: str | None,
+    expected: bool,
+) -> None:
+    """Server startup accepts only the strict unset, ``0``, and ``1`` policy."""
+    from libtmux_mcp._server_start import _resolve_allow_server_start
+
+    assert test_id
+    assert _resolve_allow_server_start(env_value) is expected
+
+
+def test_resolve_allow_server_start_rejects_invalid_without_echoing_value() -> None:
+    """Invalid startup policy fails with fixed, non-reflective guidance."""
+    from libtmux_mcp._server_start import _resolve_allow_server_start
+
+    rejected = "private-invalid-setting"
+    expected = "LIBTMUX_ALLOW_SERVER_START must be unset, '0', or '1'"
+
+    with pytest.raises(ValueError) as excinfo:
+        _resolve_allow_server_start(rejected)
+
+    assert str(excinfo.value) == expected
+    assert rejected not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("0", False), ("1", True)],
+    ids=["disabled", "enabled"],
+)
+def test_production_schema_publishes_server_start_default(
+    env_value: str,
+    expected: bool,
+) -> None:
+    """The production MCP schema publishes the effective startup policy."""
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import _allow_server_start, build_mcp_server
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                tools = {tool.name: tool for tool in await client.list_tools()}
+            schema = tools["create_session"].inputSchema["properties"]
+            print(json.dumps({
+                "effective": _allow_server_start,
+                "default": schema["allow_server_start"]["default"],
+            }))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_ALLOW_SERVER_START": env_value}
+
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert json.loads(proc.stdout) == {
+        "effective": expected,
+        "default": expected,
+    }
+
+
+def test_invalid_allow_server_start_env_fails_startup() -> None:
+    """An invalid server-start setting prevents production server import."""
+    rejected = "private-invalid-setting"
+    env = {**os.environ, "LIBTMUX_ALLOW_SERVER_START": rejected}
+
+    proc = subprocess.run(
+        [sys.executable, "-c", "import libtmux_mcp.server"],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert proc.returncode != 0
+    assert "LIBTMUX_ALLOW_SERVER_START must be unset, '0', or '1'" in proc.stderr
+    assert rejected not in proc.stderr
 
 
 def test_invalid_safety_env_hides_mutating_tools() -> None:

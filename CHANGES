@@ -17,6 +17,22 @@ objects instead of bare lists. Read rows from `.items`; for example,
 also reports `total`, `offset`, `limit`, and `truncated` for bounded discovery.
 (#95)
 
+**Starting a tmux server now requires permission**
+
+{tooliconl}`create-session` no longer starts a tmux server silently when its
+target is not running. MCP calls must pass `allow_server_start=true` or enable
+{envvar}`LIBTMUX_ALLOW_SERVER_START`; direct Python calls must pass
+`allow_server_start=True`. Starting a server launches a long-lived daemon and
+loads the user's tmux configuration, so the side effect is denied by default.
+
+The returned {class}`~libtmux_mcp.models.SessionInfo` sets
+{attr}`~libtmux_mcp.models.SessionInfo.server_started` to `true` when the call
+used a startup-enabled path after a no-start attempt proved the target absent;
+it is `false` when the no-start path used an existing server. Dead-server target
+errors now say that no server is running, including when
+{tooliconl}`set-environment` targets a stopped server. See {ref}`configuration`
+for the startup policy. (#96)
+
 ### What's new
 
 **Typed caller location**

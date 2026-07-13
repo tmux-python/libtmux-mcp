@@ -358,6 +358,7 @@ def test_send_keys_batch_preserves_error_suggestions(
     operations: list[SendKeysOperation],
     expected_error_snippet: str,
     mcp_server: Server,
+    mcp_session: Session,
 ) -> None:
     """send_keys_batch preserves exception suggestions in the error string."""
     assert test_id

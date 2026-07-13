@@ -39,7 +39,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
                 "environment",
                 "socket_name",
             ),
-            ("suppress_persistent_history",),
+            ("allow_server_start", "suppress_persistent_history"),
         ),
         create_window: (
             (
@@ -676,6 +676,7 @@ def test_create_session_history_environment_reaches_future_panes(
         session_name=session_name,
         environment={"SPAWN_SCOPE_MARKER": "session", "HISTCONTROL": "ignoredups"},
         socket_name=mcp_server.socket_name,
+        allow_server_start=True,
         suppress_persistent_history=True,
     )
     session = mcp_server.sessions.get(session_name=session_name, default=None)
@@ -720,6 +721,7 @@ def test_explicit_false_keeps_inherited_session_history_environment(
         session_name=session_name,
         environment={"HISTCONTROL": "ignoredups"},
         socket_name=mcp_server.socket_name,
+        allow_server_start=True,
         suppress_persistent_history=True,
     )
     session = mcp_server.sessions.get(session_name=session_name, default=None)

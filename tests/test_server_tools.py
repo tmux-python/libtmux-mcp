@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import pathlib
+import threading
 import typing as t
 
 import pytest
@@ -308,16 +310,244 @@ def test_list_sessions_empty_server(mcp_server: Server) -> None:
     assert result.total == 0
 
 
+@pytest.mark.usefixtures("mcp_session")
 def test_create_session(mcp_server: Server) -> None:
     """create_session creates a new tmux session."""
     result = create_session(
         session_name="mcp_test_new",
         socket_name=mcp_server.socket_name,
+        allow_server_start=True,
     )
     assert result.session_name == "mcp_test_new"
     assert result.session_id is not None
+    assert result.server_started is False
 
 
+def test_create_session_does_not_start_dead_server_by_default(
+    TestServer: type[Server],
+) -> None:
+    """Direct Python calls deny an implicit daemon start by default.
+
+    The standard server fixture is intentionally live, so ``TestServer`` is
+    used to create a cleanup-managed libtmux target without a daemon.
+    """
+    from libtmux_mcp._utils import ExpectedToolError
+
+    server = TestServer()
+    assert server.socket_name is not None
+    assert server.is_alive() is False
+
+    with pytest.raises(ExpectedToolError, match="No tmux server is running"):
+        create_session(
+            session_name="mcp_no_implicit_server",
+            socket_name=server.socket_name,
+        )
+
+    assert server.is_alive() is False
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    ["false", 0, 1, None],
+    ids=["string", "zero", "one", "none"],
+)
+def test_create_session_rejects_non_bool_start_permission_before_target_access(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid: object,
+) -> None:
+    """Direct calls require an exact bool before inspecting a tmux target.
+
+    Target lookup is replaced because this contract specifically guards the
+    validation boundary before any liveness or session-creation work.
+    """
+    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp.tools import server_tools
+
+    def fail_target_lookup(*args: object, **kwargs: object) -> t.NoReturn:
+        pytest.fail(f"target lookup ran with args={args!r}, kwargs={kwargs!r}")
+
+    monkeypatch.setattr(server_tools, "_get_server", fail_target_lookup)
+
+    with pytest.raises(ExpectedToolError, match="allow_server_start must be a bool"):
+        create_session(allow_server_start=t.cast("t.Any", invalid))
+
+
+def test_create_session_denial_survives_server_death_at_new_session(
+    TestServer: type[Server],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A target dying at command execution cannot be restarted by denial.
+
+    The command hook creates the otherwise unrepeatable liveness race while
+    retaining real libtmux and tmux behavior on both sides of the boundary.
+    """
+    from libtmux import Server
+
+    from libtmux_mcp._utils import ExpectedToolError
+
+    server = TestServer()
+    assert server.socket_name is not None
+    server.new_session(session_name="mcp_start_race_anchor")
+    assert server.is_alive() is True
+
+    original_cmd = Server.cmd
+    armed = True
+
+    def kill_before_new_session(
+        command_server: Server,
+        cmd: str,
+        *args: t.Any,
+        target: str | int | None = None,
+    ) -> t.Any:
+        nonlocal armed
+        is_new_session = cmd == "new-session" or (
+            cmd == "-N" and bool(args) and args[0] == "new-session"
+        )
+        if armed and is_new_session:
+            armed = False
+            server.kill()
+        return original_cmd(command_server, cmd, *args, target=target)
+
+    monkeypatch.setattr(Server, "cmd", kill_before_new_session)
+
+    with pytest.raises(ExpectedToolError, match="No tmux server is running"):
+        create_session(
+            session_name="mcp_start_race_denied",
+            socket_name=server.socket_name,
+            allow_server_start=False,
+        )
+
+    assert server.is_alive() is False
+
+
+def test_concurrent_create_session_attributes_only_startup_path(
+    TestServer: type[Server],
+) -> None:
+    """Only the startup-enabled path reports starting a shared target."""
+    server = TestServer()
+    assert server.socket_name is not None
+    assert server.is_alive() is False
+    ready = threading.Barrier(2)
+
+    def create(index: int) -> bool:
+        ready.wait()
+        result = create_session(
+            session_name=f"mcp_concurrent_start_{index}",
+            socket_name=server.socket_name,
+            allow_server_start=True,
+        )
+        return result.server_started
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        started = list(executor.map(create, range(2)))
+
+    assert sorted(started) == [False, True]
+    assert server.is_alive() is True
+
+
+def test_create_session_explicit_start_reports_new_daemon(
+    TestServer: type[Server],
+) -> None:
+    """Explicit permission starts a dead server and reports that side effect."""
+    server = TestServer()
+    assert server.socket_name is not None
+    assert server.is_alive() is False
+
+    result = create_session(
+        session_name="mcp_explicit_server_start",
+        socket_name=server.socket_name,
+        allow_server_start=True,
+    )
+
+    assert server.is_alive() is True
+    assert result.server_started is True
+
+
+@pytest.mark.parametrize(
+    ("enabled", "expect_error"),
+    [(False, True), (True, False)],
+    ids=["disabled", "enabled"],
+)
+def test_mcp_create_session_omission_inherits_server_start_default(
+    TestServer: type[Server],
+    enabled: bool,
+    expect_error: bool,
+) -> None:
+    """Omitted MCP input inherits the transformed startup policy."""
+    import asyncio
+
+    from fastmcp import Client, FastMCP
+
+    from libtmux_mcp._server_start import _configure_server_start_default
+    from libtmux_mcp.tools import server_tools
+
+    server = TestServer()
+    assert server.socket_name is not None
+    mcp = FastMCP(f"server-start-{enabled}")
+    server_tools.register(mcp)
+    _configure_server_start_default(mcp, enabled)
+
+    async def _call() -> t.Any:
+        async with Client(mcp) as client:
+            return await client.call_tool(
+                "create_session",
+                {
+                    "session_name": f"mcp_transformed_start_{enabled}",
+                    "socket_name": server.socket_name,
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is expect_error
+    assert server.is_alive() is enabled
+    if enabled:
+        assert result.structured_content is not None
+        assert result.structured_content["server_started"] is True
+    else:
+        assert result.content
+        assert "No tmux server is running" in result.content[0].text
+
+
+def test_mcp_explicit_false_overrides_enabled_server_start_default(
+    TestServer: type[Server],
+) -> None:
+    """Explicit MCP denial wins over the enabled startup default."""
+    import asyncio
+
+    from fastmcp import Client, FastMCP
+
+    from libtmux_mcp._server_start import _configure_server_start_default
+    from libtmux_mcp.tools import server_tools
+
+    server = TestServer()
+    assert server.socket_name is not None
+    mcp = FastMCP("server-start-explicit-false")
+    server_tools.register(mcp)
+    _configure_server_start_default(mcp, True)
+
+    async def _call() -> t.Any:
+        async with Client(mcp) as client:
+            return await client.call_tool(
+                "create_session",
+                {
+                    "session_name": "mcp_explicit_start_denial",
+                    "socket_name": server.socket_name,
+                    "allow_server_start": False,
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    assert result.content
+    assert "No tmux server is running" in result.content[0].text
+    assert server.is_alive() is False
+
+
+@pytest.mark.usefixtures("mcp_session")
 def test_create_session_returns_active_pane_id(mcp_server: Server) -> None:
     """create_session exposes the initial pane id of the new session.
 
@@ -392,6 +622,7 @@ CREATE_SESSION_ENV_STRING_FIXTURES: list[CreateSessionEnvStringFixture] = [
     CREATE_SESSION_ENV_STRING_FIXTURES,
     ids=[f.test_id for f in CREATE_SESSION_ENV_STRING_FIXTURES],
 )
+@pytest.mark.usefixtures("mcp_session")
 def test_create_session_environment_accepts_json_string(
     mcp_server: Server,
     test_id: str,

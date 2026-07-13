@@ -618,6 +618,20 @@ def _invalidate_server(
         _server_cache.pop(cache_key, None)
 
 
+def _server_not_running_error() -> ExpectedToolError:
+    """Build the agent-facing recovery error for a dead tmux target."""
+    return ExpectedToolError(
+        "No tmux server is running for this target. Call list_servers to find "
+        "a live server, or create_session(allow_server_start=true) to start one."
+    )
+
+
+def _raise_if_server_dead(server: Server) -> None:
+    """Raise a targeted recovery error when ``server`` is not alive."""
+    if not server.is_alive():
+        raise _server_not_running_error()
+
+
 def _resolve_session(
     server: Server,
     session_name: str | None = None,
@@ -646,6 +660,7 @@ def _resolve_session(
     if session_id is not None:
         session = server.sessions.get(session_id=session_id, default=None)
         if session is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="session_id",
                 obj_id=session_id,
@@ -656,6 +671,7 @@ def _resolve_session(
     if session_name is not None:
         session = server.sessions.get(session_name=session_name, default=None)
         if session is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="session_name",
                 obj_id=session_name,
@@ -665,6 +681,7 @@ def _resolve_session(
 
     sessions = server.sessions
     if not sessions:
+        _raise_if_server_dead(server)
         raise exc.TmuxObjectDoesNotExist(
             obj_key="session",
             obj_id="(any)",
@@ -710,6 +727,7 @@ def _resolve_window(
     if window_id is not None:
         window = server.windows.get(window_id=window_id, default=None)
         if window is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="window_id",
                 obj_id=window_id,
@@ -724,9 +742,16 @@ def _resolve_window(
             session_id=session_id,
         )
 
+    try:
+        windows = session.windows
+    except exc.LibTmuxException:
+        _raise_if_server_dead(server)
+        raise
+
     if window_index is not None:
-        window = session.windows.get(window_index=window_index, default=None)
+        window = windows.get(window_index=window_index, default=None)
         if window is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="window_index",
                 obj_id=window_index,
@@ -734,8 +759,8 @@ def _resolve_window(
             )
         return window
 
-    windows = session.windows
     if not windows:
+        _raise_if_server_dead(server)
         raise exc.NoWindowsExist()
     return windows[0]
 
@@ -780,6 +805,7 @@ def _resolve_pane(
     if pane_id is not None:
         pane = server.panes.get(pane_id=pane_id, default=None)
         if pane is None:
+            _raise_if_server_dead(server)
             raise exc.PaneNotFound(pane_id=pane_id)
         return pane
 
@@ -791,14 +817,21 @@ def _resolve_pane(
         session_id=session_id,
     )
 
+    try:
+        panes = window.panes
+    except exc.LibTmuxException:
+        _raise_if_server_dead(server)
+        raise
+
     if pane_index is not None:
-        pane = window.panes.get(pane_index=pane_index, default=None)
+        pane = panes.get(pane_index=pane_index, default=None)
         if pane is None:
+            _raise_if_server_dead(server)
             raise exc.PaneNotFound(pane_id=f"index:{pane_index}")
         return pane
 
-    panes = window.panes
     if not panes:
+        _raise_if_server_dead(server)
         raise exc.PaneNotFound()
     return panes[0]
 
@@ -998,13 +1031,20 @@ def _paginate(
     )
 
 
-def _serialize_session(session: Session) -> SessionInfo:
+def _serialize_session(
+    session: Session,
+    *,
+    server_started: bool = False,
+) -> SessionInfo:
     """Serialize a Session to a Pydantic model.
 
     Parameters
     ----------
     session : Session
         The session to serialize.
+    server_started : bool
+        Whether a no-start attempt proved the target absent and the creating
+        call then succeeded on the startup-enabled path.
 
     Returns
     -------
@@ -1029,6 +1069,7 @@ def _serialize_session(session: Session) -> SessionInfo:
         session_attached=getattr(session, "session_attached", None),
         session_created=getattr(session, "session_created", None),
         active_pane_id=active_pane_id,
+        server_started=server_started,
     )
 
 
@@ -1180,8 +1221,22 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
         )
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")
+    if _is_dead_server_environment_value_error(e):
+        return _server_not_running_error()
     logger.exception("unexpected error in MCP tool %s", fn_name)
     return ToolError(f"Unexpected error: {type(e).__name__}: {e}")
+
+
+def _is_dead_server_environment_value_error(e: BaseException) -> bool:
+    """Identify libtmux's narrow dead-server environment error shape."""
+    if not isinstance(e, ValueError):
+        return False
+    message = str(e)
+    if not message.startswith("tmux set-environment stderr:"):
+        return False
+    return "no server running" in message or (
+        "error connecting to" in message and "No such file or directory" in message
+    )
 
 
 def handle_tool_errors(

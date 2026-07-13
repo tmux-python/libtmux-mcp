@@ -118,6 +118,23 @@ def test_configuration_documents_command_history_default_and_restart(
     assert "Restart the MCP server only after changing this startup setting" in text
 
 
+def test_startup_docs_define_server_started_at_observable_boundary(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Startup reporting avoids stronger cross-process attribution claims."""
+    paths = (
+        docs_dir / "configuration.md",
+        docs_dir / "tools" / "server" / "create-session.md",
+        docs_dir.parent / "CHANGES",
+    )
+
+    for path in paths:
+        normalized = " ".join(path.read_text(encoding="utf-8").split())
+        assert "no-start attempt proved the target absent" in normalized
+        assert "startup-enabled path" in normalized
+        assert "when the call created the daemon" not in normalized
+
+
 def test_target_docs_publish_caller_aware_precedence(
     docs_dir: pathlib.Path,
 ) -> None:

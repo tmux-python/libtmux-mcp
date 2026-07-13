@@ -41,6 +41,37 @@ Safety tier controlling which tools are available. See {ref}`safety`.
 - **Default:** `mutating`
 - **Values:** `readonly`, `mutating`, `destructive`
 
+```{envvar} LIBTMUX_ALLOW_SERVER_START
+```
+
+Controls the MCP default for allowing {tooliconl}`create-session` to start a
+tmux server when its target is not running. Starting a server launches a
+long-lived background daemon and sources the user's tmux configuration.
+
+- **Type:** string flag
+- **Default:** `0` (disabled)
+- **Values:** `0`, `1`
+
+Unset and `0` deny the implicit daemon start; `1` allows it. Any other value
+fails server startup with
+`LIBTMUX_ALLOW_SERVER_START must be unset, '0', or '1'`, without echoing the
+rejected value. An explicit `allow_server_start` value wins for each MCP call.
+Direct Python calls always default to `False`.
+
+When the effective value is `false` and no server is running,
+{toolref}`create-session` fails without starting one. Pass
+`allow_server_start=true` for an intentional per-call start. The returned
+{class}`~libtmux_mcp.models.SessionInfo` sets
+{attr}`~libtmux_mcp.models.SessionInfo.server_started` to `true` when a
+no-start attempt proved the target absent and the call then succeeded on the
+startup-enabled path. A no-start creation accepted by an existing server
+returns `false`; the field does not claim stronger attribution across other
+processes.
+
+The server resolves {envvar}`LIBTMUX_ALLOW_SERVER_START` once during startup.
+Restart the MCP server after changing it, usually by reconnecting or restarting
+the MCP client. Per-call arguments take effect without a restart.
+
 ```{envvar} LIBTMUX_SUPPRESS_HISTORY
 ```
 
@@ -73,6 +104,7 @@ Set environment variables in your MCP client config:
             "env": {
                 "LIBTMUX_SOCKET": "ai_workspace",
                 "LIBTMUX_SAFETY": "readonly",
+                "LIBTMUX_ALLOW_SERVER_START": "0",
                 "LIBTMUX_SUPPRESS_HISTORY": "1"
             }
         }

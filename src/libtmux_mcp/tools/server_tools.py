@@ -14,6 +14,10 @@ from libtmux import exc
 from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._server_start import (
+    _create_session_with_start_policy,
+    _validate_allow_server_start,
+)
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -166,6 +170,7 @@ def create_session(
     environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
     *,
+    allow_server_start: bool = False,
     suppress_persistent_history: bool = False,
 ) -> SessionInfo:
     """Create a new tmux session.
@@ -201,6 +206,10 @@ def create_session(
         tmux socket name. Target precedence is explicit per-call selector,
         configured path, configured name, frozen caller socket, then tmux
         default.
+    allow_server_start : bool
+        Whether this call may start a tmux server when none is running.
+        Defaults to False for direct Python calls. Omitted MCP input inherits
+        LIBTMUX_ALLOW_SERVER_START.
     suppress_persistent_history : bool
         Whether to suppress persistent history for the spawned shell. Defaults
         to False for MCP and direct Python calls. This per-call option does not
@@ -212,6 +221,7 @@ def create_session(
     SessionInfo
         The created session.
     """
+    allow_server_start = _validate_allow_server_start(allow_server_start)
     spawn_environment = _prepare_spawn_environment(
         environment,
         suppress_persistent_history=suppress_persistent_history,
@@ -230,8 +240,12 @@ def create_session(
         kwargs["y"] = y
     if spawn_environment is not None:
         kwargs["environment"] = spawn_environment
-    session = server.new_session(**kwargs)
-    return _serialize_session(session)
+    session, server_started = _create_session_with_start_policy(
+        server,
+        allow_server_start=allow_server_start,
+        session_kwargs=kwargs,
+    )
+    return _serialize_session(session, server_started=server_started)
 
 
 @handle_tool_errors

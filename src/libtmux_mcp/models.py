@@ -27,6 +27,13 @@ class SessionInfo(BaseModel):
             "states where ``active_pane`` is unavailable."
         ),
     )
+    server_started: bool = Field(
+        default=False,
+        description=(
+            "Whether a no-start attempt proved the target absent and this call "
+            "then succeeded on the startup-enabled path."
+        ),
+    )
 
 
 class WindowInfo(BaseModel):

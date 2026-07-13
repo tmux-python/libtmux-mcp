@@ -286,6 +286,120 @@ def test_resolve_pane_not_found(mcp_server: Server, mcp_session: Session) -> Non
         _resolve_pane(mcp_server, pane_id="%99999")
 
 
+@pytest.mark.parametrize(
+    ("resolver", "kwargs"),
+    [
+        (_resolve_session, {"session_id": "$99999"}),
+        (_resolve_window, {"window_id": "@99999"}),
+        (_resolve_pane, {"pane_id": "%99999"}),
+    ],
+    ids=["session", "window", "pane"],
+)
+def test_targeted_resolvers_name_dead_server_cause(
+    TestServer: type[Server],
+    resolver: t.Callable[..., object],
+    kwargs: dict[str, str],
+) -> None:
+    """Missing targets on a dead daemon report liveness, not stale ids.
+
+    The standard hierarchy fixtures require a live daemon, so ``TestServer``
+    supplies a cleanup-managed dead target for this exceptional path.
+    """
+    server = TestServer()
+    assert server.is_alive() is False
+
+    with pytest.raises(
+        ExpectedToolError,
+        match=(
+            r"No tmux server is running.*"
+            r"create_session\(allow_server_start=true\)"
+        ),
+    ):
+        resolver(server, **kwargs)
+
+
+def test_window_index_resolver_names_server_death_after_session_resolution(
+    TestServer: type[Server],
+) -> None:
+    """A daemon death after session lookup still reports the liveness cause.
+
+    The standard hierarchy fixtures keep their server live, so ``TestServer``
+    supplies a cleanup-managed session whose daemon can be stopped mid-flow.
+    """
+    server = TestServer()
+    session = server.new_session(session_name="window_index_server_death")
+    server.kill()
+    assert server.is_alive() is False
+
+    with pytest.raises(ExpectedToolError, match="No tmux server is running"):
+        _resolve_window(server, session=session, window_index="99999")
+
+
+@pytest.mark.parametrize("pane_index", [None, "99999"], ids=["default", "indexed"])
+def test_pane_resolver_names_server_death_after_window_resolution(
+    TestServer: type[Server],
+    monkeypatch: pytest.MonkeyPatch,
+    pane_index: str | None,
+) -> None:
+    """A daemon death after window lookup reports the liveness cause.
+
+    The standard hierarchy fixtures cannot stop the server at this exact seam,
+    so the real resolver is wrapped to kill the cleanup-managed daemon only
+    after it returns the target window.
+    """
+    from libtmux_mcp import _utils
+
+    server = TestServer()
+    session = server.new_session(session_name="pane_resolver_server_death")
+    window = session.active_window
+    assert window is not None
+    original_resolve_window = _utils._resolve_window
+
+    def _resolve_then_kill(*args: t.Any, **kwargs: t.Any) -> Window:
+        resolved = original_resolve_window(*args, **kwargs)
+        server.kill()
+        return resolved
+
+    monkeypatch.setattr(_utils, "_resolve_window", _resolve_then_kill)
+
+    with pytest.raises(ExpectedToolError, match="No tmux server is running"):
+        _utils._resolve_pane(
+            server,
+            window_id=window.window_id,
+            pane_index=pane_index,
+        )
+
+
+def test_pane_resolver_reraises_live_server_pane_lookup_error(
+    TestServer: type[Server],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unrelated pane-query error on a live server is not swallowed.
+
+    The real pane collection is replaced only to make libtmux raise at the
+    post-window-resolution boundary under test.
+    """
+    from libtmux_mcp import _utils
+
+    server = TestServer()
+    session = server.new_session(session_name="pane_resolver_live_error")
+    window = session.active_window
+    assert window is not None
+    raised = exc.LibTmuxException("pane query rejected")
+
+    def _raise_pane_error(_window: Window) -> t.NoReturn:
+        raise raised
+
+    monkeypatch.setattr(type(window), "panes", property(_raise_pane_error))
+    monkeypatch.setattr(_utils, "_resolve_window", lambda *_a, **_kw: window)
+
+    with pytest.raises(exc.LibTmuxException) as excinfo:
+        _utils._resolve_pane(server, pane_index="99999")
+
+    assert excinfo.value is raised
+    assert server.is_alive() is True
+
+
 def test_serialize_session(mcp_session: Session) -> None:
     """_serialize_session produces a SessionInfo model."""
     from libtmux_mcp.models import SessionInfo
@@ -1156,6 +1270,50 @@ def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
     mapped = _map_exception_to_tool_error("some_tool", raised)
     assert not isinstance(mapped, ExpectedToolError)
     assert mapped.log_level == logging.ERROR
+
+
+def test_map_dead_server_environment_value_error_as_expected(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Libtmux's dead-server environment ValueError is routine absence."""
+    import logging
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    raised = ValueError(
+        "tmux set-environment stderr: "
+        "['error connecting to /tmp/example (No such file or directory)']"
+    )
+
+    with caplog.at_level(logging.ERROR, logger="libtmux_mcp._utils"):
+        mapped = _map_exception_to_tool_error("set_environment", raised)
+
+    assert isinstance(mapped, ExpectedToolError)
+    assert mapped.log_level == logging.WARNING
+    assert "No tmux server is running" in str(mapped)
+    assert not [
+        record for record in caplog.records if "unexpected error" in record.message
+    ]
+
+
+def test_map_unrelated_value_error_as_unexpected(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unrelated programming ValueErrors remain loud unexpected failures."""
+    import logging
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    with caplog.at_level(logging.ERROR, logger="libtmux_mcp._utils"):
+        mapped = _map_exception_to_tool_error(
+            "set_environment",
+            ValueError("bad caller input"),
+        )
+
+    assert not isinstance(mapped, ExpectedToolError)
+    assert mapped.log_level == logging.ERROR
+    assert "Unexpected error: ValueError: bad caller input" in str(mapped)
+    assert [record for record in caplog.records if "unexpected error" in record.message]
 
 
 def test_expected_tool_error_logs_warning_through_server(

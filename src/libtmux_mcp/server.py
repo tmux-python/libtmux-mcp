@@ -22,6 +22,10 @@ from libtmux_mcp._history import (
     _configure_history_defaults,
     _resolve_suppress_history,
 )
+from libtmux_mcp._server_start import (
+    _configure_server_start_default,
+    _resolve_allow_server_start,
+)
 from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
@@ -240,6 +244,9 @@ _safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
 _suppress_history = _resolve_suppress_history(
     os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
 )
+_allow_server_start = _resolve_allow_server_start(
+    os.environ.get("LIBTMUX_ALLOW_SERVER_START")
+)
 
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output contains terminal text benefit from this backstop. The
@@ -380,6 +387,7 @@ def _register_all() -> None:
 
     register_tools(mcp)
     _configure_history_defaults(mcp, _suppress_history)
+    _configure_server_start_default(mcp, _allow_server_start)
     register_resources(mcp)
     register_prompts(mcp)
     _mcp_registered = True
