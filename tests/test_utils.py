@@ -23,6 +23,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
+    ExpectedToolError,
     _apply_filters,
     _get_server,
     _invalidate_server,
@@ -475,6 +476,60 @@ def test_apply_filters(
             assert len(result) == expected_count
         else:
             assert len(result) >= 1
+
+
+def test_apply_filters_runs_native_before_synthetic_filters(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synthetic filters serialize each native-filter survivor once."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    assert mcp_pane.pane_id is not None
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},1,$0")
+    monkeypatch.setenv("TMUX_PANE", mcp_pane.pane_id)
+    serialization_count = 0
+
+    def serialize(pane: Pane) -> t.Any:
+        nonlocal serialization_count
+        serialization_count += 1
+        return _serialize_pane(pane)
+
+    result = _apply_filters(
+        mcp_server.panes,
+        {"pane_id": mcp_pane.pane_id, "is_caller": True},
+        serialize,
+        synthetic_fields=frozenset({"is_caller"}),
+    )
+
+    assert [pane.pane_id for pane in result] == [mcp_pane.pane_id]
+    assert serialization_count == 1
+
+
+@pytest.mark.parametrize(
+    ("filters", "error_match"),
+    [
+        ({"is_caller": "true"}, "is_caller.*boolean"),
+        ({"is_caller__contains": True}, "is_caller.*operator 'contains'"),
+    ],
+    ids=["non-boolean", "unsupported-operator"],
+)
+def test_apply_filters_rejects_invalid_synthetic_filters(
+    mcp_server: Server,
+    filters: dict[str, t.Any],
+    error_match: str,
+) -> None:
+    """Synthetic filters accept only exact boolean comparisons."""
+    with pytest.raises(ExpectedToolError, match=error_match):
+        _apply_filters(
+            mcp_server.panes,
+            filters,
+            _serialize_pane,
+            synthetic_fields=frozenset({"is_caller"}),
+        )
 
 
 # ---------------------------------------------------------------------------

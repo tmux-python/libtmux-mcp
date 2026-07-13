@@ -861,10 +861,11 @@ def _coerce_dict_arg(
 
 def _apply_filters(
     items: t.Any,
-    filters: dict[str, str] | str | None,
+    filters: dict[str, t.Any] | str | None,
     serializer: t.Callable[..., M],
+    synthetic_fields: frozenset[str] = frozenset(),
 ) -> list[M]:
-    """Apply QueryList filters and serialize results.
+    """Apply native and serialized-field filters, then return serialized results.
 
     Parameters
     ----------
@@ -876,6 +877,9 @@ def _apply_filters(
         If None or empty, all items are returned.
     serializer : callable
         Serializer function to convert each item to a model.
+    synthetic_fields : frozenset[str], optional
+        Serialized model fields that are not available to QueryList. These
+        fields support exact boolean matching only.
 
     Returns
     -------
@@ -885,7 +889,8 @@ def _apply_filters(
     Raises
     ------
     ExpectedToolError
-        If a filter key uses an invalid lookup operator.
+        If a filter key uses an invalid lookup operator or a synthetic filter
+        does not use an exact boolean comparison.
     """
     coerced = _coerce_dict_arg("filters", filters)
     if not coerced:
@@ -893,18 +898,45 @@ def _apply_filters(
     filters = coerced
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
-    for key in filters:
-        if "__" in key:
-            _field, op = key.rsplit("__", 1)
-            if op not in LOOKUP_NAME_MAP:
+    native_filters: dict[str, t.Any] = {}
+    synthetic_filters: list[tuple[str, bool]] = []
+    for key, value in filters.items():
+        field, op = key.rsplit("__", 1) if "__" in key else (key, "exact")
+        if field in synthetic_fields:
+            if op != "exact":
                 msg = (
-                    f"Invalid filter operator '{op}' in '{key}'. "
-                    f"Valid operators: {', '.join(valid_ops)}"
+                    f"Synthetic filter '{field}' does not support operator '{op}'; "
+                    "only exact boolean matching is supported"
                 )
                 raise ExpectedToolError(msg)
+            if not isinstance(value, bool):
+                msg = (
+                    f"Synthetic filter '{field}' requires a boolean value, "
+                    f"got {type(value).__name__}"
+                )
+                raise ExpectedToolError(msg)
+            synthetic_filters.append((field, value))
+            continue
+        if "__" in key and op not in LOOKUP_NAME_MAP:
+            msg = (
+                f"Invalid filter operator '{op}' in '{key}'. "
+                f"Valid operators: {', '.join(valid_ops)}"
+            )
+            raise ExpectedToolError(msg)
+        native_filters[key] = value
 
-    filtered = items.filter(**filters)
-    return [serializer(item) for item in filtered]
+    filtered = items.filter(**native_filters) if native_filters else items
+    serialized = [serializer(item) for item in filtered]
+    if not synthetic_filters:
+        return serialized
+    return [
+        item
+        for item in serialized
+        if all(
+            getattr(item, field, None) is expected
+            for field, expected in synthetic_filters
+        )
+    ]
 
 
 def _serialize_session(session: Session) -> SessionInfo:

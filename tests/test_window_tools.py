@@ -7,6 +7,7 @@ import typing as t
 import pytest
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.tools.window_tools import (
     get_window_info,
     kill_window,
@@ -243,6 +244,74 @@ def test_list_panes_with_filters(
         result = list_panes(**kwargs)
         assert isinstance(result, list)
         assert len(result) >= expected_min_count
+
+
+@pytest.mark.parametrize(
+    ("filters", "expected_is_caller"),
+    [
+        ({"is_caller": True}, True),
+        ('{"is_caller": true}', True),
+        ({"is_caller__exact": True}, True),
+        ({"is_caller": False}, False),
+        ('{"is_caller": false}', False),
+    ],
+    ids=["true", "json-true", "exact", "false", "json-false"],
+)
+def test_list_panes_filters_by_caller(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    filters: dict[str, t.Any] | str,
+    expected_is_caller: bool,
+) -> None:
+    """list_panes filters its serialized caller annotation."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    window = mcp_session.active_window
+    caller_pane = window.active_pane
+    assert caller_pane is not None and caller_pane.pane_id is not None
+    window.split()
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},1,{mcp_session.session_id or '$0'}")
+    monkeypatch.setenv("TMUX_PANE", caller_pane.pane_id)
+
+    result = list_panes(
+        window_id=window.window_id,
+        socket_name=mcp_server.socket_name,
+        filters=filters,
+    )
+
+    assert result
+    assert all(pane.is_caller is expected_is_caller for pane in result)
+    result_ids = {pane.pane_id for pane in result}
+    if expected_is_caller:
+        assert result_ids == {caller_pane.pane_id}
+    else:
+        assert caller_pane.pane_id not in result_ids
+
+
+@pytest.mark.parametrize(
+    ("filters", "error_match"),
+    [
+        ({"is_caller": "true"}, "is_caller.*boolean"),
+        ({"is_caller__contains": True}, "is_caller.*operator 'contains'"),
+    ],
+    ids=["non-boolean", "unsupported-operator"],
+)
+def test_list_panes_rejects_invalid_caller_filters(
+    mcp_server: Server,
+    mcp_session: Session,
+    filters: dict[str, t.Any],
+    error_match: str,
+) -> None:
+    """list_panes rejects invalid caller-filter values and operators."""
+    with pytest.raises(ExpectedToolError, match=error_match):
+        list_panes(
+            window_id=mcp_session.active_window.window_id,
+            socket_name=mcp_server.socket_name,
+            filters=filters,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ _DIRECTION_MAP: dict[str, PaneDirection] = {
     "right": PaneDirection.Right,
     "left": PaneDirection.Left,
 }
+_PANE_SYNTHETIC_FILTER_FIELDS = frozenset({"is_caller"})
 
 
 @handle_tool_errors
@@ -48,7 +49,7 @@ def list_panes(
     window_id: str | None = None,
     window_index: str | None = None,
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, t.Any] | str | None = None,
 ) -> list[PaneInfo]:
     """List tmux panes (terminal multiplexer splits) in a window, session, or server.
 
@@ -98,7 +99,12 @@ def list_panes(
         panes = session.panes
     else:
         panes = server.panes
-    return _apply_filters(panes, filters, _serialize_pane)
+    return _apply_filters(
+        panes,
+        filters,
+        _serialize_pane,
+        synthetic_fields=_PANE_SYNTHETIC_FILTER_FIELDS,
+    )
 
 
 # get_window_info completes the core-tmux-hierarchy symmetry of get_*_info
