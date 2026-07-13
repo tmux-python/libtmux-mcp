@@ -51,37 +51,6 @@ BATCH_OPERATION_LIMIT_FIXTURES: list[BatchOperationLimitFixture] = [
 ]
 
 
-class BatchAnnotationFixture(t.NamedTuple):
-    """Test fixture for generic batch wrapper annotations."""
-
-    test_id: str
-    tool_name: str
-    read_only_hint: bool
-    destructive_hint: bool
-    idempotent_hint: bool
-    open_world_hint: bool
-
-
-BATCH_ANNOTATION_FIXTURES: list[BatchAnnotationFixture] = [
-    BatchAnnotationFixture(
-        test_id="mutating_batch_warns_destructive_open_world",
-        tool_name="call_mutating_tools_batch",
-        read_only_hint=False,
-        destructive_hint=True,
-        idempotent_hint=False,
-        open_world_hint=True,
-    ),
-    BatchAnnotationFixture(
-        test_id="destructive_batch_warns_destructive_open_world",
-        tool_name="call_destructive_tools_batch",
-        read_only_hint=False,
-        destructive_hint=True,
-        idempotent_hint=False,
-        open_world_hint=True,
-    ),
-]
-
-
 def _content_block_to_wire(block: t.Any) -> dict[str, t.Any]:
     if hasattr(block, "model_dump"):
         dumped = block.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -98,8 +67,8 @@ def _call_tool_result_wire(result: t.Any) -> dict[str, t.Any]:
     }
 
 
-def _batch_probe_server() -> FastMCP:
-    """Build a small FastMCP server with batch tools and tiered probes."""
+def _batch_probe_server(server_tier: str = TAG_DESTRUCTIVE) -> FastMCP:
+    """Build a small FastMCP server with the batch tool and tiered probes."""
     from fastmcp import FastMCP
 
     from libtmux_mcp.middleware import SafetyMiddleware, ToolErrorResultMiddleware
@@ -109,7 +78,7 @@ def _batch_probe_server() -> FastMCP:
         name="batch-probe",
         middleware=[
             ToolErrorResultMiddleware(transform_errors=True),
-            SafetyMiddleware(max_tier=TAG_DESTRUCTIVE),
+            SafetyMiddleware(max_tier=server_tier),
         ],
     )
     register_batch_tools(mcp)
@@ -137,14 +106,14 @@ def _batch_probe_server() -> FastMCP:
     return mcp
 
 
-def test_call_readonly_tools_batch_preserves_structured_results() -> None:
-    """The readonly batch wrapper returns per-tool structured content."""
+def test_call_tools_batch_preserves_structured_results() -> None:
+    """The batch tool returns per-tool structured content."""
     from fastmcp import Client
 
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_readonly_tools_batch",
+                "call_tools_batch",
                 {
                     "operations": [
                         {
@@ -196,7 +165,7 @@ def test_call_readonly_tools_batch_preserves_structured_results() -> None:
     BATCH_RESPONSE_LIMIT_FIXTURES,
     ids=[fixture.test_id for fixture in BATCH_RESPONSE_LIMIT_FIXTURES],
 )
-def test_call_readonly_tools_batch_caps_aggregate_response(
+def test_call_tools_batch_caps_aggregate_response(
     test_id: str,
     payload_size: int,
 ) -> None:
@@ -211,7 +180,7 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_readonly_tools_batch",
+                "call_tools_batch",
                 {
                     "operations": [
                         {
@@ -271,11 +240,11 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
     BATCH_OPERATION_LIMIT_FIXTURES,
     ids=[fixture.test_id for fixture in BATCH_OPERATION_LIMIT_FIXTURES],
 )
-def test_call_readonly_tools_batch_rejects_oversized_operation_count(
+def test_call_tools_batch_rejects_oversized_operation_count(
     test_id: str,
     operation_count: int,
 ) -> None:
-    """The batch wrapper rejects requests whose rows alone can exceed the cap."""
+    """The batch tool rejects requests whose rows alone can exceed the cap."""
     from fastmcp import Client
 
     from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
@@ -285,7 +254,7 @@ def test_call_readonly_tools_batch_rejects_oversized_operation_count(
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_readonly_tools_batch",
+                "call_tools_batch",
                 {
                     "operations": [
                         {
@@ -312,15 +281,16 @@ def test_call_readonly_tools_batch_rejects_oversized_operation_count(
     assert "operations must contain at most" in serialized
 
 
-def test_call_readonly_tools_batch_rejects_mutating_inner_tool() -> None:
-    """Readonly batching does not tunnel a mutating tool call."""
+def test_call_tools_batch_max_tier_readonly_rejects_mutating_inner_tool() -> None:
+    """max_tier="readonly" refuses a mutating nested tool below the server tier."""
     from fastmcp import Client
 
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_readonly_tools_batch",
+                "call_tools_batch",
                 {
+                    "max_tier": "readonly",
                     "operations": [
                         {
                             "tool": "mutating_probe",
@@ -342,15 +312,16 @@ def test_call_readonly_tools_batch_rejects_mutating_inner_tool() -> None:
     assert "exceeds batch tier readonly" in operation["error"]
 
 
-def test_call_mutating_tools_batch_rejects_destructive_inner_tool() -> None:
-    """Mutating batching does not tunnel a destructive tool call."""
+def test_call_tools_batch_max_tier_mutating_rejects_destructive_inner_tool() -> None:
+    """max_tier="mutating" refuses a destructive nested tool below the server tier."""
     from fastmcp import Client
 
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_mutating_tools_batch",
+                "call_tools_batch",
                 {
+                    "max_tier": "mutating",
                     "operations": [
                         {
                             "tool": "destructive_probe",
@@ -369,14 +340,45 @@ def test_call_mutating_tools_batch_rejects_destructive_inner_tool() -> None:
     assert "exceeds batch tier mutating" in operation["error"]
 
 
-def test_call_mutating_tools_batch_continues_after_error() -> None:
+def test_call_tools_batch_bounded_by_server_tier() -> None:
+    """A readonly-tier server blocks a mutating nested tool even with no max_tier.
+
+    The batch tool is registered readonly so it stays callable at every tier,
+    but each nested call re-runs the safety middleware, so a readonly server
+    still refuses a mutating nested tool the batch did not cap itself.
+    """
+    from fastmcp import Client
+
+    async def _call() -> t.Any:
+        async with Client(_batch_probe_server(server_tier=TAG_READONLY)) as client:
+            return await client.call_tool(
+                "call_tools_batch",
+                {
+                    "operations": [
+                        {
+                            "tool": "mutating_probe",
+                            "arguments": {"value": "changed"},
+                        }
+                    ],
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is False
+    [operation] = result.structured_content["results"]
+    assert operation["success"] is False
+
+
+def test_call_tools_batch_continues_after_error() -> None:
     """Continue mode attempts later operations after a failed tool call."""
     from fastmcp import Client
 
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_mutating_tools_batch",
+                "call_tools_batch",
                 {
                     "on_error": "continue",
                     "operations": [
@@ -406,17 +408,17 @@ def test_call_mutating_tools_batch_continues_after_error() -> None:
 
 
 def test_call_tools_batch_rejects_self_invocation() -> None:
-    """Batch wrappers cannot recursively call batch wrappers."""
+    """The batch tool cannot recursively call the batch tool."""
     from fastmcp import Client
 
     async def _call() -> t.Any:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
-                "call_destructive_tools_batch",
+                "call_tools_batch",
                 {
                     "operations": [
                         {
-                            "tool": "call_destructive_tools_batch",
+                            "tool": "call_tools_batch",
                             "arguments": {"operations": []},
                         }
                     ],
@@ -432,26 +434,14 @@ def test_call_tools_batch_rejects_self_invocation() -> None:
     assert "cannot call batch tools recursively" in operation["error"]
 
 
-@pytest.mark.parametrize(
-    BatchAnnotationFixture._fields,
-    BATCH_ANNOTATION_FIXTURES,
-    ids=[fixture.test_id for fixture in BATCH_ANNOTATION_FIXTURES],
-)
-def test_batch_wrappers_advertise_worst_case_annotations(
-    test_id: str,
-    tool_name: str,
-    read_only_hint: bool,
-    destructive_hint: bool,
-    idempotent_hint: bool,
-    open_world_hint: bool,
-) -> None:
-    """Batch wrappers advertise the strongest hint from their allowed tools."""
+def test_call_tools_batch_advertises_worst_case_annotations() -> None:
+    """The batch tool advertises possible side effects."""
     mcp = _batch_probe_server()
 
-    tool = asyncio.run(mcp.get_tool(tool_name))
-    assert tool is not None, f"{tool_name} should be registered"
-    assert tool.annotations is not None, f"{tool_name} should carry annotations"
-    assert tool.annotations.readOnlyHint is read_only_hint
-    assert tool.annotations.destructiveHint is destructive_hint
-    assert tool.annotations.idempotentHint is idempotent_hint
-    assert tool.annotations.openWorldHint is open_world_hint
+    tool = asyncio.run(mcp.get_tool("call_tools_batch"))
+    assert tool is not None
+    assert tool.annotations is not None
+    assert tool.annotations.readOnlyHint is False
+    assert tool.annotations.destructiveHint is True
+    assert tool.annotations.idempotentHint is False
+    assert tool.annotations.openWorldHint is True

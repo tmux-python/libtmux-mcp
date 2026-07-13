@@ -674,14 +674,34 @@ DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 #:
 #: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
 #: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
-NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
-    libtmux_exc.ObjectDoesNotExist,
-    libtmux_exc.MultipleObjectsReturned,
-    libtmux_exc.PaneNotFound,
-    libtmux_exc.NoWindowsExist,
-    libtmux_exc.BadSessionName,
-    libtmux_exc.TmuxSessionExists,
-    libtmux_exc.TmuxCommandNotFound,
+
+
+def _resolve_exc_types(*names: str) -> tuple[type[Exception], ...]:
+    """Resolve libtmux exception types by name, dropping any this build lacks.
+
+    libtmux 0.62.0 re-parented :exc:`~libtmux.exc.ObjectDoesNotExist` and
+    :exc:`~libtmux.exc.MultipleObjectsReturned` under
+    :exc:`~libtmux.exc.LibTmuxException`. The chainable-commands experiment pins
+    libtmux to an older branch that may not define every name, so resolving by
+    name and dropping what is absent keeps this module importable there. On the
+    ``libtmux>=0.62.0`` floor the package targets, every name resolves and the
+    set is complete.
+    """
+    return tuple(
+        exc_type
+        for name in names
+        if (exc_type := getattr(libtmux_exc, name, None)) is not None
+    )
+
+
+NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = _resolve_exc_types(
+    "ObjectDoesNotExist",
+    "MultipleObjectsReturned",
+    "PaneNotFound",
+    "NoWindowsExist",
+    "BadSessionName",
+    "TmuxSessionExists",
+    "TmuxCommandNotFound",
 )
 
 

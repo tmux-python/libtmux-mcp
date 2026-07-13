@@ -13,6 +13,7 @@ def register_tools(mcp: FastMCP) -> None:
     from libtmux_mcp.tools import (
         batch_tools,
         buffer_tools,
+        chain_tools,
         env_tools,
         hook_tools,
         option_tools,
@@ -24,6 +25,7 @@ def register_tools(mcp: FastMCP) -> None:
     )
 
     batch_tools.register(mcp)
+    chain_tools.register(mcp)
     server_tools.register(mcp)
     session_tools.register(mcp)
     window_tools.register(mcp)

@@ -55,9 +55,8 @@ leave socket selection inside each nested tool's arguments. See
 - Signal a waiter → {tool}`signal-channel`
 
 **Batching typed tool calls?**
-- Read-only observations → {tool}`call-readonly-tools-batch`
-- Ordered readonly + mutating workflows → {tool}`call-mutating-tools-batch`
-- Reviewed workflows that include destructive steps → {tool}`call-destructive-tools-batch`
+- Native tmux operation chains → {tool}`run-tmux-plan`
+- Ordered calls to existing MCP tools → {tool}`call-tools-batch`
 
 **Staging multi-line input?**
 - Stage content → {tool}`load-buffer`
@@ -159,10 +158,10 @@ Wait for text to appear in a pane.
 Get tmux server info.
 :::
 
-:::{grid-item-card} call_readonly_tools_batch
-:link: call-readonly-tools-batch
+:::{grid-item-card} call_tools_batch
+:link: call-tools-batch
 :link-type: ref
-Call typed readonly tools in order.
+Call existing MCP tools in order, with an optional safety-tier cap.
 :::
 
 :::{grid-item-card} list_servers
@@ -264,10 +263,10 @@ Send several ordered raw-input operations.
 Run a shell command and report exit status.
 :::
 
-:::{grid-item-card} call_mutating_tools_batch
-:link: call-mutating-tools-batch
+:::{grid-item-card} run_tmux_plan
+:link: run-tmux-plan
 :link-type: ref
-Call typed readonly or mutating tools in order.
+Run a typed plan of tmux operations, one result per step.
 :::
 
 :::{grid-item-card} rename_session
@@ -435,12 +434,6 @@ Destroy a pane.
 Kill the entire tmux server.
 :::
 
-:::{grid-item-card} call_destructive_tools_batch
-:link: call-destructive-tools-batch
-:link-type: ref
-Call typed tools including destructive steps.
-:::
-
 :::{grid-item-card} delete_buffer
 :link: delete-buffer
 :link-type: ref
@@ -455,6 +448,7 @@ Delete an MCP-staged tmux paste buffer.
 
 server/index
 batch/index
+chain/index
 session/index
 window/index
 pane/index

@@ -162,7 +162,7 @@ def test_resolve_safety_level(
     expected_level: str,
 ) -> None:
     """Safety env values resolve to the server's effective tier."""
-    from libtmux_mcp.server import _resolve_safety_level
+    from libtmux_mcp._utils import _resolve_safety_level
 
     assert test_id
     assert _resolve_safety_level(env_value) == expected_level

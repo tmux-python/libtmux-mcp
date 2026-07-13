@@ -9,6 +9,15 @@
    :show-inheritance:
 ```
 
+## Chain tools
+
+```{eval-rst}
+.. automodule:: libtmux_mcp.tools.chain_tools
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
 ## Server tools
 
 ```{eval-rst}

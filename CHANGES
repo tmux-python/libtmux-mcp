@@ -6,6 +6,41 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Typed tmux operation chains with {tooliconl}`run-tmux-plan`**
+
+{tooliconl}`run-tmux-plan` accepts an ordered list of typed tmux
+operations and runs each one over a persistent `tmux -C` control connection. It
+returns one typed result per operation, discriminated by `kind`: `capture_pane`
+returns its `lines`, `split_pane` returns the new `pane_id`, and the rest return
+status only. With `on_error="stop"` (the default) it stops before the next
+operation once one fails or its target cannot be resolved, marking the rest
+skipped; with `on_error="continue"` it records each failure and runs the rest.
+Each pane operation takes one typed `target`, discriminated by `kind`: a
+concrete `pane_id` or a `ref` minted by an earlier split. Typed `split_evenly`
+and `make_grid` operations build an even row or column or a tiled grid of panes
+without hand-written layout strings. A typed `kill_pane` operation closes a
+pane, and runs only when the server's safety tier is `destructive` so a
+mutating-tier plan cannot smuggle a destructive command past the safety gate. It
+returns concrete pane IDs captured from referenced splits so later operations
+can target them, supports a dry-run mode that returns the planned steps without
+touching tmux, applies a per-dispatch timeout, and can roll back panes created
+by typed split refs when a later operation fails. Pass `explain=true` to attach
+per-dispatch diagnostics under `diagnostics`. It keeps
+{tooliconl}`call-tools-batch` available for workflows that need to call
+arbitrary MCP tools instead of this tool's typed operation set.
+
+**One generic batch tool with {tooliconl}`call-tools-batch`**
+
+{tooliconl}`call-tools-batch` runs an ordered list of existing MCP tools in a
+single call and returns a per-operation result for each, preserving every
+nested tool's structured output. Each nested call still runs through the
+server's safety tier, and an optional `max_tier` caps the batch below that tier
+(`readonly` refuses mutating or destructive nested calls, `mutating` refuses
+destructive ones). It replaces the separate readonly, mutating, and destructive
+batch tools with one tool plus the `max_tier` argument.
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.
@@ -88,13 +123,13 @@ The dev and test dependency groups now require pytest 9.1.0 or newer. (#83)
 
 ## libtmux-mcp 0.1.0a14 (2026-06-14)
 
-libtmux-mcp 0.1.0a14 adds tier-aware tool batching. {tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.
+libtmux-mcp 0.1.0a14 adds tier-aware tool batching. `call_readonly_tools_batch`, `call_mutating_tools_batch`, and `call_destructive_tools_batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — regardless of the server's `LIBTMUX_SAFETY` tier — and `on_error` selects stop-at-first-failure or continue-and-report handling. Aggregate results stay within the server's response limit.
 
 ### What's new
 
 **Tier-aware tool batching**
 
-{tooliconl}`call-readonly-tools-batch`, {tooliconl}`call-mutating-tools-batch`, and {tooliconl}`call-destructive-tools-batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. Large aggregate results stay within the server's response limit — oversized nested payloads are dropped (with the truncation flagged in the result), and very large operation lists are rejected rather than allowed to overflow it. (#79)
+`call_readonly_tools_batch`, `call_mutating_tools_batch`, and `call_destructive_tools_batch` run an ordered list of existing MCP tools in a single call and return a per-operation result for each, preserving every nested tool's own structured output. Each wrapper caps the safety tier of the calls it will make — the readonly wrapper refuses mutating or destructive operations, and the mutating wrapper refuses destructive ones — regardless of the server's `LIBTMUX_SAFETY` tier. Nested calls keep their normal schema validation, middleware, and safety checks, and `on_error` selects stop-at-first-failure or continue-and-report handling. Large aggregate results stay within the server's response limit — oversized nested payloads are dropped (with the truncation flagged in the result), and very large operation lists are rejected rather than allowed to overflow it. (#79)
 
 ## libtmux-mcp 0.1.0a13 (2026-06-13)
 
