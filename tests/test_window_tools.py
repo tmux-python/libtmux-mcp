@@ -25,15 +25,18 @@ if t.TYPE_CHECKING:
 
 
 def test_list_panes(mcp_server: Server, mcp_session: Session) -> None:
-    """list_panes returns a list of PaneInfo models."""
+    """list_panes returns a typed page of summary models."""
+    from libtmux_mcp.models import PanePage, PaneSummary
+
     window = mcp_session.active_window
     result = list_panes(
         window_id=window.window_id,
         socket_name=mcp_server.socket_name,
     )
-    assert isinstance(result, list)
-    assert len(result) >= 1
-    assert result[0].pane_id is not None
+    assert isinstance(result, PanePage)
+    assert len(result.items) >= 1
+    assert isinstance(result.items[0], PaneSummary)
+    assert result.items[0].pane_id is not None
 
 
 @pytest.mark.parametrize("explicit_scope", [False, True], ids=["default", "explicit"])
@@ -50,7 +53,7 @@ def test_list_panes_server_scope_remains_server_wide(
 
     result = list_panes(**kwargs)
 
-    session_ids = {pane.session_id for pane in result}
+    session_ids = {pane.session_id for pane in result.items}
     assert mcp_session.session_id in session_ids
     assert second_session.session_id in session_ids
 
@@ -78,8 +81,8 @@ def test_list_panes_caller_session_scope_uses_live_caller_session(
     )
 
     assert result
-    assert {pane.session_id for pane in result} == {mcp_session.session_id}
-    assert other_session.session_id not in {pane.session_id for pane in result}
+    assert {pane.session_id for pane in result.items} == {mcp_session.session_id}
+    assert other_session.session_id not in {pane.session_id for pane in result.items}
 
 
 @pytest.mark.parametrize(
@@ -97,15 +100,16 @@ def test_list_panes_caller_session_rejects_explicit_selectors(
     value: str,
 ) -> None:
     """Caller scope cannot be mixed with hierarchy selectors."""
+    kwargs: dict[str, t.Any] = {
+        "scope": "caller_session",
+        "socket_name": mcp_server.socket_name,
+        selector: value,
+    }
     with pytest.raises(
         ExpectedToolError,
         match=r"scope='caller_session'.*cannot be combined.*scope='server'",
     ):
-        list_panes(
-            scope="caller_session",
-            socket_name=mcp_server.socket_name,
-            **{selector: value},
-        )
+        list_panes(**kwargs)
 
 
 def test_list_panes_caller_session_rejects_outside_tmux(
@@ -371,8 +375,7 @@ def test_list_panes_with_filters(
             list_panes(**kwargs)
     else:
         result = list_panes(**kwargs)
-        assert isinstance(result, list)
-        assert len(result) >= expected_min_count
+        assert len(result.items) >= expected_min_count
 
 
 @pytest.mark.parametrize(
@@ -411,9 +414,9 @@ def test_list_panes_filters_by_caller(
         filters=filters,
     )
 
-    assert result
-    assert all(pane.is_caller is expected_is_caller for pane in result)
-    result_ids = {pane.pane_id for pane in result}
+    assert result.items
+    assert all(pane.is_caller is expected_is_caller for pane in result.items)
+    result_ids = {pane.pane_id for pane in result.items}
     if expected_is_caller:
         assert result_ids == {caller_pane.pane_id}
     else:

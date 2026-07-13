@@ -26,7 +26,7 @@ if t.TYPE_CHECKING:
     from libtmux.session import Session
     from libtmux.window import Window
 
-    from libtmux_mcp.models import PaneInfo, SessionInfo, WindowInfo
+    from libtmux_mcp.models import ListPage, PaneInfo, SessionInfo, WindowInfo
 
 logger = logging.getLogger(__name__)
 
@@ -804,6 +804,7 @@ def _resolve_pane(
 
 
 M = t.TypeVar("M")
+PageT = t.TypeVar("PageT", bound="ListPage")
 
 
 def _coerce_dict_arg(
@@ -937,6 +938,64 @@ def _apply_filters(
             for field, expected in synthetic_filters
         )
     ]
+
+
+def _paginate(
+    items: list[M],
+    *,
+    limit: int,
+    offset: int,
+    page_type: type[PageT],
+) -> PageT:
+    """Slice filtered, deterministically ordered rows into a typed page.
+
+    Parameters
+    ----------
+    items : list
+        Filtered, serialized, sorted, and projected rows.
+    limit : int
+        Maximum number of rows to return. Must be greater than zero.
+    offset : int
+        Zero-based row offset. Must be non-negative.
+    page_type : type[ListPage]
+        Concrete typed page model to construct.
+
+    Returns
+    -------
+    ListPage
+        Typed page with honest pre-pagination totals and continuation state.
+
+    Raises
+    ------
+    ExpectedToolError
+        If ``limit`` is not positive or ``offset`` is negative.
+
+    Examples
+    --------
+    >>> from libtmux_mcp.models import ServerInfo, ServerPage
+    >>> row = ServerInfo(is_alive=True, session_count=1)
+    >>> page = _paginate([row], limit=1, offset=0, page_type=ServerPage)
+    >>> (len(page.items), page.total, page.truncated)
+    (1, 1, False)
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        msg = f"limit must be an integer greater than 0, got {limit!r}"
+        raise ExpectedToolError(msg)
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        msg = f"offset must be an integer greater than or equal to 0, got {offset!r}"
+        raise ExpectedToolError(msg)
+
+    total = len(items)
+    page_items = items[offset : offset + limit]
+    return page_type.model_validate(
+        {
+            "items": page_items,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "truncated": offset + len(page_items) < total,
+        }
+    )
 
 
 def _serialize_session(session: Session) -> SessionInfo:

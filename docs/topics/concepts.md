@@ -89,6 +89,12 @@ List tools ({toolref}`list-sessions`, {toolref}`list-windows`, and
 
 Supported operators: `exact`, `contains`, `startswith`, `endswith`, `regex`, `icontains`, `iexact`, `istartswith`, `iendswith`, `iregex`.
 
+The four hierarchy discovery lists, including {tooliconl}`list-servers`,
+return typed page envelopes. Rows live under `items`; `total`, `offset`,
+`limit`, and `truncated` describe the page. Window and pane rows use compact
+summary metadata by default and accept `detail="full"` when you need the full
+projection.
+
 ## Resources
 
 In addition to tools, the MCP server exposes `tmux://` URI resources for browsing the hierarchy:

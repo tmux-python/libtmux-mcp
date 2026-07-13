@@ -48,6 +48,54 @@ def test_topic_docs_do_not_overclaim_runtime_features(
     assert forbidden_text not in text
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "page_model"),
+    (
+        ("tools/server/list-servers.md", "ServerPage"),
+        ("tools/server/list-sessions.md", "SessionPage"),
+        ("tools/session/list-windows.md", "WindowPage"),
+        ("tools/window/list-panes.md", "PanePage"),
+    ),
+)
+def test_list_tool_pages_document_typed_page_envelopes(
+    docs_dir: pathlib.Path,
+    relative_path: str,
+    page_model: str,
+) -> None:
+    """List tool examples show the bounded response clients receive."""
+    text = (docs_dir / relative_path).read_text(encoding="utf-8")
+
+    assert f"{{class}}`~libtmux_mcp.models.{page_model}`" in text
+    for field in ("items", "total", "offset", "limit", "truncated"):
+        assert f'"{field}"' in text
+    assert "`limit=100`" in text
+    assert "`offset=0`" in text
+
+
+def test_list_sessions_example_includes_creation_side_effect_field(
+    docs_dir: pathlib.Path,
+) -> None:
+    """List rows show that discovery never reports starting a daemon."""
+    text = (docs_dir / "tools" / "server" / "list-sessions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"server_started": false' in text
+
+
+def test_pagination_topic_distinguishes_hierarchy_pages_from_cursors(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Pagination guidance names every typed list page and ordering phase."""
+    text = (docs_dir / "topics" / "pagination.md").read_text(encoding="utf-8")
+
+    for page_model in ("ServerPage", "SessionPage", "WindowPage", "PanePage"):
+        assert f"{{class}}`~libtmux_mcp.models.{page_model}`" in text
+    assert "Filters run before the stable sort" in text
+    assert "Window and pane lists default to compact summary rows" in text
+    assert "application-level pages (not MCP-cursor pagination)" in text
+
+
 def test_configuration_documents_command_history_default_and_restart(
     docs_dir: pathlib.Path,
 ) -> None:

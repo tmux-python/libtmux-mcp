@@ -6,6 +6,17 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**List tools return page envelopes**
+
+{tooliconl}`list-servers`, {tooliconl}`list-sessions`,
+{tooliconl}`list-windows`, and {tooliconl}`list-panes` now return typed page
+objects instead of bare lists. Read rows from `.items`; for example,
+`list_sessions(...)[0]` becomes `list_sessions(...).items[0]`. The envelope
+also reports `total`, `offset`, `limit`, and `truncated` for bounded discovery.
+(#95)
+
 ### What's new
 
 **Typed caller location**
@@ -17,13 +28,20 @@ caller identity from availability, so an outside-tmux invocation, stopped
 server, stale pane, or configured-target mismatch is structured state rather
 than a failed discovery call. (#93)
 
-**Caller-session list scope**
+**Bounded list discovery**
 
-{tooliconl}`list-panes` and {tooliconl}`list-windows` now accept the explicit
-`scope="caller_session"` option to list the session containing the frozen
-caller pane. Their default remains `scope="server"`; caller-session scope
-rejects explicit hierarchy selectors and fails rather than widening the search
-when the caller is unavailable on the effective tmux target. (#95)
+All four hierarchy list tools return deterministic pages with honest totals.
+{tooliconl}`list-windows` and {tooliconl}`list-panes` default to compact
+discovery summaries and accept `detail="full"` for layout, geometry, process,
+and working-directory metadata. Filters still run against full metadata before
+projection and paging.
+
+Window and pane lists also accept the explicit `scope="caller_session"` option
+to list the session containing the frozen caller pane. Their default remains
+`scope="server"`; caller-session scope rejects explicit hierarchy selectors
+and fails rather than widening the search when the caller is unavailable on
+the effective tmux target. See {ref}`pagination-overview` for the page contract.
+(#95)
 
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 

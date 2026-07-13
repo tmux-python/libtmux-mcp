@@ -12,14 +12,17 @@ side project.
 target — pass it directly to the tool that needs it via `socket_name`.
 
 **Side effects:** None. Readonly. Stale socket files are filtered
-via a kernel-fast UNIX `connect()` probe so the call stays under one
-second even on machines with thousands of orphaned `tmux-<uid>/`
-inodes.
+via a kernel-level UNIX `connect()` probe, keeping discovery responsive
+when `tmux-<uid>/` contains orphaned socket files.
 
 **Scope:** Only servers under `${TMUX_TMPDIR:-/tmp}/tmux-<uid>/` are
 discovered by the canonical scan. Custom `tmux -S /some/path/...`
 daemons that live outside that directory must be supplied via
 `extra_socket_paths`.
+
+Results arrive as a {class}`~libtmux_mcp.models.ServerPage`. The default
+page uses `limit=100` and `offset=0`; `total` describes every discovered live
+server before paging, and `truncated` tells you whether another offset remains.
 
 **Example:**
 
@@ -33,22 +36,28 @@ daemons that live outside that directory must be supplied via
 Response:
 
 ```json
-[
-  {
-    "is_alive": true,
-    "socket_name": "default",
-    "socket_path": null,
-    "session_count": 3,
-    "version": "3.6a"
-  },
-  {
-    "is_alive": true,
-    "socket_name": "ci-runner",
-    "socket_path": null,
-    "session_count": 1,
-    "version": "3.6a"
-  }
-]
+{
+  "items": [
+    {
+      "is_alive": true,
+      "socket_name": "ci-runner",
+      "socket_path": null,
+      "session_count": 1,
+      "version": "3.6a"
+    },
+    {
+      "is_alive": true,
+      "socket_name": "default",
+      "socket_path": null,
+      "session_count": 3,
+      "version": "3.6a"
+    }
+  ],
+  "total": 2,
+  "offset": 0,
+  "limit": 100,
+  "truncated": false
+}
 ```
 
 To include a custom-path daemon:
@@ -57,7 +66,7 @@ To include a custom-path daemon:
 {
   "tool": "list_servers",
   "arguments": {
-    "extra_socket_paths": ["/home/user/.cache/tmux/socket"]
+    "extra_socket_paths": ["/path/to/tmux.sock"]
   }
 }
 ```

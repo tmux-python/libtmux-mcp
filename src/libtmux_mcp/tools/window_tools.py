@@ -20,6 +20,7 @@ from libtmux_mcp._utils import (
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
+    _paginate,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -27,7 +28,7 @@ from libtmux_mcp._utils import (
     _serialize_window,
     handle_tool_errors,
 )
-from libtmux_mcp.models import PaneInfo, WindowInfo
+from libtmux_mcp.models import PaneInfo, PanePage, PaneSummary, WindowInfo
 from libtmux_mcp.tools.session_tools import _resolve_caller_session
 
 if t.TYPE_CHECKING:
@@ -51,7 +52,10 @@ def list_panes(
     socket_name: str | None = None,
     filters: dict[str, t.Any] | str | None = None,
     scope: t.Literal["server", "caller_session"] = "server",
-) -> list[PaneInfo]:
+    detail: t.Literal["summary", "full"] = "summary",
+    limit: int = 100,
+    offset: int = 0,
+) -> PanePage:
     """List tmux panes (terminal multiplexer splits) in a window, session, or server.
 
     Use for terminal panes — including 'this pane', 'current pane',
@@ -82,14 +86,24 @@ def list_panes(
         selectors and server-wide default. ``"caller_session"`` limits
         results to the frozen caller pane's live session and cannot be
         combined with session or window selectors.
+    detail : {"summary", "full"}, optional
+        Row projection. Summary rows are the compact default; full rows
+        include geometry, process, and working-directory metadata.
+    limit : int, optional
+        Maximum rows to return. Defaults to 100.
+    offset : int, optional
+        Zero-based row offset. Defaults to 0.
 
     Returns
     -------
-    list[PaneInfo]
-        List of serialized pane objects.
+    PanePage
+        Page of summary or full pane objects and pagination metadata.
     """
     if scope not in ("server", "caller_session"):
         msg = f"Invalid scope {scope!r}; expected 'server' or 'caller_session'."
+        raise ExpectedToolError(msg)
+    if detail not in ("summary", "full"):
+        msg = f"Invalid detail {detail!r}; expected 'summary' or 'full'."
         raise ExpectedToolError(msg)
     if scope == "caller_session" and any(
         selector is not None
@@ -121,11 +135,23 @@ def list_panes(
         panes = session.panes
     else:
         panes = server.panes
-    return _apply_filters(
+    rows = _apply_filters(
         panes,
         filters,
         _serialize_pane,
         synthetic_fields=_PANE_SYNTHETIC_FILTER_FIELDS,
+    )
+    rows.sort(key=lambda row: int(row.pane_id[1:]))
+    projected: list[PaneSummary | PaneInfo]
+    if detail == "summary":
+        projected = [PaneSummary.model_validate(row) for row in rows]
+    else:
+        projected = list(rows)
+    return _paginate(
+        projected,
+        limit=limit,
+        offset=offset,
+        page_type=PanePage,
     )
 
 

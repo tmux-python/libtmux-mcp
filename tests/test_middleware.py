@@ -910,7 +910,8 @@ def test_readonly_retry_recovers_on_decorated_tool(
 
     result = asyncio.run(middleware.on_call_tool(ctx, real_call_next))
 
-    assert result == []
+    assert result.items == []
+    assert result.total == 0
     assert calls["count"] == 2, (
         f"retry did not fire (calls={calls['count']}). Likely cause: "
         f"fastmcp<3.2.4 RetryMiddleware._should_retry not walking "

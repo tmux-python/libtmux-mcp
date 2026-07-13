@@ -25,14 +25,17 @@ if t.TYPE_CHECKING:
 
 
 def test_list_windows(mcp_server: Server, mcp_session: Session) -> None:
-    """list_windows returns a list of WindowInfo models."""
+    """list_windows returns a typed page of summary models."""
+    from libtmux_mcp.models import WindowPage, WindowSummary
+
     result = list_windows(
         session_name=mcp_session.session_name,
         socket_name=mcp_server.socket_name,
     )
-    assert isinstance(result, list)
-    assert len(result) >= 1
-    assert result[0].window_id is not None
+    assert isinstance(result, WindowPage)
+    assert len(result.items) >= 1
+    assert isinstance(result.items[0], WindowSummary)
+    assert result.items[0].window_id is not None
 
 
 def test_list_windows_by_id(mcp_server: Server, mcp_session: Session) -> None:
@@ -41,7 +44,7 @@ def test_list_windows_by_id(mcp_server: Server, mcp_session: Session) -> None:
         session_id=mcp_session.session_id,
         socket_name=mcp_server.socket_name,
     )
-    assert len(result) >= 1
+    assert len(result.items) >= 1
 
 
 @pytest.mark.parametrize("explicit_scope", [False, True], ids=["default", "explicit"])
@@ -58,7 +61,7 @@ def test_list_windows_server_scope_remains_server_wide(
 
     result = list_windows(**kwargs)
 
-    session_ids = {window.session_id for window in result}
+    session_ids = {window.session_id for window in result.items}
     assert mcp_session.session_id in session_ids
     assert second_session.session_id in session_ids
 
@@ -85,9 +88,11 @@ def test_list_windows_caller_session_scope_uses_live_caller_session(
         socket_name=mcp_server.socket_name,
     )
 
-    assert {window.session_id for window in result} == {mcp_session.session_id}
-    assert caller_window.window_id in {window.window_id for window in result}
-    assert other_session.session_id not in {window.session_id for window in result}
+    assert {window.session_id for window in result.items} == {mcp_session.session_id}
+    assert caller_window.window_id in {window.window_id for window in result.items}
+    assert other_session.session_id not in {
+        window.session_id for window in result.items
+    }
 
 
 def test_list_windows_caller_scope_uses_effective_server_tmux_binary(
@@ -193,15 +198,16 @@ def test_list_windows_caller_session_rejects_explicit_selectors(
     value: str,
 ) -> None:
     """Caller scope cannot be mixed with hierarchy selectors."""
+    kwargs: dict[str, t.Any] = {
+        "scope": "caller_session",
+        "socket_name": mcp_server.socket_name,
+        selector: value,
+    }
     with pytest.raises(
         ExpectedToolError,
         match=r"scope='caller_session'.*cannot be combined.*scope='server'",
     ):
-        list_windows(
-            scope="caller_session",
-            socket_name=mcp_server.socket_name,
-            **{selector: value},
-        )
+        list_windows(**kwargs)
 
 
 def test_list_windows_caller_session_rejects_outside_tmux(
@@ -475,8 +481,7 @@ def test_list_windows_with_filters(
             list_windows(**kwargs)
     else:
         result = list_windows(**kwargs)
-        assert isinstance(result, list)
-        assert len(result) >= expected_min_count
+        assert len(result.items) >= expected_min_count
 
     # Cleanup
     cross_win.kill()

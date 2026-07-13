@@ -242,8 +242,9 @@ _suppress_history = _resolve_suppress_history(
 )
 
 #: Tools covered by the tail-preserving response limiter. Only tools
-#: whose output is terminal scrollback benefit from this backstop;
-#: structured responses from list/get tools stay under the cap naturally.
+#: whose output contains terminal text benefit from this backstop. The
+#: structured ``list_*`` tools are intentionally absent: their typed page
+#: envelopes bound rows without turning valid structured data into text.
 _RESPONSE_LIMITED_TOOLS = [
     "capture_pane",
     "capture_since",

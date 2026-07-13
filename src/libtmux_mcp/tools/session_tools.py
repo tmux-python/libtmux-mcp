@@ -23,13 +23,14 @@ from libtmux_mcp._utils import (
     _caller_is_strictly_on_server,
     _get_caller_identity,
     _get_server,
+    _paginate,
     _resolve_session,
     _serialize_session,
     _serialize_window,
     _server_not_running_error,
     handle_tool_errors,
 )
-from libtmux_mcp.models import SessionInfo, WindowInfo
+from libtmux_mcp.models import SessionInfo, WindowInfo, WindowPage, WindowSummary
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -95,7 +96,10 @@ def list_windows(
     socket_name: str | None = None,
     filters: dict[str, str] | str | None = None,
     scope: t.Literal["server", "caller_session"] = "server",
-) -> list[WindowInfo]:
+    detail: t.Literal["summary", "full"] = "summary",
+    limit: int = 100,
+    offset: int = 0,
+) -> WindowPage:
     """List tmux windows (terminal tabs) in a session, or across the server.
 
     Use for tmux windows — 'current window', 'this tab' (when terminal-
@@ -122,14 +126,24 @@ def list_windows(
         no session selector is supplied. ``"caller_session"`` limits the
         result to the frozen caller pane's live session and cannot be
         combined with ``session_name`` or ``session_id``.
+    detail : {"summary", "full"}, optional
+        Row projection. Summary rows are the compact default; full rows
+        include layout and dimensions.
+    limit : int, optional
+        Maximum rows to return. Defaults to 100.
+    offset : int, optional
+        Zero-based row offset. Defaults to 0.
 
     Returns
     -------
-    list[WindowInfo]
-        List of serialized window objects.
+    WindowPage
+        Page of summary or full window objects and pagination metadata.
     """
     if scope not in ("server", "caller_session"):
         msg = f"Invalid scope {scope!r}; expected 'server' or 'caller_session'."
+        raise ExpectedToolError(msg)
+    if detail not in ("summary", "full"):
+        msg = f"Invalid detail {detail!r}; expected 'summary' or 'full'."
         raise ExpectedToolError(msg)
     if scope == "caller_session" and (
         session_name is not None or session_id is not None
@@ -151,7 +165,25 @@ def list_windows(
         windows = session.windows
     else:
         windows = server.windows
-    return _apply_filters(windows, filters, _serialize_window)
+    rows = _apply_filters(windows, filters, _serialize_window)
+    rows.sort(
+        key=lambda row: (
+            int(row.window_id[1:]),
+            int(row.session_id[1:]) if row.session_id is not None else -1,
+            int(row.window_index) if row.window_index is not None else -1,
+        )
+    )
+    projected: list[WindowSummary | WindowInfo]
+    if detail == "summary":
+        projected = [WindowSummary.model_validate(row) for row in rows]
+    else:
+        projected = list(rows)
+    return _paginate(
+        projected,
+        limit=limit,
+        offset=offset,
+        page_type=WindowPage,
+    )
 
 
 # get_session_info completes the core-tmux-hierarchy symmetry alongside

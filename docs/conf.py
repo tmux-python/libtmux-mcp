@@ -149,13 +149,20 @@ conf["fastmcp_area_map"] = {
 conf["fastmcp_server_module"] = "libtmux_mcp.server:mcp"
 conf["fastmcp_model_module"] = "libtmux_mcp.models"
 conf["fastmcp_model_classes"] = (
+    "ListPage",
     "SessionInfo",
+    "SessionPage",
     "WindowInfo",
+    "WindowSummary",
+    "WindowPage",
     "PaneInfo",
+    "PaneSummary",
+    "PanePage",
     "PaneContentMatch",
     "SearchPanesResult",
     "PaneSnapshot",
     "ServerInfo",
+    "ServerPage",
     "OptionResult",
     "OptionSetResult",
     "EnvironmentResult",

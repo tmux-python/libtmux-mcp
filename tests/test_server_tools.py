@@ -288,11 +288,13 @@ def test_caller_context_is_frozen(
 
 
 def test_list_sessions(mcp_server: Server, mcp_session: Session) -> None:
-    """list_sessions returns a list of SessionInfo models."""
+    """list_sessions returns a typed page of SessionInfo models."""
+    from libtmux_mcp.models import SessionPage
+
     result = list_sessions(socket_name=mcp_server.socket_name)
-    assert isinstance(result, list)
-    assert len(result) >= 1
-    session_ids = [s.session_id for s in result]
+    assert isinstance(result, SessionPage)
+    assert len(result.items) >= 1
+    session_ids = [session.session_id for session in result.items]
     assert mcp_session.session_id in session_ids
 
 
@@ -302,7 +304,8 @@ def test_list_sessions_empty_server(mcp_server: Server) -> None:
     for s in mcp_server.sessions:
         s.kill()
     result = list_sessions(socket_name=mcp_server.socket_name)
-    assert result == []
+    assert result.items == []
+    assert result.total == 0
 
 
 def test_create_session(mcp_server: Server) -> None:
@@ -344,7 +347,7 @@ def test_create_session_returns_active_pane_id(mcp_server: Server) -> None:
         session_name="mcp_test_active_pane",
         socket_name=mcp_server.socket_name,
     )
-    assert any(p.pane_id == result.active_pane_id for p in panes)
+    assert any(p.pane_id == result.active_pane_id for p in panes.items)
 
 
 class CreateSessionEnvStringFixture(t.NamedTuple):
@@ -572,11 +575,11 @@ def test_list_sessions_with_filters(
             socket_name=mcp_server.socket_name,
             filters=filters,
         )
-        assert isinstance(result, list)
         if expected_count is not None:
-            assert len(result) == expected_count
+            assert len(result.items) == expected_count
+            assert result.total == expected_count
         else:
-            assert len(result) >= 1
+            assert len(result.items) >= 1
 
 
 def test_kill_server(
@@ -623,11 +626,11 @@ def test_read_heavy_tools_return_pydantic_models(
     machine-readable ``outputSchema`` from the MCP registration, which
     forces agents to re-parse strings. Keep these typed.
     """
-    from libtmux_mcp.models import ServerInfo, SessionInfo
+    from libtmux_mcp.models import ServerInfo, SessionInfo, SessionPage
 
     sessions = list_sessions(socket_name=mcp_server.socket_name)
-    assert isinstance(sessions, list)
-    assert all(isinstance(s, SessionInfo) for s in sessions)
+    assert isinstance(sessions, SessionPage)
+    assert all(isinstance(s, SessionInfo) for s in sessions.items)
 
     info = get_server_info(socket_name=mcp_server.socket_name)
     assert isinstance(info, ServerInfo)
@@ -641,15 +644,19 @@ def test_list_servers_finds_live_socket(mcp_server: Server) -> None:
     under ``$TMUX_TMPDIR/tmux-$UID/``; the discovery tool must see
     it and report it alive.
     """
-    from libtmux_mcp.models import ServerInfo
+    from libtmux_mcp.models import ServerInfo, ServerPage
 
     results = list_servers()
-    assert isinstance(results, list)
-    assert all(isinstance(r, ServerInfo) for r in results)
-    names = [r.socket_name for r in results]
+    assert isinstance(results, ServerPage)
+    assert all(isinstance(r, ServerInfo) for r in results.items)
+    names = [server.socket_name for server in results.items]
     assert mcp_server.socket_name in names
     # The fixture's socket must be reported alive.
-    found = next(r for r in results if r.socket_name == mcp_server.socket_name)
+    found = next(
+        server
+        for server in results.items
+        if server.socket_name == mcp_server.socket_name
+    )
     assert found.is_alive is True
 
 
@@ -664,7 +671,8 @@ def test_list_servers_missing_tmpdir_returns_empty(
     """
     monkeypatch.setenv("TMUX_TMPDIR", "/nonexistent-list-servers-test")
     results = list_servers()
-    assert results == []
+    assert results.items == []
+    assert results.total == 0
 
 
 @pytest.mark.usefixtures("mcp_session")
@@ -697,14 +705,37 @@ def test_list_servers_extra_socket_paths_surfaces_custom_path(
 
     results = list_servers(extra_socket_paths=[str(fixture_socket)])
 
-    assert isinstance(results, list)
     # Canonical scan saw an empty tmpdir, so everything below came from
     # the extra-paths probe.
-    socket_paths = [r.socket_path for r in results]
+    socket_paths = [server.socket_path for server in results.items]
     assert str(fixture_socket) in socket_paths
-    found = next(r for r in results if r.socket_path == str(fixture_socket))
+    found = next(
+        server for server in results.items if server.socket_path == str(fixture_socket)
+    )
     assert isinstance(found, ServerInfo)
     assert found.is_alive is True
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_list_servers_deduplicates_canonical_and_extra_socket_path(
+    mcp_server: Server,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Canonical and explicit aliases of one socket produce one row."""
+    canonical_dir = tmp_path / f"tmux-{os.geteuid()}"
+    canonical_dir.mkdir()
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+    fixture_socket = pathlib.Path("/tmp") / f"tmux-{os.geteuid()}" / socket_name
+    assert fixture_socket.is_socket()
+    (canonical_dir / socket_name).symlink_to(fixture_socket)
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+
+    result = list_servers(extra_socket_paths=[str(fixture_socket)])
+
+    assert result.total == 1
+    assert len(result.items) == 1
 
 
 def test_list_servers_extra_socket_paths_skips_nonexistent(
@@ -724,4 +755,5 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
     results = list_servers(
         extra_socket_paths=[str(bogus), str(regular_file)],
     )
-    assert results == []
+    assert results.items == []
+    assert results.total == 0
