@@ -98,8 +98,9 @@ _INSTR_METADATA_VS_CONTENT = (
 )
 
 _INSTR_READ_TOOLS = (
-    "Prefer snapshot_pane over capture_pane + get_pane_info; capture_since "
-    "for repeated observation/tailing; display_message for tmux formats."
+    "where_am_i resolves 'this pane', 'current window', and 'this session' "
+    "relative to the caller. Prefer snapshot_pane; capture_since tails; "
+    "display_message evaluates formats."
 )
 
 _INSTR_WAIT_NOT_POLL = (
@@ -182,9 +183,7 @@ def _build_instructions(
     # query away). Reuse the existing safety axis instead of shipping a
     # separate LIBTMUX_DISCOVERABILITY knob.
     if safety_level == TAG_READONLY:
-        parts.append(
-            "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
-        )
+        parts.append("\n\nReadonly mode: probe where_am_i/snapshot_pane if unsure.")
 
     instructions = "".join(parts)
     if len(instructions.encode("utf-8")) > _INSTRUCTIONS_MAX_BYTES:
@@ -207,12 +206,12 @@ def _build_instructions(
         if socket_name:
             context += f" (socket {socket_name})"
         context += (
-            ". Tool results mark is_caller=true; filter list_panes for it to answer "
-            "'which pane am I in?' (no whoami tool)."
+            ". where_am_i returns live window/session IDs; pane results mark "
+            "is_caller=true."
         )
         pane_context = (
-            f"{context_start}. Tool results mark is_caller=true; filter list_panes "
-            "for it to answer 'which pane am I in?' (no whoami tool)."
+            f"{context_start}. where_am_i returns live window/session IDs; "
+            "pane results mark is_caller=true."
         )
         minimal_context = f"\n\nAgent context: tmux pane {tmux_pane}."
         for candidate in (context, pane_context, minimal_context):

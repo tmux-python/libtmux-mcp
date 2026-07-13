@@ -202,6 +202,46 @@ class ServerInfo(BaseModel):
     version: str | None = Field(default=None, description="tmux version")
 
 
+class CallerContext(BaseModel):
+    """Frozen invocation identity and effective tmux server state."""
+
+    model_config = ConfigDict(frozen=True)
+
+    inside_tmux: bool = Field(
+        description="Whether the MCP process invocation came from a tmux pane."
+    )
+    self_available: bool = Field(
+        description=(
+            "Whether the frozen caller pane resolves on the effective live server."
+        )
+    )
+    pane_id: str | None = Field(
+        description="Frozen caller pane ID, or None outside tmux."
+    )
+    window_id: str | None = Field(
+        description="Current caller window ID when self is available."
+    )
+    session_id: str | None = Field(
+        description="Current caller session ID when self is available."
+    )
+    caller_socket_path: str | None = Field(
+        description="Socket path captured from the caller's TMUX environment."
+    )
+    effective_socket_name: str | None = Field(
+        description="Effective configured tmux socket name."
+    )
+    effective_socket_path: str | None = Field(
+        description="Effective configured or caller tmux socket path."
+    )
+    server_running: bool = Field(
+        description="Whether the effective tmux server is running."
+    )
+    safety_level: str = Field(description="Effective MCP safety tier.")
+    suppress_history: bool = Field(
+        description="Effective semantic shell-history suppression default."
+    )
+
+
 class OptionResult(BaseModel):
     """Result of a show_option call."""
 

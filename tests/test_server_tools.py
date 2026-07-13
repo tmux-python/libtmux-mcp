@@ -17,8 +17,274 @@ from libtmux_mcp.tools.server_tools import (
 )
 
 if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
+
+    from libtmux_mcp.models import CallerContext
+
+
+def _call_where_am_i() -> CallerContext:
+    """Call the public invocation-discovery function under test."""
+    from libtmux_mcp.tools import server_tools
+
+    function = getattr(server_tools, "where_am_i", None)
+    assert function is not None, "where_am_i is not implemented"
+    return t.cast("CallerContext", function())
+
+
+def _clear_configured_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave the frozen caller environment as the effective target."""
+    monkeypatch.delenv("LIBTMUX_SOCKET", raising=False)
+    monkeypatch.delenv("LIBTMUX_SOCKET_PATH", raising=False)
+
+
+def test_where_am_i_resolves_live_nondefault_caller(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live caller reports its current pane, window, and session."""
+    from libtmux_mcp import models
+    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp.server import _safety_level, _suppress_history
+
+    caller_context_type = getattr(models, "CallerContext", None)
+    assert caller_context_type is not None, "CallerContext is not implemented"
+
+    _clear_configured_target(monkeypatch)
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    pane_id = mcp_pane.pane_id
+    assert pane_id is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$stale")
+    monkeypatch.setenv("TMUX_PANE", pane_id)
+
+    result = _call_where_am_i()
+
+    assert isinstance(result, caller_context_type)
+    assert result.inside_tmux is True
+    assert result.self_available is True
+    assert result.pane_id == mcp_pane.pane_id
+    assert result.window_id == mcp_pane.window_id
+    assert result.session_id == mcp_pane.session.session_id
+    assert result.caller_socket_path == socket_path
+    assert result.effective_socket_name is None
+    assert result.effective_socket_path == socket_path
+    assert result.server_running is True
+    assert result.safety_level == _safety_level
+    assert result.suppress_history is _suppress_history
+
+
+def test_where_am_i_uses_effective_server_tmux_binary(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    custom_tmux_bin_without_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller lookup uses configured tmux even when PATH has no tmux."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    _clear_configured_target(monkeypatch)
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    assert mcp_pane.pane_id is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$stale")
+    monkeypatch.setenv("TMUX_PANE", mcp_pane.pane_id)
+
+    result = _call_where_am_i()
+
+    assert custom_tmux_bin_without_path.endswith("configured-tmux")
+    assert result.self_available is True
+    assert result.pane_id == mcp_pane.pane_id
+
+
+def test_where_am_i_reraises_unrelated_live_server_lookup_error(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live operational errors flow through the standard tmux mapper."""
+    from libtmux import exc
+    from libtmux.pane import Pane
+
+    from libtmux_mcp._utils import ExpectedToolError, _effective_socket_path
+
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    assert mcp_pane.pane_id is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$stale")
+    monkeypatch.setenv("TMUX_PANE", mcp_pane.pane_id)
+
+    def fail_lookup(cls: type[Pane], server: Server, pane_id: str) -> Pane:
+        del cls, server, pane_id
+        msg = "injected live caller lookup failure"
+        raise exc.LibTmuxException(msg)
+
+    monkeypatch.setattr(Pane, "from_pane_id", classmethod(fail_lookup))
+
+    with pytest.raises(
+        ExpectedToolError,
+        match="tmux error: injected live caller lookup failure",
+    ):
+        _call_where_am_i()
+
+
+def test_where_am_i_reports_dead_when_server_dies_during_lookup(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operational lookup error becomes unavailable only after death."""
+    from libtmux import exc
+    from libtmux.pane import Pane
+
+    from libtmux_mcp._utils import _effective_socket_path
+
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    assert mcp_pane.pane_id is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$stale")
+    monkeypatch.setenv("TMUX_PANE", mcp_pane.pane_id)
+
+    def kill_and_fail(cls: type[Pane], server: Server, pane_id: str) -> Pane:
+        del cls, pane_id
+        server.kill()
+        msg = "injected dead caller lookup failure"
+        raise exc.LibTmuxException(msg)
+
+    monkeypatch.setattr(Pane, "from_pane_id", classmethod(kill_and_fail))
+
+    result = _call_where_am_i()
+
+    assert result.self_available is False
+    assert result.server_running is False
+
+
+def test_where_am_i_preserves_caller_on_configured_target_mismatch(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configured-target mismatch keeps identity but denies self scope."""
+    from libtmux.pane import Pane
+
+    def fail_from_env(
+        cls: type[Pane], environment: t.Mapping[str, str] | None = None
+    ) -> Pane:
+        del cls, environment
+        pytest.fail("Pane.from_env must not run for a configured-target mismatch")
+
+    monkeypatch.setattr(Pane, "from_env", classmethod(fail_from_env))
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+    pane_id = mcp_pane.pane_id
+    assert pane_id is not None
+    caller_socket = "/tmp/tmux-99999/caller-only"
+    monkeypatch.setenv("LIBTMUX_SOCKET", socket_name)
+    monkeypatch.delenv("LIBTMUX_SOCKET_PATH", raising=False)
+    monkeypatch.setenv("TMUX", f"{caller_socket},12345,$0")
+    monkeypatch.setenv("TMUX_PANE", pane_id)
+
+    result = _call_where_am_i()
+
+    assert result.inside_tmux is True
+    assert result.self_available is False
+    assert result.pane_id == mcp_pane.pane_id
+    assert result.window_id is None
+    assert result.session_id is None
+    assert result.caller_socket_path == caller_socket
+    assert result.effective_socket_name == socket_name
+    assert result.effective_socket_path is None
+    assert result.server_running is True
+
+
+def test_where_am_i_returns_typed_state_for_dead_server(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead matching server is routine absence, not a tool error."""
+    dead_socket = tmp_path / "dead.sock"
+    monkeypatch.delenv("LIBTMUX_SOCKET", raising=False)
+    monkeypatch.setenv("LIBTMUX_SOCKET_PATH", str(dead_socket))
+    monkeypatch.setenv("TMUX", f"{dead_socket},12345,$0")
+    monkeypatch.setenv("TMUX_PANE", "%404")
+
+    result = _call_where_am_i()
+
+    assert result.inside_tmux is True
+    assert result.self_available is False
+    assert result.pane_id == "%404"
+    assert result.window_id is None
+    assert result.session_id is None
+    assert result.caller_socket_path == str(dead_socket)
+    assert result.effective_socket_name is None
+    assert result.effective_socket_path == str(dead_socket)
+    assert result.server_running is False
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_where_am_i_returns_typed_state_for_stale_pane(
+    mcp_server: Server,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale caller pane remains visible without invented parents."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    _clear_configured_target(monkeypatch)
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},12345,$0")
+    monkeypatch.setenv("TMUX_PANE", "%999999")
+
+    result = _call_where_am_i()
+
+    assert result.inside_tmux is True
+    assert result.self_available is False
+    assert result.pane_id == "%999999"
+    assert result.window_id is None
+    assert result.session_id is None
+    assert result.caller_socket_path == socket_path
+    assert result.effective_socket_path == socket_path
+    assert result.server_running is True
+
+
+def test_where_am_i_returns_typed_state_outside_tmux(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outside-tmux invocation returns false and null identity fields."""
+    dead_socket = tmp_path / "outside.sock"
+    monkeypatch.delenv("LIBTMUX_SOCKET", raising=False)
+    monkeypatch.setenv("LIBTMUX_SOCKET_PATH", str(dead_socket))
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+
+    result = _call_where_am_i()
+
+    assert result.inside_tmux is False
+    assert result.self_available is False
+    assert result.pane_id is None
+    assert result.window_id is None
+    assert result.session_id is None
+    assert result.caller_socket_path is None
+    assert result.effective_socket_name is None
+    assert result.effective_socket_path == str(dead_socket)
+    assert result.server_running is False
+
+
+def test_caller_context_is_frozen(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invocation-discovery results cannot drift after construction."""
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("LIBTMUX_SOCKET_PATH", str(tmp_path / "frozen.sock"))
+    result = _call_where_am_i()
+
+    with pytest.raises(ValidationError):
+        result.pane_id = "%changed"
 
 
 def test_list_sessions(mcp_server: Server, mcp_session: Session) -> None:

@@ -100,6 +100,36 @@ def test_target_docs_publish_caller_aware_precedence(
     )
 
 
+def test_where_am_i_tool_page_is_indexed_and_documents_typed_states(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Invocation discovery has a complete task page and resolvable entries."""
+    page = (docs_dir / "tools" / "server" / "where-am-i.md").read_text(encoding="utf-8")
+    server_index = (docs_dir / "tools" / "server" / "index.md").read_text(
+        encoding="utf-8"
+    )
+    prompting = (docs_dir / "topics" / "prompting.md").read_text(encoding="utf-8")
+
+    assert "```{fastmcp-tool} server_tools.where_am_i" in page
+    assert "```{fastmcp-tool-input} server_tools.where_am_i" in page
+    for section in ("**Use when**", "**Avoid when**", "**Side effects:**"):
+        assert section in page
+    for state in ("outside tmux", "dead", "stale", "mismatch"):
+        assert state in page.lower()
+    for field in (
+        "inside_tmux",
+        "self_available",
+        "pane_id",
+        "window_id",
+        "session_id",
+        "server_running",
+    ):
+        assert f'"{field}"' in page
+    assert "{tooliconl}`where-am-i`" in server_index
+    assert "\nwhere-am-i\n" in server_index
+    assert "{toolref}`where-am-i`" in prompting
+
+
 def test_configuration_separates_spawn_persistent_history_control(
     docs_dir: pathlib.Path,
 ) -> None:

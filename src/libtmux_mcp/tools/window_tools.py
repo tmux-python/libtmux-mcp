@@ -12,7 +12,6 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
-    DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -506,7 +505,6 @@ def register(mcp: FastMCP) -> None:
         title="List tmux Panes",
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY},
-        meta=DISCOVERY_META,
     )(list_panes)
     mcp.tool(
         title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}

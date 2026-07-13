@@ -31,7 +31,11 @@ known pane, or capture_pane for a one-shot manual inspection.
 
 The server also dynamically adds:
 - **Safety tier context**: Which tier is active and what tools are available
-- **Caller pane awareness**: If the server runs inside tmux, it tells the agent which pane is its own (via `TMUX_PANE`). See {ref}`concepts` "Agent self-awareness" for details.
+- **Caller pane awareness**: {tooliconl}`where-am-i` resolves "this pane",
+  "current window", and "this session" without list-and-filter discovery. Its
+  typed result keeps caller identity separate from whether the pane is still
+  available on the configured server. See {ref}`concepts` "Agent
+  self-awareness" for details.
 
 ## Activation and discovery
 
@@ -41,7 +45,7 @@ The server stays out of the way when you mean a browser window, an editor split,
 
 ### Always-on tool listing (Claude Code only)
 
-[Claude Code](https://code.claude.com/docs/en/mcp) defers loading MCP tool schemas when they exceed ~10% of your context window. By default, the three discovery anchors ({toolref}`list-panes`, {toolref}`list-windows`, {toolref}`snapshot-pane`) carry an `anthropic/alwaysLoad: true` hint so bare *"pane"* / *"window"* prompts surface this server without a `ToolSearch` hop.
+[Claude Code](https://code.claude.com/docs/en/mcp) defers loading MCP tool schemas when they exceed ~10% of your context window. By default, the three discovery anchors ({toolref}`where-am-i`, {toolref}`list-windows`, {toolref}`snapshot-pane`) carry an `anthropic/alwaysLoad: true` hint so bare *"pane"* / *"window"* prompts surface this server without a `ToolSearch` hop.
 
 To force libtmux-mcp's *full* schema list to load upfront — useful if you also want {toolref}`send-keys`, {toolref}`capture-pane`, {toolref}`select-window` etc. preloaded — add `"alwaysLoad": true` at the server entry level (requires Claude Code v2.1.121+):
 
@@ -65,6 +69,7 @@ These natural-language prompts reliably trigger the right tool sequences:
 
 | Prompt | Agent interprets as |
 |--------|-------------------|
+| [What's running in this window?]{.prompt} | {toolref}`where-am-i` → {toolref}`list-panes` for the returned `window_id` |
 | [Run `pytest` in my build pane and show results]{.prompt} | {toolref}`run-command` |
 | [Start the dev server and wait until it's ready]{.prompt} | {toolref}`send-keys` → {toolref}`wait-for-text` (for "listening on" — third-party output the agent doesn't author) |
 | [Spin up the dev server in the bottom-right pane]{.prompt} | {toolref}`find-pane-by-position` (corner=bottom-right) → {toolref}`send-keys` → {toolref}`wait-for-text` (for the server's readiness banner) |
@@ -145,7 +150,7 @@ This is the lever closest to the failure mode for *"current window"* / *"this se
 
 When an agent is unsure which tool to use, these rules help:
 
-1. **Discovery first**: Call {toolref}`list-sessions` or {toolref}`list-panes` before acting on specific targets
+1. **Resolve relationships first**: Call {toolref}`where-am-i` for "this pane", "current window", or "this session". Use {toolref}`list-sessions` or {toolref}`list-panes` when you need an inventory instead.
 2. **Prefer IDs**: Once you have a `pane_id`, use it for all subsequent calls — it never changes during the pane's lifetime
 3. **Run, wait, or observe deliberately**: For commands the agent authors, prefer {toolref}`run-command`. Use {toolref}`wait-for-channel` only for custom shell composition outside that shape. Use {toolref}`capture-since` for repeated observation, and fall back to {toolref}`wait-for-text` or {toolref}`wait-for-content-change` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
 4. **Content vs. metadata**: If looking for text *in* a terminal, use {toolref}`search-panes`. If looking for pane *properties* (name, PID, path), use {toolref}`list-panes` or {toolref}`get-pane-info`

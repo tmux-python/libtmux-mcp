@@ -416,7 +416,7 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
 #:
 #: Best-effort by design — safe no-op for clients that don't index the
 #: ``anthropic/*`` namespace. Apply only to read-tier discovery anchors
-#: (``list_panes``, ``list_windows``, ``snapshot_pane``); each
+#: (``where_am_i``, ``list_windows``, ``snapshot_pane``); each
 #: always-loaded tool consumes a fixed schema budget in clients that
 #: honour the hint, so widening the set has a real cost.
 DISCOVERY_META: dict[str, t.Any] = {

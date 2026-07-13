@@ -10,30 +10,98 @@ import socket
 import typing as t
 
 from fastmcp.exceptions import ToolError
+from libtmux import exc
+from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_RO,
+    DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _caller_is_strictly_on_server,
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _resolve_server_target,
     _serialize_session,
     handle_tool_errors,
 )
-from libtmux_mcp.models import ServerInfo, SessionInfo
+from libtmux_mcp.models import CallerContext, ServerInfo, SessionInfo
 
 logger = logging.getLogger(__name__)
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+
+
+@handle_tool_errors
+def where_am_i() -> CallerContext:
+    """Locate this MCP invocation in tmux without listing terminal panes.
+
+    Resolves relational requests such as 'this pane', 'current window',
+    and 'this session'. Caller identity remains visible when the selected
+    server differs, is stopped, or no longer contains the frozen pane.
+
+    Returns
+    -------
+    CallerContext
+        Frozen caller identity, effective target, and availability state.
+    """
+    from libtmux_mcp.server import _safety_level, _suppress_history
+
+    caller = _get_caller_identity()
+    target = _resolve_server_target()
+    server = _get_server(
+        socket_name=target.socket_name,
+        socket_path=target.socket_path,
+    )
+    server_running = server.is_alive()
+    window_id: str | None = None
+    session_id: str | None = None
+    self_available = False
+
+    if (
+        server_running
+        and caller is not None
+        and caller.pane_id is not None
+        and _caller_is_strictly_on_server(server, caller)
+    ):
+        try:
+            pane = Pane.from_pane_id(server=server, pane_id=caller.pane_id)
+            resolved_window_id = pane.window_id
+            resolved_session_id = pane.session.session_id
+        except exc.ObjectDoesNotExist:
+            pass
+        except exc.LibTmuxException:
+            if not server.is_alive():
+                server_running = False
+            else:
+                raise
+        else:
+            window_id = resolved_window_id
+            session_id = resolved_session_id
+            self_available = True
+
+    return CallerContext(
+        inside_tmux=caller is not None,
+        self_available=self_available,
+        pane_id=caller.pane_id if caller is not None else None,
+        window_id=window_id,
+        session_id=session_id,
+        caller_socket_path=caller.socket_path if caller is not None else None,
+        effective_socket_name=target.socket_name,
+        effective_socket_path=target.socket_path,
+        server_running=server_running,
+        safety_level=_safety_level,
+        suppress_history=_suppress_history,
+    )
 
 
 @handle_tool_errors
@@ -301,6 +369,7 @@ SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
         "call_mutating_tools_batch",
         "call_readonly_tools_batch",
         "list_servers",
+        "where_am_i",
     }
 )
 
@@ -370,6 +439,12 @@ def list_servers(
 
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
+    mcp.tool(
+        title="Locate tmux Caller",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+        meta=DISCOVERY_META,
+    )(where_am_i)
     mcp.tool(
         title="List tmux Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(list_sessions)

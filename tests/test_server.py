@@ -397,31 +397,32 @@ def test_base_instructions_document_buffer_lifecycle() -> None:
     assert "clipboard history" in _BASE_INSTRUCTIONS
 
 
+def test_base_instructions_define_caller_relative_discovery() -> None:
+    """The durable prompt maps relational language to ``where_am_i``."""
+    expected = (
+        "where_am_i resolves 'this pane', 'current window', and "
+        "'this session' relative to the caller"
+    )
+
+    assert expected in _BASE_INSTRUCTIONS
+
+
 def test_build_instructions_documents_is_caller_workflow_inside_tmux(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The is_caller workflow sentence appears only when inside tmux.
-
-    The sentence references "your pane is identified above", which is
-    only true when ``TMUX_PANE`` is set and the agent-context line has
-    been emitted. Outside tmux, the sentence would be a lie — so it
-    lives inside the ``if tmux_pane:`` branch of ``_build_instructions``
-    and must NOT appear in ``_BASE_INSTRUCTIONS`` itself.
-    """
-    # Outside tmux: the workflow sentence must NOT appear.
+    """Dynamic context augments the durable zero-input discovery rule."""
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TMUX", raising=False)
     outside = _build_instructions(safety_level=TAG_MUTATING)
-    assert "whoami tool" not in outside
+    assert "where_am_i" in outside
     assert "is_caller=true" not in outside
 
-    # Inside tmux: the workflow sentence appears.
     monkeypatch.setenv("TMUX_PANE", "%42")
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
     inside = _build_instructions(safety_level=TAG_MUTATING)
+    assert "where_am_i" in inside
     assert "is_caller=true" in inside
-    assert "whoami tool" in inside
-    assert "list_panes" in inside
+    assert "filter list_panes" not in inside
 
 
 def test_build_instructions_always_includes_safety() -> None:
@@ -653,7 +654,8 @@ def test_readonly_hint_visible_only_on_readonly_tier(
 #: regression to "Evaluate Format String".
 _TMUX_QUALIFIED_TOOLS = frozenset(
     [
-        # 5 server-level
+        # 6 server-level
+        "where_am_i",
         "list_sessions",
         "list_servers",
         "create_session",
@@ -709,6 +711,7 @@ _TMUX_QUALIFIED_TOOLS = frozenset(
 #: and add explicit boundaries.
 _DISCOVERY_ANCHORS = frozenset(
     [
+        "where_am_i",
         "list_panes",
         "list_windows",
         "list_sessions",
@@ -724,7 +727,7 @@ _DISCOVERY_ANCHORS = frozenset(
 #: meta hint. Read-only only — best-effort hint to Claude Code that
 #: keeps a tiny tmux vocabulary always-visible without preloading
 #: every tool's schema.
-_ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"])
+_ALWAYS_LOAD_ANCHORS = frozenset(["where_am_i", "list_windows", "snapshot_pane"])
 
 
 #: Verbs-of-art whose titles stay generic — they are tmux-specific
@@ -850,13 +853,11 @@ def test_discovery_anchor_descriptions_carry_tmux_and_synonyms() -> None:
 
 
 def test_discovery_anchors_marked_alwaysload() -> None:
-    """``list_panes``, ``list_windows``, ``snapshot_pane`` carry alwaysLoad.
+    """Self, window, and snapshot discovery carry alwaysLoad.
 
     Best-effort hint — FastMCP passes ``meta`` opaquely, so honoring
-    is delegated to Claude Code where the field is documented at
-    ``code.claude.com/docs/en/mcp`` (v2.1.121+). The test asserts only
-    the positive contract; over-specifying the negative space is
-    chrome.
+    is delegated to Claude Code. The exact set stays bounded because
+    every preloaded schema consumes permanent client context.
     """
     import asyncio
 
@@ -868,6 +869,13 @@ def test_discovery_anchors_marked_alwaysload() -> None:
     register_tools(mcp)
     tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
 
+    actual = {
+        name
+        for name, tool in tools.items()
+        if (getattr(tool, "meta", None) or {}).get("anthropic/alwaysLoad") is True
+    }
+    assert actual == _ALWAYS_LOAD_ANCHORS
+
     for tool_name in _ALWAYS_LOAD_ANCHORS:
         tool = tools.get(tool_name)
         assert tool is not None, f"tool not registered: {tool_name}"
@@ -875,6 +883,59 @@ def test_discovery_anchors_marked_alwaysload() -> None:
         assert meta.get("anthropic/alwaysLoad") is True, (
             f"{tool_name} meta missing anthropic/alwaysLoad: {meta!r}"
         )
+
+
+def test_where_am_i_registration_is_zero_input_readonly_and_typed() -> None:
+    """Invocation discovery publishes a typed zero-argument schema."""
+    import asyncio
+    import inspect
+
+    from fastmcp import FastMCP
+    from fastmcp.tools.function_tool import FunctionTool
+
+    from libtmux_mcp.tools import register_tools, server_tools
+
+    assert hasattr(server_tools, "where_am_i"), "where_am_i is not implemented"
+
+    mcp = FastMCP(name="where-am-i-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    tool = tools["where_am_i"]
+
+    assert isinstance(tool, FunctionTool)
+    assert inspect.signature(tool.fn).parameters == {}
+    assert tool.parameters == {
+        "additionalProperties": False,
+        "properties": {},
+        "type": "object",
+    }
+    assert tool.tags == {TAG_READONLY}
+    assert tool.annotations is not None
+    assert tool.annotations.readOnlyHint is True
+    assert tool.annotations.destructiveHint is False
+    assert tool.annotations.idempotentHint is True
+    assert tool.annotations.openWorldHint is False
+
+    schema = tool.output_schema
+    assert schema is not None
+    assert set(schema["properties"]) == {
+        "inside_tmux",
+        "self_available",
+        "pane_id",
+        "window_id",
+        "session_id",
+        "caller_socket_path",
+        "effective_socket_name",
+        "effective_socket_path",
+        "server_running",
+        "safety_level",
+        "suppress_history",
+    }
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["properties"]["inside_tmux"]["type"] == "boolean"
+    assert schema["properties"]["self_available"]["type"] == "boolean"
+    assert schema["properties"]["server_running"]["type"] == "boolean"
+    assert schema["properties"]["suppress_history"]["type"] == "boolean"
 
 
 def test_hierarchy_tool_titles_carry_tmux_qualifier() -> None:
