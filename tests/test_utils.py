@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import subprocess
+import sys
+import textwrap
 import typing as t
 
 import pytest
@@ -63,6 +67,174 @@ def test_get_server_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIBTMUX_SOCKET", "env_socket")
     server = _get_server()
     assert server.socket_name == "env_socket"
+
+
+def test_get_server_follows_caller_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_get_server targets the non-default socket that launched MCP."""
+    caller_socket = "/tmp/odd,dir/caller-work"
+    monkeypatch.delenv("LIBTMUX_SOCKET", raising=False)
+    monkeypatch.delenv("LIBTMUX_SOCKET_PATH", raising=False)
+    monkeypatch.setenv("TMUX", f"{caller_socket},12345,$0")
+
+    server = _get_server()
+
+    assert server.socket_name is None
+    assert str(server.socket_path) == caller_socket
+
+
+@pytest.mark.parametrize(
+    ("socket_name", "socket_path", "configured_name", "configured_path"),
+    [
+        ("explicit-name", None, None, "/tmp/configured"),
+        (None, "/tmp/explicit", "configured-name", None),
+    ],
+    ids=["name-over-configured-path", "path-over-configured-name"],
+)
+def test_get_server_explicit_selector_does_not_mix_configured_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    socket_name: str | None,
+    socket_path: str | None,
+    configured_name: str | None,
+    configured_path: str | None,
+) -> None:
+    """An explicit selector excludes the other configured selector."""
+    from libtmux_mcp import _utils
+
+    if configured_name is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET", configured_name)
+    if configured_path is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET_PATH", configured_path)
+
+    target = _utils._resolve_server_target(
+        socket_name=socket_name,
+        socket_path=socket_path,
+    )
+    server = _get_server(socket_name=socket_name, socket_path=socket_path)
+
+    actual_socket_path = (
+        str(server.socket_path) if server.socket_path is not None else None
+    )
+    assert target.socket_name == socket_name
+    assert target.socket_path == socket_path
+    assert server.socket_name == socket_name
+    assert actual_socket_path == socket_path
+
+
+def test_get_server_configured_path_beats_configured_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LIBTMUX_SOCKET_PATH takes precedence when both selectors are set."""
+    from libtmux_mcp import _utils
+
+    configured_path = "/tmp/configured-path"
+    monkeypatch.setenv("LIBTMUX_SOCKET", "configured-name")
+    monkeypatch.setenv("LIBTMUX_SOCKET_PATH", configured_path)
+
+    target = _utils._resolve_server_target()
+    server = _get_server()
+
+    assert target.socket_name is None
+    assert target.socket_path == configured_path
+    assert server.socket_name is None
+    assert str(server.socket_path) == configured_path
+    _invalidate_server()
+    assert not _server_cache
+
+
+@pytest.mark.parametrize(
+    ("configured_name", "configured_path", "expected_name", "expected_path"),
+    [
+        ("configured-name", None, "configured-name", None),
+        (None, "/tmp/configured-path", None, "/tmp/configured-path"),
+    ],
+    ids=["configured-name", "configured-path"],
+)
+def test_get_server_configured_target_beats_frozen_caller(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_name: str | None,
+    configured_path: str | None,
+    expected_name: str | None,
+    expected_path: str | None,
+) -> None:
+    """Configured selectors take precedence over the frozen caller socket."""
+    from libtmux_mcp import _utils
+
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/caller-only,12345,$0")
+    if configured_name is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET", configured_name)
+    if configured_path is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET_PATH", configured_path)
+
+    target = _utils._resolve_server_target()
+
+    assert target.socket_name == expected_name
+    assert target.socket_path == expected_path
+
+
+def test_resolve_server_target_rejects_two_explicit_selectors() -> None:
+    """The normalized target rejects mutually exclusive explicit inputs."""
+    from libtmux_mcp import _utils
+
+    with pytest.raises(
+        ValueError,
+        match="socket_name and socket_path are mutually exclusive",
+    ):
+        _utils._resolve_server_target("explicit", "/tmp/explicit")
+
+
+def test_resolve_server_target_is_immutable() -> None:
+    """The normalized server target is a frozen value object."""
+    from libtmux_mcp import _utils
+
+    target = _utils._resolve_server_target(socket_name="explicit")
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        target.socket_name = "changed"  # type: ignore[misc]
+
+
+def test_invocation_environment_survives_live_tmux_deletion() -> None:
+    """A transient live TMUX deletion cannot erase invocation identity."""
+    caller_socket = "/tmp/odd,dir/caller-work"
+    code = textwrap.dedent(
+        f"""
+        import os
+
+        from libtmux_mcp._utils import (
+            _get_caller_identity,
+            _get_invocation_environment,
+            _get_server,
+        )
+
+        snapshot = _get_invocation_environment()
+        del os.environ["TMUX"]
+        assert snapshot["TMUX"] == {f"{caller_socket},12345,$0"!r}
+        try:
+            snapshot["TMUX"] = "changed"
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invocation environment is mutable")
+        assert _get_caller_identity().socket_path == {caller_socket!r}
+        assert str(_get_server().socket_path) == {caller_socket!r}
+        """
+    )
+    env = {
+        **os.environ,
+        "TMUX": f"{caller_socket},12345,$0",
+        "TMUX_PANE": "%7",
+    }
+    env.pop("LIBTMUX_SOCKET", None)
+    env.pop("LIBTMUX_SOCKET_PATH", None)
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_resolve_session_by_name(mcp_server: Server, mcp_session: Session) -> None:
@@ -324,6 +496,23 @@ def test_get_caller_identity_parses_tmux_env(
     assert caller.server_pid == 12345
     assert caller.session_id == "$7"
     assert caller.pane_id == "%3"
+
+
+def test_get_caller_identity_preserves_commas_in_socket_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller parsing right-splits TMUX so socket commas remain intact."""
+    from libtmux_mcp._utils import _get_caller_identity
+
+    monkeypatch.setenv("TMUX", "/tmp/odd,dir/work,12345,$7")
+    monkeypatch.setenv("TMUX_PANE", "%3")
+
+    caller = _get_caller_identity()
+
+    assert caller is not None
+    assert caller.socket_path == "/tmp/odd,dir/work"
+    assert caller.server_pid == 12345
+    assert caller.session_id == "$7"
 
 
 def test_get_caller_identity_returns_none_when_unset(

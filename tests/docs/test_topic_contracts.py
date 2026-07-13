@@ -70,6 +70,36 @@ def test_configuration_documents_command_history_default_and_restart(
     assert "Restart the MCP server only after changing this startup setting" in text
 
 
+def test_target_docs_publish_caller_aware_precedence(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Configuration, prompting, and recovery agree on target selection."""
+    relative_paths = (
+        "configuration.md",
+        "topics/prompting.md",
+        "topics/troubleshooting.md",
+    )
+    precedence = (
+        "explicit per-call selector, configured path, configured name, "
+        "frozen caller socket, tmux default"
+    )
+
+    for relative_path in relative_paths:
+        text = (docs_dir / relative_path).read_text(encoding="utf-8")
+        assert precedence in " ".join(text.split())
+
+    configuration = (docs_dir / "configuration.md").read_text(encoding="utf-8")
+    troubleshooting = (docs_dir / "topics/troubleshooting.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_configuration = " ".join(configuration.split())
+    assert "inside tmux, the frozen caller socket" in normalized_configuration
+    assert "outside tmux, the tmux default" in normalized_configuration
+    assert "remove `LIBTMUX_SOCKET` from the config to use the default socket" not in (
+        troubleshooting
+    )
+
+
 def test_configuration_separates_spawn_persistent_history_control(
     docs_dir: pathlib.Path,
 ) -> None:

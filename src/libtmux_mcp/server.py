@@ -27,6 +27,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
+    _get_caller_identity,
     _server_cache,
 )
 from libtmux_mcp.middleware import (
@@ -70,7 +71,9 @@ _INSTR_HIERARCHY = (
     "libtmux MCP server for tmux. "
     "tmux hierarchy: Server > Session > Window > Pane. "
     "Prefer pane_id (e.g. '%1') for targeting. "
-    "Targeted tmux tools accept socket_name (defaults to LIBTMUX_SOCKET); "
+    "Targeted tmux tools accept socket_name. Target precedence: explicit "
+    "per-call selector, configured path, configured name, frozen caller "
+    "socket, tmux default. "
     "list_servers discovers sockets via TMUX_TMPDIR plus extra_socket_paths."
 )
 
@@ -192,13 +195,12 @@ def _build_instructions(
     # the untrusted socket name and explanatory workflow before omitting the
     # context entirely. Never byte-slice text because UTF-8 characters may be
     # split across bytes.
-    tmux_pane = os.environ.get("TMUX_PANE")
-    if tmux_pane:
-        # Parse TMUX env: "/tmp/tmux-1000/default,48188,10"
-        tmux_env = os.environ.get("TMUX", "")
-        env_parts = tmux_env.split(",") if tmux_env else []
-        socket_path = env_parts[0] if env_parts else None
-        socket_name = socket_path.rsplit("/", 1)[-1] if socket_path else None
+    caller = _get_caller_identity()
+    if caller is not None and caller.pane_id:
+        tmux_pane = caller.pane_id
+        socket_name = (
+            caller.socket_path.rsplit("/", 1)[-1] if caller.socket_path else None
+        )
 
         context_start = f"\n\nAgent context: this MCP runs inside tmux pane {tmux_pane}"
         context = context_start

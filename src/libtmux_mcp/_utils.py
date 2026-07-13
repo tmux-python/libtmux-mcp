@@ -13,6 +13,7 @@ import logging
 import os
 import pathlib
 import threading
+import types
 import typing as t
 
 from fastmcp.exceptions import ToolError
@@ -28,6 +29,19 @@ if t.TYPE_CHECKING:
     from libtmux_mcp.models import PaneInfo, SessionInfo, WindowInfo
 
 logger = logging.getLogger(__name__)
+
+_INVOCATION_ENVIRONMENT: t.Mapping[str, str] = types.MappingProxyType(dict(os.environ))
+
+
+def _get_invocation_environment() -> t.Mapping[str, str]:
+    """Return the immutable environment captured at process invocation.
+
+    Returns
+    -------
+    typing.Mapping[str, str]
+        Read-only snapshot of the environment present when this module loaded.
+    """
+    return _INVOCATION_ENVIRONMENT
 
 
 class ExpectedToolError(ToolError):
@@ -120,8 +134,9 @@ def _get_caller_identity() -> CallerIdentity | None:
     callers should check individual fields rather than relying on all
     being populated.
     """
-    pane_id = os.environ.get("TMUX_PANE")
-    tmux_env = os.environ.get("TMUX")
+    environment = _get_invocation_environment()
+    pane_id = environment.get("TMUX_PANE")
+    tmux_env = environment.get("TMUX")
 
     if not tmux_env and not pane_id:
         return None
@@ -131,7 +146,7 @@ def _get_caller_identity() -> CallerIdentity | None:
     session_id: str | None = None
 
     if tmux_env:
-        parts = tmux_env.split(",", 2)
+        parts = tmux_env.rsplit(",", 2)
         if parts:
             socket_path = parts[0] or None
         if len(parts) >= 2 and parts[1]:
@@ -480,6 +495,71 @@ _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}
 _server_cache_lock = threading.Lock()
 
 
+@dataclasses.dataclass(frozen=True)
+class ServerTarget:
+    """Normalized selectors for one tmux server."""
+
+    socket_name: str | None
+    socket_path: str | None
+    tmux_bin: str | None
+
+
+def _resolve_server_target(
+    socket_name: str | None = None,
+    socket_path: str | None = None,
+) -> ServerTarget:
+    """Resolve explicit, configured, caller, and default server selectors.
+
+    Parameters
+    ----------
+    socket_name : str, optional
+        Explicit tmux socket name (``-L``).
+    socket_path : str, optional
+        Explicit tmux socket path (``-S``).
+
+    Returns
+    -------
+    ServerTarget
+        Immutable normalized target and configured tmux binary.
+
+    Raises
+    ------
+    ValueError
+        If both explicit socket selectors are supplied.
+    """
+    if socket_name is not None and socket_path is not None:
+        msg = "socket_name and socket_path are mutually exclusive"
+        raise ValueError(msg)
+
+    environment = _get_invocation_environment()
+    tmux_bin = environment.get("LIBTMUX_TMUX_BIN") or None
+
+    if socket_name is not None:
+        return ServerTarget(socket_name, None, tmux_bin)
+    if socket_path is not None:
+        return ServerTarget(None, socket_path, tmux_bin)
+
+    configured_path = environment.get("LIBTMUX_SOCKET_PATH") or None
+    if configured_path is not None:
+        return ServerTarget(None, configured_path, tmux_bin)
+
+    configured_name = environment.get("LIBTMUX_SOCKET") or None
+    if configured_name is not None:
+        return ServerTarget(configured_name, None, tmux_bin)
+
+    try:
+        caller_server = Server.from_env(environment)
+    except exc.NotInsideTmux:
+        return ServerTarget(None, None, tmux_bin)
+
+    caller_socket_path = caller_server.socket_path
+    return ServerTarget(
+        None,
+        str(caller_socket_path) if caller_socket_path is not None else None,
+        tmux_bin,
+    )
+
+
 def _get_server(
     socket_name: str | None = None,
     socket_path: str | None = None,
@@ -489,23 +569,17 @@ def _get_server(
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name (-L). Falls back to LIBTMUX_SOCKET env var.
+        Explicit tmux socket name (``-L``).
     socket_path : str, optional
-        tmux socket path (-S). Falls back to LIBTMUX_SOCKET_PATH env var.
+        Explicit tmux socket path (``-S``).
 
     Returns
     -------
     Server
         A cached libtmux Server instance.
     """
-    if socket_name is None:
-        socket_name = os.environ.get("LIBTMUX_SOCKET")
-    if socket_path is None:
-        socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
-
-    tmux_bin = os.environ.get("LIBTMUX_TMUX_BIN")
-
-    cache_key = (socket_name, socket_path, tmux_bin)
+    target = _resolve_server_target(socket_name, socket_path)
+    cache_key = (target.socket_name, target.socket_path, target.tmux_bin)
     with _server_cache_lock:
         if cache_key in _server_cache:
             cached = _server_cache[cache_key]
@@ -514,12 +588,12 @@ def _get_server(
 
         if cache_key not in _server_cache:
             kwargs: dict[str, t.Any] = {}
-            if socket_name is not None:
-                kwargs["socket_name"] = socket_name
-            if socket_path is not None:
-                kwargs["socket_path"] = socket_path
-            if tmux_bin is not None:
-                kwargs["tmux_bin"] = tmux_bin
+            if target.socket_name is not None:
+                kwargs["socket_name"] = target.socket_name
+            if target.socket_path is not None:
+                kwargs["socket_path"] = target.socket_path
+            if target.tmux_bin is not None:
+                kwargs["tmux_bin"] = target.tmux_bin
             _server_cache[cache_key] = Server(**kwargs)
 
         return _server_cache[cache_key]
@@ -538,19 +612,10 @@ def _invalidate_server(
     socket_path : str, optional
         tmux socket path used in the cache key.
     """
-    if socket_name is None:
-        socket_name = os.environ.get("LIBTMUX_SOCKET")
-    if socket_path is None:
-        socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
-
+    target = _resolve_server_target(socket_name, socket_path)
+    cache_key = (target.socket_name, target.socket_path, target.tmux_bin)
     with _server_cache_lock:
-        keys_to_remove = [
-            key
-            for key in _server_cache
-            if key[0] == socket_name and key[1] == socket_path
-        ]
-        for key in keys_to_remove:
-            del _server_cache[key]
+        _server_cache.pop(cache_key, None)
 
 
 def _resolve_session(

@@ -16,9 +16,10 @@ Server > Session > Window > Pane. Use pane_id (e.g. '%1') as the
 preferred targeting method - it is globally unique within a tmux server.
 Use run_command for authored shell commands, send_keys or
 send_keys_batch for raw TUI / persistent-shell input, capture_pane for
-one-shot reads, and capture_since for repeated observation. All tools
-accept an optional socket_name parameter for multi-server support
-(defaults to LIBTMUX_SOCKET env var).
+one-shot reads, and capture_since for repeated observation. Targeted tools
+accept an optional socket_name parameter for multi-server support. Target
+precedence is: explicit per-call selector, configured path, configured name,
+frozen caller socket, tmux default.
 
 IMPORTANT — metadata vs content: list_windows, list_panes, and
 list_sessions only search metadata (names, IDs, current command). To

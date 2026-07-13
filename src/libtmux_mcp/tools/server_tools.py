@@ -51,7 +51,9 @@ def list_sessions(
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"session_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
@@ -108,7 +110,9 @@ def create_session(
         overrides them. MCP audit redaction does not hide these surfaces. Pass
         credential references, not literal credentials.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     suppress_persistent_history : bool
         Whether to suppress persistent history for the spawned shell. Defaults
         to False for MCP and direct Python calls. This per-call option does not
@@ -153,7 +157,9 @@ def kill_server(socket_name: str | None = None) -> str:
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------
@@ -185,7 +191,9 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------

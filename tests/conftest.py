@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import types
 import typing as t
 
 import pytest
 
-from libtmux_mcp._utils import _server_cache
+from libtmux_mcp import _utils
+
+_server_cache = _utils._server_cache
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -36,6 +40,11 @@ def _isolate_tmux_caller_env(
     """
     monkeypatch.delenv("TMUX", raising=False)
     monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.setattr(
+        _utils,
+        "_get_invocation_environment",
+        lambda: types.MappingProxyType(dict(os.environ)),
+    )
 
 
 @pytest.fixture

@@ -12,7 +12,8 @@ Runtime configuration for the libtmux-mcp server. For MCP client setup, see {ref
 tmux socket name (`-L`). Isolates the MCP server to a specific tmux socket.
 
 - **Type:** string
-- **Default:** (none — uses the default tmux socket)
+- **Default:** (none — follows the frozen caller socket inside tmux, then the
+  tmux default outside tmux)
 
 ```{envvar} LIBTMUX_SOCKET_PATH
 ```
@@ -20,7 +21,8 @@ tmux socket name (`-L`). Isolates the MCP server to a specific tmux socket.
 tmux socket path (`-S`). Alternative to socket name for custom socket locations.
 
 - **Type:** string
-- **Default:** (none)
+- **Default:** (none — falls through to the configured name, frozen caller
+  socket, then tmux default)
 
 ```{envvar} LIBTMUX_TMUX_BIN
 ```
@@ -80,7 +82,10 @@ Set environment variables in your MCP client config:
 
 ## Socket isolation
 
-By default, the MCP server connects to the default tmux socket. Set {envvar}`LIBTMUX_SOCKET` to isolate AI agent activity from your personal tmux sessions:
+With no configured selector, a server launched inside tmux follows the frozen
+caller socket; outside tmux it connects to the tmux default. Set
+{envvar}`LIBTMUX_SOCKET` to isolate AI agent activity from your personal tmux
+sessions:
 
 ```json
 "env": { "LIBTMUX_SOCKET": "ai_workspace" }
@@ -88,6 +93,16 @@ By default, the MCP server connects to the default tmux socket. Set {envvar}`LIB
 
 The agent will only see sessions on the `ai_workspace` socket, not your personal sessions.
 
-## All tools accept `socket_name`
+## Target selection
 
-Every tool accepts an optional `socket_name` parameter that overrides {envvar}`LIBTMUX_SOCKET` for that call. This allows agents to work across multiple tmux servers in a single session.
+Target precedence is: explicit per-call selector, configured path, configured
+name, frozen caller socket, tmux default. The configured path comes from
+{envvar}`LIBTMUX_SOCKET_PATH`; the configured name comes from
+{envvar}`LIBTMUX_SOCKET`.
+
+When both `LIBTMUX_SOCKET*` settings are unset, inside tmux, the frozen caller
+socket is selected. When both are unset outside tmux, the tmux default is
+selected. A targeted tool's optional `socket_name` overrides the configured and
+caller-derived selectors for that call, which lets agents work across multiple
+servers. {tooliconl}`list-servers` is the discovery exception: pass
+`extra_socket_paths` to include sockets outside the canonical scan.

@@ -54,7 +54,9 @@ def list_windows(
     session_id : str, optional
         Session ID (e.g. '$1') to look up.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"window_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
@@ -141,7 +143,9 @@ def create_window(
     direction : str, optional
         Window placement direction.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     environment : dict or str, optional
         Per-process environment as a mapping or JSON object string. Values do
         not modify the tmux session environment. Each item becomes a tmux
@@ -210,7 +214,9 @@ def rename_session(
     session_id : str, optional
         Session ID (e.g. '$1') to look up.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------
@@ -242,7 +248,9 @@ def kill_session(
     session_id : str, optional
         Session ID (e.g. '$1') to look up.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------

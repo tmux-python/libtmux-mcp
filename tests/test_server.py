@@ -45,6 +45,16 @@ BUILD_INSTRUCTIONS_FIXTURES: list[BuildInstructionsFixture] = [
         expect_safety_in_text="mutating",
     ),
     BuildInstructionsFixture(
+        test_id="inside_tmux_comma_bearing_socket_path",
+        safety_level=TAG_MUTATING,
+        tmux_pane_env="%43",
+        tmux_env="/tmp/odd,dir/work,12345,0",
+        expect_agent_context=True,
+        expect_pane_id_in_text="%43",
+        expect_socket_name="work",
+        expect_safety_in_text="mutating",
+    ),
+    BuildInstructionsFixture(
         test_id="outside_tmux_no_context",
         safety_level=TAG_MUTATING,
         tmux_pane_env=None,
@@ -306,8 +316,28 @@ def test_base_instructions_document_socket_name_contract() -> None:
     level.
     """
     assert "Targeted tmux tools accept" in _BASE_INSTRUCTIONS
+    assert (
+        "explicit per-call selector, configured path, configured name, "
+        "frozen caller socket, tmux default"
+    ) in _BASE_INSTRUCTIONS
+    assert "defaults to LIBTMUX_SOCKET" not in _BASE_INSTRUCTIONS
     assert "list_servers" in _BASE_INSTRUCTIONS
     assert "extra_socket_paths" in _BASE_INSTRUCTIONS
+
+
+def test_registered_tool_docs_do_not_claim_stale_socket_default() -> None:
+    """Public parameter prose reflects caller-aware target precedence."""
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="socket-doc-contract")
+    register_tools(mcp)
+
+    for tool in asyncio.run(mcp.list_tools()):
+        assert "Defaults to LIBTMUX_SOCKET env var." not in (tool.description or "")
 
 
 def test_registered_tools_accept_socket_name() -> None:

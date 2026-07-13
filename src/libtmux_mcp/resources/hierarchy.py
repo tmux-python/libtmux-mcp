@@ -45,7 +45,9 @@ def register(mcp: FastMCP) -> None:
         Parameters
         ----------
         socket_name : str, optional
-            tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+            tmux socket name. Target precedence is explicit per-call selector,
+            configured path, configured name, frozen caller socket, then tmux
+            default.
 
         Returns
         -------
@@ -72,7 +74,9 @@ def register(mcp: FastMCP) -> None:
         session_name : str
             The session name.
         socket_name : str, optional
-            tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+            tmux socket name. Target precedence is explicit per-call selector,
+            configured path, configured name, frozen caller socket, then tmux
+            default.
 
         Returns
         -------
@@ -106,7 +110,9 @@ def register(mcp: FastMCP) -> None:
         session_name : str
             The session name.
         socket_name : str, optional
-            tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+            tmux socket name. Target precedence is explicit per-call selector,
+            configured path, configured name, frozen caller socket, then tmux
+            default.
 
         Returns
         -------
@@ -141,7 +147,9 @@ def register(mcp: FastMCP) -> None:
         window_index : str
             The window index within the session.
         socket_name : str, optional
-            tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+            tmux socket name. Target precedence is explicit per-call selector,
+            configured path, configured name, frozen caller socket, then tmux
+            default.
 
         Returns
         -------
@@ -177,7 +185,9 @@ def register(mcp: FastMCP) -> None:
         pane_id : str
             The pane ID (e.g. '%1').
         socket_name : str, optional
-            tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+            tmux socket name. Target precedence is explicit per-call selector,
+            configured path, configured name, frozen caller socket, then tmux
+            default.
 
         Returns
         -------
@@ -205,7 +215,9 @@ def register(mcp: FastMCP) -> None:
         pane_id : str
             The pane ID (e.g. '%1').
         socket_name : str, optional
-            tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+            tmux socket name. Target precedence is explicit per-call selector,
+            configured path, configured name, frozen caller socket, then tmux
+            default.
 
         Returns
         -------
