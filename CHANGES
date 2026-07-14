@@ -6,6 +6,59 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**List tools return page envelopes**
+
+{tooliconl}`list-servers`, {tooliconl}`list-sessions`,
+{tooliconl}`list-windows`, and {tooliconl}`list-panes` now return typed page
+objects instead of bare lists. Read rows from `.items`; for example,
+`list_sessions(...)[0]` becomes `list_sessions(...).items[0]`. The envelope
+also reports `total`, `offset`, `limit`, and `truncated` for bounded discovery.
+(#95)
+
+**Starting a tmux server now requires permission**
+
+{tooliconl}`create-session` no longer starts a tmux server silently when its
+target is not running. MCP calls must pass `allow_server_start=true` or enable
+{envvar}`LIBTMUX_ALLOW_SERVER_START`; direct Python calls must pass
+`allow_server_start=True`. Starting a server launches a long-lived daemon and
+loads the user's tmux configuration, so the side effect is denied by default.
+
+The returned {class}`~libtmux_mcp.models.SessionInfo` sets
+{attr}`~libtmux_mcp.models.SessionInfo.server_started` to `true` when the call
+used a startup-enabled path after a no-start attempt proved the target absent;
+it is `false` when the no-start path used an existing server. Dead-server target
+errors now say that no server is running, including when
+{tooliconl}`set-environment` targets a stopped server. See {ref}`configuration`
+for the startup policy. (#96)
+
+### What's new
+
+**Typed caller location**
+
+The zero-input {tooliconl}`where-am-i` tool returns a
+{class}`~libtmux_mcp.models.CallerContext` for relational requests such as
+"this pane", "current window", and "this session". The result distinguishes
+caller identity from availability, so an outside-tmux invocation, stopped
+server, stale pane, or configured-target mismatch is structured state rather
+than a failed discovery call. (#93)
+
+**Bounded list discovery**
+
+All four hierarchy list tools return deterministic pages with honest totals.
+{tooliconl}`list-windows` and {tooliconl}`list-panes` default to compact
+discovery summaries and accept `detail="full"` for layout, geometry, process,
+and working-directory metadata. Filters still run against full metadata before
+projection and paging.
+
+Window and pane lists also accept the explicit `scope="caller_session"` option
+to list the session containing the frozen caller pane. Their default remains
+`scope="server"`; caller-session scope rejects explicit hierarchy selectors
+and fails rather than widening the search when the caller is unavailable on
+the effective tmux target. See {ref}`pagination-overview` for the page contract.
+(#95)
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.

@@ -38,7 +38,10 @@ can't find targets.
    $ tmux list-sessions
    ```
 
-2. Are you on the right socket? If `LIBTMUX_SOCKET` is set, the server only sees sessions on that socket:
+2. Are you on the right socket? Target precedence is: explicit per-call
+   selector, configured path, configured name, frozen caller socket, tmux
+   default. If `LIBTMUX_SOCKET` is set, the server only sees sessions on that
+   socket unless the call supplies an explicit selector:
 
    ```console
    $ tmux -L ai_workspace list-sessions
@@ -54,9 +57,15 @@ can't find targets.
 
 **Symptoms**: Server sees different sessions than expected, or sees nothing.
 
-**Cause**: `LIBTMUX_SOCKET` in the MCP config isolates the server to a specific socket. Your personal sessions are on the default socket.
+**Cause**: `LIBTMUX_SOCKET_PATH` or `LIBTMUX_SOCKET` in the MCP config isolates
+the server to a specific socket. With both unset, a server launched inside tmux
+follows its frozen caller socket; only a server launched outside tmux falls
+through to the tmux default.
 
-**Fix**: Either remove `LIBTMUX_SOCKET` from the config to use the default socket, or ensure sessions exist on the configured socket.
+**Fix**: Pass `socket_name` for a one-call override, correct the configured
+selector, or ensure sessions exist on the selected socket. Target precedence
+is: explicit per-call selector, configured path, configured name, frozen caller
+socket, tmux default.
 
 ## Pane targeting mismatch
 

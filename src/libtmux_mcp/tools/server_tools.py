@@ -10,25 +10,41 @@ import socket
 import typing as t
 
 from fastmcp.exceptions import ToolError
+from libtmux import exc
+from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._server_start import (
+    _create_session_with_start_policy,
+    _validate_allow_server_start,
+)
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_RO,
+    DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _caller_is_strictly_on_server,
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _paginate,
+    _resolve_server_target,
     _serialize_session,
     handle_tool_errors,
 )
-from libtmux_mcp.models import ServerInfo, SessionInfo
+from libtmux_mcp.models import (
+    CallerContext,
+    ServerInfo,
+    ServerPage,
+    SessionInfo,
+    SessionPage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +53,75 @@ if t.TYPE_CHECKING:
 
 
 @handle_tool_errors
+def where_am_i() -> CallerContext:
+    """Locate this MCP invocation in tmux without listing terminal panes.
+
+    Resolves relational requests such as 'this pane', 'current window',
+    and 'this session'. Caller identity remains visible when the selected
+    server differs, is stopped, or no longer contains the frozen pane.
+
+    Returns
+    -------
+    CallerContext
+        Frozen caller identity, effective target, and availability state.
+    """
+    from libtmux_mcp.server import _safety_level, _suppress_history
+
+    caller = _get_caller_identity()
+    target = _resolve_server_target()
+    server = _get_server(
+        socket_name=target.socket_name,
+        socket_path=target.socket_path,
+    )
+    server_running = server.is_alive()
+    window_id: str | None = None
+    session_id: str | None = None
+    self_available = False
+
+    if (
+        server_running
+        and caller is not None
+        and caller.pane_id is not None
+        and _caller_is_strictly_on_server(server, caller)
+    ):
+        try:
+            pane = Pane.from_pane_id(server=server, pane_id=caller.pane_id)
+            resolved_window_id = pane.window_id
+            resolved_session_id = pane.session.session_id
+        except exc.ObjectDoesNotExist:
+            pass
+        except exc.LibTmuxException:
+            if not server.is_alive():
+                server_running = False
+            else:
+                raise
+        else:
+            window_id = resolved_window_id
+            session_id = resolved_session_id
+            self_available = True
+
+    return CallerContext(
+        inside_tmux=caller is not None,
+        self_available=self_available,
+        pane_id=caller.pane_id if caller is not None else None,
+        window_id=window_id,
+        session_id=session_id,
+        caller_socket_path=caller.socket_path if caller is not None else None,
+        effective_socket_name=target.socket_name,
+        effective_socket_path=target.socket_path,
+        server_running=server_running,
+        safety_level=_safety_level,
+        suppress_history=_suppress_history,
+    )
+
+
+@handle_tool_errors
 def list_sessions(
     socket_name: str | None = None,
     filters: dict[str, str] | str | None = None,
-) -> list[SessionInfo]:
+    limit: int = 100,
+    offset: int = 0,
+) -> SessionPage:
     """List tmux sessions (terminal workspaces) on a tmux server.
 
     Use for tmux multiplexer sessions — 'this session', 'my workspace',
@@ -51,19 +132,32 @@ def list_sessions(
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"session_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
+    limit : int, optional
+        Maximum rows to return. Defaults to 100.
+    offset : int, optional
+        Zero-based row offset. Defaults to 0.
 
     Returns
     -------
-    list[SessionInfo]
-        List of session objects.
+    SessionPage
+        Page of session objects and pagination metadata.
     """
     server = _get_server(socket_name=socket_name)
     sessions = server.sessions
-    return _apply_filters(sessions, filters, _serialize_session)
+    rows = _apply_filters(sessions, filters, _serialize_session)
+    rows.sort(key=lambda row: int(row.session_id[1:]))
+    return _paginate(
+        rows,
+        limit=limit,
+        offset=offset,
+        page_type=SessionPage,
+    )
 
 
 @handle_tool_errors
@@ -76,6 +170,7 @@ def create_session(
     environment: dict[str, str] | str | None = None,
     socket_name: str | None = None,
     *,
+    allow_server_start: bool = False,
     suppress_persistent_history: bool = False,
 ) -> SessionInfo:
     """Create a new tmux session.
@@ -108,7 +203,13 @@ def create_session(
         overrides them. MCP audit redaction does not hide these surfaces. Pass
         credential references, not literal credentials.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
+    allow_server_start : bool
+        Whether this call may start a tmux server when none is running.
+        Defaults to False for direct Python calls. Omitted MCP input inherits
+        LIBTMUX_ALLOW_SERVER_START.
     suppress_persistent_history : bool
         Whether to suppress persistent history for the spawned shell. Defaults
         to False for MCP and direct Python calls. This per-call option does not
@@ -120,6 +221,7 @@ def create_session(
     SessionInfo
         The created session.
     """
+    allow_server_start = _validate_allow_server_start(allow_server_start)
     spawn_environment = _prepare_spawn_environment(
         environment,
         suppress_persistent_history=suppress_persistent_history,
@@ -138,8 +240,12 @@ def create_session(
         kwargs["y"] = y
     if spawn_environment is not None:
         kwargs["environment"] = spawn_environment
-    session = server.new_session(**kwargs)
-    return _serialize_session(session)
+    session, server_started = _create_session_with_start_policy(
+        server,
+        allow_server_start=allow_server_start,
+        session_kwargs=kwargs,
+    )
+    return _serialize_session(session, server_started=server_started)
 
 
 @handle_tool_errors
@@ -153,7 +259,9 @@ def kill_server(socket_name: str | None = None) -> str:
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------
@@ -185,7 +293,9 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------
@@ -293,6 +403,7 @@ SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
         "call_mutating_tools_batch",
         "call_readonly_tools_batch",
         "list_servers",
+        "where_am_i",
     }
 )
 
@@ -300,7 +411,9 @@ SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
 @handle_tool_errors
 def list_servers(
     extra_socket_paths: list[str] | None = None,
-) -> list[ServerInfo]:
+    limit: int = 100,
+    offset: int = 0,
+) -> ServerPage:
     """Discover live tmux servers under the current user's ``$TMUX_TMPDIR``.
 
     Scans ``${TMUX_TMPDIR:-/tmp}/tmux-<uid>/`` for socket files — the
@@ -325,18 +438,26 @@ def list_servers(
         ``connect()``) and queried for server metadata. Paths that do
         not exist, are not sockets, or have no listener are silently
         skipped.
+    limit : int, optional
+        Maximum rows to return. Defaults to 100.
+    offset : int, optional
+        Zero-based row offset. Defaults to 0.
 
     Returns
     -------
-    list[ServerInfo]
-        One entry per live tmux server found. Canonical-directory
-        results come first, followed by successful ``extra_socket_paths``
-        probes in the supplied order. Empty when nothing lives under
-        ``$TMUX_TMPDIR`` and no extras are supplied or reachable.
+    ServerPage
+        Deterministically ordered page of live tmux servers found.
     """
     tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
     uid_dir = pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}"
-    results: list[ServerInfo] = []
+    results_by_path: dict[str, ServerInfo] = {}
+
+    def add_result(socket_path: pathlib.Path, info: ServerInfo) -> None:
+        normalized_path = os.path.normcase(os.path.realpath(socket_path))
+        existing = results_by_path.get(normalized_path)
+        if existing is None or (not existing.is_alive and info.is_alive):
+            results_by_path[normalized_path] = info
+
     if uid_dir.is_dir():
         for entry in sorted(uid_dir.iterdir()):
             try:
@@ -352,16 +473,32 @@ def list_servers(
                 info = get_server_info(socket_name=entry.name)
             except ToolError:
                 continue
-            results.append(info)
+            add_result(entry, info)
     for raw_path in extra_socket_paths or []:
-        extra = _probe_server_by_path(pathlib.Path(raw_path))
+        extra_path = pathlib.Path(raw_path)
+        extra = _probe_server_by_path(extra_path)
         if extra is not None:
-            results.append(extra)
-    return results
+            add_result(extra_path, extra)
+    results = list(results_by_path.values())
+    results.sort(
+        key=lambda result: (result.socket_path or "", result.socket_name or "")
+    )
+    return _paginate(
+        results,
+        limit=limit,
+        offset=offset,
+        page_type=ServerPage,
+    )
 
 
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
+    mcp.tool(
+        title="Locate tmux Caller",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY},
+        meta=DISCOVERY_META,
+    )(where_am_i)
     mcp.tool(
         title="List tmux Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(list_sessions)

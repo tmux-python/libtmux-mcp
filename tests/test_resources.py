@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import typing as t
 
@@ -46,6 +47,21 @@ def test_sessions_resource(
     data = json.loads(result)
     assert isinstance(data, list)
     assert len(data) >= 1
+
+
+def test_resource_docs_publish_caller_aware_socket_precedence(
+    resource_functions: dict[str, t.Any],
+) -> None:
+    """Hierarchy resource parameters do not claim the stale env-only default."""
+    precedence = (
+        "explicit per-call selector, configured path, configured name, "
+        "frozen caller socket, then tmux default"
+    )
+
+    for function in resource_functions.values():
+        docstring = inspect.getdoc(function) or ""
+        assert "Defaults to LIBTMUX_SOCKET env var." not in docstring
+        assert precedence in " ".join(docstring.split())
 
 
 def test_session_detail_resource(

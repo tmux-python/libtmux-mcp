@@ -5,6 +5,10 @@ Server & process-level tools — discover sessions, control the tmux daemon, rea
 ::::{grid} 1 2 2 3
 :gutter: 2 2 3 3
 
+:::{grid-item-card} {tooliconl}`where-am-i`
+Resolve the frozen caller pane and effective tmux target.
+:::
+
 :::{grid-item-card} {tooliconl}`list-sessions`
 List all sessions on the tmux server.
 :::
@@ -47,6 +51,7 @@ Set an environment variable on the server.
 :hidden:
 :maxdepth: 1
 
+where-am-i
 list-sessions
 list-servers
 get-server-info

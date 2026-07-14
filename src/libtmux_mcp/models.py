@@ -27,6 +27,13 @@ class SessionInfo(BaseModel):
             "states where ``active_pane`` is unavailable."
         ),
     )
+    server_started: bool = Field(
+        default=False,
+        description=(
+            "Whether a no-start attempt proved the target absent and this call "
+            "then succeeded on the startup-enabled path."
+        ),
+    )
 
 
 class WindowInfo(BaseModel):
@@ -124,6 +131,51 @@ class PaneInfo(BaseModel):
     )
 
 
+class WindowSummary(BaseModel):
+    """Compact tmux window metadata for discovery lists."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    window_id: str = Field(description="Window ID (e.g. '@1')")
+    window_name: str | None = Field(default=None, description="Window name")
+    window_index: str | None = Field(default=None, description="Window index")
+    session_id: str | None = Field(default=None, description="Parent session ID")
+    session_name: str | None = Field(default=None, description="Parent session name")
+    pane_count: int = Field(description="Number of panes")
+    window_active: str | None = Field(
+        default=None, description="Active flag ('1' or '0')"
+    )
+    active_pane_id: str | None = Field(
+        default=None,
+        description="Pane id (``%N``) of the window's active pane.",
+    )
+
+
+class PaneSummary(BaseModel):
+    """Compact tmux pane metadata for discovery lists."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    pane_id: str = Field(description="Pane ID (e.g. '%1')")
+    pane_index: str | None = Field(default=None, description="Pane index")
+    pane_current_command: str | None = Field(
+        default=None, description="Running command"
+    )
+    pane_title: str | None = Field(default=None, description="Pane title")
+    pane_active: str | None = Field(
+        default=None, description="Active flag ('1' or '0')"
+    )
+    window_id: str | None = Field(default=None, description="Parent window ID")
+    session_id: str | None = Field(default=None, description="Parent session ID")
+    is_caller: bool | None = Field(
+        default=None,
+        description=(
+            "True for the frozen MCP caller pane, False for another pane, "
+            "or None outside tmux."
+        ),
+    )
+
+
 class PaneContentMatch(BaseModel):
     """A pane whose captured content matched a search pattern."""
 
@@ -200,6 +252,83 @@ class ServerInfo(BaseModel):
     socket_path: str | None = Field(default=None, description="Socket path")
     session_count: int = Field(description="Number of sessions")
     version: str | None = Field(default=None, description="tmux version")
+
+
+class ListPage(BaseModel):
+    """Pagination metadata shared by deterministic tmux list results."""
+
+    total: int = Field(description="Matching rows before pagination.")
+    offset: int = Field(description="Zero-based offset used for this page.")
+    limit: int = Field(description="Maximum rows requested for this page.")
+    truncated: bool = Field(
+        description="True when more matching rows remain after this page."
+    )
+
+
+class SessionPage(ListPage):
+    """Page of tmux sessions."""
+
+    items: list[SessionInfo] = Field(description="Session rows in this page.")
+
+
+class ServerPage(ListPage):
+    """Page of tmux servers."""
+
+    items: list[ServerInfo] = Field(description="Server rows in this page.")
+
+
+class WindowPage(ListPage):
+    """Page of summary or full tmux window metadata."""
+
+    items: list[WindowSummary | WindowInfo] = Field(
+        description="Window rows in this page."
+    )
+
+
+class PanePage(ListPage):
+    """Page of summary or full tmux pane metadata."""
+
+    items: list[PaneSummary | PaneInfo] = Field(description="Pane rows in this page.")
+
+
+class CallerContext(BaseModel):
+    """Frozen invocation identity and effective tmux server state."""
+
+    model_config = ConfigDict(frozen=True)
+
+    inside_tmux: bool = Field(
+        description="Whether the MCP process invocation came from a tmux pane."
+    )
+    self_available: bool = Field(
+        description=(
+            "Whether the frozen caller pane resolves on the effective live server."
+        )
+    )
+    pane_id: str | None = Field(
+        description="Frozen caller pane ID, or None outside tmux."
+    )
+    window_id: str | None = Field(
+        description="Current caller window ID when self is available."
+    )
+    session_id: str | None = Field(
+        description="Current caller session ID when self is available."
+    )
+    caller_socket_path: str | None = Field(
+        description="Socket path captured from the caller's TMUX environment."
+    )
+    effective_socket_name: str | None = Field(
+        description="Effective configured tmux socket name."
+    )
+    effective_socket_path: str | None = Field(
+        description="Effective configured or caller tmux socket path."
+    )
+    server_running: bool = Field(
+        description="Whether the effective tmux server is running."
+    )
+    safety_level: str = Field(description="Effective MCP safety tier.")
+    suppress_history: bool = Field(
+        description="Effective semantic shell-history suppression default."
+    )
 
 
 class OptionResult(BaseModel):

@@ -48,6 +48,54 @@ def test_topic_docs_do_not_overclaim_runtime_features(
     assert forbidden_text not in text
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "page_model"),
+    (
+        ("tools/server/list-servers.md", "ServerPage"),
+        ("tools/server/list-sessions.md", "SessionPage"),
+        ("tools/session/list-windows.md", "WindowPage"),
+        ("tools/window/list-panes.md", "PanePage"),
+    ),
+)
+def test_list_tool_pages_document_typed_page_envelopes(
+    docs_dir: pathlib.Path,
+    relative_path: str,
+    page_model: str,
+) -> None:
+    """List tool examples show the bounded response clients receive."""
+    text = (docs_dir / relative_path).read_text(encoding="utf-8")
+
+    assert f"{{class}}`~libtmux_mcp.models.{page_model}`" in text
+    for field in ("items", "total", "offset", "limit", "truncated"):
+        assert f'"{field}"' in text
+    assert "`limit=100`" in text
+    assert "`offset=0`" in text
+
+
+def test_list_sessions_example_includes_creation_side_effect_field(
+    docs_dir: pathlib.Path,
+) -> None:
+    """List rows show that discovery never reports starting a daemon."""
+    text = (docs_dir / "tools" / "server" / "list-sessions.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"server_started": false' in text
+
+
+def test_pagination_topic_distinguishes_hierarchy_pages_from_cursors(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Pagination guidance names every typed list page and ordering phase."""
+    text = (docs_dir / "topics" / "pagination.md").read_text(encoding="utf-8")
+
+    for page_model in ("ServerPage", "SessionPage", "WindowPage", "PanePage"):
+        assert f"{{class}}`~libtmux_mcp.models.{page_model}`" in text
+    assert "Filters run before the stable sort" in text
+    assert "Window and pane lists default to compact summary rows" in text
+    assert "application-level pages (not MCP-cursor pagination)" in text
+
+
 def test_configuration_documents_command_history_default_and_restart(
     docs_dir: pathlib.Path,
 ) -> None:
@@ -68,6 +116,100 @@ def test_configuration_documents_command_history_default_and_restart(
     assert "set `suppress_history=false` for intentional multiline input" in text
     assert "Direct Python calls default to `False`" in text
     assert "Restart the MCP server only after changing this startup setting" in text
+
+
+def test_startup_docs_define_server_started_at_observable_boundary(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Startup reporting avoids stronger cross-process attribution claims."""
+    paths = (
+        docs_dir / "configuration.md",
+        docs_dir / "tools" / "server" / "create-session.md",
+        docs_dir.parent / "CHANGES",
+    )
+
+    for path in paths:
+        normalized = " ".join(path.read_text(encoding="utf-8").split())
+        assert "no-start attempt proved the target absent" in normalized
+        assert "startup-enabled path" in normalized
+        assert "when the call created the daemon" not in normalized
+
+
+def test_target_docs_publish_caller_aware_precedence(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Configuration, prompting, and recovery agree on target selection."""
+    relative_paths = (
+        "configuration.md",
+        "topics/prompting.md",
+        "topics/troubleshooting.md",
+    )
+    precedence = (
+        "explicit per-call selector, configured path, configured name, "
+        "frozen caller socket, tmux default"
+    )
+
+    for relative_path in relative_paths:
+        text = (docs_dir / relative_path).read_text(encoding="utf-8")
+        assert precedence in " ".join(text.split())
+
+    configuration = (docs_dir / "configuration.md").read_text(encoding="utf-8")
+    troubleshooting = (docs_dir / "topics/troubleshooting.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_configuration = " ".join(configuration.split())
+    assert "inside tmux, the frozen caller socket" in normalized_configuration
+    assert "outside tmux, the tmux default" in normalized_configuration
+    assert "remove `LIBTMUX_SOCKET` from the config to use the default socket" not in (
+        troubleshooting
+    )
+
+
+def test_where_am_i_tool_page_is_indexed_and_documents_typed_states(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Invocation discovery has a complete task page and resolvable entries."""
+    page = (docs_dir / "tools" / "server" / "where-am-i.md").read_text(encoding="utf-8")
+    server_index = (docs_dir / "tools" / "server" / "index.md").read_text(
+        encoding="utf-8"
+    )
+    prompting = (docs_dir / "topics" / "prompting.md").read_text(encoding="utf-8")
+
+    assert "```{fastmcp-tool} server_tools.where_am_i" in page
+    assert "```{fastmcp-tool-input} server_tools.where_am_i" in page
+    for section in ("**Use when**", "**Avoid when**", "**Side effects:**"):
+        assert section in page
+    for state in ("outside tmux", "dead", "stale", "mismatch"):
+        assert state in page.lower()
+    for field in (
+        "inside_tmux",
+        "self_available",
+        "pane_id",
+        "window_id",
+        "session_id",
+        "server_running",
+    ):
+        assert f'"{field}"' in page
+    assert "{tooliconl}`where-am-i`" in server_index
+    assert "\nwhere-am-i\n" in server_index
+    assert "{toolref}`where-am-i`" in prompting
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ("tools/session/list-windows.md", "tools/window/list-panes.md"),
+)
+def test_caller_session_tool_pages_name_lookup_tradeoff(
+    docs_dir: pathlib.Path,
+    relative_path: str,
+) -> None:
+    """Caller-local discovery states the extra lookup and its benefit."""
+    normalized = " ".join(
+        (docs_dir / relative_path).read_text(encoding="utf-8").split()
+    )
+
+    assert "extra targeted tmux lookup" in normalized
+    assert "fail-closed live-session accuracy" in normalized
 
 
 def test_configuration_separates_spawn_persistent_history_control(

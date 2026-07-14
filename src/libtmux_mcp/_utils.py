@@ -13,6 +13,7 @@ import logging
 import os
 import pathlib
 import threading
+import types
 import typing as t
 
 from fastmcp.exceptions import ToolError
@@ -25,9 +26,22 @@ if t.TYPE_CHECKING:
     from libtmux.session import Session
     from libtmux.window import Window
 
-    from libtmux_mcp.models import PaneInfo, SessionInfo, WindowInfo
+    from libtmux_mcp.models import ListPage, PaneInfo, SessionInfo, WindowInfo
 
 logger = logging.getLogger(__name__)
+
+_INVOCATION_ENVIRONMENT: t.Mapping[str, str] = types.MappingProxyType(dict(os.environ))
+
+
+def _get_invocation_environment() -> t.Mapping[str, str]:
+    """Return the immutable environment captured at process invocation.
+
+    Returns
+    -------
+    typing.Mapping[str, str]
+        Read-only snapshot of the environment present when this module loaded.
+    """
+    return _INVOCATION_ENVIRONMENT
 
 
 class ExpectedToolError(ToolError):
@@ -120,8 +134,9 @@ def _get_caller_identity() -> CallerIdentity | None:
     callers should check individual fields rather than relying on all
     being populated.
     """
-    pane_id = os.environ.get("TMUX_PANE")
-    tmux_env = os.environ.get("TMUX")
+    environment = _get_invocation_environment()
+    pane_id = environment.get("TMUX_PANE")
+    tmux_env = environment.get("TMUX")
 
     if not tmux_env and not pane_id:
         return None
@@ -131,7 +146,7 @@ def _get_caller_identity() -> CallerIdentity | None:
     session_id: str | None = None
 
     if tmux_env:
-        parts = tmux_env.split(",", 2)
+        parts = tmux_env.rsplit(",", 2)
         if parts:
             socket_path = parts[0] or None
         if len(parts) >= 2 and parts[1]:
@@ -401,7 +416,7 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
 #:
 #: Best-effort by design — safe no-op for clients that don't index the
 #: ``anthropic/*`` namespace. Apply only to read-tier discovery anchors
-#: (``list_panes``, ``list_windows``, ``snapshot_pane``); each
+#: (``where_am_i``, ``list_windows``, ``snapshot_pane``); each
 #: always-loaded tool consumes a fixed schema budget in clients that
 #: honour the hint, so widening the set has a real cost.
 DISCOVERY_META: dict[str, t.Any] = {
@@ -480,6 +495,71 @@ _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}
 _server_cache_lock = threading.Lock()
 
 
+@dataclasses.dataclass(frozen=True)
+class ServerTarget:
+    """Normalized selectors for one tmux server."""
+
+    socket_name: str | None
+    socket_path: str | None
+    tmux_bin: str | None
+
+
+def _resolve_server_target(
+    socket_name: str | None = None,
+    socket_path: str | None = None,
+) -> ServerTarget:
+    """Resolve explicit, configured, caller, and default server selectors.
+
+    Parameters
+    ----------
+    socket_name : str, optional
+        Explicit tmux socket name (``-L``).
+    socket_path : str, optional
+        Explicit tmux socket path (``-S``).
+
+    Returns
+    -------
+    ServerTarget
+        Immutable normalized target and configured tmux binary.
+
+    Raises
+    ------
+    ValueError
+        If both explicit socket selectors are supplied.
+    """
+    if socket_name is not None and socket_path is not None:
+        msg = "socket_name and socket_path are mutually exclusive"
+        raise ValueError(msg)
+
+    environment = _get_invocation_environment()
+    tmux_bin = environment.get("LIBTMUX_TMUX_BIN") or None
+
+    if socket_name is not None:
+        return ServerTarget(socket_name, None, tmux_bin)
+    if socket_path is not None:
+        return ServerTarget(None, socket_path, tmux_bin)
+
+    configured_path = environment.get("LIBTMUX_SOCKET_PATH") or None
+    if configured_path is not None:
+        return ServerTarget(None, configured_path, tmux_bin)
+
+    configured_name = environment.get("LIBTMUX_SOCKET") or None
+    if configured_name is not None:
+        return ServerTarget(configured_name, None, tmux_bin)
+
+    try:
+        caller_server = Server.from_env(environment)
+    except exc.NotInsideTmux:
+        return ServerTarget(None, None, tmux_bin)
+
+    caller_socket_path = caller_server.socket_path
+    return ServerTarget(
+        None,
+        str(caller_socket_path) if caller_socket_path is not None else None,
+        tmux_bin,
+    )
+
+
 def _get_server(
     socket_name: str | None = None,
     socket_path: str | None = None,
@@ -489,23 +569,17 @@ def _get_server(
     Parameters
     ----------
     socket_name : str, optional
-        tmux socket name (-L). Falls back to LIBTMUX_SOCKET env var.
+        Explicit tmux socket name (``-L``).
     socket_path : str, optional
-        tmux socket path (-S). Falls back to LIBTMUX_SOCKET_PATH env var.
+        Explicit tmux socket path (``-S``).
 
     Returns
     -------
     Server
         A cached libtmux Server instance.
     """
-    if socket_name is None:
-        socket_name = os.environ.get("LIBTMUX_SOCKET")
-    if socket_path is None:
-        socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
-
-    tmux_bin = os.environ.get("LIBTMUX_TMUX_BIN")
-
-    cache_key = (socket_name, socket_path, tmux_bin)
+    target = _resolve_server_target(socket_name, socket_path)
+    cache_key = (target.socket_name, target.socket_path, target.tmux_bin)
     with _server_cache_lock:
         if cache_key in _server_cache:
             cached = _server_cache[cache_key]
@@ -514,12 +588,12 @@ def _get_server(
 
         if cache_key not in _server_cache:
             kwargs: dict[str, t.Any] = {}
-            if socket_name is not None:
-                kwargs["socket_name"] = socket_name
-            if socket_path is not None:
-                kwargs["socket_path"] = socket_path
-            if tmux_bin is not None:
-                kwargs["tmux_bin"] = tmux_bin
+            if target.socket_name is not None:
+                kwargs["socket_name"] = target.socket_name
+            if target.socket_path is not None:
+                kwargs["socket_path"] = target.socket_path
+            if target.tmux_bin is not None:
+                kwargs["tmux_bin"] = target.tmux_bin
             _server_cache[cache_key] = Server(**kwargs)
 
         return _server_cache[cache_key]
@@ -538,19 +612,24 @@ def _invalidate_server(
     socket_path : str, optional
         tmux socket path used in the cache key.
     """
-    if socket_name is None:
-        socket_name = os.environ.get("LIBTMUX_SOCKET")
-    if socket_path is None:
-        socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
-
+    target = _resolve_server_target(socket_name, socket_path)
+    cache_key = (target.socket_name, target.socket_path, target.tmux_bin)
     with _server_cache_lock:
-        keys_to_remove = [
-            key
-            for key in _server_cache
-            if key[0] == socket_name and key[1] == socket_path
-        ]
-        for key in keys_to_remove:
-            del _server_cache[key]
+        _server_cache.pop(cache_key, None)
+
+
+def _server_not_running_error() -> ExpectedToolError:
+    """Build the agent-facing recovery error for a dead tmux target."""
+    return ExpectedToolError(
+        "No tmux server is running for this target. Call list_servers to find "
+        "a live server, or create_session(allow_server_start=true) to start one."
+    )
+
+
+def _raise_if_server_dead(server: Server) -> None:
+    """Raise a targeted recovery error when ``server`` is not alive."""
+    if not server.is_alive():
+        raise _server_not_running_error()
 
 
 def _resolve_session(
@@ -581,6 +660,7 @@ def _resolve_session(
     if session_id is not None:
         session = server.sessions.get(session_id=session_id, default=None)
         if session is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="session_id",
                 obj_id=session_id,
@@ -591,6 +671,7 @@ def _resolve_session(
     if session_name is not None:
         session = server.sessions.get(session_name=session_name, default=None)
         if session is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="session_name",
                 obj_id=session_name,
@@ -600,6 +681,7 @@ def _resolve_session(
 
     sessions = server.sessions
     if not sessions:
+        _raise_if_server_dead(server)
         raise exc.TmuxObjectDoesNotExist(
             obj_key="session",
             obj_id="(any)",
@@ -645,6 +727,7 @@ def _resolve_window(
     if window_id is not None:
         window = server.windows.get(window_id=window_id, default=None)
         if window is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="window_id",
                 obj_id=window_id,
@@ -659,9 +742,16 @@ def _resolve_window(
             session_id=session_id,
         )
 
+    try:
+        windows = session.windows
+    except exc.LibTmuxException:
+        _raise_if_server_dead(server)
+        raise
+
     if window_index is not None:
-        window = session.windows.get(window_index=window_index, default=None)
+        window = windows.get(window_index=window_index, default=None)
         if window is None:
+            _raise_if_server_dead(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="window_index",
                 obj_id=window_index,
@@ -669,8 +759,8 @@ def _resolve_window(
             )
         return window
 
-    windows = session.windows
     if not windows:
+        _raise_if_server_dead(server)
         raise exc.NoWindowsExist()
     return windows[0]
 
@@ -715,6 +805,7 @@ def _resolve_pane(
     if pane_id is not None:
         pane = server.panes.get(pane_id=pane_id, default=None)
         if pane is None:
+            _raise_if_server_dead(server)
             raise exc.PaneNotFound(pane_id=pane_id)
         return pane
 
@@ -726,19 +817,27 @@ def _resolve_pane(
         session_id=session_id,
     )
 
+    try:
+        panes = window.panes
+    except exc.LibTmuxException:
+        _raise_if_server_dead(server)
+        raise
+
     if pane_index is not None:
-        pane = window.panes.get(pane_index=pane_index, default=None)
+        pane = panes.get(pane_index=pane_index, default=None)
         if pane is None:
+            _raise_if_server_dead(server)
             raise exc.PaneNotFound(pane_id=f"index:{pane_index}")
         return pane
 
-    panes = window.panes
     if not panes:
+        _raise_if_server_dead(server)
         raise exc.PaneNotFound()
     return panes[0]
 
 
 M = t.TypeVar("M")
+PageT = t.TypeVar("PageT", bound="ListPage")
 
 
 def _coerce_dict_arg(
@@ -796,10 +895,11 @@ def _coerce_dict_arg(
 
 def _apply_filters(
     items: t.Any,
-    filters: dict[str, str] | str | None,
+    filters: dict[str, t.Any] | str | None,
     serializer: t.Callable[..., M],
+    synthetic_fields: frozenset[str] = frozenset(),
 ) -> list[M]:
-    """Apply QueryList filters and serialize results.
+    """Apply native and serialized-field filters, then return serialized results.
 
     Parameters
     ----------
@@ -811,6 +911,9 @@ def _apply_filters(
         If None or empty, all items are returned.
     serializer : callable
         Serializer function to convert each item to a model.
+    synthetic_fields : frozenset[str], optional
+        Serialized model fields that are not available to QueryList. These
+        fields support exact boolean matching only.
 
     Returns
     -------
@@ -820,7 +923,8 @@ def _apply_filters(
     Raises
     ------
     ExpectedToolError
-        If a filter key uses an invalid lookup operator.
+        If a filter key uses an invalid lookup operator or a synthetic filter
+        does not use an exact boolean comparison.
     """
     coerced = _coerce_dict_arg("filters", filters)
     if not coerced:
@@ -828,27 +932,119 @@ def _apply_filters(
     filters = coerced
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
-    for key in filters:
-        if "__" in key:
-            _field, op = key.rsplit("__", 1)
-            if op not in LOOKUP_NAME_MAP:
+    native_filters: dict[str, t.Any] = {}
+    synthetic_filters: list[tuple[str, bool]] = []
+    for key, value in filters.items():
+        field, op = key.rsplit("__", 1) if "__" in key else (key, "exact")
+        if field in synthetic_fields:
+            if op != "exact":
                 msg = (
-                    f"Invalid filter operator '{op}' in '{key}'. "
-                    f"Valid operators: {', '.join(valid_ops)}"
+                    f"Synthetic filter '{field}' does not support operator '{op}'; "
+                    "only exact boolean matching is supported"
                 )
                 raise ExpectedToolError(msg)
+            if not isinstance(value, bool):
+                msg = (
+                    f"Synthetic filter '{field}' requires a boolean value, "
+                    f"got {type(value).__name__}"
+                )
+                raise ExpectedToolError(msg)
+            synthetic_filters.append((field, value))
+            continue
+        if "__" in key and op not in LOOKUP_NAME_MAP:
+            msg = (
+                f"Invalid filter operator '{op}' in '{key}'. "
+                f"Valid operators: {', '.join(valid_ops)}"
+            )
+            raise ExpectedToolError(msg)
+        native_filters[key] = value
 
-    filtered = items.filter(**filters)
-    return [serializer(item) for item in filtered]
+    filtered = items.filter(**native_filters) if native_filters else items
+    serialized = [serializer(item) for item in filtered]
+    if not synthetic_filters:
+        return serialized
+    return [
+        item
+        for item in serialized
+        if all(
+            getattr(item, field, None) is expected
+            for field, expected in synthetic_filters
+        )
+    ]
 
 
-def _serialize_session(session: Session) -> SessionInfo:
+def _paginate(
+    items: list[M],
+    *,
+    limit: int,
+    offset: int,
+    page_type: type[PageT],
+) -> PageT:
+    """Slice filtered, deterministically ordered rows into a typed page.
+
+    Parameters
+    ----------
+    items : list
+        Filtered, serialized, sorted, and projected rows.
+    limit : int
+        Maximum number of rows to return. Must be greater than zero.
+    offset : int
+        Zero-based row offset. Must be non-negative.
+    page_type : type[ListPage]
+        Concrete typed page model to construct.
+
+    Returns
+    -------
+    ListPage
+        Typed page with honest pre-pagination totals and continuation state.
+
+    Raises
+    ------
+    ExpectedToolError
+        If ``limit`` is not positive or ``offset`` is negative.
+
+    Examples
+    --------
+    >>> from libtmux_mcp.models import ServerInfo, ServerPage
+    >>> row = ServerInfo(is_alive=True, session_count=1)
+    >>> page = _paginate([row], limit=1, offset=0, page_type=ServerPage)
+    >>> (len(page.items), page.total, page.truncated)
+    (1, 1, False)
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        msg = f"limit must be an integer greater than 0, got {limit!r}"
+        raise ExpectedToolError(msg)
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        msg = f"offset must be an integer greater than or equal to 0, got {offset!r}"
+        raise ExpectedToolError(msg)
+
+    total = len(items)
+    page_items = items[offset : offset + limit]
+    return page_type.model_validate(
+        {
+            "items": page_items,
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "truncated": offset + len(page_items) < total,
+        }
+    )
+
+
+def _serialize_session(
+    session: Session,
+    *,
+    server_started: bool = False,
+) -> SessionInfo:
     """Serialize a Session to a Pydantic model.
 
     Parameters
     ----------
     session : Session
         The session to serialize.
+    server_started : bool
+        Whether a no-start attempt proved the target absent and the creating
+        call then succeeded on the startup-enabled path.
 
     Returns
     -------
@@ -873,6 +1069,7 @@ def _serialize_session(session: Session) -> SessionInfo:
         session_attached=getattr(session, "session_attached", None),
         session_created=getattr(session, "session_created", None),
         active_pane_id=active_pane_id,
+        server_started=server_started,
     )
 
 
@@ -1024,8 +1221,22 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
         )
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")
+    if _is_dead_server_environment_value_error(e):
+        return _server_not_running_error()
     logger.exception("unexpected error in MCP tool %s", fn_name)
     return ToolError(f"Unexpected error: {type(e).__name__}: {e}")
+
+
+def _is_dead_server_environment_value_error(e: BaseException) -> bool:
+    """Identify libtmux's narrow dead-server environment error shape."""
+    if not isinstance(e, ValueError):
+        return False
+    message = str(e)
+    if not message.startswith("tmux set-environment stderr:"):
+        return False
+    return "no server running" in message or (
+        "error connecting to" in message and "No such file or directory" in message
+    )
 
 
 def handle_tool_errors(

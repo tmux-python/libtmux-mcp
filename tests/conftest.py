@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
+import shlex
+import shutil
+import types
 import typing as t
 
 import pytest
 
-from libtmux_mcp._utils import _server_cache
+from libtmux_mcp import _utils
+
+_server_cache = _utils._server_cache
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -36,6 +43,11 @@ def _isolate_tmux_caller_env(
     """
     monkeypatch.delenv("TMUX", raising=False)
     monkeypatch.delenv("TMUX_PANE", raising=False)
+    monkeypatch.setattr(
+        _utils,
+        "_get_invocation_environment",
+        lambda: types.MappingProxyType(dict(os.environ)),
+    )
 
 
 @pytest.fixture
@@ -70,3 +82,28 @@ def mcp_pane(mcp_window: Window) -> Pane:
     active_pane = mcp_window.active_pane
     assert active_pane is not None
     return active_pane
+
+
+@pytest.fixture
+def custom_tmux_bin_without_path(
+    mcp_server: Server,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> str:
+    """Provide a working configured tmux binary while PATH has no tmux.
+
+    Depending on ``mcp_server`` ensures the pytest plugin creates its real
+    daemon before PATH is narrowed for the caller-lookup regression.
+    """
+    del mcp_server
+    real_tmux = shutil.which("tmux")
+    assert real_tmux is not None
+    wrapper = tmp_path / "configured-tmux"
+    wrapper.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(real_tmux)} "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("LIBTMUX_TMUX_BIN", str(wrapper))
+    monkeypatch.setenv("PATH", str(tmp_path))
+    return str(wrapper)

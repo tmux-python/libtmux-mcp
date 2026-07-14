@@ -38,9 +38,10 @@ Run the Playwright tests against my dev server in the myapp session.
 ```{admonition} Agent reasoning
 :class: agent-thought
 
-{toolref}`list-panes` will not help here -- it shows metadata like current
-command and working directory, not terminal content. The dev server printed
-its URL to the terminal minutes ago, so I need to search terminal content.
+{toolref}`list-panes` will not help here -- it shows metadata like the current
+command (and, with `detail="full"`, the working directory), not terminal
+content. The dev server printed its URL to the terminal minutes ago, so I need
+to search terminal content.
 ```
 
 The agent calls {tooliconl}`search-panes` with `pattern: "Local:"` and
@@ -79,9 +80,10 @@ like a blank shell.
 
 {toolref}`search-panes` searches terminal *content* -- what you would see on
 screen. {toolref}`list-panes` searches *metadata* like current command and
-working directory. If the agent had used {toolref}`list-panes` to find a pane
-running `node`, it would know a process exists but not whether it is ready or
-what URL it chose.
+working directory; request `detail="full"` when the compact default does not
+carry the property you need. If the agent had used {toolref}`list-panes` to
+find a pane running `node`, it would know a process exists but not whether it
+is ready or what URL it chose.
 
 ---
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
+from libtmux import exc
 from libtmux.constants import WindowDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
@@ -19,17 +20,73 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _caller_is_strictly_on_server,
     _get_caller_identity,
     _get_server,
+    _paginate,
     _resolve_session,
     _serialize_session,
     _serialize_window,
+    _server_not_running_error,
     handle_tool_errors,
 )
-from libtmux_mcp.models import SessionInfo, WindowInfo
+from libtmux_mcp.models import SessionInfo, WindowInfo, WindowPage, WindowSummary
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.server import Server
+    from libtmux.session import Session
+
+
+def _resolve_caller_session(server: Server) -> Session:
+    """Resolve the frozen caller pane's live session on ``server``.
+
+    Parameters
+    ----------
+    server : libtmux.Server
+        Effective server selected for the list operation.
+
+    Returns
+    -------
+    libtmux.Session
+        Live session containing the frozen caller pane.
+
+    Raises
+    ------
+    ExpectedToolError
+        If caller identity is absent, targets another socket, or no
+        longer resolves to a live pane.
+    """
+    from libtmux.pane import Pane
+
+    caller = _get_caller_identity()
+    if caller is None or caller.pane_id is None:
+        msg = (
+            "scope='caller_session' requires a frozen caller pane from an MCP "
+            "invocation started inside tmux; use scope='server' with explicit "
+            "hierarchy selectors instead."
+        )
+        raise ExpectedToolError(msg)
+    if not _caller_is_strictly_on_server(server, caller):
+        msg = (
+            "scope='caller_session' is unavailable because the caller socket "
+            "does not match the effective tmux target; use scope='server' with "
+            "explicit hierarchy selectors, or target the caller's socket."
+        )
+        raise ExpectedToolError(msg)
+    try:
+        return Pane.from_pane_id(server=server, pane_id=caller.pane_id).session
+    except exc.ObjectDoesNotExist:
+        msg = (
+            "scope='caller_session' could not resolve the frozen caller pane "
+            "on the effective tmux target; use scope='server' with explicit "
+            "hierarchy selectors, or restart from a live tmux pane."
+        )
+        raise ExpectedToolError(msg) from None
+    except exc.LibTmuxException:
+        if not server.is_alive():
+            raise _server_not_running_error() from None
+        raise
 
 
 @handle_tool_errors
@@ -38,7 +95,11 @@ def list_windows(
     session_id: str | None = None,
     socket_name: str | None = None,
     filters: dict[str, str] | str | None = None,
-) -> list[WindowInfo]:
+    scope: t.Literal["server", "caller_session"] = "server",
+    detail: t.Literal["summary", "full"] = "summary",
+    limit: int = 100,
+    offset: int = 0,
+) -> WindowPage:
     """List tmux windows (terminal tabs) in a session, or across the server.
 
     Use for tmux windows — 'current window', 'this tab' (when terminal-
@@ -54,25 +115,75 @@ def list_windows(
     session_id : str, optional
         Session ID (e.g. '$1') to look up.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"window_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
+    scope : {"server", "caller_session"}, optional
+        Discovery scope. ``"server"`` preserves server-wide listing when
+        no session selector is supplied. ``"caller_session"`` limits the
+        result to the frozen caller pane's live session and cannot be
+        combined with ``session_name`` or ``session_id``.
+    detail : {"summary", "full"}, optional
+        Row projection. Summary rows are the compact default; full rows
+        include layout and dimensions.
+    limit : int, optional
+        Maximum rows to return. Defaults to 100.
+    offset : int, optional
+        Zero-based row offset. Defaults to 0.
 
     Returns
     -------
-    list[WindowInfo]
-        List of serialized window objects.
+    WindowPage
+        Page of summary or full window objects and pagination metadata.
     """
+    if scope not in ("server", "caller_session"):
+        msg = f"Invalid scope {scope!r}; expected 'server' or 'caller_session'."
+        raise ExpectedToolError(msg)
+    if detail not in ("summary", "full"):
+        msg = f"Invalid detail {detail!r}; expected 'summary' or 'full'."
+        raise ExpectedToolError(msg)
+    if scope == "caller_session" and (
+        session_name is not None or session_id is not None
+    ):
+        msg = (
+            "scope='caller_session' cannot be combined with explicit hierarchy "
+            "selectors (session_name or session_id); omit the selectors or use "
+            "scope='server'."
+        )
+        raise ExpectedToolError(msg)
+
     server = _get_server(socket_name=socket_name)
-    if session_name is not None or session_id is not None:
+    if scope == "caller_session":
+        windows = _resolve_caller_session(server).windows
+    elif session_name is not None or session_id is not None:
         session = _resolve_session(
             server, session_name=session_name, session_id=session_id
         )
         windows = session.windows
     else:
         windows = server.windows
-    return _apply_filters(windows, filters, _serialize_window)
+    rows = _apply_filters(windows, filters, _serialize_window)
+    rows.sort(
+        key=lambda row: (
+            int(row.window_id[1:]),
+            int(row.session_id[1:]) if row.session_id is not None else -1,
+            int(row.window_index) if row.window_index is not None else -1,
+        )
+    )
+    projected: list[WindowSummary | WindowInfo]
+    if detail == "summary":
+        projected = [WindowSummary.model_validate(row) for row in rows]
+    else:
+        projected = list(rows)
+    return _paginate(
+        projected,
+        limit=limit,
+        offset=offset,
+        page_type=WindowPage,
+    )
 
 
 # get_session_info completes the core-tmux-hierarchy symmetry alongside
@@ -141,7 +252,9 @@ def create_window(
     direction : str, optional
         Window placement direction.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
     environment : dict or str, optional
         Per-process environment as a mapping or JSON object string. Values do
         not modify the tmux session environment. Each item becomes a tmux
@@ -210,7 +323,9 @@ def rename_session(
     session_id : str, optional
         Session ID (e.g. '$1') to look up.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------
@@ -242,7 +357,9 @@ def kill_session(
     session_id : str, optional
         Session ID (e.g. '$1') to look up.
     socket_name : str, optional
-        tmux socket name. Defaults to LIBTMUX_SOCKET env var.
+        tmux socket name. Target precedence is explicit per-call selector,
+        configured path, configured name, frozen caller socket, then tmux
+        default.
 
     Returns
     -------

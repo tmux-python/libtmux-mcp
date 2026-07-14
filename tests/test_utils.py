@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import subprocess
+import sys
+import textwrap
 import typing as t
 
 import pytest
@@ -19,6 +23,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
+    ExpectedToolError,
     _apply_filters,
     _get_server,
     _invalidate_server,
@@ -63,6 +68,174 @@ def test_get_server_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LIBTMUX_SOCKET", "env_socket")
     server = _get_server()
     assert server.socket_name == "env_socket"
+
+
+def test_get_server_follows_caller_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_get_server targets the non-default socket that launched MCP."""
+    caller_socket = "/tmp/odd,dir/caller-work"
+    monkeypatch.delenv("LIBTMUX_SOCKET", raising=False)
+    monkeypatch.delenv("LIBTMUX_SOCKET_PATH", raising=False)
+    monkeypatch.setenv("TMUX", f"{caller_socket},12345,$0")
+
+    server = _get_server()
+
+    assert server.socket_name is None
+    assert str(server.socket_path) == caller_socket
+
+
+@pytest.mark.parametrize(
+    ("socket_name", "socket_path", "configured_name", "configured_path"),
+    [
+        ("explicit-name", None, None, "/tmp/configured"),
+        (None, "/tmp/explicit", "configured-name", None),
+    ],
+    ids=["name-over-configured-path", "path-over-configured-name"],
+)
+def test_get_server_explicit_selector_does_not_mix_configured_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    socket_name: str | None,
+    socket_path: str | None,
+    configured_name: str | None,
+    configured_path: str | None,
+) -> None:
+    """An explicit selector excludes the other configured selector."""
+    from libtmux_mcp import _utils
+
+    if configured_name is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET", configured_name)
+    if configured_path is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET_PATH", configured_path)
+
+    target = _utils._resolve_server_target(
+        socket_name=socket_name,
+        socket_path=socket_path,
+    )
+    server = _get_server(socket_name=socket_name, socket_path=socket_path)
+
+    actual_socket_path = (
+        str(server.socket_path) if server.socket_path is not None else None
+    )
+    assert target.socket_name == socket_name
+    assert target.socket_path == socket_path
+    assert server.socket_name == socket_name
+    assert actual_socket_path == socket_path
+
+
+def test_get_server_configured_path_beats_configured_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LIBTMUX_SOCKET_PATH takes precedence when both selectors are set."""
+    from libtmux_mcp import _utils
+
+    configured_path = "/tmp/configured-path"
+    monkeypatch.setenv("LIBTMUX_SOCKET", "configured-name")
+    monkeypatch.setenv("LIBTMUX_SOCKET_PATH", configured_path)
+
+    target = _utils._resolve_server_target()
+    server = _get_server()
+
+    assert target.socket_name is None
+    assert target.socket_path == configured_path
+    assert server.socket_name is None
+    assert str(server.socket_path) == configured_path
+    _invalidate_server()
+    assert not _server_cache
+
+
+@pytest.mark.parametrize(
+    ("configured_name", "configured_path", "expected_name", "expected_path"),
+    [
+        ("configured-name", None, "configured-name", None),
+        (None, "/tmp/configured-path", None, "/tmp/configured-path"),
+    ],
+    ids=["configured-name", "configured-path"],
+)
+def test_get_server_configured_target_beats_frozen_caller(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_name: str | None,
+    configured_path: str | None,
+    expected_name: str | None,
+    expected_path: str | None,
+) -> None:
+    """Configured selectors take precedence over the frozen caller socket."""
+    from libtmux_mcp import _utils
+
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/caller-only,12345,$0")
+    if configured_name is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET", configured_name)
+    if configured_path is not None:
+        monkeypatch.setenv("LIBTMUX_SOCKET_PATH", configured_path)
+
+    target = _utils._resolve_server_target()
+
+    assert target.socket_name == expected_name
+    assert target.socket_path == expected_path
+
+
+def test_resolve_server_target_rejects_two_explicit_selectors() -> None:
+    """The normalized target rejects mutually exclusive explicit inputs."""
+    from libtmux_mcp import _utils
+
+    with pytest.raises(
+        ValueError,
+        match="socket_name and socket_path are mutually exclusive",
+    ):
+        _utils._resolve_server_target("explicit", "/tmp/explicit")
+
+
+def test_resolve_server_target_is_immutable() -> None:
+    """The normalized server target is a frozen value object."""
+    from libtmux_mcp import _utils
+
+    target = _utils._resolve_server_target(socket_name="explicit")
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        target.socket_name = "changed"  # type: ignore[misc]
+
+
+def test_invocation_environment_survives_live_tmux_deletion() -> None:
+    """A transient live TMUX deletion cannot erase invocation identity."""
+    caller_socket = "/tmp/odd,dir/caller-work"
+    code = textwrap.dedent(
+        f"""
+        import os
+
+        from libtmux_mcp._utils import (
+            _get_caller_identity,
+            _get_invocation_environment,
+            _get_server,
+        )
+
+        snapshot = _get_invocation_environment()
+        del os.environ["TMUX"]
+        assert snapshot["TMUX"] == {f"{caller_socket},12345,$0"!r}
+        try:
+            snapshot["TMUX"] = "changed"
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("invocation environment is mutable")
+        assert _get_caller_identity().socket_path == {caller_socket!r}
+        assert str(_get_server().socket_path) == {caller_socket!r}
+        """
+    )
+    env = {
+        **os.environ,
+        "TMUX": f"{caller_socket},12345,$0",
+        "TMUX_PANE": "%7",
+    }
+    env.pop("LIBTMUX_SOCKET", None)
+    env.pop("LIBTMUX_SOCKET_PATH", None)
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_resolve_session_by_name(mcp_server: Server, mcp_session: Session) -> None:
@@ -111,6 +284,120 @@ def test_resolve_pane_not_found(mcp_server: Server, mcp_session: Session) -> Non
     """_resolve_pane raises when pane not found."""
     with pytest.raises(exc.PaneNotFound):
         _resolve_pane(mcp_server, pane_id="%99999")
+
+
+@pytest.mark.parametrize(
+    ("resolver", "kwargs"),
+    [
+        (_resolve_session, {"session_id": "$99999"}),
+        (_resolve_window, {"window_id": "@99999"}),
+        (_resolve_pane, {"pane_id": "%99999"}),
+    ],
+    ids=["session", "window", "pane"],
+)
+def test_targeted_resolvers_name_dead_server_cause(
+    TestServer: type[Server],
+    resolver: t.Callable[..., object],
+    kwargs: dict[str, str],
+) -> None:
+    """Missing targets on a dead daemon report liveness, not stale ids.
+
+    The standard hierarchy fixtures require a live daemon, so ``TestServer``
+    supplies a cleanup-managed dead target for this exceptional path.
+    """
+    server = TestServer()
+    assert server.is_alive() is False
+
+    with pytest.raises(
+        ExpectedToolError,
+        match=(
+            r"No tmux server is running.*"
+            r"create_session\(allow_server_start=true\)"
+        ),
+    ):
+        resolver(server, **kwargs)
+
+
+def test_window_index_resolver_names_server_death_after_session_resolution(
+    TestServer: type[Server],
+) -> None:
+    """A daemon death after session lookup still reports the liveness cause.
+
+    The standard hierarchy fixtures keep their server live, so ``TestServer``
+    supplies a cleanup-managed session whose daemon can be stopped mid-flow.
+    """
+    server = TestServer()
+    session = server.new_session(session_name="window_index_server_death")
+    server.kill()
+    assert server.is_alive() is False
+
+    with pytest.raises(ExpectedToolError, match="No tmux server is running"):
+        _resolve_window(server, session=session, window_index="99999")
+
+
+@pytest.mark.parametrize("pane_index", [None, "99999"], ids=["default", "indexed"])
+def test_pane_resolver_names_server_death_after_window_resolution(
+    TestServer: type[Server],
+    monkeypatch: pytest.MonkeyPatch,
+    pane_index: str | None,
+) -> None:
+    """A daemon death after window lookup reports the liveness cause.
+
+    The standard hierarchy fixtures cannot stop the server at this exact seam,
+    so the real resolver is wrapped to kill the cleanup-managed daemon only
+    after it returns the target window.
+    """
+    from libtmux_mcp import _utils
+
+    server = TestServer()
+    session = server.new_session(session_name="pane_resolver_server_death")
+    window = session.active_window
+    assert window is not None
+    original_resolve_window = _utils._resolve_window
+
+    def _resolve_then_kill(*args: t.Any, **kwargs: t.Any) -> Window:
+        resolved = original_resolve_window(*args, **kwargs)
+        server.kill()
+        return resolved
+
+    monkeypatch.setattr(_utils, "_resolve_window", _resolve_then_kill)
+
+    with pytest.raises(ExpectedToolError, match="No tmux server is running"):
+        _utils._resolve_pane(
+            server,
+            window_id=window.window_id,
+            pane_index=pane_index,
+        )
+
+
+def test_pane_resolver_reraises_live_server_pane_lookup_error(
+    TestServer: type[Server],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unrelated pane-query error on a live server is not swallowed.
+
+    The real pane collection is replaced only to make libtmux raise at the
+    post-window-resolution boundary under test.
+    """
+    from libtmux_mcp import _utils
+
+    server = TestServer()
+    session = server.new_session(session_name="pane_resolver_live_error")
+    window = session.active_window
+    assert window is not None
+    raised = exc.LibTmuxException("pane query rejected")
+
+    def _raise_pane_error(_window: Window) -> t.NoReturn:
+        raise raised
+
+    monkeypatch.setattr(type(window), "panes", property(_raise_pane_error))
+    monkeypatch.setattr(_utils, "_resolve_window", lambda *_a, **_kw: window)
+
+    with pytest.raises(exc.LibTmuxException) as excinfo:
+        _utils._resolve_pane(server, pane_index="99999")
+
+    assert excinfo.value is raised
+    assert server.is_alive() is True
 
 
 def test_serialize_session(mcp_session: Session) -> None:
@@ -305,6 +592,60 @@ def test_apply_filters(
             assert len(result) >= 1
 
 
+def test_apply_filters_runs_native_before_synthetic_filters(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synthetic filters serialize each native-filter survivor once."""
+    from libtmux_mcp._utils import _effective_socket_path
+
+    assert mcp_pane.pane_id is not None
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},1,$0")
+    monkeypatch.setenv("TMUX_PANE", mcp_pane.pane_id)
+    serialization_count = 0
+
+    def serialize(pane: Pane) -> t.Any:
+        nonlocal serialization_count
+        serialization_count += 1
+        return _serialize_pane(pane)
+
+    result = _apply_filters(
+        mcp_server.panes,
+        {"pane_id": mcp_pane.pane_id, "is_caller": True},
+        serialize,
+        synthetic_fields=frozenset({"is_caller"}),
+    )
+
+    assert [pane.pane_id for pane in result] == [mcp_pane.pane_id]
+    assert serialization_count == 1
+
+
+@pytest.mark.parametrize(
+    ("filters", "error_match"),
+    [
+        ({"is_caller": "true"}, "is_caller.*boolean"),
+        ({"is_caller__contains": True}, "is_caller.*operator 'contains'"),
+    ],
+    ids=["non-boolean", "unsupported-operator"],
+)
+def test_apply_filters_rejects_invalid_synthetic_filters(
+    mcp_server: Server,
+    filters: dict[str, t.Any],
+    error_match: str,
+) -> None:
+    """Synthetic filters accept only exact boolean comparisons."""
+    with pytest.raises(ExpectedToolError, match=error_match):
+        _apply_filters(
+            mcp_server.panes,
+            filters,
+            _serialize_pane,
+            synthetic_fields=frozenset({"is_caller"}),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Caller identity parsing tests
 # ---------------------------------------------------------------------------
@@ -324,6 +665,23 @@ def test_get_caller_identity_parses_tmux_env(
     assert caller.server_pid == 12345
     assert caller.session_id == "$7"
     assert caller.pane_id == "%3"
+
+
+def test_get_caller_identity_preserves_commas_in_socket_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Caller parsing right-splits TMUX so socket commas remain intact."""
+    from libtmux_mcp._utils import _get_caller_identity
+
+    monkeypatch.setenv("TMUX", "/tmp/odd,dir/work,12345,$7")
+    monkeypatch.setenv("TMUX_PANE", "%3")
+
+    caller = _get_caller_identity()
+
+    assert caller is not None
+    assert caller.socket_path == "/tmp/odd,dir/work"
+    assert caller.server_pid == 12345
+    assert caller.session_id == "$7"
 
 
 def test_get_caller_identity_returns_none_when_unset(
@@ -912,6 +1270,50 @@ def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
     mapped = _map_exception_to_tool_error("some_tool", raised)
     assert not isinstance(mapped, ExpectedToolError)
     assert mapped.log_level == logging.ERROR
+
+
+def test_map_dead_server_environment_value_error_as_expected(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Libtmux's dead-server environment ValueError is routine absence."""
+    import logging
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    raised = ValueError(
+        "tmux set-environment stderr: "
+        "['error connecting to /tmp/example (No such file or directory)']"
+    )
+
+    with caplog.at_level(logging.ERROR, logger="libtmux_mcp._utils"):
+        mapped = _map_exception_to_tool_error("set_environment", raised)
+
+    assert isinstance(mapped, ExpectedToolError)
+    assert mapped.log_level == logging.WARNING
+    assert "No tmux server is running" in str(mapped)
+    assert not [
+        record for record in caplog.records if "unexpected error" in record.message
+    ]
+
+
+def test_map_unrelated_value_error_as_unexpected(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unrelated programming ValueErrors remain loud unexpected failures."""
+    import logging
+
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    with caplog.at_level(logging.ERROR, logger="libtmux_mcp._utils"):
+        mapped = _map_exception_to_tool_error(
+            "set_environment",
+            ValueError("bad caller input"),
+        )
+
+    assert not isinstance(mapped, ExpectedToolError)
+    assert mapped.log_level == logging.ERROR
+    assert "Unexpected error: ValueError: bad caller input" in str(mapped)
+    assert [record for record in caplog.records if "unexpected error" in record.message]
 
 
 def test_expected_tool_error_logs_warning_through_server(

@@ -9,12 +9,27 @@ container — create one before creating windows or panes.
 **Avoid when** a session with the target name already exists — check with
 {tooliconl}`list-sessions` first, or the command will fail.
 
-**Side effects:** Creates a new tmux session with one window and one pane.
+**Side effects:** Creates a new tmux session with one window and one pane. If
+no server is running, `allow_server_start=true` also launches a long-lived tmux
+daemon and sources the user's tmux configuration. The call fails without
+starting a daemon when that permission is false.
 
 **Do not pass credentials directly in `environment`.** Values persist in the
 new session, can be inspected with {tooliconl}`show-environment`, and reach
 its initial pane and future panes. Pass credential references instead; see
 {ref}`safety` for details.
+
+`allow_server_start` defaults to `false` for direct Python calls. Omitted MCP
+input inherits {envvar}`LIBTMUX_ALLOW_SERVER_START`, which is disabled by
+default; an explicit value wins. Set it to `true` only when starting the target
+tmux server is intended. The returned
+{class}`~libtmux_mcp.models.SessionInfo` reports that side effect through
+{attr}`~libtmux_mcp.models.SessionInfo.server_started`: `true` means a no-start
+attempt proved the target absent and the call then succeeded on the
+startup-enabled path. It does not claim stronger attribution across other
+processes. Change the environment default only after restarting the MCP
+server; per-call values apply immediately. See {ref}`configuration` for the
+startup setting.
 
 `suppress_persistent_history` defaults to `false` for MCP and direct Python calls. It does not inherit {envvar}`LIBTMUX_SUPPRESS_HISTORY`. Leave it `false` to add no history controls for this call. That choice cannot remove inherited, session, or startup-file controls.
 
@@ -28,7 +43,8 @@ When you enable it, tmux environment arguments are added, but the spawned proces
 {
   "tool": "create_session",
   "arguments": {
-    "session_name": "dev"
+    "session_name": "dev",
+    "allow_server_start": false
   }
 }
 ```
@@ -42,7 +58,8 @@ Response ({class}`~libtmux_mcp.models.SessionInfo`):
   "window_count": 1,
   "session_attached": "0",
   "session_created": "1774521872",
-  "active_pane_id": "%0"
+  "active_pane_id": "%0",
+  "server_started": false
 }
 ```
 

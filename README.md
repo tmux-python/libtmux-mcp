@@ -15,7 +15,7 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 
 | Module | Tools |
 |--------|-------|
-| **Server** | `list_servers`, `list_sessions`, `create_session`, `kill_server`, `get_server_info` |
+| **Server** | `where_am_i`, `list_servers`, `list_sessions`, `create_session`, `kill_server`, `get_server_info` |
 | **Batch** | `call_readonly_tools_batch`, `call_mutating_tools_batch`, `call_destructive_tools_batch` |
 | **Session** | `list_windows`, `get_session_info`, `create_window`, `rename_session`, `select_window`, `kill_session` |
 | **Window** | `list_panes`, `get_window_info`, `split_window`, `rename_window`, `select_layout`, `resize_window`, `move_window`, `kill_window` |
@@ -24,6 +24,11 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 | **Environment** | `show_environment`, `set_environment` |
 | **Buffers** | `load_buffer`, `paste_buffer`, `show_buffer`, `delete_buffer` |
 | **Hooks** | `show_hooks`, `show_hook` |
+
+Call `where_am_i` with no arguments when a request says "this pane",
+"current window", or "this session". Its typed result distinguishes a live
+caller from an outside-tmux invocation, a stopped server, a stale pane, or a
+configured server that differs from the caller's server.
 
 ## Quickstart
 

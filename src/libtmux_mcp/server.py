@@ -22,11 +22,16 @@ from libtmux_mcp._history import (
     _configure_history_defaults,
     _resolve_suppress_history,
 )
+from libtmux_mcp._server_start import (
+    _configure_server_start_default,
+    _resolve_allow_server_start,
+)
 from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
+    _get_caller_identity,
     _server_cache,
 )
 from libtmux_mcp.middleware import (
@@ -70,7 +75,9 @@ _INSTR_HIERARCHY = (
     "libtmux MCP server for tmux. "
     "tmux hierarchy: Server > Session > Window > Pane. "
     "Prefer pane_id (e.g. '%1') for targeting. "
-    "Targeted tmux tools accept socket_name (defaults to LIBTMUX_SOCKET); "
+    "Targeted tmux tools accept socket_name. Target precedence: explicit "
+    "per-call selector, configured path, configured name, frozen caller "
+    "socket, tmux default. "
     "list_servers discovers sockets via TMUX_TMPDIR plus extra_socket_paths."
 )
 
@@ -95,8 +102,9 @@ _INSTR_METADATA_VS_CONTENT = (
 )
 
 _INSTR_READ_TOOLS = (
-    "Prefer snapshot_pane over capture_pane + get_pane_info; capture_since "
-    "for repeated observation/tailing; display_message for tmux formats."
+    "where_am_i resolves 'this pane', 'current window', and 'this session' "
+    "relative to the caller. Prefer snapshot_pane; capture_since tails; "
+    "display_message evaluates formats."
 )
 
 _INSTR_WAIT_NOT_POLL = (
@@ -179,9 +187,7 @@ def _build_instructions(
     # query away). Reuse the existing safety axis instead of shipping a
     # separate LIBTMUX_DISCOVERABILITY knob.
     if safety_level == TAG_READONLY:
-        parts.append(
-            "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
-        )
+        parts.append("\n\nReadonly mode: probe where_am_i/snapshot_pane if unsure.")
 
     instructions = "".join(parts)
     if len(instructions.encode("utf-8")) > _INSTRUCTIONS_MAX_BYTES:
@@ -192,25 +198,24 @@ def _build_instructions(
     # the untrusted socket name and explanatory workflow before omitting the
     # context entirely. Never byte-slice text because UTF-8 characters may be
     # split across bytes.
-    tmux_pane = os.environ.get("TMUX_PANE")
-    if tmux_pane:
-        # Parse TMUX env: "/tmp/tmux-1000/default,48188,10"
-        tmux_env = os.environ.get("TMUX", "")
-        env_parts = tmux_env.split(",") if tmux_env else []
-        socket_path = env_parts[0] if env_parts else None
-        socket_name = socket_path.rsplit("/", 1)[-1] if socket_path else None
+    caller = _get_caller_identity()
+    if caller is not None and caller.pane_id:
+        tmux_pane = caller.pane_id
+        socket_name = (
+            caller.socket_path.rsplit("/", 1)[-1] if caller.socket_path else None
+        )
 
         context_start = f"\n\nAgent context: this MCP runs inside tmux pane {tmux_pane}"
         context = context_start
         if socket_name:
             context += f" (socket {socket_name})"
         context += (
-            ". Tool results mark is_caller=true; filter list_panes for it to answer "
-            "'which pane am I in?' (no whoami tool)."
+            ". where_am_i returns live window/session IDs; pane results mark "
+            "is_caller=true."
         )
         pane_context = (
-            f"{context_start}. Tool results mark is_caller=true; filter list_panes "
-            "for it to answer 'which pane am I in?' (no whoami tool)."
+            f"{context_start}. where_am_i returns live window/session IDs; "
+            "pane results mark is_caller=true."
         )
         minimal_context = f"\n\nAgent context: tmux pane {tmux_pane}."
         for candidate in (context, pane_context, minimal_context):
@@ -239,10 +244,14 @@ _safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
 _suppress_history = _resolve_suppress_history(
     os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
 )
+_allow_server_start = _resolve_allow_server_start(
+    os.environ.get("LIBTMUX_ALLOW_SERVER_START")
+)
 
 #: Tools covered by the tail-preserving response limiter. Only tools
-#: whose output is terminal scrollback benefit from this backstop;
-#: structured responses from list/get tools stay under the cap naturally.
+#: whose output contains terminal text benefit from this backstop. The
+#: structured ``list_*`` tools are intentionally absent: their typed page
+#: envelopes bound rows without turning valid structured data into text.
 _RESPONSE_LIMITED_TOOLS = [
     "capture_pane",
     "capture_since",
@@ -378,6 +387,7 @@ def _register_all() -> None:
 
     register_tools(mcp)
     _configure_history_defaults(mcp, _suppress_history)
+    _configure_server_start_default(mcp, _allow_server_start)
     register_resources(mcp)
     register_prompts(mcp)
     _mcp_registered = True
