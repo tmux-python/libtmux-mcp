@@ -59,11 +59,11 @@ dev = [
   "gp-sphinx==0.0.1a34",
   "sphinx-autodoc-api-style==0.0.1a34",
   "sphinx-autodoc-fastmcp==0.0.1a34",
-  "gp-libs>=0.0.18",
+  "gp-libs>=0.0.19",
   "sphinx-autobuild",
   # Testing
   "typing-extensions; python_version < '3.11'",
-  "gp-libs>=0.0.18",
+  "gp-libs>=0.0.19",
   "pytest>=9.1.0",  # >=9.1.0 attaches caplog to non-propagating loggers; see test_middleware
   "pytest-rerunfailures",
   "pytest-mock",
@@ -85,12 +85,12 @@ docs = [
   "gp-sphinx==0.0.1a34",
   "sphinx-autodoc-api-style==0.0.1a34",
   "sphinx-autodoc-fastmcp==0.0.1a34",
-  "gp-libs>=0.0.18",
+  "gp-libs>=0.0.19",
   "sphinx-autobuild",
 ]
 testing = [
   "typing-extensions; python_version < '3.11'",
-  "gp-libs>=0.0.18",
+  "gp-libs>=0.0.19",
   "pytest>=9.1.0",  # >=9.1.0 attaches caplog to non-propagating loggers; see test_middleware
   "pytest-rerunfailures",
   "pytest-mock",
