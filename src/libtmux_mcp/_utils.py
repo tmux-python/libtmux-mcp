@@ -341,6 +341,28 @@ TAG_DESTRUCTIVE = "destructive"
 
 VALID_SAFETY_LEVELS = frozenset({TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE})
 
+#: Non-tier marker tag for tools that enforce their own wall-clock
+#: ceiling internally and whose cost is therefore *duration*, not
+#: side effects.
+#:
+#: A tagged tool must never be re-driven by machinery that assumes a
+#: call is cheap:
+#:
+#: * :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` skips it,
+#:   because the deadline is computed inside the tool body — a retry
+#:   restarts the clock and doubles the ceiling.
+#: * The ``call_*_tools_batch`` wrappers reject it per-operation,
+#:   because the batch loop is serial with no aggregate deadline and
+#:   ``MAX_BATCH_OPERATIONS`` is 1000.
+#:
+#: A TAG rather than a tool-name list on purpose: a name string is
+#: exactly what ``add_tool_transformation`` can rename out from under
+#: the exclusion. Tier resolution
+#: (:meth:`~libtmux_mcp.middleware.SafetyMiddleware._is_allowed`,
+#: ``batch_tools._tool_tier``) inspects only the three tier tags, so
+#: carrying this extra tag is inert everywhere else.
+TAG_SELF_BOUNDED = "self-bounded"
+
 # ---------------------------------------------------------------------------
 # Reusable annotation presets for tool registration
 # ---------------------------------------------------------------------------
