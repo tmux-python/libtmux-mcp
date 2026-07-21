@@ -218,11 +218,49 @@ def _build_instructions(
             f"{context_start}. Tool results mark is_caller=true; filter list_panes "
             "for it to answer 'which pane am I in?' (no whoami tool)."
         )
-        minimal_context = f"\n\nAgent context: tmux pane {tmux_pane}."
-        for candidate in (context, pane_context, minimal_context):
+        # Only the socket name is optional. Dropping it costs an agent
+        # nothing it cannot re-derive, so that degradation stays silent.
+        for candidate in (context, pane_context):
             combined = instructions + candidate
             if len(combined.encode("utf-8")) <= _INSTRUCTIONS_MAX_BYTES:
                 return combined
+
+        # Past this point the is_caller workflow — the only place an
+        # agent learns how to answer "which pane am I in?" — cannot fit.
+        # There are two very different reasons for that, and they need
+        # opposite handling:
+        #
+        #   (a) our own _INSTR_* segments grew until the workflow no
+        #       longer fits alongside them. That is a build-time bug in
+        #       this file, and silently dropping the workflow hides it:
+        #       the budget assertions only check the total size, and
+        #       the degraded form still contains "Agent context", so
+        #       nothing fails. Raise and make the author shorten a
+        #       segment.
+        #
+        #   (b) TMUX_PANE / TMUX are pathologically large. That is
+        #       runtime data we do not control, and refusing to start
+        #       over a hostile environment variable would be a denial
+        #       of service. Degrade, as before.
+        #
+        # A nominal pane id discriminates: if the workflow fits with a
+        # realistic id, only the oversized runtime data pushed us over.
+        nominal_context = (
+            "\n\nAgent context: this MCP runs inside tmux pane %000"
+            ". Tool results mark is_caller=true; filter list_panes "
+            "for it to answer 'which pane am I in?' (no whoami tool)."
+        )
+        if len((instructions + nominal_context).encode("utf-8")) > (
+            _INSTRUCTIONS_MAX_BYTES
+        ):
+            msg = (
+                "server instructions leave no room for the is_caller agent "
+                f"context within the {_INSTRUCTIONS_MAX_BYTES}-byte MCP budget "
+                f"(need {len((instructions + nominal_context).encode('utf-8'))} "
+                "bytes); shorten an _INSTR_* segment rather than letting agent "
+                "context be dropped"
+            )
+            raise RuntimeError(msg)
 
     return instructions
 
