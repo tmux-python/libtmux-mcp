@@ -3671,54 +3671,44 @@ def test_wait_for_text_propagates_cancellation(
 
 
 def test_wait_tools_do_not_block_event_loop(
-    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
 ) -> None:
-    """wait_for_text runs its blocking capture off the main event loop.
+    """A wedged tmux must not pin the event loop.
 
-    Regression guard for the critical bug that FastMCP async tools are
-    direct-awaited on the main event loop. ``pane.capture_pane()`` is a
-    sync ``subprocess.run`` call; without ``asyncio.to_thread`` it
-    would block every other coroutine on the same loop for the
-    duration of each poll tick.
+    FastMCP direct-awaits async tools on the main loop, so anything the
+    wait path does synchronously freezes every other coroutine, the MCP
+    transport, and cancellation itself.
 
-    Discriminator: monkeypatch ``pane.capture_pane`` so each call
-    blocks the calling *thread* for 80 ms via ``time.sleep``. With
-    ``asyncio.to_thread`` the default executor runs that off the
-    event loop and the ticker coroutine keeps firing every 10 ms;
-    without it, the event loop is pinned for the full 80 ms per poll
-    and the ticker can only advance during the brief
-    ``await asyncio.sleep(interval)`` gaps. The threshold (~40 ticks
-    expected with the fix vs. <= 6 without) cleanly fails the
-    un-fixed code while remaining robust against 2x CI slowdown.
+    Discriminator: a stub ``tmux`` that never returns. The wait path
+    spawns it with ``asyncio.create_subprocess_exec``, so a concurrent
+    ticker keeps firing every 10 ms while the call is in flight and the
+    call still ends bounded. Route it through a *blocking* spawn and
+    the ticker stops dead for the whole wedge.
 
-    The previous version of this test used the production
-    ``capture_pane`` (which returns instantly under tmux's normal
-    semantics) and asserted ``ticks >= 5``. Since ``await
-    asyncio.sleep(interval=0.05)`` between poll iterations already
-    yielded enough for the ticker to satisfy that bound, the test
-    passed even with ``asyncio.to_thread`` reverted — providing zero
-    actual defense against the bug it claimed to guard. The
-    monkeypatched slow capture is the discriminator.
-
-    See commit ``74ec8f0`` for the project's precedent on stabilizing
-    timing-sensitive tests under ``--reruns 0``.
+    This replaces an earlier version that monkeypatched a slow capture
+    to measure an ``asyncio.to_thread`` offload. That invariant is
+    gone: there is no blocking call left to offload, and a thread was
+    never a safe place for this work anyway -- a worker stuck in
+    ``Popen.communicate()`` cannot be cancelled, and
+    ``concurrent.futures.thread._python_exit`` joins it untimed at
+    interpreter exit. See ``test_wait_path_uses_no_worker_threads``.
     """
     import asyncio
-    import time as _time
 
     from libtmux_mcp.tools.pane_tools import wait as _wait_mod
 
-    def _slow_capture(*_a: object, **_kw: object) -> list[str]:
-        _time.sleep(0.08)
-        return []
+    stub = tmp_path / "tmux"
+    stub.write_text("#!/bin/sh\nsleep 60\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(
+        _wait_mod, "_tmux_argv", lambda _server, *args: [str(stub), *args]
+    )
+    monkeypatch.setattr(_wait_mod, "_TMUX_CALL_TIMEOUT_SECONDS", 0.4)
 
-    # The wait tool no longer routes captures through libtmux (whose
-    # Popen.communicate() has no timeout); it shells out via
-    # subprocess.run with a hard bound. Patch that helper so the
-    # discriminator still measures the to_thread offload.
-    monkeypatch.setattr(_wait_mod, "_bounded_capture", _slow_capture)
-
-    async def _drive() -> int:
+    async def _drive() -> tuple[int, float]:
         ticks = 0
         stop = asyncio.Event()
 
@@ -3728,30 +3718,31 @@ def test_wait_tools_do_not_block_event_loop(
                 ticks += 1
                 await asyncio.sleep(0.01)
 
+        started = time.monotonic()
+
         async def _waiter() -> None:
             try:
-                await wait_for_text(
-                    patterns=["WILL_NEVER_MATCH_EVENT_LOOP_zqr9"],
-                    pane_id=mcp_pane.pane_id,
-                    timeout=0.4,
-                    interval=0.05,
-                    socket_name=mcp_server.socket_name,
-                )
+                with contextlib.suppress(ToolError):
+                    await wait_for_text(
+                        patterns=["WILL_NEVER_MATCH_EVENT_LOOP_zqr9"],
+                        pane_id=mcp_pane.pane_id,
+                        timeout=0.5,
+                        interval=0.05,
+                        socket_name=mcp_server.socket_name,
+                    )
             finally:
                 stop.set()
 
         await asyncio.gather(_ticker(), _waiter())
-        return ticks
+        return ticks, time.monotonic() - started
 
-    ticks = asyncio.run(_drive())
-    # With asyncio.to_thread, ticker fires ~40 times in the 400 ms
-    # window. Without, only during the 50 ms inter-poll sleep gaps
-    # (~3 polls x ~5 ticks/sleep = ~15) plus 1 between captures = 6.
-    # The 20-tick threshold is robust against 2x CI slowdown and
-    # unambiguously fails the un-fixed code.
+    ticks, elapsed = asyncio.run(_drive())
+
+    assert elapsed < 5.0, f"wedged tmux was not bounded: {elapsed:.1f}s"
+    # ~40 ticks expected across the wedge; a pinned loop yields none.
     assert ticks >= 20, (
-        f"ticker advanced only {ticks} times — blocking capture is on the "
-        f"main event loop, not in asyncio.to_thread"
+        f"ticker advanced only {ticks} times — a wedged tmux is pinning "
+        f"the event loop instead of running as an async subprocess"
     )
 
 
@@ -4060,9 +4051,9 @@ def test_wait_for_text_never_interpolates_pattern_into_tmux_format(
     recorded: list[tuple[str, ...]] = []
     original = wait_mod._run_tmux_lines
 
-    def _spy(server: t.Any, *args: str, **kwargs: t.Any) -> list[str]:
+    async def _spy(server: t.Any, *args: str, **kwargs: t.Any) -> list[str]:
         recorded.append(args)
-        return original(server, *args, **kwargs)
+        return await original(server, *args, **kwargs)
 
     monkeypatch.setattr(wait_mod, "_run_tmux_lines", _spy)
 
@@ -4090,27 +4081,26 @@ def test_wait_for_text_never_interpolates_pattern_into_tmux_format(
 def test_wait_for_text_bounds_every_tmux_call(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every tmux subprocess the wait path spawns carries a timeout.
+    """Every tmux child the wait path spawns is bounded by a timeout.
 
-    Amplifier C. libtmux runs tmux through ``Popen.communicate()`` with
-    no timeout; a wedged tmux server therefore pins an
-    ``asyncio.to_thread`` worker forever, because a
-    ``concurrent.futures`` task that has already started cannot be
-    cancelled. With 24 executor slots, 24 wedged waits stall every
-    ``to_thread`` on the server. ``subprocess.run(timeout=...)`` is the
-    only mechanism that bounds the thread itself.
+    Amplifier C. The wait path spawns tmux with
+    ``asyncio.create_subprocess_exec`` and bounds each call with
+    ``asyncio.wait(timeout=...)``. A thread would be unrecoverable
+    here: a worker blocked in ``Popen.communicate()`` cannot be
+    cancelled, and ``concurrent.futures.thread._python_exit`` joins
+    every pool worker untimed at interpreter shutdown, so one wedged
+    tmux hangs process exit forever.
     """
     import asyncio
-    import subprocess
 
     timeouts: list[float | None] = []
-    original_run = subprocess.run
+    original_wait = asyncio.wait
 
-    def _spy(*args: t.Any, **kwargs: t.Any) -> t.Any:
+    async def _spy(*args: t.Any, **kwargs: t.Any) -> t.Any:
         timeouts.append(kwargs.get("timeout"))
-        return original_run(*args, **kwargs)
+        return await original_wait(*args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", _spy)
+    monkeypatch.setattr(asyncio, "wait", _spy)
 
     asyncio.run(
         wait_for_text(
@@ -4121,10 +4111,45 @@ def test_wait_for_text_bounds_every_tmux_call(
         )
     )
 
-    assert timeouts, "wait_for_text spawned no bounded subprocess"
-    assert all(value is not None and value > 0 for value in timeouts), (
-        f"unbounded tmux subprocess in the wait path: {timeouts}"
+    assert timeouts, "the wait path spawned no bounded tmux calls"
+    assert all(v is not None and v > 0 for v in timeouts), (
+        f"an unbounded tmux call slipped through: {timeouts}"
     )
+
+
+def test_wait_path_uses_no_worker_threads(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait path must never hand tmux work to a thread.
+
+    This is the invariant that keeps a wedged tmux from hanging
+    interpreter shutdown: ``concurrent.futures.thread._python_exit``
+    joins pool workers with no timeout, and no thread-based
+    arrangement escapes it -- not ``asyncio.to_thread``, not a private
+    pool with ``shutdown(wait=False)``. A subprocess we own can be
+    killed; a thread cannot.
+    """
+    import asyncio
+
+    calls: list[t.Any] = []
+    original = asyncio.to_thread
+
+    async def _spy(fn: t.Any, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        calls.append(fn)
+        return await original(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _spy)
+
+    asyncio.run(
+        wait_for_text(
+            patterns=["NEVER_APPEARS_NOTHREAD_v9"],
+            pane_id=mcp_pane.pane_id,
+            timeout=0.3,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert calls == [], f"wait path used worker threads for: {calls}"
 
 
 def test_wait_for_text_wedged_tmux_raises_instead_of_hanging(
@@ -4136,6 +4161,8 @@ def test_wait_for_text_wedged_tmux_raises_instead_of_hanging(
     sleeps far past the bound. Without ``subprocess.run(timeout=...)``
     this call would block its worker thread for the full sleep.
     """
+    import asyncio
+
     from libtmux_mcp.tools.pane_tools import wait as wait_mod
 
     stub = tmp_path / "tmux"
@@ -4151,7 +4178,9 @@ def test_wait_for_text_wedged_tmux_raises_instead_of_hanging(
 
     started = time.monotonic()
     with pytest.raises(ExpectedToolError, match="unresponsive"):
-        wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+        asyncio.run(
+            wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+        )
     elapsed = time.monotonic() - started
 
     assert elapsed < 5.0, f"wedged tmux blocked for {elapsed:.1f}s"
