@@ -38,6 +38,7 @@ import typing as t
 from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING,
     TAG_MUTATING,
+    TAG_SELF_BOUNDED,
     ExpectedToolError,
     _get_server,
     _tmux_argv,
@@ -219,10 +220,16 @@ async def signal_channel(
 
 def register(mcp: FastMCP) -> None:
     """Register wait-for channel tools with the MCP instance."""
+    # ``wait_for_channel`` blocks for a caller-supplied ``timeout`` with
+    # no server ceiling at all, so a 1000-operation batch is a strictly
+    # worse version of the bug ``wait_for_text``'s cap exists to fix.
+    # ``TAG_SELF_BOUNDED`` keeps it out of the batch wrappers; the tool
+    # is already bounded per-call by ``subprocess.run(timeout=...)``,
+    # which is what the tag asserts.
     mcp.tool(
         title="Wait For tmux Channel",
         annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        tags={TAG_MUTATING, TAG_SELF_BOUNDED},
     )(wait_for_channel)
     mcp.tool(
         title="Signal tmux Channel",

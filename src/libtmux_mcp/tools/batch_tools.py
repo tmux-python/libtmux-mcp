@@ -15,6 +15,7 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    TAG_SELF_BOUNDED,
     ExpectedToolError,
     handle_tool_errors_async,
 )
@@ -125,6 +126,21 @@ async def _get_allowed_tool_tier(
     tool = await fastmcp.get_tool(operation.tool)
     if tool is None:
         msg = f"Unknown tool: {operation.tool!r}"
+        raise ExpectedToolError(msg)
+
+    # ``max_tier`` is a CEILING, so a readonly tool is reachable through
+    # every batch wrapper, not only the readonly one. The batch loop is
+    # serial with no aggregate deadline and ``MAX_BATCH_OPERATIONS`` is
+    # 1000, so a self-bounded wait batched N times costs N x its
+    # ceiling. Reject per-operation (not pre-loop) so the raise becomes
+    # a ``success=False`` row and ``on_error='continue'`` isolation is
+    # preserved.
+    if TAG_SELF_BOUNDED in tool.tags:
+        msg = (
+            f"Tool {operation.tool!r} enforces its own wait ceiling and "
+            "cannot be batched; batching would multiply that ceiling by "
+            "the operation count. Call it directly."
+        )
         raise ExpectedToolError(msg)
 
     tool_tier = _tool_tier(operation.tool, tool.tags)

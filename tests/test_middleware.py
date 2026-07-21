@@ -836,6 +836,35 @@ def test_readonly_retry_skips_mutating_tool() -> None:
     assert call_next.calls == 1  # no retry — fail on first call
 
 
+def test_readonly_retry_skips_self_bounded_tool() -> None:
+    """A readonly + self-bounded tool is NOT retried.
+
+    ``wait_for_text`` computes its deadline inside the tool body, so a
+    retry restarts the clock: a transient ``LibTmuxException`` at t=29s
+    of a 30s wait would produce a ~59s call and turn the wait ceiling
+    into a lie. ``_SkipDeterministicFailures`` cannot cover this — it
+    carves out failures by exception *type*, and this exception is a
+    genuinely transient one a retry would fix for any other tool. The
+    exclusion has to be tool-level, and it is a TAG rather than a name
+    list because ``add_tool_transformation`` can rename a tool.
+    """
+    from libtmux import exc as libtmux_exc
+
+    from libtmux_mcp._utils import TAG_SELF_BOUNDED
+
+    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TAG_READONLY, TAG_SELF_BOUNDED})
+    call_next = _FlakyCallNext(
+        raises_n_times=1,
+        exception=libtmux_exc.LibTmuxException("transient socket error"),
+    )
+
+    with pytest.raises(libtmux_exc.LibTmuxException, match="transient"):
+        asyncio.run(middleware.on_call_tool(ctx, call_next))
+
+    assert call_next.calls == 1  # no retry — the wait budget is not doubled
+
+
 def test_readonly_retry_skips_non_libtmux_exception() -> None:
     """Even readonly tools don't retry on exceptions outside the trigger set.
 
