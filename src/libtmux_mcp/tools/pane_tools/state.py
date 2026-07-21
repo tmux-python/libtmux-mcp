@@ -76,15 +76,21 @@ def _read_pane_state(pane: Pane) -> _PaneState:
 
 
 def _raise_if_pane_lifecycle_changed(
-    pane: Pane, state: _PaneState, baseline_pid: str
+    pane_id: str | None, state: _PaneState, baseline_pid: str
 ) -> None:
-    """Raise ``ExpectedToolError`` when a cursor or wait baseline is invalid."""
+    """Raise ``ExpectedToolError`` when a cursor or wait baseline is invalid.
+
+    Takes the pane *id* rather than a :class:`~libtmux.pane.Pane` so the
+    wait tools can call it after they stop holding a live libtmux
+    object — they resolve the target once, off the event loop, then
+    work from the id string alone.
+    """
     if state.pane_dead:
-        msg = f"pane {pane.pane_id} died; cursor/baseline anchor is no longer valid"
+        msg = f"pane {pane_id} died; cursor/baseline anchor is no longer valid"
         raise ExpectedToolError(msg)
     if state.pane_pid != baseline_pid:
         msg = (
-            f"pane {pane.pane_id} was respawned "
+            f"pane {pane_id} was respawned "
             f"(pid {baseline_pid} -> {state.pane_pid}); "
             "cursor/baseline anchor is no longer valid"
         )

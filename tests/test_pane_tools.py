@@ -4063,9 +4063,9 @@ def test_wait_for_text_never_interpolates_pattern_into_tmux_format(
     recorded: list[tuple[str, ...]] = []
     original = wait_mod._run_tmux_lines
 
-    def _spy(server: t.Any, *args: str) -> list[str]:
+    def _spy(server: t.Any, *args: str, **kwargs: t.Any) -> list[str]:
         recorded.append(args)
-        return original(server, *args)
+        return original(server, *args, **kwargs)
 
     monkeypatch.setattr(wait_mod, "_run_tmux_lines", _spy)
 

@@ -66,9 +66,16 @@ _TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
 #: reads through ``subprocess.run(..., timeout=...)`` is the only
 #: mechanism that actually bounds the thread (``mcp.tool(timeout=...)``
 #: uses ``anyio.fail_after``, which bounds the coroutine, not the
-#: worker). Worst-case overshoot past ``effective_timeout`` is one
-#: wedged call — hence 5 s, not 30.
+#: worker). This is the CEILING on a single call; :func:`_call_budget`
+#: lowers it to whatever remains of the caller's own deadline, so the
+#: wait cannot overshoot by a whole call's worth.
 _TMUX_CALL_TIMEOUT_SECONDS = 5.0
+
+#: Floor for a budget-derived per-call timeout. Without it, a wait
+#: whose deadline has just passed would hand ``subprocess.run`` a
+#: non-positive timeout and raise instantly, reporting "tmux is
+#: unresponsive" for what is really a normal expiry.
+_TMUX_CALL_MIN_SECONDS = 0.25
 
 #: Caps on ``WaitForTextResult.tail``. Bounded by BYTES as well as
 #: lines because ``capture-pane -J`` joins wrapped rows, so one logical
@@ -134,7 +141,28 @@ async def _maybe_log(
 # ---------------------------------------------------------------------------
 
 
-def _run_tmux_lines(server: Server, *args: str) -> list[str]:
+def _call_budget(deadline: float | None) -> float:
+    """Return the per-call tmux timeout, never overshooting ``deadline``.
+
+    A fixed 5 s cap lets a single wedged call run past the caller's own
+    deadline, and the poll loop issues two reads per tick with the
+    deadline check only at the end — so a fixed cap makes the true
+    worst case ``effective_timeout + 2 x 5 s``. Deriving each call's
+    timeout from the remaining budget collapses that back.
+
+    The floor keeps a nearly-exhausted budget from passing a zero or
+    negative timeout to :func:`subprocess.run`, which would raise at
+    once and turn a normal expiry into a spurious error.
+    """
+    if deadline is None:
+        return _TMUX_CALL_TIMEOUT_SECONDS
+    remaining = deadline - time.monotonic()
+    return max(min(_TMUX_CALL_TIMEOUT_SECONDS, remaining), _TMUX_CALL_MIN_SECONDS)
+
+
+def _run_tmux_lines(
+    server: Server, *args: str, deadline: float | None = None
+) -> list[str]:
     """Run one tmux subcommand under a hard wall-clock bound.
 
     Returns stdout split on newlines with trailing blanks stripped,
@@ -143,17 +171,18 @@ def _run_tmux_lines(server: Server, *args: str) -> list[str]:
     libtmux.
     """
     argv = _tmux_argv(server, *args)
+    budget = _call_budget(deadline)
     try:
         proc = subprocess.run(
             argv,
             capture_output=True,
             check=True,
-            timeout=_TMUX_CALL_TIMEOUT_SECONDS,
+            timeout=budget,
         )
     except subprocess.TimeoutExpired as e:
         msg = (
             f"tmux {args[0]} did not return within "
-            f"{_TMUX_CALL_TIMEOUT_SECONDS}s; the tmux server is unresponsive"
+            f"{budget:.2f}s; the tmux server is unresponsive"
         )
         raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
@@ -166,23 +195,41 @@ def _run_tmux_lines(server: Server, *args: str) -> list[str]:
     return out
 
 
-def _bounded_pane_state(server: Server, pane_id: str) -> _PaneState:
-    """Read :class:`_PaneState` under :data:`_TMUX_CALL_TIMEOUT_SECONDS`."""
+def _bounded_pane_state(
+    server: Server, pane_id: str, *, deadline: float | None = None
+) -> _PaneState:
+    """Read :class:`_PaneState` bounded by the remaining wait budget."""
     out = _run_tmux_lines(
-        server, "display-message", "-p", "-t", pane_id, PANE_STATE_FORMAT
+        server,
+        "display-message",
+        "-p",
+        "-t",
+        pane_id,
+        PANE_STATE_FORMAT,
+        deadline=deadline,
     )
     return _parse_pane_state(out[0] if out else "0|0|0||0")
 
 
-def _bounded_history_limit(server: Server, pane_id: str) -> int:
-    """Read ``history-limit`` under :data:`_TMUX_CALL_TIMEOUT_SECONDS`."""
+def _bounded_history_limit(
+    server: Server, pane_id: str, *, deadline: float | None = None
+) -> int:
+    """Read ``history-limit`` bounded by the remaining wait budget."""
     out = _run_tmux_lines(
-        server, "display-message", "-p", "-t", pane_id, HISTORY_LIMIT_FORMAT
+        server,
+        "display-message",
+        "-p",
+        "-t",
+        pane_id,
+        HISTORY_LIMIT_FORMAT,
+        deadline=deadline,
     )
     return int(out[0]) if out and out[0].isdigit() else 0
 
 
-def _bounded_capture(server: Server, pane_id: str, *, start: int) -> list[str]:
+def _bounded_capture(
+    server: Server, pane_id: str, *, start: int, deadline: float | None = None
+) -> list[str]:
     """Capture pane rows from ``start`` under a hard timeout.
 
     ``-J`` joins tmux's visual wraps so a pattern spanning the wrap
@@ -190,8 +237,68 @@ def _bounded_capture(server: Server, pane_id: str, *, start: int) -> list[str]:
     No caller-supplied text reaches this argv.
     """
     return _run_tmux_lines(
-        server, "capture-pane", "-p", "-J", "-t", pane_id, "-S", str(start)
+        server,
+        "capture-pane",
+        "-p",
+        "-J",
+        "-t",
+        pane_id,
+        "-S",
+        str(start),
+        deadline=deadline,
     )
+
+
+async def _resolve_pane_bounded(
+    server: Server,
+    *,
+    pane_id: str | None,
+    session_name: str | None,
+    session_id: str | None,
+    window_id: str | None,
+) -> str:
+    """Resolve a pane target without blocking the event loop.
+
+    :func:`_resolve_pane` is a synchronous libtmux call, and libtmux
+    runs tmux through ``Popen.communicate()`` with no timeout. Called
+    bare from an ``async def`` — as every wait tool did before this — a
+    wedged tmux server freezes the entire asyncio loop, not merely one
+    worker: no other tool call, no MCP ping, and no cancellation can be
+    serviced, and ``mcp.tool(timeout=...)`` cannot fire either because
+    ``anyio.fail_after`` needs the loop to run.
+
+    Pushing it to a worker restores loop liveness, and
+    :func:`asyncio.wait_for` bounds the caller. The worker itself can
+    still outlive the call — a running ``concurrent.futures`` task is
+    not cancellable — so this converts a whole-server freeze into a
+    single temporarily-held executor slot, the same exposure every
+    other ``to_thread`` call site already carries.
+
+    Resolving natively through a bounded ``list-panes -F`` would drop
+    that residual too, but it would have to reproduce libtmux's
+    resolution precedence and its error messages; the loop freeze is
+    the severe half and this closes it.
+    """
+    try:
+        pane = await asyncio.wait_for(
+            asyncio.to_thread(
+                _resolve_pane,
+                server,
+                pane_id=pane_id,
+                session_name=session_name,
+                session_id=session_id,
+                window_id=window_id,
+            ),
+            timeout=_TMUX_CALL_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as e:
+        msg = (
+            f"resolving the target pane did not return within "
+            f"{_TMUX_CALL_TIMEOUT_SECONDS}s; the tmux server is unresponsive"
+        )
+        raise ExpectedToolError(msg) from e
+    assert pane.pane_id is not None
+    return pane.pane_id
 
 
 # ---------------------------------------------------------------------------
@@ -378,21 +485,20 @@ async def wait_for_text(
     )
 
     server = _get_server(socket_name=socket_name)
-    pane = _resolve_pane(
+
+    # Anchor ``start_time`` before pane resolution: that call reaches
+    # tmux too, so leaving it outside the clock hid it from
+    # ``elapsed_seconds`` as well as from the deadline.
+    start_time = time.monotonic()
+    deadline = start_time + effective_timeout
+
+    target = await _resolve_pane_bounded(
         server,
         pane_id=pane_id,
         session_name=session_name,
         session_id=session_id,
         window_id=window_id,
     )
-
-    assert pane.pane_id is not None
-    target = pane.pane_id
-
-    # Anchor ``start_time`` before the baseline read so
-    # ``elapsed_seconds`` reflects total call duration.
-    start_time = time.monotonic()
-    deadline = start_time + effective_timeout
 
     # Snapshot the pane state before polling. ``hs0 + cy0`` is the
     # absolute grid anchor — invariant under subsequent scrolling
@@ -401,10 +507,14 @@ async def wait_for_text(
     # ``pane_pid`` lets us detect a respawn-pane mid-wait that would
     # otherwise leave the absolute anchor pointing at the old
     # process's output. See issue #45.
-    entry = await asyncio.to_thread(_bounded_pane_state, server, target)
+    entry = await asyncio.to_thread(
+        _bounded_pane_state, server, target, deadline=deadline
+    )
     baseline_abs = entry.history_size + entry.cursor_y
     baseline_pid = entry.pane_pid
-    baseline_hlimit = await asyncio.to_thread(_bounded_history_limit, server, target)
+    baseline_hlimit = await asyncio.to_thread(
+        _bounded_history_limit, server, target, deadline=deadline
+    )
 
     # Snapshot rows below the entry cursor by content. The cursor anchor
     # alone matches any row at start_line onward, which includes stale
@@ -413,7 +523,7 @@ async def wait_for_text(
     # against this set turns the cursor anchor into an honest "content
     # written after entry" predicate.
     entry_rows = await asyncio.to_thread(
-        _bounded_capture, server, target, start=entry.cursor_y + 1
+        _bounded_capture, server, target, start=entry.cursor_y + 1, deadline=deadline
     )
     entry_below_cursor: frozenset[str] = frozenset(entry_rows)
 
@@ -444,8 +554,10 @@ async def wait_for_text(
             # and the tmux reads are blocking subprocess calls. Push
             # them to the default executor so concurrent tool calls are
             # not starved during long waits.
-            state = await asyncio.to_thread(_bounded_pane_state, server, target)
-            _raise_if_pane_lifecycle_changed(pane, state, baseline_pid)
+            state = await asyncio.to_thread(
+                _bounded_pane_state, server, target, deadline=deadline
+            )
+            _raise_if_pane_lifecycle_changed(target, state, baseline_pid)
             # When tmux's ``history-limit`` is reached, ``grid_collect_history``
             # (grid.c) frees the oldest scrollback rows and decrements
             # ``gd->hsize``, so absolute index math anchored on
@@ -509,7 +621,11 @@ async def wait_for_text(
                 rows: list[str] = []
             else:
                 rows = await asyncio.to_thread(
-                    _bounded_capture, server, target, start=start_line
+                    _bounded_capture,
+                    server,
+                    target,
+                    start=start_line,
+                    deadline=deadline,
                 )
             last_rows = rows
             # Drop lines whose content was already below the entry
