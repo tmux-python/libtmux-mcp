@@ -21,10 +21,20 @@ class _PaneState(t.NamedTuple):
     Wire format parsed by :func:`_read_pane_state`::
 
         #{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}
+        |#{alternate_on}
 
     Fields are ``|``-separated: the first three are non-negative
     integers, ``pane_pid`` is a decimal PID string, and ``pane_dead``
-    is the literal ``"0"`` or ``"1"``.
+    and ``alternate_on`` are the literal ``"0"`` or ``"1"``.
+
+    ``alternate_on`` rides along free in the same round-trip. It is
+    reported, never acted on: a pane on the alternate screen has been
+    handed to a full-screen program that owns and repaints the whole
+    grid, so "text appeared below the cursor" stops meaning anything
+    there. Measured on tmux 3.7b, ``capture-pane -S`` still returns
+    real main-screen scrollback while ``alternate_on=1`` — the grid
+    is shared, so the anchor stays arithmetically valid and only the
+    rows beneath it have been overwritten by paint.
     """
 
     history_size: int
@@ -32,6 +42,7 @@ class _PaneState(t.NamedTuple):
     pane_height: int
     pane_pid: str
     pane_dead: bool
+    alternate_on: bool = False
 
 
 #: tmux format string read by :func:`_read_pane_state`. Exposed as a
@@ -44,6 +55,7 @@ class _PaneState(t.NamedTuple):
 #: either silently corrupts the surrounding fields.
 PANE_STATE_FORMAT = (
     "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}"
+    "|#{alternate_on}"
 )
 
 #: ``history-limit`` read, split out for the same reason.
@@ -52,13 +64,22 @@ HISTORY_LIMIT_FORMAT = "#{history_limit}"
 
 def _parse_pane_state(raw: str) -> _PaneState:
     """Parse one :data:`PANE_STATE_FORMAT` line into a :class:`_PaneState`."""
-    hs, cy, sy, pid, dead = raw.split("|", 4)
+    # ``maxsplit`` is one below the field count so a pane_pid or a
+    # future field containing ``|`` cannot shift the parse. Older tmux
+    # builds that do not know ``alternate_on`` emit the literal format
+    # text rather than a value, so treat anything but ``"1"`` as off
+    # instead of raising — this read is on the hot poll path and must
+    # degrade, not fail, across the CI tmux version matrix.
+    parts = raw.split("|", 5)
+    hs, cy, sy, pid, dead = parts[:5]
+    alternate = parts[5] if len(parts) > 5 else "0"
     return _PaneState(
         history_size=int(hs),
         cursor_y=int(cy),
         pane_height=int(sy),
         pane_pid=pid,
         pane_dead=dead == "1",
+        alternate_on=alternate == "1",
     )
 
 

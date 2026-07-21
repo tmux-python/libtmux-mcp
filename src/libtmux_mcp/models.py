@@ -235,10 +235,15 @@ class WaitForTextResult(BaseModel):
     """Result of a bounded wait for new pane output.
 
     Deliberately free of inference. Every field is something the tool
-    observed directly — a match, a byte count, a clock reading. There
-    is no "likely cause", no "next action", no quiescence verdict: a
+    observed directly — a match, a clock reading, a tmux flag. There is
+    no "likely cause", no "next action", no quiescence verdict: a
     confidently-wrong diagnosis costs the agent more than an honest
     "nothing appeared, here is what the pane shows".
+
+    Field count is load-bearing. ``outputSchema`` is re-sent on every
+    request of every session, so a field that no agent branches on is a
+    permanent tax. ``outcome`` carries what three separate booleans
+    carried before it.
     """
 
     found: bool = Field(
@@ -247,75 +252,73 @@ class WaitForTextResult(BaseModel):
             "``patterns=null``, when any new output appeared."
         )
     )
-    stopped: bool = Field(
-        default=False,
-        description="True when a ``stop`` failure pattern matched and ended the wait.",
-    )
-    matched_source: t.Literal["patterns", "stop", "any"] | None = Field(
-        default=None,
+    outcome: t.Literal[
+        "matched", "any_output", "stopped", "alternate_screen", "timeout"
+    ] = Field(
         description=(
-            "Which argument produced the match: ``patterns``, ``stop``, or "
-            "``any`` for the ``patterns=null`` catch-all. Null on timeout."
-        ),
+            "How the wait ended. ``matched``: a ``patterns`` entry hit. "
+            "``any_output``: ``patterns`` was omitted and something — "
+            "possibly just a prompt repaint — was written; read it as "
+            "'the pane moved', never as 'the command finished'. "
+            "``stopped``: a ``stop`` failure marker hit. "
+            "``alternate_screen``: the pane was under a pager, editor, or "
+            "full-screen TUI, which repaints the whole grid, so matching "
+            "was suppressed — read the screen with snapshot_pane instead "
+            "of retrying. ``timeout``: nothing matched in the budget."
+        )
     )
     matched_index: int | None = Field(
         default=None,
         description=(
-            "Zero-based index of the entry in ``patterns`` or ``stop`` that "
-            "fired. Null on timeout and for the ``patterns=null`` catch-all."
+            "Zero-based index into ``patterns``, or into ``stop`` when "
+            "``outcome`` is ``stopped``. Null otherwise."
         ),
     )
     matched_lines: list[str] = Field(
         default_factory=list,
         description="Newly-written lines that matched (empty on timeout).",
     )
-    saw_new_output: bool = Field(
-        default=False,
-        description=(
-            "True when any line was written below the entry cursor during "
-            "the wait. False with ``found=false`` means the pane was silent, "
-            "not that the pattern was wrong."
-        ),
-    )
-    suppressed_stale_match: bool = Field(
-        default=False,
-        description=(
-            "True when a ``patterns`` entry already matched a row present "
-            "below the cursor at entry. Such rows are stale paint and are "
-            "excluded from matching; this flags the 'the text is right "
-            "there but the wait timed out' case."
-        ),
-    )
     tail: list[str] = Field(
         default_factory=list,
         description=(
             "Rows below the entry cursor at the final poll, tail-limited by "
             "lines and bytes. Includes stale rows excluded from matching, so "
-            "it shows what the pane looks like, not what matched."
+            "it shows what the pane looks like, not what matched. On a "
+            "timeout this usually already contains the answer — read it "
+            "before retrying with a different pattern."
         ),
     )
-    tail_truncated: bool = Field(
+    saw_new_output: bool = Field(
         default=False,
-        description="Whether ``tail`` dropped leading lines or bytes to fit its cap.",
+        description=(
+            "True when any line was written below the entry cursor during "
+            "the wait. False with ``found=false`` means the pane was silent "
+            "— often the command never ran — not that the pattern was wrong."
+        ),
+    )
+    matched_at_entry: bool = Field(
+        default=False,
+        description=(
+            "True when a ``patterns`` entry already matched text on screen "
+            "before the wait began. Such rows are stale and excluded from "
+            "matching; this flags the 'the text is right there but the wait "
+            "timed out' case. Fix it with a unique sentinel."
+        ),
+    )
+    alternate_screen: bool = Field(
+        default=False,
+        description=(
+            "True when the pane was on the terminal's alternate screen at "
+            "any point during the wait."
+        ),
     )
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
     effective_timeout: float = Field(
         description=(
             "Seconds actually enforced. Server policy caps the requested "
-            "``timeout``; compare against what you passed."
+            "``timeout``; compare against what you passed to see a clamp."
         )
-    )
-    timeout_clamped: bool = Field(
-        default=False,
-        description=(
-            "True when the requested ``timeout`` exceeded the server "
-            "ceiling and was replaced by ``effective_timeout``."
-        ),
-    )
-    risk_band_warned: bool = Field(
-        default=False,
-        description="Whether polling entered the history-limit trim-risk band",
     )
 
 

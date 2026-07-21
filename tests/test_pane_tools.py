@@ -3481,7 +3481,6 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
     )
 
     assert result.found is False
-    assert result.risk_band_warned is False
     assert any(
         level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
     ), f"expected a timeout warning, got: {log_calls}"
@@ -3624,9 +3623,11 @@ def test_wait_for_text_warns_when_already_in_risk_band(
             ctx=t.cast("t.Any", _RecordingContext()),
         )
 
-    result = asyncio.run(run())
+    # The trim-risk band is surfaced as a client log notification, not
+    # a result field: an agent cannot act on a boolean it gets after
+    # the fact, and the field was permanent weight in ``outputSchema``.
+    asyncio.run(run())
 
-    assert result.risk_band_warned is True
     assert any(
         level == "warning" and "trim-risk band" in msg for level, msg in log_calls
     ), f"expected a trim-risk-band warning during idle wait, got: {log_calls}"
@@ -3802,7 +3803,8 @@ def test_wait_for_text_clamps_oversized_timeout(
 
     assert result.found is False
     assert result.effective_timeout == 1.0
-    assert result.timeout_clamped is True
+    # The clamp is visible as effective_timeout < what we passed.
+    assert result.effective_timeout < 3600.0
     # Generous headroom for the fixed per-call tmux bound on slow CI.
     assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
 
@@ -3822,7 +3824,6 @@ def test_wait_for_text_reports_unclamped_timeout(
         )
     )
     assert result.effective_timeout == 0.3
-    assert result.timeout_clamped is False
 
 
 def test_wait_for_text_stop_pattern_returns_early(
@@ -3851,9 +3852,8 @@ def test_wait_for_text_stop_pattern_returns_early(
 
     result = asyncio.run(run())
 
-    assert result.stopped is True
+    assert result.outcome == "stopped"
     assert result.found is False
-    assert result.matched_source == "stop"
     assert result.matched_index == 1
     assert any("BUILD_FAILED_marker_z1" in line for line in result.matched_lines)
     assert result.elapsed_seconds < 10.0
@@ -3880,8 +3880,7 @@ def test_wait_for_text_pattern_hit_reports_its_index(
     result = asyncio.run(run())
 
     assert result.found is True
-    assert result.stopped is False
-    assert result.matched_source == "patterns"
+    assert result.outcome == "matched"
     assert result.matched_index == 1
 
 
@@ -3909,7 +3908,7 @@ def test_wait_for_text_none_patterns_waits_for_any_new_output(
     result = asyncio.run(run())
 
     assert result.found is True
-    assert result.matched_source == "any"
+    assert result.outcome == "any_output"
     assert result.matched_index is None
     assert result.saw_new_output is True
     assert result.elapsed_seconds < 10.0
@@ -3937,7 +3936,7 @@ def test_wait_for_text_none_patterns_times_out_on_silent_pane(
         )
     )
     assert result.found is False
-    assert result.matched_source is None
+    assert result.outcome == "timeout"
     assert result.saw_new_output is False
 
 
@@ -4005,9 +4004,8 @@ def test_wait_for_text_reports_stale_match_and_tail(
     )
 
     assert result.found is False
-    assert result.suppressed_stale_match is True
+    assert result.matched_at_entry is True
     assert any("STALE_TAIL_MARKER" in line for line in result.tail)
-    assert result.tail_truncated is False
 
 
 def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
@@ -4041,7 +4039,6 @@ def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
     assert result.saw_new_output is True
     assert len(result.tail) <= _TAIL_MAX_LINES
     assert len("\n".join(result.tail).encode()) <= _TAIL_MAX_BYTES
-    assert result.tail_truncated is True
 
 
 def test_wait_for_text_never_interpolates_pattern_into_tmux_format(

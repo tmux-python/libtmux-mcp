@@ -83,6 +83,11 @@ _TMUX_CALL_MIN_SECONDS = 0.25
 _TAIL_MAX_LINES = 20
 _TAIL_MAX_BYTES = 2_000
 
+#: Mirrors :class:`~libtmux_mcp.models.WaitForTextResult.outcome`.
+_WaitOutcome = t.Literal[
+    "matched", "any_output", "stopped", "alternate_screen", "timeout"
+]
+
 
 async def _maybe_report_progress(
     ctx: Context | None,
@@ -144,15 +149,17 @@ async def _maybe_log(
 def _call_budget(deadline: float | None) -> float:
     """Return the per-call tmux timeout, never overshooting ``deadline``.
 
-    A fixed 5 s cap lets a single wedged call run past the caller's own
-    deadline, and the poll loop issues two reads per tick with the
+    A fixed 5 s cap lets a single wedged call run past the caller's
+    own deadline, and the poll loop issues two reads per tick with the
     deadline check only at the end — so a fixed cap makes the true
-    worst case ``effective_timeout + 2 x 5 s``. Deriving each call's
-    timeout from the remaining budget collapses that back.
+    worst case ``effective_timeout + 2 x 5 s``, not
+    ``effective_timeout``. Deriving each call's timeout from the
+    remaining budget collapses that back: the wait cannot exceed its
+    deadline by more than the floor below.
 
     The floor keeps a nearly-exhausted budget from passing a zero or
-    negative timeout to :func:`subprocess.run`, which would raise at
-    once and turn a normal expiry into a spurious error.
+    negative timeout to :func:`subprocess.run` (which would raise
+    immediately and turn a normal timeout into a spurious error).
     """
     if deadline is None:
         return _TMUX_CALL_TIMEOUT_SECONDS
@@ -169,6 +176,9 @@ def _run_tmux_lines(
     matching :class:`libtmux.common.tmux_cmd`'s own normalisation so
     call sites see the same shape they did when they went through
     libtmux.
+
+    ``deadline`` is a :func:`time.monotonic` reading; when given, the
+    subprocess timeout is bounded by the budget remaining until it.
     """
     argv = _tmux_argv(server, *args)
     budget = _call_budget(deadline)
@@ -208,7 +218,7 @@ def _bounded_pane_state(
         PANE_STATE_FORMAT,
         deadline=deadline,
     )
-    return _parse_pane_state(out[0] if out else "0|0|0||0")
+    return _parse_pane_state(out[0] if out else "0|0|0||0|0")
 
 
 def _bounded_history_limit(
@@ -261,23 +271,23 @@ async def _resolve_pane_bounded(
 
     :func:`_resolve_pane` is a synchronous libtmux call, and libtmux
     runs tmux through ``Popen.communicate()`` with no timeout. Called
-    bare from an ``async def`` — as every wait tool did before this — a
-    wedged tmux server freezes the entire asyncio loop, not merely one
-    worker: no other tool call, no MCP ping, and no cancellation can be
-    serviced, and ``mcp.tool(timeout=...)`` cannot fire either because
-    ``anyio.fail_after`` needs the loop to run.
+    bare from an ``async def`` — as every wait tool did before this —
+    a wedged tmux server freezes the entire asyncio loop, not merely
+    one worker: no other tool call, no MCP ping, and no cancellation
+    can be serviced, and ``mcp.tool(timeout=...)`` cannot fire either
+    because ``anyio.fail_after`` needs the loop to run.
 
     Pushing it to a worker restores loop liveness, and
     :func:`asyncio.wait_for` bounds the caller. The worker itself can
     still outlive the call — a running ``concurrent.futures`` task is
     not cancellable — so this converts a whole-server freeze into a
-    single temporarily-held executor slot, the same exposure every
-    other ``to_thread`` call site already carries.
+    single temporarily-held executor slot, which is the same exposure
+    every other ``to_thread`` call site already carries.
 
-    Resolving natively through a bounded ``list-panes -F`` would drop
-    that residual too, but it would have to reproduce libtmux's
-    resolution precedence and its error messages; the loop freeze is
-    the severe half and this closes it.
+    SPIKE: resolving natively via a bounded ``list-panes -F`` would
+    drop the residual slot leak too, but it would have to reproduce
+    libtmux's resolution precedence and error messages. Deferred: the
+    loop freeze is the severe half and this closes it.
     """
     try:
         pane = await asyncio.wait_for(
@@ -467,7 +477,10 @@ async def wait_for_text(
         raise ExpectedToolError(msg)
 
     effective_timeout = min(timeout, ceiling)
-    timeout_clamped = effective_timeout < timeout
+    # No ``timeout_clamped`` flag: it is exactly
+    # ``effective_timeout < what_you_passed``, which the caller can
+    # compute, and a field the agent never branches on is permanent
+    # weight in ``outputSchema``.
 
     compiled_patterns = await _compile_patterns(
         patterns or [],
@@ -527,17 +540,27 @@ async def wait_for_text(
     )
     entry_below_cursor: frozenset[str] = frozenset(entry_rows)
 
+    # ``matched_at_entry`` scans the WHOLE visible screen, not just the
+    # rows the delta filter suppresses. The usual shape of this mistake
+    # is text a command printed moments ago sitting ABOVE the cursor,
+    # which a below-cursor scan reports as a clean miss — the agent
+    # then cannot tell "already there" from "never arrived".
+    visible_rows = await asyncio.to_thread(
+        _bounded_capture, server, target, start=0, deadline=deadline
+    )
+
     # Honest, non-heuristic diagnostic: did a success pattern already
     # match a row the delta filter is about to suppress? That is the
     # single most common reason a wait "should have" matched instantly
     # and instead ran to the ceiling.
-    stale_at_entry = _first_match(compiled_patterns, entry_rows) is not None
+    stale_at_entry = _first_match(compiled_patterns, visible_rows) is not None
 
     matched_lines: list[str] = []
-    matched_source: t.Literal["patterns", "stop", "any"] | None = None
+    outcome: _WaitOutcome = "timeout"
     matched_index: int | None = None
     saw_new_output = False
     warned_risk_band = False
+    saw_alternate_screen = entry.alternate_on
     last_rows: list[str] = []
 
     try:
@@ -558,6 +581,8 @@ async def wait_for_text(
                 _bounded_pane_state, server, target, deadline=deadline
             )
             _raise_if_pane_lifecycle_changed(target, state, baseline_pid)
+            if state.alternate_on:
+                saw_alternate_screen = True
             # When tmux's ``history-limit`` is reached, ``grid_collect_history``
             # (grid.c) frees the oldest scrollback rows and decrements
             # ``gd->hsize``, so absolute index math anchored on
@@ -634,24 +659,48 @@ async def wait_for_text(
             if new_lines:
                 saw_new_output = True
 
+            if state.alternate_on:
+                # A full-screen program owns and repaints the whole
+                # grid, so rows "below the cursor" are its paint, not
+                # output written after this call. Matching them reports
+                # text the program had already drawn — a false accept,
+                # which is worse than waiting. Skip matching for as long
+                # as it lasts; never latch, so quitting a pager mid-wait
+                # resumes an honest wait.
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(interval)
+                continue
+
             stop_hit = _first_match(compiled_stop, new_lines)
             pattern_hit = _first_match(compiled_patterns, new_lines)
-            # Success wins a tie within one tick: if the pane printed
-            # both a success marker and a stop marker between two polls,
-            # the run reached the state the caller asked for.
-            if pattern_hit is not None:
-                matched_index, matched_lines = pattern_hit
-                matched_source = "patterns"
-                break
+            # ``stop`` wins a same-tick tie. Every tick re-captures the
+            # whole region, so a failure line at t=1.00 and a success
+            # line at t=1.02 arrive in the SAME ``new_lines`` — letting
+            # ``patterns`` win there means a broad success pattern (a
+            # shell-prompt regex, say) silently swallows every failure
+            # marker the caller supplied, which defeats the entire
+            # point of passing ``stop``.
             if stop_hit is not None:
                 matched_index, matched_lines = stop_hit
-                matched_source = "stop"
+                outcome = "stopped"
+                break
+            if pattern_hit is not None:
+                matched_index, matched_lines = pattern_hit
+                outcome = "matched"
                 break
             if not compiled_patterns and new_lines:
                 # ``patterns=None`` catch-all: any new output satisfies
                 # the wait. Subsumes the former wait_for_content_change.
-                matched_lines = list(new_lines)
-                matched_source = "any"
+                # Reported as its own outcome so an agent that dropped
+                # ``patterns`` under context pressure can SEE that it
+                # matched "something moved", not "the thing I wanted".
+                matched_lines = _limit_lines(
+                    list(new_lines),
+                    max_lines=_TAIL_MAX_LINES,
+                    max_bytes=_TAIL_MAX_BYTES,
+                ).lines
+                outcome = "any_output"
                 break
 
             if time.monotonic() >= deadline:
@@ -670,9 +719,14 @@ async def wait_for_text(
         raise
 
     elapsed = time.monotonic() - start_time
-    found = matched_source in {"patterns", "any"}
-    stopped = matched_source == "stop"
-    if matched_source is None:
+    found = outcome in {"matched", "any_output"}
+    if outcome == "timeout" and saw_alternate_screen:
+        # Reclassify: "timeout" tells an agent its PATTERN was wrong.
+        # Here the pane spent the wait under a full-screen program, so
+        # matching was suppressed and the tool never got to look. That
+        # is a different fix — read the screen, don't retry the wait.
+        outcome = "alternate_screen"
+    if not found:
         await _maybe_log(
             ctx,
             level="warning",
@@ -687,17 +741,14 @@ async def wait_for_text(
     )
     return WaitForTextResult(
         found=found,
-        stopped=stopped,
-        matched_source=matched_source,
+        outcome=outcome,
         matched_index=matched_index,
         matched_lines=limited_matches.lines,
         saw_new_output=saw_new_output,
-        suppressed_stale_match=stale_at_entry and not found,
+        matched_at_entry=stale_at_entry and not found,
+        alternate_screen=saw_alternate_screen,
         tail=limited_tail.lines,
-        tail_truncated=limited_tail.truncated,
         pane_id=target,
         elapsed_seconds=round(elapsed, 3),
         effective_timeout=effective_timeout,
-        timeout_clamped=timeout_clamped,
-        risk_band_warned=warned_risk_band,
     )
