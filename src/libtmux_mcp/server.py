@@ -29,6 +29,11 @@ from libtmux_mcp._utils import (
     VALID_SAFETY_LEVELS,
     _server_cache,
 )
+from libtmux_mcp._wait_policy import (
+    WAIT_MAX_SECONDS_ENV,
+    _configure_wait_ceiling,
+    _resolve_wait_max_seconds,
+)
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
     AuditMiddleware,
@@ -239,6 +244,7 @@ _safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
 _suppress_history = _resolve_suppress_history(
     os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
 )
+_wait_max_seconds = _resolve_wait_max_seconds(os.environ.get(WAIT_MAX_SECONDS_ENV))
 
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output is terminal scrollback benefit from this backstop;
@@ -378,6 +384,10 @@ def _register_all() -> None:
 
     register_tools(mcp)
     _configure_history_defaults(mcp, _suppress_history)
+    # Publish the resolved wait ceiling to the wait tool module. Same
+    # shape as the history default above: server owns env resolution,
+    # tool modules never import server globals.
+    _configure_wait_ceiling(_wait_max_seconds)
     register_resources(mcp)
     register_prompts(mcp)
     _mcp_registered = True
