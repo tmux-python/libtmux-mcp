@@ -34,19 +34,24 @@ class _PaneState(t.NamedTuple):
     pane_dead: bool
 
 
-def _read_pane_state(pane: Pane) -> _PaneState:
-    """Return a :class:`_PaneState` snapshot for ``pane``.
+#: tmux format string read by :func:`_read_pane_state`. Exposed as a
+#: constant because the wait tools re-issue the identical read through
+#: a timeout-bounded ``subprocess.run`` rather than libtmux (whose
+#: ``Popen.communicate()`` has no timeout and can wedge a worker
+#: thread). It is a fixed literal — no caller-supplied text is ever
+#: interpolated into a tmux format string, because tmux's format
+#: parser treats ``#`` and ``}`` structurally and a pattern containing
+#: either silently corrupts the surrounding fields.
+PANE_STATE_FORMAT = (
+    "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}"
+)
 
-    Combines the tmux state reads needed by wait and incremental
-    capture tools into a single ``display-message`` call. ``pane_pid``
-    and ``pane_dead`` surface respawn-pane and pane-death events that
-    invalidate cursor or baseline anchors.
-    """
-    stdout = pane.display_message(
-        "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}",
-        get_text=True,
-    )
-    raw = stdout[0] if stdout else "0|0|0||0"
+#: ``history-limit`` read, split out for the same reason.
+HISTORY_LIMIT_FORMAT = "#{history_limit}"
+
+
+def _parse_pane_state(raw: str) -> _PaneState:
+    """Parse one :data:`PANE_STATE_FORMAT` line into a :class:`_PaneState`."""
     hs, cy, sy, pid, dead = raw.split("|", 4)
     return _PaneState(
         history_size=int(hs),
@@ -55,6 +60,19 @@ def _read_pane_state(pane: Pane) -> _PaneState:
         pane_pid=pid,
         pane_dead=dead == "1",
     )
+
+
+def _read_pane_state(pane: Pane) -> _PaneState:
+    """Return a :class:`_PaneState` snapshot for ``pane``.
+
+    Combines the tmux state reads needed by wait and incremental
+    capture tools into a single ``display-message`` call. ``pane_pid``
+    and ``pane_dead`` surface respawn-pane and pane-death events that
+    invalidate cursor or baseline anchors.
+    """
+    stdout = pane.display_message(PANE_STATE_FORMAT, get_text=True)
+    raw = stdout[0] if stdout else "0|0|0||0"
+    return _parse_pane_state(raw)
 
 
 def _raise_if_pane_lifecycle_changed(
@@ -83,6 +101,6 @@ def _read_history_limit(pane: Pane) -> int:
     so per-tick reads do not pay for a value that never changes between
     ticks.
     """
-    stdout = pane.display_message("#{history_limit}", get_text=True)
+    stdout = pane.display_message(HISTORY_LIMIT_FORMAT, get_text=True)
     raw = stdout[0] if stdout else "0"
     return int(raw)

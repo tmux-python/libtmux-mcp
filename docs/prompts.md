@@ -189,11 +189,11 @@ a logs tail on the bottom-right:
    `send_keys` immediately after `split_window` is safe and
    shell-agnostic.
 5. Optionally confirm each program drew its UI via
-   `wait_for_content_change(pane_id="%A", timeout=3.0)`
-   (and similarly for `%C`). This is a "did the screen change?"
-   check — it works whether the pane shows a prompt glyph, a vim
-   splash screen, or a log tail, so no shell-specific regex is
-   needed.
+   `wait_for_text(pane_id="%A", patterns=null, timeout=3.0)`
+   (and similarly for `%C`). Omitting `patterns` makes this a
+   "did anything new get printed?" check — it works whether the
+   pane shows a prompt glyph, a vim splash screen, or a log tail,
+   so no shell-specific regex is needed.
 
 Use pane IDs (`%N`) for all subsequent targeting — they are stable
 across layout changes; window renames are not.

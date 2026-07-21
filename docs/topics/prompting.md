@@ -100,7 +100,7 @@ raw TUI input or persistent shell state, use send_keys or
 send_keys_batch. For custom command completion outside run_command,
 compose `tmux wait-for -S <channel>` into the shell command and call
 wait_for_channel — deterministic, no polling. Use wait_for_text or
-wait_for_content_change for observation flows (third-party logs,
+wait_for_text for observation flows (third-party logs,
 daemon prompts), and use capture_since when you need to read the same
 pane repeatedly. Never capture_pane immediately after send_keys — the
 command may still be running.
@@ -146,6 +146,6 @@ When an agent is unsure which tool to use, these rules help:
 
 1. **Discovery first**: Call {toolref}`list-sessions` or {toolref}`list-panes` before acting on specific targets
 2. **Prefer IDs**: Once you have a `pane_id`, use it for all subsequent calls — it never changes during the pane's lifetime
-3. **Run, wait, or observe deliberately**: For commands the agent authors, prefer {toolref}`run-command`. Use {toolref}`wait-for-channel` only for custom shell composition outside that shape. Use {toolref}`capture-since` for repeated observation, and fall back to {toolref}`wait-for-text` or {toolref}`wait-for-content-change` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
+3. **Run, wait, or observe deliberately**: For commands the agent authors, prefer {toolref}`run-command`. Use {toolref}`wait-for-channel` only for custom shell composition outside that shape. Use {toolref}`capture-since` for repeated observation, and fall back to {toolref}`wait-for-text` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
 4. **Content vs. metadata**: If looking for text *in* a terminal, use {toolref}`search-panes`. If looking for pane *properties* (name, PID, path), use {toolref}`list-panes` or {toolref}`get-pane-info`
 5. **Destructive tools are opt-in**: Never kill sessions, windows, or panes unless the user explicitly asks

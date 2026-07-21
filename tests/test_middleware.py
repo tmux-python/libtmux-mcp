@@ -1618,3 +1618,27 @@ def test_unexpected_argument_suggestion_without_handshake() -> None:
     meta = result.meta or {}
     assert meta["expected"] is True
     assert "some clients (e.g. Gemini CLI)" in meta["suggestion"]
+
+
+def test_wait_for_text_is_registered_self_bounded_and_still_readonly() -> None:
+    """``wait_for_text`` carries both tags, and the extra tag is inert.
+
+    ``SafetyMiddleware._is_allowed`` inspects only the three tier tags,
+    so an additional marker tag must not change tier visibility at any
+    safety level.
+    """
+    from fastmcp import FastMCP
+
+    from libtmux_mcp._utils import TAG_SELF_BOUNDED
+    from libtmux_mcp.middleware import SafetyMiddleware
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP(name="self-bounded-audit")
+    register_tools(mcp)
+    tool = asyncio.run(mcp.get_tool("wait_for_text"))
+    assert tool is not None
+    assert TAG_READONLY in tool.tags
+    assert TAG_SELF_BOUNDED in tool.tags
+
+    for tier in (TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE):
+        assert SafetyMiddleware(max_tier=tier)._is_allowed(set(tool.tags)) is True

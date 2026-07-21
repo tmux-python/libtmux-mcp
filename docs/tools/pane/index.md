@@ -82,11 +82,7 @@ Exit copy mode.
 :::
 
 :::{grid-item-card} {tooliconl}`wait-for-text`
-Block until a pattern appears in a pane.
-:::
-
-:::{grid-item-card} {tooliconl}`wait-for-content-change`
-Block until pane content changes.
+Block until new output matches (or any new output appears).
 :::
 
 :::{grid-item-card} {tooliconl}`wait-for-channel`
@@ -131,7 +127,6 @@ resize-pane
 enter-copy-mode
 exit-copy-mode
 wait-for-text
-wait-for-content-change
 wait-for-channel
 signal-channel
 respawn-pane

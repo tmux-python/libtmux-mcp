@@ -63,7 +63,8 @@ the agent authors. For custom shell composition outside
 {tool}`send-keys` with `tmux wait-for -S <channel>` composed into the
 payload, followed by {tool}`wait-for-channel`. For output the agent
 does not author (third-party log lines, daemon prompts, interactive
-supervisors), use {tool}`wait-for-text` or {tool}`wait-for-content-change`.
+supervisors), use {tool}`wait-for-text` (pass `patterns=null` to wait
+for any new output, or `stop=[...]` to bail out on failure markers).
 
 When you need to keep checking the same pane after that first read, switch to
 {tool}`capture-since`: the first call returns a cursor, and follow-up calls
