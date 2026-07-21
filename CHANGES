@@ -6,6 +6,58 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**{tooliconl}`wait-for-text` takes `patterns` (a list) instead of `pattern`**
+
+The single `pattern` string is now `patterns: list[str] | None`. Passing `null`
+waits for any new output at all, which subsumes the removed
+`wait_for_content_change` tool. A new `stop: list[str] | None` argument carries
+failure markers; a `stop` hit ends the wait immediately and the result reports
+which entry fired (`matched_source`, `matched_index`).
+
+**`wait_for_content_change` and `ContentChangeResult` are removed**
+
+Replaced by `wait_for_text(patterns=null)`, which additionally filters
+pre-existing scrollback and stale below-cursor paint out of the change
+predicate.
+
+### What's new
+
+**{tooliconl}`wait-for-text` waits are capped at 30 seconds**
+
+An unbounded caller-supplied `timeout` let a badly-chosen search text block the
+MCP connection for minutes. The wait now honours a server ceiling, set with
+`LIBTMUX_MCP_WAIT_MAX_SECONDS` and itself hard-clamped to `[1.0, 120.0]`. An
+over-large `timeout` is clamped rather than rejected: the call returns at the
+ceiling and reports `effective_timeout` and `timeout_clamped`, so the agent
+learns the policy from the result.
+
+**{class}`~libtmux_mcp.models.WaitForTextResult` reports what the pane actually
+did**
+
+The result adds `saw_new_output`, `suppressed_stale_match` (a pattern was
+already on screen at entry and was excluded as stale paint), and a `tail` of the
+rows below the entry cursor, bounded by both lines and bytes. Every field is
+observed, not inferred.
+
+### Fixes
+
+**A wait can no longer exceed its own ceiling**
+
+Three paths each multiplied the wait budget. `ReadonlyRetryMiddleware` retried
+the whole tool on a transient libtmux error, restarting a deadline computed
+inside the tool body. The `call_*_tools_batch` wrappers accepted the wait tool
+through all three tiers (`max_tier` is a ceiling) and ran it serially with no
+aggregate deadline. And cancelled waits leaked executor slots, because libtmux
+invokes tmux through an untimed `Popen.communicate()` that an `asyncio`
+cancellation cannot interrupt.
+
+Waits are now tagged `self-bounded`: retry skips them, and every batch wrapper
+rejects them per-operation so `on_error="continue"` isolation is preserved. The
+wait path's tmux reads go through `subprocess.run(timeout=...)`, the only
+mechanism that bounds the worker thread rather than just the coroutine.
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.

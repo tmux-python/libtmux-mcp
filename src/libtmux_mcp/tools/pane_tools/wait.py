@@ -1,10 +1,11 @@
-"""Waiting / polling tools for pane content changes."""
+"""Bounded waiting / polling tool for pane output."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
+import subprocess
 import time
 import typing as t
 
@@ -15,17 +16,22 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
     _resolve_pane,
+    _tmux_argv,
     handle_tool_errors_async,
 )
-from libtmux_mcp.models import (
-    ContentChangeResult,
-    WaitForTextResult,
-)
+from libtmux_mcp._wait_policy import _wait_ceiling_seconds
+from libtmux_mcp.models import WaitForTextResult
+from libtmux_mcp.tools.pane_tools.capture_since import _limit_lines
 from libtmux_mcp.tools.pane_tools.state import (
+    HISTORY_LIMIT_FORMAT,
+    PANE_STATE_FORMAT,
+    _PaneState,
+    _parse_pane_state,
     _raise_if_pane_lifecycle_changed,
-    _read_history_limit,
-    _read_pane_state,
 )
+
+if t.TYPE_CHECKING:
+    from libtmux.server import Server
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,28 @@ _TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     BrokenPipeError,
     ConnectionError,
 )
+
+#: Per-``tmux``-invocation wall-clock bound.
+#:
+#: This is the load-bearing half of the wait ceiling. libtmux runs tmux
+#: through ``Popen.communicate()`` with no timeout, so a wedged tmux
+#: server pins the ``asyncio.to_thread`` worker until it replies —
+#: cancelling the coroutine does not cancel a ``concurrent.futures``
+#: task that has already started. The default executor has
+#: ``min(32, cpu_count + 4)`` slots; that many wedged waits stall every
+#: ``to_thread`` call on the whole server. Routing the wait's tmux
+#: reads through ``subprocess.run(..., timeout=...)`` is the only
+#: mechanism that actually bounds the thread (``mcp.tool(timeout=...)``
+#: uses ``anyio.fail_after``, which bounds the coroutine, not the
+#: worker). Worst-case overshoot past ``effective_timeout`` is one
+#: wedged call — hence 5 s, not 30.
+_TMUX_CALL_TIMEOUT_SECONDS = 5.0
+
+#: Caps on ``WaitForTextResult.tail``. Bounded by BYTES as well as
+#: lines because ``capture-pane -J`` joins wrapped rows, so one logical
+#: line can be far wider than ``pane_width``.
+_TAIL_MAX_LINES = 20
+_TAIL_MAX_BYTES = 2_000
 
 
 async def _maybe_report_progress(
@@ -101,9 +129,115 @@ async def _maybe_log(
         return
 
 
+# ---------------------------------------------------------------------------
+# Timeout-bounded tmux reads
+# ---------------------------------------------------------------------------
+
+
+def _run_tmux_lines(server: Server, *args: str) -> list[str]:
+    """Run one tmux subcommand under a hard wall-clock bound.
+
+    Returns stdout split on newlines with trailing blanks stripped,
+    matching :class:`libtmux.common.tmux_cmd`'s own normalisation so
+    call sites see the same shape they did when they went through
+    libtmux.
+    """
+    argv = _tmux_argv(server, *args)
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            check=True,
+            timeout=_TMUX_CALL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        msg = (
+            f"tmux {args[0]} did not return within "
+            f"{_TMUX_CALL_TIMEOUT_SECONDS}s; the tmux server is unresponsive"
+        )
+        raise ExpectedToolError(msg) from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+        msg = f"tmux {args[0]} failed: {stderr or e}"
+        raise ExpectedToolError(msg) from e
+    out = proc.stdout.decode("utf-8", errors="backslashreplace").split("\n")
+    while out and out[-1] == "":
+        out.pop()
+    return out
+
+
+def _bounded_pane_state(server: Server, pane_id: str) -> _PaneState:
+    """Read :class:`_PaneState` under :data:`_TMUX_CALL_TIMEOUT_SECONDS`."""
+    out = _run_tmux_lines(
+        server, "display-message", "-p", "-t", pane_id, PANE_STATE_FORMAT
+    )
+    return _parse_pane_state(out[0] if out else "0|0|0||0")
+
+
+def _bounded_history_limit(server: Server, pane_id: str) -> int:
+    """Read ``history-limit`` under :data:`_TMUX_CALL_TIMEOUT_SECONDS`."""
+    out = _run_tmux_lines(
+        server, "display-message", "-p", "-t", pane_id, HISTORY_LIMIT_FORMAT
+    )
+    return int(out[0]) if out and out[0].isdigit() else 0
+
+
+def _bounded_capture(server: Server, pane_id: str, *, start: int) -> list[str]:
+    """Capture pane rows from ``start`` under a hard timeout.
+
+    ``-J`` joins tmux's visual wraps so a pattern spanning the wrap
+    column still matches one logical line. ``-p`` prints to stdout.
+    No caller-supplied text reaches this argv.
+    """
+    return _run_tmux_lines(
+        server, "capture-pane", "-p", "-J", "-t", pane_id, "-S", str(start)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pattern compilation
+# ---------------------------------------------------------------------------
+
+
+async def _compile_patterns(
+    values: list[str],
+    *,
+    label: str,
+    regex: bool,
+    match_case: bool,
+    ctx: Context | None,
+) -> list[re.Pattern[str]]:
+    """Compile one pattern list, raising ``ExpectedToolError`` on bad input."""
+    flags = 0 if match_case else re.IGNORECASE
+    compiled: list[re.Pattern[str]] = []
+    for value in values:
+        if not value:
+            msg = f"{label} pattern must be a non-empty string"
+            raise ExpectedToolError(msg)
+        try:
+            compiled.append(re.compile(value if regex else re.escape(value), flags))
+        except re.error as e:
+            msg = f"Invalid regex pattern: {e}"
+            await _maybe_log(ctx, level="warning", message=msg)
+            raise ExpectedToolError(msg) from e
+    return compiled
+
+
+def _first_match(
+    compiled: list[re.Pattern[str]], lines: list[str]
+) -> tuple[int, list[str]] | None:
+    """Return ``(pattern_index, matching_lines)`` for the first pattern that hits."""
+    for index, pattern in enumerate(compiled):
+        hits = [line for line in lines if pattern.search(line)]
+        if hits:
+            return index, hits
+    return None
+
+
 @handle_tool_errors_async
 async def wait_for_text(
-    pattern: str,
+    patterns: list[str] | None = None,
+    stop: list[str] | None = None,
     regex: bool = False,
     pane_id: str | None = None,
     session_name: str | None = None,
@@ -115,75 +249,46 @@ async def wait_for_text(
     socket_name: str | None = None,
     ctx: Context | None = None,
 ) -> WaitForTextResult:
-    r"""Wait for NEW text to appear in a tmux pane.
+    r"""Wait for NEW output in a tmux pane, then return.
 
-    Polls the pane at regular intervals until ``pattern`` appears on a
-    line written *after* the call starts, or the timeout is reached.
-    Use this instead of polling :func:`capture_pane` manually — it
-    saves agent tokens and turns.
+    Polls until one of ``patterns`` appears on a line written *after*
+    this call starts, one of ``stop`` appears (immediate failure exit),
+    or the timeout expires. Pass ``patterns=null`` to wait for any new
+    output at all. Use this instead of polling ``capture_pane`` in a
+    loop.
 
-    **What "new" means.** At entry the tool snapshots two things: the
-    pane's absolute grid position (``history_size + cursor_y``) and the
-    contents of every row below the entry cursor. Each tick captures
-    the rows below the original baseline and discards any row whose
-    content matches the entry snapshot — those rows are stale paint
-    that pre-dates the wait, not output written after it. Scrollback
-    that was already present when the call began is ignored, and so
-    is paint-style content left below the cursor by TUI repaints,
-    ``paste-text``, or manual cursor positioning. For the synchronous
-    "is the pattern in the pane right now?" check, call
-    {tooliconl}`search-panes` instead.
+    Pre-existing scrollback is never matched, and neither is paint left
+    below the cursor at entry — only rows written after the call began
+    count. If a pattern was already on screen the result says so via
+    ``suppressed_stale_match``.
 
-    The content-delta filter has a rare false-negative case: if new
-    output happens to byte-match a row in the entry snapshot, that
-    new row is filtered out. The patterns agents typically wait on
-    (command-specific markers, full status strings) make this
-    collision unlikely in practice. For stricter "any change"
-    semantics, use {tooliconl}`wait-for-content-change`.
+    Prefer ``run_command`` for commands you author (it returns exit
+    status), or ``wait_for_channel`` with a composed
+    ``; tmux wait-for -S <channel>``. Reserve this tool for output you
+    do not control. If the pane emits recurring prompts or background
+    log lines you cannot attribute, bracket your command with a unique
+    sentinel (``cmd; echo __WAIT_$RANDOM__``) and wait for that.
 
-    In-place updates to the entry cursor's row — carriage-return
-    rewrites, progress spinners, single-line status updates — are
-    not observed; only rows below the entry cursor count as "new."
-    Use {tooliconl}`wait-for-content-change` or pair the command
-    with a sentinel for those cases.
+    ``stop`` is the cheap way to avoid burning the whole budget: pass
+    the failure markers you already know (``"error:"``, ``"FAILED"``,
+    ``"Traceback"``) and a failed run returns in milliseconds instead
+    of at the ceiling.
 
-    **Adversarial-safety pattern.** If you cannot trust that the
-    pattern only appears after your action — for example because the
-    pane prints recurring prompts, log lines, or output from background
-    processes you do not control — bracket your command with a unique
-    sentinel: ``cmd; echo __WAIT_$RANDOM__`` and wait for the sentinel
-    instead of ``cmd``'s natural output. tmux's grid model cannot
-    distinguish "your output" from "theirs"; the sentinel can.
-
-    **When NOT to use this — sequential ``send_keys`` race.** If you
-    call ``send_keys`` and immediately ``wait_for_text``, fast output
-    (``echo``, prompt-return after ``^C``) can land *before* this tool
-    snapshots the baseline, and the match is then invisible to the
-    wait. The race is small but real on CI and over remote sockets.
-    For commands you author, prefer ``run_command`` so completion,
-    exit status, and output arrive as one typed result. For custom
-    shell composition outside that shape, append
-    ``; tmux wait-for -S <channel>`` to your ``send_keys`` payload and
-    call ``wait_for_channel`` instead. Reserve ``wait_for_text`` for
-    output you do not control
-    (third-party process logs, daemon prompts, interactive
-    supervisors).
-
-    When a :class:`fastmcp.Context` is available, this tool emits
-    periodic ``ctx.report_progress`` notifications so MCP clients can
-    show a "polling pane X... (elapsed/timeout)" indicator during long
-    waits. Progress notifications never block the timeout contract —
-    if the client connection is gone the progress call is suppressed
-    and polling continues.
+    The server caps ``timeout``. An over-large value is not an error —
+    the wait returns at the ceiling and reports ``effective_timeout``.
 
     Parameters
     ----------
-    pattern : str
-        Text to wait for. Treated as literal text by default. Set
-        ``regex=True`` to interpret as a regular expression.
+    patterns : list of str, optional
+        Success patterns; the first one to match ends the wait.
+        Literal text unless ``regex=True``. Omit or pass ``null`` to
+        wait for any new output.
+    stop : list of str, optional
+        Failure patterns. A hit ends the wait immediately with
+        ``stopped=true`` and ``found=false``.
     regex : bool
-        Whether to interpret pattern as a regular expression. Default False
-        (literal text matching).
+        Interpret ``patterns`` and ``stop`` as regular expressions.
+        Default False (literal text).
     pane_id : str, optional
         Pane ID (e.g. '%1').
     session_name : str, optional
@@ -193,9 +298,10 @@ async def wait_for_text(
     window_id : str, optional
         Window ID for pane resolution.
     timeout : float
-        Maximum seconds to wait. Default 8.0.
+        Requested seconds to wait. Default 8.0. Clamped by server
+        policy; see ``effective_timeout`` in the result.
     interval : float
-        Seconds between polls. Default 0.05 (50ms).
+        Seconds between polls. Default 0.05 (50ms). Minimum 0.01.
     match_case : bool
         Whether to match case. Default False (case-insensitive).
     socket_name : str, optional
@@ -207,85 +313,69 @@ async def wait_for_text(
     Returns
     -------
     WaitForTextResult
-        Result with found status, matched lines, and timing info.
+        Match outcome, a bounded tail of what the pane printed, and the
+        timeout actually enforced.
 
     Notes
     -----
-    **Scrollback rollover detection is partial.** The tool raises
-    ``ExpectedToolError`` when ``hsize`` shrinks below the entry value — which
-    catches ``clear-history`` and any rollover where the dip is
-    observable between polls. It does **not** reliably detect
-    ``grid_collect_history`` trim that fires during continuous output:
-    tmux trims (~10% of ``history-limit``) then immediately scrolls
-    new lines back, so sampled ``hsize`` can stay clamped at the cap
-    and never appear below entry. For deterministic command-completion
-    synchronization use ``wait_for_channel``; for observation flows
-    that approach ``history-limit``, the tool emits a runtime
-    ``ctx.warning`` notification when sampled state enters the
-    trim-risk band.
+    **Matching happens in Python, never in tmux.** Patterns are never
+    interpolated into a tmux format string: tmux's format parser treats
+    ``#`` and ``}`` structurally, so an ordinary regex quantifier
+    corrupts field parsing and a pattern ending in ``#`` swallows the
+    rest of the format. Only fixed literal formats reach tmux.
 
-    Note that ``hsize`` also decrements on resize-grow when there is
-    scrolled history available (``screen.c`` ``screen_resize_y``),
-    but in that case the row data is not freed — only the
-    history/visible-region boundary moves and absolute indices stay
-    valid. The guard distinguishes the two cases by also requiring
-    ``pane_height`` to not have grown, so resize-grow continues
-    polling cleanly.
+    **Every tmux call is timeout-bounded.** The reads go through
+    ``subprocess.run(timeout=...)`` rather than libtmux's untimed
+    ``Popen.communicate()``, so a wedged tmux server cannot pin an
+    executor worker past the wait budget.
 
-    **Wrapped lines are joined for matching.** Captures pass tmux's
-    ``-J`` flag so a pattern that spans the pane's visual wrap is
-    still matched against the joined logical line. The returned
-    ``matched_lines`` entry for such a hit is the joined line and
-    can therefore be longer than ``pane_width``.
+    **Alternate screen / pagers are not handled.** Inside ``less``,
+    ``capture-pane`` returns the pager's painted rows, so a wait for
+    text the pager has drawn matches on paint. That is a false
+    positive, not a hang, and this tool does not detect it.
 
-    **In-place rewrites below the baseline.** Programs that paint
-    over rows the tool will capture — cursor-position escape
-    sequences, full-screen progress displays, anything that rewrites
-    rows it already wrote — can re-introduce text the caller saw
-    earlier. Each tick captures the current contents of rows below
-    the baseline; tmux's grid model cannot distinguish "fresh write"
-    from "repaint with the same characters."
-    ``screen_write_reverseindex`` (``screen-write.c``) only scrolls
-    the visible region within ``[rupper, rlower]`` and never touches
-    ``hsize``, so ``\\eM`` itself does not invalidate the anchor —
-    but the surrounding TUI render loop may. Full-screen TUIs
-    typically run on the alternate screen (a separate grid that
-    this tool does not traverse), so the main-screen pattern is
-    rare in practice.
+    **Scrollback rollover detection is partial.** The tool raises when
+    ``hsize`` shrinks below the entry value (``clear-history``, and any
+    rollover whose dip is observable between polls). It does not
+    reliably detect ``grid_collect_history`` trim during continuous
+    output; a runtime ``ctx.warning`` fires when sampled state enters
+    the trim-risk band. Use ``wait_for_channel`` when correctness
+    matters more than convenience.
 
-    **``clear`` / ``reset``.** With the default ``scroll-on-clear``
-    option, cleared content scrolls into history (``screen-write.c``
-    ``screen_write_clearscreen``), so the baseline anchor is
-    unaffected.
-
-    **Safety tier.** Tagged ``readonly`` because the tool observes
-    pane state without mutating it. Readonly clients may therefore
-    block for the caller-supplied ``timeout`` (default 8 s, caller
-    may pass larger values). The capture call runs on the asyncio
-    default thread-pool executor, whose size caps concurrent waits
-    (``min(32, os.cpu_count() + 4)`` on CPython); a malicious
-    readonly client could saturate that pool with long-timeout
-    calls. If you need to rate-limit wait tools, do it at the
-    transport layer or with dedicated middleware.
+    **In-place rewrites of the entry cursor row are invisible.**
+    Carriage-return rewrites, spinners, and single-line status updates
+    happen on the baseline row, which is excluded. Pair those with a
+    sentinel on a fresh line.
     """
-    if not pattern:
-        msg = "pattern must be a non-empty string"
-        raise ExpectedToolError(msg)
+    ceiling = _wait_ceiling_seconds()
+
     if interval < 0.01:
         msg = f"interval must be at least 0.01 s (received {interval})"
         raise ExpectedToolError(msg)
     if timeout <= 0:
         msg = f"timeout must be positive (received {timeout})"
         raise ExpectedToolError(msg)
+    if patterns is not None and not patterns:
+        msg = "patterns must be a non-empty list, or null to wait for any new output"
+        raise ExpectedToolError(msg)
 
-    search_pattern = pattern if regex else re.escape(pattern)
-    flags = 0 if match_case else re.IGNORECASE
-    try:
-        compiled = re.compile(search_pattern, flags)
-    except re.error as e:
-        msg = f"Invalid regex pattern: {e}"
-        await _maybe_log(ctx, level="warning", message=msg)
-        raise ExpectedToolError(msg) from e
+    effective_timeout = min(timeout, ceiling)
+    timeout_clamped = effective_timeout < timeout
+
+    compiled_patterns = await _compile_patterns(
+        patterns or [],
+        label="patterns",
+        regex=regex,
+        match_case=match_case,
+        ctx=ctx,
+    )
+    compiled_stop = await _compile_patterns(
+        stop or [],
+        label="stop",
+        regex=regex,
+        match_case=match_case,
+        ctx=ctx,
+    )
 
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -297,17 +387,12 @@ async def wait_for_text(
     )
 
     assert pane.pane_id is not None
+    target = pane.pane_id
 
-    # Anchor ``start_time`` before the baseline read so the elapsed
-    # time returned in ``WaitForTextResult.elapsed_seconds`` reflects
-    # total call duration, including the baseline read. The
-    # user-supplied ``timeout`` still cannot bound a stalled tmux
-    # command — libtmux's ``tmux_cmd`` uses ``Popen.communicate()``
-    # with no subprocess timeout, so a hung tmux read can exceed the
-    # budget. The early anchor measures that blowout; it doesn't
-    # prevent it.
+    # Anchor ``start_time`` before the baseline read so
+    # ``elapsed_seconds`` reflects total call duration.
     start_time = time.monotonic()
-    deadline = start_time + timeout
+    deadline = start_time + effective_timeout
 
     # Snapshot the pane state before polling. ``hs0 + cy0`` is the
     # absolute grid anchor — invariant under subsequent scrolling
@@ -316,30 +401,34 @@ async def wait_for_text(
     # ``pane_pid`` lets us detect a respawn-pane mid-wait that would
     # otherwise leave the absolute anchor pointing at the old
     # process's output. See issue #45.
-    entry = await asyncio.to_thread(_read_pane_state, pane)
+    entry = await asyncio.to_thread(_bounded_pane_state, server, target)
     baseline_abs = entry.history_size + entry.cursor_y
     baseline_pid = entry.pane_pid
-    baseline_hlimit = await asyncio.to_thread(_read_history_limit, pane)
+    baseline_hlimit = await asyncio.to_thread(_bounded_history_limit, server, target)
 
     # Snapshot rows below the entry cursor by content. The cursor anchor
     # alone matches any row at start_line onward, which includes stale
     # paint-style content (TUI repaints, paste-text, manual cursor
     # positioning) that pre-dates the wait. Filtering per-tick captures
     # against this set turns the cursor anchor into an honest "content
-    # written after entry" predicate. Stored as a frozenset for O(1)
-    # lookup against the typically small below-cursor row set.
-    entry_below_cursor: frozenset[str] = frozenset(
-        await asyncio.to_thread(
-            pane.capture_pane,
-            start=entry.cursor_y + 1,
-            end=None,
-            join_wrapped=True,
-        )
+    # written after entry" predicate.
+    entry_rows = await asyncio.to_thread(
+        _bounded_capture, server, target, start=entry.cursor_y + 1
     )
+    entry_below_cursor: frozenset[str] = frozenset(entry_rows)
+
+    # Honest, non-heuristic diagnostic: did a success pattern already
+    # match a row the delta filter is about to suppress? That is the
+    # single most common reason a wait "should have" matched instantly
+    # and instead ran to the ceiling.
+    stale_at_entry = _first_match(compiled_patterns, entry_rows) is not None
 
     matched_lines: list[str] = []
-    found = False
+    matched_source: t.Literal["patterns", "stop", "any"] | None = None
+    matched_index: int | None = None
+    saw_new_output = False
     warned_risk_band = False
+    last_rows: list[str] = []
 
     try:
         while True:
@@ -347,15 +436,15 @@ async def wait_for_text(
             await _maybe_report_progress(
                 ctx,
                 progress=elapsed,
-                total=timeout,
-                message=f"Polling pane {pane.pane_id} for pattern",
+                total=effective_timeout,
+                message=f"Polling pane {target} for pattern",
             )
 
-            # FastMCP direct-awaits async tools on the main event loop;
-            # the libtmux display-message + capture_pane calls are both
-            # blocking subprocess.run. Push to the default executor so
-            # concurrent tool calls are not starved during long waits.
-            state = await asyncio.to_thread(_read_pane_state, pane)
+            # FastMCP direct-awaits async tools on the main event loop
+            # and the tmux reads are blocking subprocess calls. Push
+            # them to the default executor so concurrent tool calls are
+            # not starved during long waits.
+            state = await asyncio.to_thread(_bounded_pane_state, server, target)
             _raise_if_pane_lifecycle_changed(pane, state, baseline_pid)
             # When tmux's ``history-limit`` is reached, ``grid_collect_history``
             # (grid.c) frees the oldest scrollback rows and decrements
@@ -376,7 +465,7 @@ async def wait_for_text(
                 and state.pane_height <= entry.pane_height
             ):
                 msg = (
-                    f"pane {pane.pane_id} history shrank below entry "
+                    f"pane {target} history shrank below entry "
                     f"baseline (history_size {entry.history_size} -> "
                     f"{state.history_size}); baseline anchor lost — "
                     "re-arm wait_for_text or use wait_for_channel for "
@@ -388,9 +477,7 @@ async def wait_for_text(
             # grid_collect_history trim during continuous output, where
             # hsize bounces between (hlimit - hlimit/10) and hlimit
             # faster than we can poll. Emit a one-shot warning when
-            # sampled state is in the trim-risk band so agents
-            # subscribed to MCP log notifications know to verify
-            # results or switch to wait_for_channel.
+            # sampled state is in the trim-risk band.
             if not warned_risk_band and baseline_hlimit > 0:
                 trim_batch = max(baseline_hlimit // 10, 1)
                 risk_floor = baseline_hlimit - trim_batch
@@ -399,7 +486,7 @@ async def wait_for_text(
                         ctx,
                         level="warning",
                         message=(
-                            f"pane {pane.pane_id} is polling in the "
+                            f"pane {target} is polling in the "
                             "history-limit trim-risk band "
                             f"(history_size {state.history_size} / "
                             f"history_limit {baseline_hlimit}); "
@@ -419,30 +506,36 @@ async def wait_for_text(
             # ``state.pane_height`` (re-read each tick) so a resize mid-wait
             # doesn't leave the guard keyed to a stale height.
             if start_line >= state.pane_height:
-                lines: list[str] = []
+                rows: list[str] = []
             else:
-                # ``join_wrapped=True`` adds tmux's ``-J`` so visually
-                # wrapped lines are returned as one logical line. Without
-                # this, a pattern that spans tmux's wrap column is split
-                # across two rows and ``re.search`` against each row in
-                # isolation never matches. Trade-off: the returned
-                # ``matched_lines`` can contain a single string longer
-                # than ``pane_width``.
-                lines = await asyncio.to_thread(
-                    pane.capture_pane,
-                    start=start_line,
-                    end=None,
-                    join_wrapped=True,
+                rows = await asyncio.to_thread(
+                    _bounded_capture, server, target, start=start_line
                 )
-            # Filter out lines whose content was already below the
-            # entry cursor — those are stale paint, not output written
-            # after the call began. Then run the regex against the
-            # truly-new lines.
-            new_lines = [line for line in lines if line not in entry_below_cursor]
-            hits = [line for line in new_lines if compiled.search(line)]
-            if hits:
-                matched_lines.extend(hits)
-                found = True
+            last_rows = rows
+            # Drop lines whose content was already below the entry
+            # cursor — stale paint, not output written after the call.
+            new_lines = [line for line in rows if line not in entry_below_cursor]
+            if new_lines:
+                saw_new_output = True
+
+            stop_hit = _first_match(compiled_stop, new_lines)
+            pattern_hit = _first_match(compiled_patterns, new_lines)
+            # Success wins a tie within one tick: if the pane printed
+            # both a success marker and a stop marker between two polls,
+            # the run reached the state the caller asked for.
+            if pattern_hit is not None:
+                matched_index, matched_lines = pattern_hit
+                matched_source = "patterns"
+                break
+            if stop_hit is not None:
+                matched_index, matched_lines = stop_hit
+                matched_source = "stop"
+                break
+            if not compiled_patterns and new_lines:
+                # ``patterns=None`` catch-all: any new output satisfies
+                # the wait. Subsumes the former wait_for_content_change.
+                matched_lines = list(new_lines)
+                matched_source = "any"
                 break
 
             if time.monotonic() >= deadline:
@@ -456,151 +549,39 @@ async def wait_for_text(
         logger.debug(
             "wait_for_text cancelled after %.3fs on pane %s",
             time.monotonic() - start_time,
-            pane.pane_id,
+            target,
         )
         raise
 
     elapsed = time.monotonic() - start_time
-    if not found:
+    found = matched_source in {"patterns", "any"}
+    stopped = matched_source == "stop"
+    if matched_source is None:
         await _maybe_log(
             ctx,
             level="warning",
-            message=(
-                f"Pattern not found in pane {pane.pane_id} before {timeout}s timeout"
-            ),
+            message=f"No match in pane {target} before {effective_timeout}s timeout",
         )
+
+    limited_tail = _limit_lines(
+        last_rows, max_lines=_TAIL_MAX_LINES, max_bytes=_TAIL_MAX_BYTES
+    )
+    limited_matches = _limit_lines(
+        matched_lines, max_lines=_TAIL_MAX_LINES, max_bytes=_TAIL_MAX_BYTES
+    )
     return WaitForTextResult(
         found=found,
-        matched_lines=matched_lines,
-        pane_id=pane.pane_id,
+        stopped=stopped,
+        matched_source=matched_source,
+        matched_index=matched_index,
+        matched_lines=limited_matches.lines,
+        saw_new_output=saw_new_output,
+        suppressed_stale_match=stale_at_entry and not found,
+        tail=limited_tail.lines,
+        tail_truncated=limited_tail.truncated,
+        pane_id=target,
         elapsed_seconds=round(elapsed, 3),
+        effective_timeout=effective_timeout,
+        timeout_clamped=timeout_clamped,
         risk_band_warned=warned_risk_band,
-    )
-
-
-@handle_tool_errors_async
-async def wait_for_content_change(
-    pane_id: str | None = None,
-    session_name: str | None = None,
-    session_id: str | None = None,
-    window_id: str | None = None,
-    timeout: float = 8.0,
-    interval: float = 0.05,
-    socket_name: str | None = None,
-    ctx: Context | None = None,
-) -> ContentChangeResult:
-    """Wait for any content change in a tmux pane.
-
-    Captures the current pane content, then polls until the content differs
-    or the timeout is reached. Use this after send_keys when you don't know
-    what the output will be — it waits for "something happened" rather than
-    a specific pattern.
-
-    Raises ``ExpectedToolError`` when pane respawn or pane death invalidates the
-    baseline captured at entry. For correctness-sensitive flows prefer
-    ``wait_for_channel`` composed with ``tmux wait-for -S``.
-
-    Emits :meth:`fastmcp.Context.report_progress` each tick when a
-    Context is injected, so clients can render a progress indicator
-    during the wait.
-
-    Parameters
-    ----------
-    pane_id : str, optional
-        Pane ID (e.g. '%1').
-    session_name : str, optional
-        Session name for pane resolution.
-    session_id : str, optional
-        Session ID (e.g. '$1') for pane resolution.
-    window_id : str, optional
-        Window ID for pane resolution.
-    timeout : float
-        Maximum seconds to wait. Default 8.0.
-    interval : float
-        Seconds between polls. Default 0.05 (50ms).
-    socket_name : str, optional
-        tmux socket name.
-    ctx : fastmcp.Context, optional
-        FastMCP context for progress notifications. Omitted in tests.
-
-    Returns
-    -------
-    ContentChangeResult
-        Result with changed status and timing info.
-
-    Notes
-    -----
-    **Safety tier.** Tagged ``readonly`` because the tool observes
-    pane state without mutating it. Readonly clients may therefore
-    block for the caller-supplied ``timeout`` (default 8 s, caller
-    may pass larger values). The capture call runs on the asyncio
-    default thread-pool executor, whose size caps concurrent waits
-    (``min(32, os.cpu_count() + 4)`` on CPython); a malicious
-    readonly client could saturate that pool with long-timeout
-    calls. If you need to rate-limit wait tools, do it at the
-    transport layer or with dedicated middleware.
-    """
-    server = _get_server(socket_name=socket_name)
-    pane = _resolve_pane(
-        server,
-        pane_id=pane_id,
-        session_name=session_name,
-        session_id=session_id,
-        window_id=window_id,
-    )
-
-    assert pane.pane_id is not None
-    entry = await asyncio.to_thread(_read_pane_state, pane)
-    baseline_pid = entry.pane_pid
-    _raise_if_pane_lifecycle_changed(pane, entry, baseline_pid)
-
-    # See comment in wait_for_text: push the blocking capture off the
-    # main event loop via asyncio.to_thread.
-    initial_content = await asyncio.to_thread(pane.capture_pane)
-    start_time = time.monotonic()
-    deadline = start_time + timeout
-    changed = False
-
-    try:
-        while True:
-            elapsed = time.monotonic() - start_time
-            await _maybe_report_progress(
-                ctx,
-                progress=elapsed,
-                total=timeout,
-                message=f"Watching pane {pane.pane_id} for change",
-            )
-
-            state = await asyncio.to_thread(_read_pane_state, pane)
-            _raise_if_pane_lifecycle_changed(pane, state, baseline_pid)
-            current = await asyncio.to_thread(pane.capture_pane)
-            if current != initial_content:
-                changed = True
-                break
-
-            if time.monotonic() >= deadline:
-                break
-            await asyncio.sleep(interval)
-    except asyncio.CancelledError:
-        # MCP cancellation — see ``wait_for_text`` for rationale.
-        logger.debug(
-            "wait_for_content_change cancelled after %.3fs on pane %s",
-            time.monotonic() - start_time,
-            pane.pane_id,
-        )
-        raise
-
-    elapsed = time.monotonic() - start_time
-    if not changed:
-        await _maybe_log(
-            ctx,
-            level="warning",
-            message=(
-                f"No content change in pane {pane.pane_id} before {timeout}s timeout"
-            ),
-        )
-    return ContentChangeResult(
-        changed=changed,
-        pane_id=pane.pane_id,
-        elapsed_seconds=round(elapsed, 3),
     )

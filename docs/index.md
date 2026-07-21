@@ -71,7 +71,7 @@ Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 
 Read tmux state without changing anything.
 
-{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`wait-for-content-change` · {toolref}`display-message` · {toolref}`call-readonly-tools-batch`
+{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`display-message` · {toolref}`call-readonly-tools-batch`
 
 ### Act (mutating)
 

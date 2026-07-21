@@ -118,8 +118,8 @@ def send_keys(
     captured output, use ``run_command`` instead. For custom completion
     outside that shape, compose ``tmux wait-for -S <channel>`` into the
     shell command and call ``wait_for_channel``. For repeated observation
-    after input, prefer ``capture_since``; reserve ``wait_for_text`` and
-    ``wait_for_content_change`` for output the agent does not author.
+    after input, prefer ``capture_since``; reserve ``wait_for_text``
+    for output the agent does not author.
 
     Do NOT call ``capture_pane`` immediately — both the read and the
     pattern-match paths race the pane's PTY draw.

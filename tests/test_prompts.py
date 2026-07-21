@@ -144,10 +144,10 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     ``tail -f`` take over the terminal and never draw a shell prompt,
     so the wait would block until timeout.
 
-    The corrected recipe uses ``wait_for_content_change`` after launch
-    for an optional "program started" confirmation — a screen-change
-    check that works for every shell and every program, no glyph
-    matching required.
+    The corrected recipe uses ``wait_for_text(patterns=null)`` after
+    launch for an optional "program started" confirmation — an
+    any-new-output check that works for every shell and every program,
+    no glyph matching required.
     """
     from libtmux_mcp.prompts.recipes import build_dev_workspace
 
@@ -156,8 +156,8 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     assert "wait for the prompt" not in text
     assert "Between each step, wait for the prompt" not in text
     # Post-launch confirmation still uses the right primitive:
-    # content-change, not prompt-match.
-    assert "wait_for_content_change" in text
+    # any-new-output, not prompt-match.
+    assert "patterns=null" in text
 
 
 def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
@@ -184,8 +184,8 @@ def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
     # The stray-Enter-into-idle-shell line must be gone.
     assert 'send_keys(pane_id="%B", keys="")' not in text
     # Positive pin: post-launch UI confirmation is still available
-    # via the shell-agnostic content-change primitive.
-    assert "wait_for_content_change" in text
+    # via the shell-agnostic any-new-output primitive.
+    assert "patterns=null" in text
 
 
 def _extract_tool_calls(

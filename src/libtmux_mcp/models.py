@@ -232,15 +232,87 @@ class EnvironmentSetResult(BaseModel):
 
 
 class WaitForTextResult(BaseModel):
-    """Result of waiting for text to appear in a pane."""
+    """Result of a bounded wait for new pane output.
 
-    found: bool = Field(description="Whether the pattern was found before timeout")
+    Deliberately free of inference. Every field is something the tool
+    observed directly — a match, a byte count, a clock reading. There
+    is no "likely cause", no "next action", no quiescence verdict: a
+    confidently-wrong diagnosis costs the agent more than an honest
+    "nothing appeared, here is what the pane shows".
+    """
+
+    found: bool = Field(
+        description=(
+            "True when a ``patterns`` entry matched new output, or, with "
+            "``patterns=null``, when any new output appeared."
+        )
+    )
+    stopped: bool = Field(
+        default=False,
+        description="True when a ``stop`` failure pattern matched and ended the wait.",
+    )
+    matched_source: t.Literal["patterns", "stop", "any"] | None = Field(
+        default=None,
+        description=(
+            "Which argument produced the match: ``patterns``, ``stop``, or "
+            "``any`` for the ``patterns=null`` catch-all. Null on timeout."
+        ),
+    )
+    matched_index: int | None = Field(
+        default=None,
+        description=(
+            "Zero-based index of the entry in ``patterns`` or ``stop`` that "
+            "fired. Null on timeout and for the ``patterns=null`` catch-all."
+        ),
+    )
     matched_lines: list[str] = Field(
         default_factory=list,
-        description="Lines matching the pattern (empty if not found)",
+        description="Newly-written lines that matched (empty on timeout).",
+    )
+    saw_new_output: bool = Field(
+        default=False,
+        description=(
+            "True when any line was written below the entry cursor during "
+            "the wait. False with ``found=false`` means the pane was silent, "
+            "not that the pattern was wrong."
+        ),
+    )
+    suppressed_stale_match: bool = Field(
+        default=False,
+        description=(
+            "True when a ``patterns`` entry already matched a row present "
+            "below the cursor at entry. Such rows are stale paint and are "
+            "excluded from matching; this flags the 'the text is right "
+            "there but the wait timed out' case."
+        ),
+    )
+    tail: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Rows below the entry cursor at the final poll, tail-limited by "
+            "lines and bytes. Includes stale rows excluded from matching, so "
+            "it shows what the pane looks like, not what matched."
+        ),
+    )
+    tail_truncated: bool = Field(
+        default=False,
+        description="Whether ``tail`` dropped leading lines or bytes to fit its cap.",
     )
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+    effective_timeout: float = Field(
+        description=(
+            "Seconds actually enforced. Server policy caps the requested "
+            "``timeout``; compare against what you passed."
+        )
+    )
+    timeout_clamped: bool = Field(
+        default=False,
+        description=(
+            "True when the requested ``timeout`` exceeded the server "
+            "ceiling and was replaced by ``effective_timeout``."
+        ),
+    )
     risk_band_warned: bool = Field(
         default=False,
         description="Whether polling entered the history-limit trim-risk band",
@@ -659,11 +731,3 @@ class BufferContent(BaseModel):
         default=0,
         description="Number of lines dropped from the head when truncating.",
     )
-
-
-class ContentChangeResult(BaseModel):
-    """Result of waiting for any screen content change."""
-
-    changed: bool = Field(description="Whether the content changed before timeout")
-    pane_id: str = Field(description="Pane ID that was polled")
-    elapsed_seconds: float = Field(description="Time spent waiting in seconds")

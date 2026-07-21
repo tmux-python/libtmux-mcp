@@ -10,9 +10,8 @@ a terminal program. For several ordered raw-input operations, use
 **Avoid when** you need to run one authored shell command and
 immediately capture its result — use {tooliconl}`run-command` so exit
 status, timeout state, and output come back as one typed result. For
-output the agent does not author, use {tooliconl}`wait-for-text` /
-{tooliconl}`wait-for-content-change` or observe with
-{tooliconl}`capture-since`.
+output the agent does not author, use {tooliconl}`wait-for-text` or
+observe with {tooliconl}`capture-since`.
 
 **Side effects:** Sends keystrokes to the pane. If `enter` is true (default),
 the command executes.

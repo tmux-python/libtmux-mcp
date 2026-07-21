@@ -255,7 +255,11 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
     assert "wait_for_channel" in _BASE_INSTRUCTIONS
     assert "capture_since" in _BASE_INSTRUCTIONS
     assert "wait_for_text" in _BASE_INSTRUCTIONS
-    assert "wait_for_content_change" in _BASE_INSTRUCTIONS
+    # The catch-all form replaced the separate wait_for_content_change
+    # tool; the instructions must still name it so agents know the
+    # "wait for any new output" affordance exists.
+    assert "patterns=null" in _BASE_INSTRUCTIONS
+    assert "stop=" in _BASE_INSTRUCTIONS
     assert "send_keys_batch" in _BASE_INSTRUCTIONS
     assert _BASE_INSTRUCTIONS.index("run_command") < _BASE_INSTRUCTIONS.index(
         "wait_for_channel"
@@ -714,7 +718,6 @@ _VERBS_OF_ART = frozenset(
         "clear_pane",
         "search_panes",
         "wait_for_text",
-        "wait_for_content_change",
         "select_pane",
         "swap_pane",
         "enter_copy_mode",
