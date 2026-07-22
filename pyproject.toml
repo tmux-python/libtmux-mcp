@@ -111,6 +111,13 @@ lint = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Development pin only (this branch): the chained plan tools + watchers
+# consume libtmux's unreleased experimental MCP adapter
+# (libtmux.experimental.mcp / .engines). Points libtmux at the engine-ops
+# branch so those APIs are importable. Not for release.
+[tool.uv.sources]
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", branch = "engine-ops" }
+
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
 # fresh release blocking on the 3-day cooldown blocks every
