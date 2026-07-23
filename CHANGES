@@ -54,9 +54,29 @@ invokes tmux through an untimed `Popen.communicate()` that an `asyncio`
 cancellation cannot interrupt.
 
 Waits are now tagged `self-bounded`: retry skips them, and every batch wrapper
-rejects them per-operation so `on_error="continue"` isolation is preserved. The
-wait path's tmux reads go through `subprocess.run(timeout=...)`, the only
-mechanism that bounds the worker thread rather than just the coroutine.
+rejects them per-operation so `on_error="continue"` isolation is preserved.
+
+**{tooliconl}`wait-for-channel` and {tooliconl}`run-command` also honour the
+wait ceiling**
+
+Both block on `tmux wait-for` through a caller-supplied `timeout` with no
+server-side clamp — an oversized value stalled the shared MCP connection for as
+long as the caller asked, worse than the bug the {tooliconl}`wait-for-text`
+ceiling exists to fix. Both now clamp to the same `LIBTMUX_MCP_WAIT_MAX_SECONDS`
+ceiling: {tooliconl}`run-command` reports the timeout it actually enforced on
+{class}`~libtmux_mcp.models.RunCommandResult.effective_timeout`, and
+{tooliconl}`wait-for-channel` reports it in its confirmation message.
+
+**A wedged tmux no longer hangs the server**
+
+The wait path used to reach tmux through worker threads, and a thread blocked in
+libtmux's untimed `Popen.communicate()` cannot be cancelled. Because
+`concurrent.futures` joins its pool workers untimed at interpreter shutdown, a
+single unresponsive tmux left the process — and Ctrl-C — hanging indefinitely.
+Every tmux call the wait makes, pane resolution included, now runs as an
+`asyncio` subprocess bounded against the wait's own deadline and killed on
+expiry, so no wait-path work runs on a thread and the server exits promptly even
+when tmux stops responding.
 
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 

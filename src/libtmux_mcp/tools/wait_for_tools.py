@@ -15,7 +15,10 @@ If the shell command that was supposed to emit the signal crashes
 before it ran, the wait would deadlock the MCP server and every agent
 connected to it. :func:`wait_for_channel` therefore *requires* a
 timeout and wraps the underlying ``subprocess.run`` call in
-``timeout=timeout``. Agents SHOULD use the safe composition pattern::
+``timeout=timeout``, itself capped by the same server wait ceiling
+:func:`~libtmux_mcp._wait_policy._wait_ceiling_seconds` publishes for
+``wait_for_text`` — an over-large ``timeout`` is clamped, not honoured
+verbatim. Agents SHOULD use the safe composition pattern::
 
     send_keys("pytest; tmux wait-for -S tests_done")
 
@@ -44,6 +47,7 @@ from libtmux_mcp._utils import (
     _tmux_argv,
     handle_tool_errors_async,
 )
+from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -135,14 +139,19 @@ async def wait_for_channel(
     timeout : float
         Maximum seconds to wait. The underlying ``tmux wait-for`` has
         no built-in timeout — this wrapper enforces it via
-        ``subprocess.run(timeout=...)``. Defaults to 30 seconds.
+        ``subprocess.run(timeout=...)``. Defaults to 30 seconds. Capped
+        by the same server wait ceiling as ``wait_for_text``; an
+        over-large value is not an error, the wait returns at the
+        ceiling and the confirmation message names the timeout that
+        was actually enforced.
     socket_name : str, optional
         tmux socket name.
 
     Returns
     -------
     str
-        Confirmation message naming the channel.
+        Confirmation message naming the channel and the timeout
+        actually enforced.
 
     Raises
     ------
@@ -151,6 +160,7 @@ async def wait_for_channel(
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_channel_name(channel)
+    effective_timeout = min(timeout, _wait_ceiling_seconds())
     argv = _tmux_argv(server, "wait-for", cname)
     try:
         # FastMCP direct-awaits async tools on its event loop. ``tmux
@@ -160,16 +170,23 @@ async def wait_for_channel(
         # be serviced for the duration of the wait. Mirror the pattern
         # used by :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text`.
         await asyncio.to_thread(
-            subprocess.run, argv, check=True, capture_output=True, timeout=timeout
+            subprocess.run,
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=effective_timeout,
         )
     except subprocess.TimeoutExpired as e:
-        msg = f"wait-for timeout: channel {cname!r} was not signalled within {timeout}s"
+        msg = (
+            f"wait-for timeout: channel {cname!r} was not signalled within "
+            f"{effective_timeout}s"
+        )
         raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"wait-for failed for channel {cname!r}: {stderr or e}"
         raise ExpectedToolError(msg) from e
-    return f"Channel {cname!r} was signalled"
+    return f"Channel {cname!r} was signalled (timeout {effective_timeout}s)"
 
 
 @handle_tool_errors_async
@@ -220,12 +237,12 @@ async def signal_channel(
 
 def register(mcp: FastMCP) -> None:
     """Register wait-for channel tools with the MCP instance."""
-    # ``wait_for_channel`` blocks for a caller-supplied ``timeout`` with
-    # no server ceiling at all, so a 1000-operation batch is a strictly
-    # worse version of the bug ``wait_for_text``'s cap exists to fix.
-    # ``TAG_SELF_BOUNDED`` keeps it out of the batch wrappers; the tool
-    # is already bounded per-call by ``subprocess.run(timeout=...)``,
-    # which is what the tag asserts.
+    # ``wait_for_channel``'s ``timeout`` is clamped to the shared wait
+    # ceiling (see ``_wait_policy``), but a 1000-operation batch would
+    # still multiply that ceiling by the operation count. ``TAG_SELF_BOUNDED``
+    # keeps it out of the batch wrappers; the tool is already bounded
+    # per-call by ``subprocess.run(timeout=...)``, which is what the tag
+    # asserts.
     mcp.tool(
         title="Wait For tmux Channel",
         annotations=ANNOTATIONS_MUTATING,
