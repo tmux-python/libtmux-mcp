@@ -22,6 +22,17 @@ Replaced by `wait_for_text(patterns=null)`, which additionally filters
 pre-existing scrollback and stale below-cursor paint out of the change
 predicate.
 
+**{tooliconl}`run-command` can no longer be nested in a `call_*_tools_batch`
+wrapper**
+
+{tooliconl}`run-command` blocks on `tmux wait-for` under the same wait ceiling
+as the wait tools, so it is now tagged `self-bounded` too. The batch loop is
+serial with no aggregate deadline and accepts up to 1000 operations, so a
+batched {tooliconl}`run-command` multiplied that ceiling by the operation count.
+All three wrappers now reject it per-operation. Use
+{tooliconl}`send-keys-batch` for command sequences, or call
+{tooliconl}`run-command` directly once per command.
+
 ### What's new
 
 **{tooliconl}`wait-for-text` waits are capped at 30 seconds**

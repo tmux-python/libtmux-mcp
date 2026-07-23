@@ -91,9 +91,15 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING},
     )(send_keys_batch)
-    mcp.tool(title="Run Command", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
-        run_command
-    )
+    # run_command blocks on ``tmux wait-for`` under the same wait
+    # ceiling as the wait tools, so TAG_SELF_BOUNDED excludes it from
+    # the batch wrappers: a serial batch would multiply that ceiling by
+    # the operation count. Use send_keys_batch for command sequences.
+    mcp.tool(
+        title="Run Command",
+        annotations=ANNOTATIONS_SHELL,
+        tags={TAG_MUTATING, TAG_SELF_BOUNDED},
+    )(run_command)
     mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         capture_pane
     )
