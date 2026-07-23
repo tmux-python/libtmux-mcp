@@ -218,6 +218,42 @@ def test_batch_self_bounded_rejection_preserves_continue_isolation() -> None:
     assert rows[1]["success"] is True
 
 
+def test_run_command_is_registered_self_bounded_and_unbatchable() -> None:
+    """``run_command`` carries ``TAG_SELF_BOUNDED`` on the real server.
+
+    ``run_command`` clamps its ``timeout`` to the same wait ceiling as
+    the wait tools, so batching it amplifies that ceiling exactly the
+    same way. Assert against the real registration rather than a probe,
+    and drive ``_get_allowed_tool_tier`` at every wrapper's ``max_tier``
+    because ``max_tier`` is a ceiling: a mutating tool is reachable
+    through the mutating and destructive wrappers both.
+    """
+    from fastmcp import FastMCP
+
+    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp.models import ToolCallOperation
+    from libtmux_mcp.tools import register_tools
+    from libtmux_mcp.tools.batch_tools import _get_allowed_tool_tier
+
+    mcp = FastMCP(name="run-command-self-bounded-audit")
+    register_tools(mcp)
+    tool = asyncio.run(mcp.get_tool("run_command"))
+    assert tool is not None
+    assert TAG_MUTATING in tool.tags
+    assert TAG_SELF_BOUNDED in tool.tags
+
+    operation = ToolCallOperation(tool="run_command", arguments={})
+    for max_tier in (TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE):
+        with pytest.raises(ExpectedToolError, match="cannot be batched"):
+            asyncio.run(
+                _get_allowed_tool_tier(
+                    fastmcp=mcp,
+                    operation=operation,
+                    max_tier=max_tier,
+                )
+            )
+
+
 def test_call_readonly_tools_batch_preserves_structured_results() -> None:
     """The readonly batch wrapper returns per-tool structured content."""
     from fastmcp import Client

@@ -427,7 +427,7 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
         "openWorldHint": True,
         "readOnlyHint": False,
     }
-    assert payload["tags"] == ["mutating"]
+    assert sorted(payload["tags"]) == ["mutating", "self-bounded"]
     assert payload["raw_defaults"] == {
         "send_keys": False,
         "send_keys_batch": False,
@@ -492,7 +492,7 @@ def test_run_command_describes_mcp_precedence_and_direct_python_default() -> Non
     MCP_HISTORY_BEHAVIOR_FIXTURES,
     ids=[fixture.test_id for fixture in MCP_HISTORY_BEHAVIOR_FIXTURES],
 )
-def test_mcp_run_command_and_generic_batch_use_effective_default(
+def test_mcp_run_command_uses_effective_default_and_resists_batching(
     test_id: str,
     value: str,
     omitted_is_saved: bool,
@@ -500,7 +500,13 @@ def test_mcp_run_command_and_generic_batch_use_effective_default(
     mcp_pane: Pane,
     tmp_path: pathlib.Path,
 ) -> None:
-    """Omission inherits through direct and generic MCP calls; booleans win."""
+    """Omission inherits through direct MCP calls; booleans win.
+
+    ``run_command`` is registered ``self-bounded``, so the generic batch
+    wrapper rejects it rather than inheriting anything: the nested call
+    never reaches a shell, which is asserted here against the real
+    server rather than a probe.
+    """
     histfile = tmp_path / f"{test_id}.bash_history"
     mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
     retry_until(
@@ -596,14 +602,12 @@ def test_mcp_run_command_and_generic_batch_use_effective_default(
             )
             assert batch.is_error is False
             assert batch.structured_content is not None
-            assert batch.structured_content["succeeded"] == 1
+            assert batch.structured_content["succeeded"] == 0
+            assert batch.structured_content["failed"] == 1
             [operation] = batch.structured_content["results"]
-            assert operation["success"] is True
-            nested = operation["structured_content"]
-            assert nested is not None
-            assert nested["timed_out"] is False
-            assert nested["exit_status"] == 0
-            assert batch_output.read_text() == f"{batch_omitted}\n"
+            assert operation["success"] is False
+            assert "cannot be batched" in operation["error"]
+            assert not batch_output.exists()
 
             flushed = await client.call_tool(
                 "run_command",
@@ -625,7 +629,7 @@ def test_mcp_run_command_and_generic_batch_use_effective_default(
     assert (omitted in saved) is omitted_is_saved
     assert explicit_true not in saved
     assert explicit_false in saved
-    assert (batch_omitted in saved) is omitted_is_saved
+    assert batch_omitted not in saved
 
 
 def test_global_history_transform_keeps_raw_and_paste_schemas_explicit_only() -> None:
