@@ -166,7 +166,7 @@ verify that control returns to the shell:
 1. `send_keys(pane_id="{pane_id}", keys="C-c", literal=False,
    enter=False)` — tmux interprets `C-c` as SIGINT.
 2. `wait_for_text(pane_id="{pane_id}", patterns=["\\$ ", "\\# ", "\\% "],
-   stop=["^C", "Interrupt"], regex=True, timeout=5.0)` — waits for a
+   stop=["\\^C", "Interrupt"], regex=True, timeout=5.0)` — waits for a
    common shell prompt glyph. Adjust the patterns to match the user's
    shell theme. The `stop` list exits early on the markers many
    programs print when they catch SIGINT and keep running.
