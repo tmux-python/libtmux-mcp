@@ -122,6 +122,39 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
     assert "do NOT escalate automatically" in text
 
 
+def test_interrupt_gracefully_escapes_caret_in_stop_marker() -> None:
+    r"""The ``^C`` stop marker survives ``regex=True`` compilation.
+
+    Regression guard: the recipe emitted ``stop=["^C", "Interrupt"]``
+    on a ``wait_for_text`` call that also passes ``regex=True``, so the
+    marker compiled to a start-anchored ``C``. That never matched the
+    literal ``^C`` echo a shell prints on SIGINT — the whole point of
+    the marker — while false-firing ``outcome="stopped"`` on any line
+    beginning with ``C`` (``Compiling``, ``Cloning``, ...).
+
+    Escaping the caret is the fix rather than dropping ``regex=True``,
+    because ``patterns`` on the same call genuinely needs regex.
+    """
+    import re
+    import warnings
+
+    from libtmux_mcp.prompts.recipes import interrupt_gracefully
+
+    text = interrupt_gracefully(pane_id="%3")
+    stop_line = next(line for line in text.splitlines() if "stop=" in line)
+    _, _, payload = stop_line.partition("stop=")
+    markers_literal, _, _ = payload.partition("]")
+    with warnings.catch_warnings():
+        # The emitted marker is ``"\^C"``, an invalid Python escape.
+        warnings.simplefilter("ignore", SyntaxWarning)
+        markers = ast.literal_eval(f"{markers_literal}]")
+    caret_c = markers[0]
+
+    assert caret_c == r"\^C"
+    assert re.search(caret_c, "^C") is not None
+    assert re.search(caret_c, "Compiling") is None
+
+
 def test_diagnose_failing_pane_uses_capture_since_for_repeated_reads() -> None:
     """Diagnosis recipe routes repeated observation to ``capture_since``."""
     from libtmux_mcp.prompts.recipes import diagnose_failing_pane
