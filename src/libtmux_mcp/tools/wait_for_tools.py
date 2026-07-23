@@ -171,8 +171,13 @@ async def wait_for_channel(
         # wait-for`` blocks for the full timeout (up to 30 s by default)
         # so the synchronous ``subprocess.run`` must run off the loop —
         # otherwise no other tool call, MCP ping, or cancellation can
-        # be serviced for the duration of the wait. Mirror the pattern
-        # used by :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text`.
+        # be serviced for the duration of the wait. This path still runs
+        # ``subprocess.run`` on a worker thread;
+        # :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text` no
+        # longer does, having moved to ``asyncio.create_subprocess_exec``
+        # because a thread blocked in libtmux's untimed
+        # ``Popen.communicate()`` cannot be cancelled. The thread here is
+        # bounded by ``subprocess.run(timeout=...)`` instead.
         await asyncio.to_thread(
             subprocess.run,
             argv,
