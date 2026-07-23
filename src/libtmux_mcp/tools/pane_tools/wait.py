@@ -516,14 +516,14 @@ async def wait_for_text(
     Pre-existing scrollback is never matched, and neither is paint left
     below the cursor at entry — only rows written after the call began
     count. If a pattern was already on screen the result says so via
-    ``suppressed_stale_match``.
+    ``matched_at_entry``.
 
-    Prefer ``run_command`` for commands you author (it returns exit
-    status), or ``wait_for_channel`` with a composed
-    ``; tmux wait-for -S <channel>``. Reserve this tool for output you
-    do not control. If the pane emits recurring prompts or background
-    log lines you cannot attribute, bracket your command with a unique
-    sentinel (``cmd; echo __WAIT_$RANDOM__``) and wait for that.
+    **Last resort: reserve for output you did not author.** Commands
+    you send are AUTHORED — use ``run_command`` (returns exit status)
+    or compose ``; tmux wait-for -S <channel>`` with ``wait_for_channel``
+    instead, both cheaper and exact. For unattributable recurring
+    prompts or background log lines, bracket your own command with a
+    unique sentinel (``cmd; echo __WAIT_$RANDOM__``) and wait for that.
 
     ``stop`` is the cheap way to avoid burning the whole budget: pass
     the failure markers you already know (``"error:"``, ``"FAILED"``,

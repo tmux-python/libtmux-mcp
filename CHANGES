@@ -78,6 +78,17 @@ Every tmux call the wait makes, pane resolution included, now runs as an
 expiry, so no wait-path work runs on a thread and the server exits promptly even
 when tmux stops responding.
 
+### Documentation
+
+**{tooliconl}`wait-for-text` is documented as a last resort for unauthored
+output**
+
+The {tooliconl}`wait-for-text`, {tooliconl}`run-command`, and
+{tooliconl}`wait-for-channel` docstrings now state the AUTHORED vs UNAUTHORED
+split plainly: commands you send belong on {tooliconl}`run-command` or
+{tooliconl}`wait-for-channel` composed with `tmux wait-for -S`, and
+{tooliconl}`wait-for-text` is reserved for output you did not author.
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.

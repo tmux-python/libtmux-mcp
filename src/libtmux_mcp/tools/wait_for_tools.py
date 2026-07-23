@@ -115,6 +115,10 @@ async def wait_for_channel(
 ) -> str:
     """Block until a tmux ``wait-for`` channel is signalled.
 
+    This is the AUTHORED-output synchronisation primitive: the channel
+    only fires because your own composed shell command signals it.
+    Reserve ``wait_for_text`` for output you did not author.
+
     Agents can compose this with ``send_keys`` to turn shell-side
     milestones into explicit synchronisation points::
 
