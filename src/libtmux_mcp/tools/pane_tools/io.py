@@ -340,7 +340,10 @@ async def run_command(
     Use for the common terminal workflow: run this command, wait until it
     completes, then report whether it succeeded. The command is sent to
     the pane's interactive shell, followed by a private ``tmux wait-for``
-    signal and a private pane option carrying the shell exit status.
+    signal and a private pane option carrying the shell exit status. This
+    is the AUTHORED-output path — the command you pass is what the wait
+    synchronizes on. Reserve ``wait_for_text`` for output you did not
+    author: another process, a human, or a background job.
 
     The command runs in a subshell, so ``cd``, ``export`` and other shell
     state changes do not persist to later calls.
