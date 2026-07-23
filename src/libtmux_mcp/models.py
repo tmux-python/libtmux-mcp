@@ -375,6 +375,13 @@ class RunCommandResult(BaseModel):
         default=0,
         description="Number of pane lines dropped from the head when truncating",
     )
+    effective_timeout: float = Field(
+        description=(
+            "Seconds actually enforced for command completion. Server "
+            "policy caps the requested ``timeout``; compare against what "
+            "you passed to see a clamp."
+        )
+    )
 
 
 class SendKeysOperation(BaseModel):

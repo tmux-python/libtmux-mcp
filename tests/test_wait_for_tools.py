@@ -112,6 +112,35 @@ def test_wait_for_channel_times_out(mcp_server: Server) -> None:
     assert elapsed < 3.0, f"timeout took unexpectedly long: {elapsed}s"
 
 
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_for_channel_clamps_oversized_timeout(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An over-large ``timeout`` is clamped to the server wait ceiling.
+
+    Mirrors ``wait_for_text``'s clamp: without it, an unsignalled channel
+    with ``timeout=3600`` would block the shared MCP connection for an
+    hour instead of returning at the ceiling. The ceiling is lowered to
+    1 s so the assertion is about the clamp mechanism, not wall-clock
+    patience.
+    """
+    from libtmux_mcp import _wait_policy
+
+    monkeypatch.setattr(_wait_policy, "_wait_max_seconds", 1.0)
+
+    started = time.monotonic()
+    with pytest.raises(ToolError, match=r"wait-for timeout.*within 1\.0s"):
+        asyncio.run(
+            wait_for_channel(
+                channel="wf_clamp_test",
+                timeout=3600.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+    elapsed = time.monotonic() - started
+    assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+
+
 def test_wait_for_channel_rejects_invalid_name(mcp_server: Server) -> None:
     """Invalid channel names are rejected before spawning tmux."""
     with pytest.raises(ToolError, match="Invalid channel name"):

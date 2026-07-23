@@ -560,6 +560,59 @@ def test_run_command_timeout_reports_without_killing_shell(
     )
 
 
+def test_run_command_reports_unclamped_timeout(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A ``timeout`` under the ceiling is reported verbatim, unclamped."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    result = asyncio.run(
+        run_command(
+            command="true",
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.effective_timeout == 5.0
+
+
+def test_run_command_clamps_oversized_timeout(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An over-large ``timeout`` is clamped to the server wait ceiling.
+
+    Mirrors ``wait_for_text``'s clamp: without it, ``run_command`` would
+    honour a caller-supplied ``timeout`` of any size — including one
+    that stalls the shared MCP connection far longer than the server's
+    wait policy allows. The ceiling is lowered to 0.3 s so the assertion
+    is about the clamp mechanism, not wall-clock patience.
+    """
+    import asyncio
+
+    from libtmux_mcp import _wait_policy
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    monkeypatch.setattr(_wait_policy, "_wait_max_seconds", 0.3)
+
+    started = time.monotonic()
+    result = asyncio.run(
+        run_command(
+            command="sleep 5",
+            pane_id=mcp_pane.pane_id,
+            timeout=3600.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.timed_out is True
+    assert result.effective_timeout == 0.3
+    assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+
+
 @pytest.mark.parametrize(
     RunCommandStatusIsolationFixture._fields,
     RUN_COMMAND_STATUS_ISOLATION_FIXTURES,
