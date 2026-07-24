@@ -6,6 +6,19 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Development
+
+**`mcp_swap.py doctor` and `use-local --env`**
+
+The dev config-swap helper gains a read-only `doctor` subcommand that reports
+the effective MCP-swap environment — which server name each CLI points at (and a
+mismatch when the repo is registered under a name other than the derived
+default), un-reverted swaps and orphaned backups accumulating on disk, a state
+entry whose backup has gone missing, and auth-overriding env vars such as
+`OPENAI_API_KEY`. `use-local` also takes a repeatable `--env KEY=VALUE` to write
+env (e.g. an isolated `LIBTMUX_SOCKET`) into the server entry without a manual
+post-edit.
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.
