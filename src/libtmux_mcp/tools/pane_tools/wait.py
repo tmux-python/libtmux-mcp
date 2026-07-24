@@ -236,20 +236,23 @@ async def _run_tmux_lines(
     # so the kill happens first and the read task is torn down after,
     # when cancelling it can actually succeed.
     task = asyncio.ensure_future(proc.communicate())
-    done, _pending = await asyncio.wait({task}, timeout=budget)
-    if not done:
-        await _kill_and_reap(proc, task)
-        msg = (
-            f"tmux {args[0]} did not return within "
-            f"{budget:.2f}s; the tmux server is unresponsive"
-        )
-        raise ExpectedToolError(msg)
     try:
+        done, _pending = await asyncio.wait({task}, timeout=budget)
+        if not done:
+            await _kill_and_reap(proc, task)
+            msg = (
+                f"tmux {args[0]} did not return within "
+                f"{budget:.2f}s; the tmux server is unresponsive"
+            )
+            raise ExpectedToolError(msg)
         stdout, stderr = task.result()
     except asyncio.CancelledError:
         # The whole call was cancelled (MCP client hung up). Tear the
         # child down before letting the cancellation through, or tmux
-        # is orphaned.
+        # is orphaned. The cancellation lands on the ``asyncio.wait``
+        # above just as often as on ``task.result()``, so the guard
+        # must span both — otherwise a cancel while waiting orphans the
+        # child.
         await _kill_and_reap(proc, task)
         raise
     if proc.returncode != 0:
