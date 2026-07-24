@@ -4239,6 +4239,109 @@ def test_wait_for_text_wedged_tmux_raises_instead_of_hanging(
     assert elapsed < 5.0, f"wedged tmux blocked for {elapsed:.1f}s"
 
 
+def test_run_tmux_lines_cancel_reaps_child(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling a wait mid-read reaps the tmux child, never orphans it.
+
+    Cancellation lands on ``asyncio.wait`` inside ``_run_tmux_lines``,
+    not just on ``task.result()``. If the reap guard does not span the
+    ``asyncio.wait`` the child is left running after the coroutine
+    unwinds. Drives the helper directly against a stub ``tmux`` that
+    records its own pid and sleeps far past the wait, cancels while it
+    is asleep, and asserts BOTH that ``CancelledError`` propagates and
+    that the recorded pid is gone.
+    """
+    import asyncio
+    import os
+
+    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+
+    pidfile = tmp_path / "pid"
+    stub = tmp_path / "tmux"
+    stub.write_text(f'#!/bin/sh\necho $$ > "{pidfile}"\nsleep 60\n')
+    stub.chmod(0o755)
+
+    class _StubServer:
+        tmux_bin = str(stub)
+        socket_name = None
+        socket_path = None
+
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    async def _drive() -> tuple[bool, int]:
+        task = asyncio.ensure_future(
+            wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+        )
+        # Wait for the stub to spawn and record its pid.
+        deadline = time.monotonic() + 5.0
+        while not pidfile.exists() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert pidfile.exists(), "stub tmux never started"
+        child_pid = int(pidfile.read_text().strip())
+
+        task.cancel()
+        propagated = False
+        try:
+            await task
+        except asyncio.CancelledError:
+            propagated = True
+        return propagated, child_pid
+
+    propagated, child_pid = asyncio.run(_drive())
+
+    assert propagated, "CancelledError did not propagate to the caller"
+
+    # The event loop's child watcher may finish the reap a beat late.
+    for _ in range(50):
+        if not _pid_alive(child_pid):
+            break
+        time.sleep(0.02)
+    alive = _pid_alive(child_pid)
+    if alive:
+        os.kill(child_pid, 9)  # clean up the orphan we just proved
+    assert not alive, f"child {child_pid} orphaned after cancellation"
+
+
+def test_run_tmux_lines_happy_path_returns_without_kill(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A cleanly-exiting tmux is returned intact, never torn down.
+
+    Complements ``test_run_tmux_lines_cancel_reaps_child``: proves the
+    reap guard does NOT fire on the happy path. A stub ``tmux`` that
+    prints two lines and exits 0 must come back verbatim; if the cancel
+    guard tore down a process that had already exited, the read would
+    still be captured but the widened ``except`` only runs on
+    ``CancelledError``, so this locks in that a returned process is left
+    alone.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+
+    stub = tmp_path / "tmux"
+    stub.write_text("#!/bin/sh\nprintf 'alpha\\nbeta\\n'\n")
+    stub.chmod(0o755)
+
+    class _StubServer:
+        tmux_bin = str(stub)
+        socket_name = None
+        socket_path = None
+
+    out = asyncio.run(
+        wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+    )
+    assert out == ["alpha", "beta"]
+
+
 # ---------------------------------------------------------------------------
 # snapshot_pane tests
 # ---------------------------------------------------------------------------
