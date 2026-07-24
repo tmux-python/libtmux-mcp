@@ -170,11 +170,18 @@ transcripts), and the **ground-truth socket state** after the run.
 
 ```console
 $ uv run scripts/mcp_swap.py detect                        # which CLIs are present
+$ uv run scripts/mcp_swap.py doctor --server tmux           # effective environment + footguns
 $ uv run scripts/mcp_swap.py status --server tmux           # current entries
-$ uv run scripts/mcp_swap.py use-local --server tmux --dry-run
-$ uv run scripts/mcp_swap.py use-local --server tmux
+$ uv run scripts/mcp_swap.py use-local --server tmux --env LIBTMUX_SOCKET=mcp-target --dry-run
+$ uv run scripts/mcp_swap.py use-local --server tmux --env LIBTMUX_SOCKET=mcp-target
 $ uv run scripts/mcp_swap.py revert                         # restore from timestamped backups
 ```
+
+Run `doctor` first — it reports which server name each CLI points at (and warns
+when the repo is registered under a name other than the derived default),
+un-reverted swaps and orphaned backups, missing backups (revert would fail), and
+auth-overriding env vars like `OPENAI_API_KEY`. `--env` injects the isolated
+`LIBTMUX_SOCKET` into the entry at swap time, so you don't hand-edit the config.
 
 The short version: pass `--server tmux` (the real registration key on this
 machine is `tmux`, not the derived `libtmux`); mcp_swap preserves env but does
