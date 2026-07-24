@@ -67,11 +67,16 @@ Shape-normalization gotchas seen in practice — normalize before asserting:
 ### Layer 1 — Headless CLI one-shot
 
 Proves the real client can discover and call the tools, scriptably, with no
-send-keys. Every CLI has a non-interactive mode. Registration-proof commands are
-cheaper than a full prompt; run those first. Flags drift between releases — the
-matrix in `references/cli-matrix.md` lists last-known-good invocations and the
-per-CLI traps (e.g. `cursor-agent mcp list` under-reports; use `mcp list-tools`).
-Re-verify with `--help` before trusting any flag.
+send-keys. Every CLI has a non-interactive mode. A cheap discovery proof (does
+the client *see* the server?) is worth running before spending a model turn —
+but the cheapest proof differs sharply per CLI: grok's `mcp doctor` does a real
+handshake, codex's `mcp get` only parses config, and agy has no proof short of a
+model call. `references/cli-matrix.md` has the verified per-CLI invocation,
+isolation lever, and approval-bypass flag for all six. Two things that surprise
+people: some `mcp list`/`list-tools` subcommands read the *ambient* config and
+ignore your isolated one, and a mutating tool call needs a per-CLI
+approval-bypass flag or it hangs on a no-TTY prompt. Flags drift — re-verify with
+`--help`.
 
 ### Layer 2 — Interactive, driven by tmux send-keys
 
@@ -115,15 +120,30 @@ completion marker — the prompt glyph returning, a known output line — rather
 list is the right primitive, but point it at the *harness* socket, never the
 server under test.
 
+**Submit as separate events.** Send the prompt text and `Enter` as two distinct
+`send-keys` calls — then one Enter submits. Batching text and `Enter` into a
+single `send-keys` is what leaves the prompt sitting unsent and makes it look
+like you need a second Enter. Also mind PATH: a CLI launched inside a `-L`
+harness pane runs in a non-login shell that lacks your mise/node/uv shims, so
+`export` the needed bin dirs before launching it or you'll just get `command not
+found`.
+
 ## High-value test: cancellation / teardown
 
 Cancellation is invisible to the tool list and only reachable through Layer 2 —
 and it is exactly where tmux-MCP servers leak. Reproduce it:
 
 1. Prompt the agent to call a `wait_for_text` that will never match (long timeout).
-2. Once it's mid-call, cancel: `send-keys -t <pane> C-c`, or kill the pane.
+2. While it's mid-call — the TUI shows a "working / esc to interrupt" state — send
+   `Escape` to that pane. `Esc` during the working phase cancels the in-flight
+   tool call **while keeping the MCP server subprocess alive**, which is the exact
+   client-cancellation the reap path guards; `Esc` *after* a turn finishes just
+   enters edit-previous mode. (Killing the pane instead tears down the whole
+   server, which tests a different thing.)
 3. On the **mcp-target** socket, assert no orphaned `tmux`/child process survives
-   (`pgrep -f mcp-target`) and the server exits promptly.
+   (`pgrep -f mcp-target`) and the server stays healthy. Verified through Codex:
+   the `wait_for_text` call returned `Error: interrupted`, the server survived,
+   and no child leaked.
 
 A server that reaps its child on cancel passes; one that orphans it hangs
 interpreter shutdown. This is a behavioral difference you cannot see from schemas.
@@ -156,12 +176,22 @@ $ uv run scripts/mcp_swap.py use-local --server tmux
 $ uv run scripts/mcp_swap.py revert                         # restore from timestamped backups
 ```
 
-Repo-specific traps live in `references/cli-matrix.md` — read it before running a
-swap. The short version: pass `--server tmux` (the real registration key on this
+The short version: pass `--server tmux` (the real registration key on this
 machine is `tmux`, not the derived `libtmux`); mcp_swap preserves env but does
 not add new keys, so inject `LIBTMUX_SOCKET=mcp-target` via each CLI's native
 `mcp add ... -e ...` or a post-swap edit; `mcp_swap use-local` mutates the user's
 real CLI configs, so dry-run first and always `revert` at the end.
+
+**Prefer zero-mutation isolation for a test.** mcp_swap is for a swap you *want*
+to persist. To just exercise a checkout, use each CLI's throwaway config-home /
+project-config lever instead — `references/cli-matrix.md` gives the verified one
+per CLI (codex `CODEX_HOME` or `-c` overrides, grok `GROK_HOME`, agy
+`--gemini_dir`, cursor/gemini project config, claude `--mcp-config
+--strict-mcp-config`). All six were driven this way with their real config
+confirmed byte-identical afterward, and no swap state touched. Note the machine
+may already carry an un-reverted swap (all CLIs pointing at a local checkout), so
+`revert` returns you to *that* state, not a pristine one — check the swap state
+file before assuming.
 
 ## Cleanup checklist
 

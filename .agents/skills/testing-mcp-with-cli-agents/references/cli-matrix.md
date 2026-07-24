@@ -1,85 +1,145 @@
-# CLI matrix — last-known-good invocations and per-CLI traps
+# CLI matrix — per-CLI isolation, proofs, and gotchas
 
-Flags drift between releases. Treat everything here as last-known-good and
-re-verify with `<cli> --help` / `<cli> mcp --help` before trusting it. Sourced
-from verified prior QA runs against libtmux-mcp and agentgrep-mcp.
+Verified 2026-07-24 by driving all six CLIs against a branch libtmux-mcp server on
+isolated tmux sockets, each with a throwaway config. **Every real config was
+confirmed byte-identical before/after** — no CLI needs `mcp_swap` or a real-config
+write to be tested. Full model-driven tool-call proof (agent calls a tool, isolated
+socket confirms the mutation) was reached on **codex, cursor, grok, agy**; **claude**
+and **gemini** were blocked at account tier/credit, not by the harness. Flags drift —
+re-verify with `<cli> --help` before trusting any invocation below.
 
-## Registration proofs (cheapest — run before spending a full prompt)
+## Cross-cutting lessons (the transferable part)
 
-```console
-$ claude mcp list;         claude mcp get tmux
-$ codex mcp list;          codex mcp get tmux
-$ gemini mcp list
-$ cursor-agent mcp list-tools tmux      # NOT `mcp list` — see trap below
-```
+1. **Isolate the config, never mutate it.** Every CLI exposes a config-home or
+   project-config lever (table below). None requires `mcp_swap` for a test.
+2. **The wall is auth/account tier, not the harness.** claude → `Credit balance is
+   too low`; gemini → `IneligibleTierError` (free tier unsupported). Treat these as
+   findings and stop spending; they are not harness failures.
+3. **Name the throwaway server distinctively (`tmuxlab`, not `tmux`).** All six CLIs
+   already carry a `tmux` server (from a prior swap) pointing at the real checkout on
+   the default socket. An identical name silently collides — it merges (cursor),
+   shadows (gemini), or gets resolved instead of yours (claude `mcp list`). A unique
+   name makes any leakage obvious.
+4. **Config leaks across CLIs.** grok merges Claude Code's `~/.claude.json` *and* any
+   cwd `.mcp.json` into its own MCP set; agy and gemini share the `~/.gemini` tree;
+   codex's daemon is keyed to `CODEX_HOME` (so a throwaway home spawns an independent
+   process tree — no conflict). Assume ambient servers are present unless you override
+   `HOME`/config-home fully.
+5. **"Cheapest proof" is not uniform.** grok's `mcp doctor` does a *real handshake*
+   (reported 51 tools — matches the branch surface); codex's `mcp get` only *parses
+   config*; agy has nothing short of a model call. Pick per CLI (table).
+6. **PATH:** for a **headless** run, export the node + uv dirs once before invoking —
+   the CLI inherits them and launches the `uv` server fine. The alternate-socket-pane
+   PATH gap (a `-L` pane's non-login shell lacks the mise shims) only bites when you
+   launch a CLI **TUI inside a harness pane** (Layer 2).
+7. **Non-interactive mutating tool calls need an approval-bypass flag** — different per
+   CLI (table). Without it, a mutating call blocks on an approval prompt with no TTY
+   and the harness hangs.
+8. **Interactive send-keys submit:** send the prompt text and `Enter` as **separate
+   `send-keys` events** — then a single Enter submits. The "needs a double Enter"
+   pitfall comes from batching text+Enter in one `send-keys` call. `Esc` cancels only
+   **during** the working/tool phase; after a turn completes it enters edit-previous
+   mode instead.
 
-## Headless one-shot (Layer 1)
+## Quick matrix
 
-```console
-$ codex -a never exec --sandbox read-only --json -C /repo \
-    'Call the tmux MCP: list sessions and report the count.'
+| CLI | headless one-shot | config-isolation lever | cheapest discovery proof | approval bypass (non-interactive) | full model proof reached |
+|---|---|---|---|---|---|
+| claude | `claude -p` | `--mcp-config <f> --strict-mcp-config` (session only) | `-p --output-format stream-json` init event | `--permission-mode bypassPermissions` | no — credit blocked |
+| codex | `codex exec` | `CODEX_HOME` throwaway **or** `-c` overrides | `codex mcp get tmux` (parses config, no spawn) | `--dangerously-bypass-approvals-and-sandbox` | yes |
+| cursor | `cursor-agent --print` | project `.cursor/mcp.json` (merged, not isolating) | headless `--approve-mcps` run (see trap) | `--force --approve-mcps` (omit `--mode`) | yes |
+| gemini | `gemini -p` | project `.gemini/settings.json` from cwd | `gemini mcp list` | `--approval-mode yolo` (`--skip-trust`) | no — free tier |
+| grok | `grok -p` / `--single` | `GROK_HOME` **or** `mcp add --scope project` | `grok mcp doctor tmux --json` (real handshake) | `--permission-mode bypassPermissions` | yes |
+| agy | `agy -p` | hidden `--gemini_dir <path>` | none short of a model call | `--dangerously-skip-permissions` | yes |
 
-$ gemini --skip-trust --allowed-mcp-server-names tmux --approval-mode yolo \
-    --output-format json -p 'Call the tmux MCP: list sessions.'
+## Per-CLI detail
 
-$ cursor-agent --print --output-format stream-json --trust --approve-mcps \
-    --sandbox enabled --mode ask --workspace /repo \
-    'Call the tmux MCP: list sessions.'
-```
+### codex — two isolation styles, both verified
+- **Config-less (leanest):** a home dir containing only a symlink to real `auth.json`,
+  no `config.toml`, plus `-c` overrides:
+  `-c 'mcp_servers.tmux.command="uv"' -c 'mcp_servers.tmux.args=["--directory","<SERVER>","run","libtmux-mcp"]' -c 'mcp_servers.tmux.env.LIBTMUX_SOCKET="mcplab-codex-target"'`.
+  Nothing to copy or diff back.
+- **Copy-config:** `cp ~/.codex/config.toml <home>/`; symlink `auth.json`; rewrite
+  `[mcp_servers.tmux]`. Downside: **drags in the user's hooks/output-style**, which
+  fire in the isolated session — prefer the `-c` style.
+- Run: `env -u OPENAI_API_KEY CODEX_HOME=<home> codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -C <SERVER> '<prompt>'`.
+- Gotchas: **`OPENAI_API_KEY` in the env hijacks auth** to API-key billing even with a
+  ChatGPT `auth.json` — always `env -u OPENAI_API_KEY` to use the subscription. **No
+  `codex mcp list-tools`** exists; `mcp list`/`get`/`doctor` only count/parse config —
+  real tool enumeration needs a model turn. Subcommand flags are position-sensitive
+  (`--ignore-user-config`/`--skip-git-repo-check` go *after* the subcommand;
+  `--skip-git-repo-check` is exec-only). `LIBTMUX_SOCKET` shows masked as `*****` in
+  `mcp get`. The `/tmp` `CODEX_HOME` helper-binary warning prints on every subcommand —
+  harmless.
 
-Claude headless: `claude -p '<prompt>'` (add MCP scope/permission flags as your
-setup requires). Grok and agy follow the interactive (Layer 2) path unless a
-current `--help` shows a print/exec mode.
+### cursor — full success, and it CORRECTS prior art
+- Project `<ws>/.cursor/mcp.json` with a **distinct** server name (`tmuxlab`); run with
+  cwd=`<ws>` or `--workspace <ws>`:
+  `cursor-agent --print --output-format stream-json --trust --approve-mcps --force --workspace <ws> '<prompt naming the tmuxlab tool>'`.
+- **CORRECTION:** the old note "`mcp list-tools` returns tools even when `mcp list` says
+  needs-approval" is **reversed** on build 2026.07.23 — `mcp list-tools <unapproved>`
+  now *fails* (`has not been approved`), and `--approve-mcps` on the `mcp` subcommand
+  doesn't help. Prove via a headless `--approve-mcps` agent run + the socket, not
+  `list-tools`.
+- **CORRECTION:** `--mode ask`/`--mode plan` are **read-only**, so a mutating call is
+  suppressed. Omit `--mode` (default agent mode) and add `--force`.
+- Project config is **merged** with global (all global servers still load) — isolate by
+  unique name + `env.LIBTMUX_SOCKET`, not by expecting the project file to override.
+  No `mcp add`; config is a JSON file only.
 
-## Per-CLI traps
+### grok — full success, best cheap proof
+- `GROK_HOME=<ws>/.grok grok mcp add tmux -e LIBTMUX_SOCKET=mcplab-grok-target -- uv --directory <SERVER> run libtmux-mcp`, then
+  `cp ~/.grok/auth.json ~/.grok/agent_id <ws>/.grok/` (**auth does not follow
+  `GROK_HOME`**), then
+  `GROK_HOME=<ws>/.grok grok -p '<prompt>' --permission-mode bypassPermissions --cwd <ws> --output-format plain`.
+- `grok mcp doctor tmux --json` is the **best cheap proof of any CLI** — a real
+  handshake reporting tool count, no model turn. Alternative isolation: `mcp add
+  --scope project` writes `./.grok/config.toml` (keeps real `$HOME`/auth).
+- Gotchas: **grok merges `~/.claude.json` + cwd `.mcp.json`** into its server set, so
+  `GROK_HOME` alone doesn't fully isolate — override `HOME` for a clean set. `grok
+  models` says "not authenticated" even when auth is valid (misleading banner; trust
+  `doctor` and the run). `mcp add` prints the literal `$GROK_HOME` (cosmetic).
 
-- **cursor-agent `mcp list` under-reports.** It can say `not loaded (needs
-  approval)` while `cursor-agent mcp list-tools tmux` returns the full list and
-  Composer calls the tools fine. `list-tools` + one real call is the
-  authoritative proof, not the status string.
-- **Codex approval-flag placement.** Use the top-level form `codex -a never
-  exec ...`; passing the approval policy *after* `exec` fails.
-- **Claude account state can block headless runs** (`Credit balance is too
-  low`). That's a client/account limit, not a server bug — fall back to Layer 2
-  or Layer 0.
-- **Claude worktree scope shadowing.** Claude maps a linked git worktree to the
-  main worktree path for per-project MCP, so a per-project entry can out-rank a
-  `--scope user` swap. Know which layer you're actually hitting with `claude mcp
-  get`.
+### agy (Antigravity) — full success, no `mcp` verb
+- **Hidden `--gemini_dir <path>`** flag (not in `--help`; `agy --gemini_dir` errors
+  "flag needs an argument", confirming it) relocates the entire `~/.gemini` tree —
+  cleaner than a `HOME` override. Symlink the real auth/state files
+  (`oauth_creds.json`, `google_account_id`, `installation_id`, `settings.json`, …)
+  into `<gdir>`, but make `<gdir>/config/mcp_config.json` your own
+  `{"mcpServers":{"tmux":{...,"env":{"LIBTMUX_SOCKET":"mcplab-agy-target"}}}}`.
+- Run: `PATH=<uv>:<node>:$PATH agy --gemini_dir <gdir> --log-file <log> --dangerously-skip-permissions --print-timeout 3m -p '<prompt>'`.
+- Gotchas: **no `mcp` verb at all** — MCP is configured only by editing
+  `mcp_config.json`, and the *only* way to enumerate/exercise tools is a model call.
+  `--gemini_dir` does **not** isolate auth (symlink it in). Headless needs
+  `--dangerously-skip-permissions` (or `--mode accept-edits`). `--print-timeout`
+  default is 5m — set it low and wrap in an outer `timeout`.
 
-## Native `mcp add` (per CLI) — for injecting env like LIBTMUX_SOCKET
+### claude — isolation proven, model turn credit-blocked
+- `--mcp-config <file> --strict-mcp-config` fully scopes which MCP servers a
+  `-p`/interactive **session** sees (the `init` event lists only your server) — but the
+  server sits at `status:"pending"` and connects lazily on the **first model turn**, so
+  you can't enumerate its tools without spending one.
+- **`claude mcp list`/`get` ignore `--mcp-config`** and inspect the *ambient* config —
+  not usable for isolated discovery. Use a `-p --output-format stream-json` run and read
+  the `init` event's `mcp_servers` array.
+- `--strict-mcp-config` scopes MCP **only**: a `-p` run still **writes `~/.claude.json`**
+  (it grew) and creates `~/.claude/projects/<cwd>/`, and ambient hooks/skills/plugins
+  fire. Add **`--bare`** to strip hooks/auto-memory/keychain/CLAUDE.md and minimize
+  ambient writes. `mcp list` alone leaves `~/.claude.json` untouched.
+- Auth: `ANTHROPIC_API_KEY` (if set) takes precedence over the claude.ai OAuth login;
+  `env -u ANTHROPIC_API_KEY claude …` forces subscription auth. Here the API key's
+  account returned `Credit balance is too low` — model turn blocked.
 
-mcp_swap preserves existing env but does not add new keys, so to sandbox the
-socket use each CLI's own add command (syntax varies; the `-e` / `--env`
-placement is the usual footgun):
-
-```console
-$ claude mcp add tmux -s user -e LIBTMUX_SOCKET=mcp-target -- uv --directory /repo run libtmux-mcp
-$ codex  mcp add tmux --env LIBTMUX_SOCKET=mcp-target       -- uv --directory /repo run libtmux-mcp
-$ gemini mcp add tmux -s user -e LIBTMUX_SOCKET=mcp-target  uv -- --directory /repo run libtmux-mcp
-$ grok   mcp add tmux -e LIBTMUX_SOCKET=mcp-target          -- uv --directory /repo run libtmux-mcp
-```
-
-Cursor and agy have no `mcp add` — edit their JSON config directly
-(`~/.cursor/mcp.json`, `~/.gemini/config/mcp_config.json`) with the same
-`command` / `args` / `env` shape, then approve in-app.
-
-## mcp_swap traps (this repo)
-
-- **Pass `--server tmux`.** The script derives the slug `libtmux` from the
-  package name, but the effective registered key on this machine is `tmux`.
-  Without the flag you swap a `libtmux` entry nobody uses — `status` with no flag
-  reports `no entry for 'libtmux'` across all six CLIs.
-- **`--entry` when the first `[project.scripts]` key isn't the MCP entry.** Here
-  the only script is `libtmux-mcp`, so the default is fine; other repos (e.g.
-  agentgrep needed `--entry agentgrep-mcp`) do not get that for free.
-- **`use-local` mutates real user configs.** Dry-run first; `revert` unwinds from
-  timestamped backups in LIFO order when swaps stack.
-
-## Direct-smoke sanity values (Layer 0, libtmux-mcp)
-
-A healthy default-tier smoke against an isolated socket has looked like: `~52`
-tools visible, `list_sessions` works, `call_readonly_tools_batch` works,
-`send_keys_batch` preserves op order, and an oversized batch is rejected with
-`operations must contain at most 1000 tool calls`. Exact tool count shifts as the
-surface evolves — treat these as a shape check, not a fixed assertion.
+### gemini — isolation proven, model turn tier-blocked
+- Project `<ws>/.gemini/settings.json` (`{"mcpServers":{"tmux":{"command","args","env"}}}`)
+  read from **cwd**; a project-scoped server **shadows** a same-named user server (real
+  `settings.json` stays clean). `gemini mcp add <name> <cmd> [args] -s project -e K=V`
+  defaults to project scope.
+- Run: `gemini --skip-trust --allowed-mcp-server-names tmux --approval-mode yolo --output-format json -p '<prompt>'` (verified against gemini 0.52.0).
+- Gotchas: **untrusted folders disable ALL MCP** — `mcp list` shows every server
+  `Disabled`; pass `--skip-trust` on the run (`mcp list` has no such flag, so its
+  Disabled output is expected, not a failure). A failed headless run **still mutates
+  `~/.gemini/projects.json`** (appends the cwd) — project config does not stop that
+  global-registry write; full isolation needs a `HOME`/config-dir override (which
+  discards real OAuth). Auth: `IneligibleTierError` free-tier — no model turn on this
+  account/CLI version.
