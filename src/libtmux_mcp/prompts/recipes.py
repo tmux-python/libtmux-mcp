@@ -136,11 +136,11 @@ a logs tail on the bottom-right:
    `send_keys` immediately after `split_window` is safe and
    shell-agnostic.
 5. Optionally confirm each program drew its UI via
-   `wait_for_content_change(pane_id="%A", timeout=3.0)`
-   (and similarly for `%C`). This is a "did the screen change?"
-   check — it works whether the pane shows a prompt glyph, a vim
-   splash screen, or a log tail, so no shell-specific regex is
-   needed.
+   `wait_for_text(pane_id="%A", patterns=null, timeout=3.0)`
+   (and similarly for `%C`). Omitting `patterns` makes this a
+   "did anything new get printed?" check — it works whether the
+   pane shows a prompt glyph, a vim splash screen, or a log tail,
+   so no shell-specific regex is needed.
 
 Use pane IDs (`%N`) for all subsequent targeting — they are stable
 across layout changes; window renames are not.
@@ -151,7 +151,7 @@ def interrupt_gracefully(pane_id: str) -> str:
     r"""Interrupt a running command and verify the prompt returned.
 
     Sends ``C-c`` through ``send_keys(literal=True)``, then waits on
-    a shell-prompt pattern via ``wait_for_text``. Fails loudly if the
+    shell-prompt patterns via ``wait_for_text``. Fails loudly if the
     process ignores SIGINT — the right escalation point is the caller,
     not an automatic ``C-\`` follow-up (SIGQUIT can core-dump).
 
@@ -165,9 +165,11 @@ verify that control returns to the shell:
 
 1. `send_keys(pane_id="{pane_id}", keys="C-c", literal=False,
    enter=False)` — tmux interprets `C-c` as SIGINT.
-2. `wait_for_text(pane_id="{pane_id}", pattern="\\$ |\\# |\\% ",
-   regex=True, timeout=5.0)` — waits for a common shell prompt
-   glyph. Adjust the pattern to match the user's shell theme.
+2. `wait_for_text(pane_id="{pane_id}", patterns=["\\$ ", "\\# ", "\\% "],
+   stop=["\\^C", "Interrupt"], regex=True, timeout=5.0)` — waits for a
+   common shell prompt glyph. Adjust the patterns to match the user's
+   shell theme. The `stop` list exits early on the markers many
+   programs print when they catch SIGINT and keep running.
    The `wait_for_channel` pattern doesn't apply here — `C-c` is a
    signal, not a shell command, so there's no statement to compose
    `tmux wait-for -S` into. The shell prompt itself is the only

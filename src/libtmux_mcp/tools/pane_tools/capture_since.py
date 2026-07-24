@@ -121,12 +121,12 @@ def _read_stable_visible(
             expected_pid = before.pane_pid
         else:
             expected_pid = baseline_pid
-            _raise_if_pane_lifecycle_changed(pane, before, expected_pid)
+            _raise_if_pane_lifecycle_changed(pane.pane_id, before, expected_pid)
 
         lines = _capture_rows(pane)
         cursor_rows = _capture_cursor_rows(pane, before)
         after = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane, after, expected_pid)
+        _raise_if_pane_lifecycle_changed(pane.pane_id, after, expected_pid)
         if _same_state(before, after):
             return _PaneRead(
                 state=after,
@@ -139,7 +139,7 @@ def _read_stable_visible(
     if baseline_pid is None:
         _raise_if_dead_without_baseline(pane, state)
     else:
-        _raise_if_pane_lifecycle_changed(pane, state, baseline_pid)
+        _raise_if_pane_lifecycle_changed(pane.pane_id, state, baseline_pid)
     return _PaneRead(
         state=state,
         cursor_rows=_capture_cursor_rows(pane, state),
@@ -233,7 +233,7 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
     history_limit = _read_history_limit(pane)
     for _attempt in range(_STABLE_READ_ATTEMPTS):
         before = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane, before, cursor.pane_pid)
+        _raise_if_pane_lifecycle_changed(pane.pane_id, before, cursor.pane_pid)
         if _cursor_anchor_lost(cursor, before):
             missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
             return _PaneRead(
@@ -256,7 +256,7 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
         )
         cursor_rows = _capture_cursor_rows(pane, before)
         after = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane, after, cursor.pane_pid)
+        _raise_if_pane_lifecycle_changed(pane.pane_id, after, cursor.pane_pid)
         if _same_state(before, after):
             if trim_risk:
                 match_index = _find_unique_cursor_match(rows, cursor)

@@ -161,7 +161,6 @@ conf["fastmcp_model_classes"] = (
     "EnvironmentResult",
     "EnvironmentSetResult",
     "WaitForTextResult",
-    "ContentChangeResult",
     "RunCommandResult",
     "SendKeysOperation",
     "SendKeysOperationResult",

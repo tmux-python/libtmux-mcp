@@ -47,6 +47,7 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    TAG_SELF_BOUNDED,
     ExpectedToolError,
 )
 
@@ -774,10 +775,20 @@ class ReadonlyRetryMiddleware(Middleware):
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Delegate to the upstream retry only for tools tagged readonly."""
+        """Delegate to the upstream retry only for retry-eligible readonly tools.
+
+        ``TAG_SELF_BOUNDED`` tools are excluded even though they are
+        readonly. Their deadline is computed inside the tool body, so a
+        retry restarts the clock: a transient ``LibTmuxException`` at
+        t=29s of a 30s wait would produce a ~59s call and make the wait
+        ceiling a lie. :class:`_SkipDeterministicFailures` cannot cover
+        this — it carves out failures by exception type, and the
+        offending exception here is a genuinely transient one that a
+        retry *would* fix for any other tool.
+        """
         if context.fastmcp_context:
             tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and TAG_READONLY in tool.tags:
+            if tool and TAG_READONLY in tool.tags and TAG_SELF_BOUNDED not in tool.tags:
                 return await self._retry.on_request(context, call_next)
         return await call_next(context)
 

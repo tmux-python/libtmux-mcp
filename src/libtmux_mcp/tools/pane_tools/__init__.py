@@ -22,6 +22,7 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
+    TAG_SELF_BOUNDED,
 )
 from libtmux_mcp.tools.pane_tools.capture_since import capture_since
 from libtmux_mcp.tools.pane_tools.copy_mode import enter_copy_mode, exit_copy_mode
@@ -48,10 +49,7 @@ from libtmux_mcp.tools.pane_tools.lifecycle import (
 from libtmux_mcp.tools.pane_tools.meta import display_message, snapshot_pane
 from libtmux_mcp.tools.pane_tools.pipe import pipe_pane
 from libtmux_mcp.tools.pane_tools.search import search_panes
-from libtmux_mcp.tools.pane_tools.wait import (
-    wait_for_content_change,
-    wait_for_text,
-)
+from libtmux_mcp.tools.pane_tools.wait import wait_for_text
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -79,7 +77,6 @@ __all__ = [
     "set_pane_title",
     "snapshot_pane",
     "swap_pane",
-    "wait_for_content_change",
     "wait_for_text",
 ]
 
@@ -94,9 +91,15 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING},
     )(send_keys_batch)
-    mcp.tool(title="Run Command", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
-        run_command
-    )
+    # run_command blocks on ``tmux wait-for`` under the same wait
+    # ceiling as the wait tools, so TAG_SELF_BOUNDED excludes it from
+    # the batch wrappers: a serial batch would multiply that ceiling by
+    # the operation count. Use send_keys_batch for command sequences.
+    mcp.tool(
+        title="Run Command",
+        annotations=ANNOTATIONS_SHELL,
+        tags={TAG_MUTATING, TAG_SELF_BOUNDED},
+    )(run_command)
     mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         capture_pane
     )
@@ -135,20 +138,19 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(title="Search Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
         search_panes
     )
-    mcp.tool(title="Wait For Text", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        wait_for_text
-    )
+    # TAG_SELF_BOUNDED excludes this tool from retry and from batch
+    # wrappers: both would multiply the wait ceiling it enforces.
+    mcp.tool(
+        title="Wait For Text",
+        annotations=ANNOTATIONS_RO,
+        tags={TAG_READONLY, TAG_SELF_BOUNDED},
+    )(wait_for_text)
     mcp.tool(
         title="Snapshot Pane",
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY},
         meta=DISCOVERY_META,
     )(snapshot_pane)
-    mcp.tool(
-        title="Wait For Content Change",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
-    )(wait_for_content_change)
     mcp.tool(
         title="Select Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(select_pane)

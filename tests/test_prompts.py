@@ -122,6 +122,39 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
     assert "do NOT escalate automatically" in text
 
 
+def test_interrupt_gracefully_escapes_caret_in_stop_marker() -> None:
+    r"""The ``^C`` stop marker survives ``regex=True`` compilation.
+
+    Regression guard: the recipe emitted ``stop=["^C", "Interrupt"]``
+    on a ``wait_for_text`` call that also passes ``regex=True``, so the
+    marker compiled to a start-anchored ``C``. That never matched the
+    literal ``^C`` echo a shell prints on SIGINT — the whole point of
+    the marker — while false-firing ``outcome="stopped"`` on any line
+    beginning with ``C`` (``Compiling``, ``Cloning``, ...).
+
+    Escaping the caret is the fix rather than dropping ``regex=True``,
+    because ``patterns`` on the same call genuinely needs regex.
+    """
+    import re
+    import warnings
+
+    from libtmux_mcp.prompts.recipes import interrupt_gracefully
+
+    text = interrupt_gracefully(pane_id="%3")
+    stop_line = next(line for line in text.splitlines() if "stop=" in line)
+    _, _, payload = stop_line.partition("stop=")
+    markers_literal, _, _ = payload.partition("]")
+    with warnings.catch_warnings():
+        # The emitted marker is ``"\^C"``, an invalid Python escape.
+        warnings.simplefilter("ignore", SyntaxWarning)
+        markers = ast.literal_eval(f"{markers_literal}]")
+    caret_c = markers[0]
+
+    assert caret_c == r"\^C"
+    assert re.search(caret_c, "^C") is not None
+    assert re.search(caret_c, "Compiling") is None
+
+
 def test_diagnose_failing_pane_uses_capture_since_for_repeated_reads() -> None:
     """Diagnosis recipe routes repeated observation to ``capture_since``."""
     from libtmux_mcp.prompts.recipes import diagnose_failing_pane
@@ -144,10 +177,10 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     ``tail -f`` take over the terminal and never draw a shell prompt,
     so the wait would block until timeout.
 
-    The corrected recipe uses ``wait_for_content_change`` after launch
-    for an optional "program started" confirmation — a screen-change
-    check that works for every shell and every program, no glyph
-    matching required.
+    The corrected recipe uses ``wait_for_text(patterns=null)`` after
+    launch for an optional "program started" confirmation — an
+    any-new-output check that works for every shell and every program,
+    no glyph matching required.
     """
     from libtmux_mcp.prompts.recipes import build_dev_workspace
 
@@ -156,8 +189,8 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     assert "wait for the prompt" not in text
     assert "Between each step, wait for the prompt" not in text
     # Post-launch confirmation still uses the right primitive:
-    # content-change, not prompt-match.
-    assert "wait_for_content_change" in text
+    # any-new-output, not prompt-match.
+    assert "patterns=null" in text
 
 
 def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
@@ -184,8 +217,8 @@ def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
     # The stray-Enter-into-idle-shell line must be gone.
     assert 'send_keys(pane_id="%B", keys="")' not in text
     # Positive pin: post-launch UI confirmation is still available
-    # via the shell-agnostic content-change primitive.
-    assert "wait_for_content_change" in text
+    # via the shell-agnostic any-new-output primitive.
+    assert "patterns=null" in text
 
 
 def _extract_tool_calls(

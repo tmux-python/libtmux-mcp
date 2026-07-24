@@ -6,6 +6,97 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**{tooliconl}`wait-for-text` takes a list of patterns and is capped by the
+server**
+
+The single `pattern` string becomes `patterns`, a list — or `null` to wait for
+any new output at all. A new `stop` list carries failure markers, and a hit ends
+the wait immediately. An over-large `timeout` is no longer honoured verbatim: it
+is clamped to a server ceiling, so a badly-chosen search text holds the shared
+MCP connection for seconds rather than minutes. `LIBTMUX_MCP_WAIT_MAX_SECONDS`
+sets the ceiling, and every wait reports the timeout it actually enforced. (#100)
+
+```python
+# Before
+wait_for_text(pane_id="%1", pattern="ready", timeout=600)
+
+# After — patterns is a list, stop bails out early, timeout is clamped
+wait_for_text(pane_id="%1", patterns=["ready"], stop=["error"], timeout=600)
+```
+
+**`wait_for_content_change` and `ContentChangeResult` are removed**
+
+Use `wait_for_text(patterns=null)`, which waits for any new output and
+additionally excludes pre-existing scrollback and stale below-cursor paint from
+the change predicate. (#100)
+
+**{tooliconl}`run-command` can no longer be nested in a batch wrapper**
+
+It blocks under the same server wait ceiling as the wait tools, and the batch
+wrappers run their operations serially with no aggregate deadline — batching it
+multiplied that ceiling by the operation count. All three wrappers now reject it
+per operation. Use {tooliconl}`send-keys-batch` for command sequences, or call
+{tooliconl}`run-command` directly. (#100)
+
+**{class}`~libtmux_mcp.models.WaitForTextResult` drops `risk_band_warned`**
+
+The history-limit trim-risk signal is now delivered only as an MCP warning
+notification; no field on the result reports it, and nothing else on the result
+substitutes for it. Clients that cannot surface notifications should stop
+depending on scrollback entirely — compose `tmux wait-for -S` into the command
+and use {tooliconl}`wait-for-channel`, which does not read the pane at all.
+(#100)
+
+### What's new
+
+**A wait reports what the pane actually did**
+
+A single `outcome` field states how the wait ended — it matched, it saw any new
+output, it hit a stop marker, the pane was on the alternate screen, or it timed
+out. Alongside it the result names which entry fired, whether anything new was
+written, whether the match was stale paint already on screen when the wait
+began, and a bounded tail of the rows below the entry cursor. Every field is
+observed rather than inferred. (#100)
+
+**Pagers and editors are reported instead of matched on paint**
+
+Inside `less`, an editor, or any other full-screen program, a pane capture
+returns rows the program has already painted, which a naive wait reported as new
+output. The wait now says the pane is on the alternate screen so the agent reads
+it instead of trusting a false match, and resumes ordinary matching when the
+program exits. (#100)
+
+### Fixes
+
+**A wedged tmux no longer hangs the server**
+
+An unresponsive tmux could leave the process — and Ctrl-C — hanging
+indefinitely, because the wait reached tmux through worker threads that could
+not be cancelled and were joined without a timeout at interpreter shutdown.
+Every tmux call a wait makes, pane resolution included, is now bounded against
+the wait's own deadline and killed on expiry, so the server exits promptly even
+when tmux stops responding. (#100)
+
+**A wait can no longer be multiplied past its ceiling**
+
+Retrying a wait restarted its budget, and batching one repeated that budget once
+per operation, so a bounded wait could still run unbounded. Waits are now tagged
+self-bounded: retries skip them and every batch wrapper rejects them per
+operation, preserving continue-on-error isolation. {tooliconl}`wait-for-channel`
+and {tooliconl}`run-command` honour the same ceiling and report the timeout they
+actually enforced. (#100)
+
+### Documentation
+
+**{tooliconl}`wait-for-text` is documented as a last resort**
+
+The wait tools now state the split plainly: a command you send belongs on
+{tooliconl}`run-command`, or on {tooliconl}`wait-for-channel` composed with
+`tmux wait-for -S`, and {tooliconl}`wait-for-text` is reserved for output you
+did not author. (#100)
+
 ## libtmux-mcp 0.1.0a18 (2026-07-12)
 
 libtmux-mcp 0.1.0a18 raises the libtmux floor to 0.62.0 and tightens how the server handles lookups that cannot succeed. A readonly call carrying a stale or ambiguous id now fails on the first attempt instead of paying a second tmux round-trip and a backoff window to fail identically, and an ambiguous target — a window shared between sessions, matched by name or index — now comes back with a recovery hint that says to target it by id instead of an unexplained error. The floor bump is what makes both fixes possible: libtmux 0.62.0 folds its query errors into the {exc}`libtmux.exc.LibTmuxException` hierarchy the server keys on.

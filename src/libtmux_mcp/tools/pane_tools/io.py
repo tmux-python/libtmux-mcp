@@ -24,6 +24,7 @@ from libtmux_mcp._utils import (
     handle_tool_errors,
     handle_tool_errors_async,
 )
+from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 from libtmux_mcp.models import (
     RunCommandResult,
     SendKeysBatchResult,
@@ -118,8 +119,8 @@ def send_keys(
     captured output, use ``run_command`` instead. For custom completion
     outside that shape, compose ``tmux wait-for -S <channel>`` into the
     shell command and call ``wait_for_channel``. For repeated observation
-    after input, prefer ``capture_since``; reserve ``wait_for_text`` and
-    ``wait_for_content_change`` for output the agent does not author.
+    after input, prefer ``capture_since``; reserve ``wait_for_text``
+    for output the agent does not author.
 
     Do NOT call ``capture_pane`` immediately — both the read and the
     pattern-match paths race the pane's PTY draw.
@@ -339,7 +340,10 @@ async def run_command(
     Use for the common terminal workflow: run this command, wait until it
     completes, then report whether it succeeded. The command is sent to
     the pane's interactive shell, followed by a private ``tmux wait-for``
-    signal and a private pane option carrying the shell exit status.
+    signal and a private pane option carrying the shell exit status. This
+    is the AUTHORED-output path — the command you pass is what the wait
+    synchronizes on. Reserve ``wait_for_text`` for output you did not
+    author: another process, a human, or a background job.
 
     The command runs in a subshell, so ``cd``, ``export`` and other shell
     state changes do not persist to later calls.
@@ -357,7 +361,11 @@ async def run_command(
     window_id : str, optional
         Window ID for pane resolution.
     timeout : float
-        Maximum seconds to wait for command completion.
+        Maximum seconds to wait for command completion. Capped by the
+        same server wait ceiling as ``wait_for_text``; an over-large
+        value is not an error — the wait returns at the ceiling and
+        the timeout actually enforced is reported on
+        ``RunCommandResult.effective_timeout``.
     max_lines : int or None
         Maximum pane output lines to return. Defaults to all captured
         visible output; pass a small value for a tail-only summary.
@@ -385,6 +393,7 @@ async def run_command(
     if timeout <= 0:
         msg = "timeout must be positive"
         raise ExpectedToolError(msg)
+    effective_timeout = min(timeout, _wait_ceiling_seconds())
 
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -425,7 +434,7 @@ async def run_command(
             wait_argv,
             check=True,
             capture_output=True,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
     except subprocess.TimeoutExpired:
         timed_out = True
@@ -465,6 +474,7 @@ async def run_command(
         output=kept_lines,
         output_truncated=truncated,
         output_truncated_lines=dropped,
+        effective_timeout=effective_timeout,
     )
 
 

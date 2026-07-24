@@ -232,18 +232,93 @@ class EnvironmentSetResult(BaseModel):
 
 
 class WaitForTextResult(BaseModel):
-    """Result of waiting for text to appear in a pane."""
+    """Result of a bounded wait for new pane output.
 
-    found: bool = Field(description="Whether the pattern was found before timeout")
+    Deliberately free of inference. Every field is something the tool
+    observed directly — a match, a clock reading, a tmux flag. There is
+    no "likely cause", no "next action", no quiescence verdict: a
+    confidently-wrong diagnosis costs the agent more than an honest
+    "nothing appeared, here is what the pane shows".
+
+    Field count is load-bearing. ``outputSchema`` is re-sent on every
+    request of every session, so a field that no agent branches on is a
+    permanent tax. ``outcome`` carries what three separate booleans
+    carried before it.
+    """
+
+    found: bool = Field(
+        description=(
+            "True when a ``patterns`` entry matched new output, or, with "
+            "``patterns=null``, when any new output appeared."
+        )
+    )
+    outcome: t.Literal[
+        "matched", "any_output", "stopped", "alternate_screen", "timeout"
+    ] = Field(
+        description=(
+            "How the wait ended. ``matched``: a ``patterns`` entry hit. "
+            "``any_output``: ``patterns`` was omitted and something — "
+            "possibly just a prompt repaint — was written; read it as "
+            "'the pane moved', never as 'the command finished'. "
+            "``stopped``: a ``stop`` failure marker hit. "
+            "``alternate_screen``: the pane was under a pager, editor, or "
+            "full-screen TUI, which repaints the whole grid, so matching "
+            "was suppressed — read the screen with snapshot_pane instead "
+            "of retrying. ``timeout``: nothing matched in the budget."
+        )
+    )
+    matched_index: int | None = Field(
+        default=None,
+        description=(
+            "Zero-based index into ``patterns``, or into ``stop`` when "
+            "``outcome`` is ``stopped``. Null otherwise."
+        ),
+    )
     matched_lines: list[str] = Field(
         default_factory=list,
-        description="Lines matching the pattern (empty if not found)",
+        description="Newly-written lines that matched (empty on timeout).",
+    )
+    tail: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Rows below the entry cursor at the final poll, tail-limited by "
+            "lines and bytes. Includes stale rows excluded from matching, so "
+            "it shows what the pane looks like, not what matched. On a "
+            "timeout this usually already contains the answer — read it "
+            "before retrying with a different pattern."
+        ),
+    )
+    saw_new_output: bool = Field(
+        default=False,
+        description=(
+            "True when any line was written below the entry cursor during "
+            "the wait. False with ``found=false`` means the pane was silent "
+            "— often the command never ran — not that the pattern was wrong."
+        ),
+    )
+    matched_at_entry: bool = Field(
+        default=False,
+        description=(
+            "True when a ``patterns`` entry already matched text on screen "
+            "before the wait began. Such rows are stale and excluded from "
+            "matching; this flags the 'the text is right there but the wait "
+            "timed out' case. Fix it with a unique sentinel."
+        ),
+    )
+    alternate_screen: bool = Field(
+        default=False,
+        description=(
+            "True when the pane was on the terminal's alternate screen at "
+            "any point during the wait."
+        ),
     )
     pane_id: str = Field(description="Pane ID that was polled")
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
-    risk_band_warned: bool = Field(
-        default=False,
-        description="Whether polling entered the history-limit trim-risk band",
+    effective_timeout: float = Field(
+        description=(
+            "Seconds actually enforced. Server policy caps the requested "
+            "``timeout``; compare against what you passed to see a clamp."
+        )
     )
 
 
@@ -299,6 +374,13 @@ class RunCommandResult(BaseModel):
     output_truncated_lines: int = Field(
         default=0,
         description="Number of pane lines dropped from the head when truncating",
+    )
+    effective_timeout: float = Field(
+        description=(
+            "Seconds actually enforced for command completion. Server "
+            "policy caps the requested ``timeout``; compare against what "
+            "you passed to see a clamp."
+        )
     )
 
 
@@ -659,11 +741,3 @@ class BufferContent(BaseModel):
         default=0,
         description="Number of lines dropped from the head when truncating.",
     )
-
-
-class ContentChangeResult(BaseModel):
-    """Result of waiting for any screen content change."""
-
-    changed: bool = Field(description="Whether the content changed before timeout")
-    pane_id: str = Field(description="Pane ID that was polled")
-    elapsed_seconds: float = Field(description="Time spent waiting in seconds")
