@@ -19,6 +19,65 @@ for the full release log.
    [tracker]: https://github.com/tmux-python/libtmux-mcp/discussions
 ```
 
+## libtmux-mcp 0.1.0a19 (2026-07-25)
+
+### `wait_for_text` takes `patterns`, and `wait_for_content_change` is gone
+
+`wait_for_text` accepted a single `pattern` string. It now takes `patterns`, a
+list — or `null` to wait for any new output at all. The schema rejects the old
+argument rather than silently ignoring it, so a call written against the old
+signature fails loudly with `Remove or correct the unrecognized argument(s):
+pattern`.
+
+#### Before
+
+```json
+{"tool": "wait_for_text", "arguments": {"pane_id": "%1", "pattern": "ready"}}
+```
+
+#### After
+
+```json
+{"tool": "wait_for_text", "arguments": {"pane_id": "%1", "patterns": ["ready"]}}
+```
+
+`wait_for_content_change` and its `ContentChangeResult` are removed. Pass
+`patterns: null` instead — it waits for any new output and additionally
+excludes pre-existing scrollback and stale paint from the change predicate,
+which the old tool did not.
+
+```json
+{"tool": "wait_for_text", "arguments": {"pane_id": "%1", "patterns": null}}
+```
+
+### Waits are capped by the server
+
+`wait_for_text`, `wait_for_channel`, and `run_command` are all bounded by
+`LIBTMUX_MCP_WAIT_MAX_SECONDS` (30 seconds by default, clamped to `[1, 120]`).
+An over-large `timeout` is **clamped, not rejected** — the call succeeds and
+reports the value actually enforced, so read `effective_timeout` rather than
+assuming your value was honoured. A wait that previously blocked for an hour
+now returns at the ceiling.
+
+Raise the ceiling with the environment variable if your workload needs it, or
+call again — the command keeps running in the pane between calls.
+
+### `WaitForTextResult` reports an `outcome`
+
+The result's loose booleans are replaced by one `outcome` field taking
+`matched`, `any_output`, `stopped`, `alternate_screen`, or `timeout`.
+`risk_band_warned` is removed; the history-limit trim signal is delivered as an
+MCP warning notification instead. Clients that cannot surface notifications
+should compose `tmux wait-for -S` into the command and use `wait_for_channel`,
+which does not read the pane at all.
+
+### Self-bounded tools cannot be batched
+
+`run_command`, `wait_for_text`, and `wait_for_channel` are rejected by the
+batch wrappers per operation, because batching one multiplied the wait ceiling
+by the operation count. Use `send_keys_batch` for command sequences, or call
+the tool directly.
+
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
 
 ### Recommended registration slug: `libtmux` → `tmux`
