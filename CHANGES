@@ -6,6 +6,25 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**{tooliconl}`wait-for-text` warnings move from MCP log notifications to stderr**
+
+MCP deprecated the protocol-level Logging capability in
+[SEP-2577](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577),
+effective with the `2026-07-28` revision, naming stderr as the migration path
+for stdio servers. {tooliconl}`wait-for-text` was the only tool that used it —
+an invalid regex, a timeout, and the history-limit trim-risk band each emitted a
+`notifications/message` warning. All three are now ordinary `libtmux_mcp.*` log
+records on stderr, where every other libtmux-mcp record already goes.
+
+A client that subscribed to MCP log notifications no longer receives these three
+over the protocol. Nothing an agent can act on is lost: the invalid regex is
+still raised as a tool error, and the timeout is still reported as
+{attr}`~libtmux_mcp.models.WaitForTextResult.outcome`. This supersedes the
+0.1.0a19 note that the trim-risk signal is "delivered only as an MCP warning
+notification". (#110)
+
 ### Documentation
 
 #### Caller identity fields are described (#105)
