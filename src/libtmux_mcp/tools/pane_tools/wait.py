@@ -652,11 +652,22 @@ async def wait_for_text(
     try:
         while True:
             elapsed = time.monotonic() - start_time
+            # Spend the message on the numbers, not on restating the
+            # pane. A constant string here is a wasted channel: clients
+            # that surface progress at all usually show the message and
+            # not the raw progress/total pair, and "how much budget is
+            # left" is the only thing a human watching a long wait wants
+            # to know. It is also the field most likely to survive a
+            # future transport — MCP background tasks drop numeric
+            # progress entirely and keep only a status message.
             await _maybe_report_progress(
                 ctx,
                 progress=elapsed,
                 total=effective_timeout,
-                message=f"Polling pane {target} for pattern",
+                message=(
+                    f"Waiting on pane {target}: {elapsed:.1f}s elapsed, "
+                    f"{max(effective_timeout - elapsed, 0.0):.1f}s left"
+                ),
             )
 
             # FastMCP direct-awaits async tools on the main event loop

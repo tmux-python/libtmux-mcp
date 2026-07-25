@@ -3852,7 +3852,17 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
     first_progress, first_total, first_msg = progress_calls[0]
     assert first_progress >= 0.0
     assert first_total == 0.2
-    assert "Polling pane" in first_msg
+    assert mcp_pane.pane_id is not None
+    assert mcp_pane.pane_id in first_msg
+    # The message must carry the BUDGET, not just restate the pane. A
+    # constant string wastes the one field a client is most likely to
+    # show a human, and it is the field that survives transports which
+    # drop the numeric pair.
+    assert "elapsed" in first_msg
+    assert "left" in first_msg
+    assert first_msg != progress_calls[-1][2], (
+        f"progress message never changed across the wait: {first_msg!r}"
+    )
 
 
 def test_wait_for_text_propagates_unexpected_progress_error(
