@@ -64,8 +64,8 @@ rather than rejected, so this can be lower than what you asked for.
 
 Matching is best-effort once polling enters tmux's history-limit trim-risk band,
 because older scrollback can be discarded while the wait is active. The server
-reports that as an MCP warning notification; use {tooliconl}`wait-for-channel`
-for deterministic command completion.
+logs that to stderr; use {tooliconl}`wait-for-channel` for deterministic
+command completion.
 
 ```{fastmcp-tool-input} pane_tools.wait_for_text
 ```

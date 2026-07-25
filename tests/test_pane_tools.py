@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import pathlib
 import shlex
@@ -3050,6 +3051,12 @@ def test_wait_for_text(
 #: read is internal to the tool and not observable from here.
 _EMIT_AFTER_BASELINE_SECONDS = 1.0
 
+#: Logger the wait tools warn through. MCP deprecated the protocol-level
+#: Logging capability in SEP-2577, so these warnings travel on stderr
+#: rather than as ``notifications/message``; ``caplog`` is how the suite
+#: observes them.
+_WAIT_LOGGER = "libtmux_mcp.tools.pane_tools.wait"
+
 
 def test_wait_for_text_matches_new_output_after_baseline(
     mcp_server: Server, mcp_pane: Pane
@@ -3861,9 +3868,6 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
         ) -> None:
             progress_calls.append((progress, total, message))
 
-        async def warning(self, message: str) -> None:
-            return  # log notifications not asserted in this test
-
     stub = _StubContext()
     result = asyncio.run(
         wait_for_text(
@@ -3968,12 +3972,6 @@ def test_wait_for_text_suppresses_broken_resource_error(
         ) -> None:
             raise anyio.BrokenResourceError
 
-        async def warning(self, message: str) -> None:
-            # Same transport-closed shape on the log channel — the
-            # wait loop's timeout-warning call must also be suppressed
-            # silently when the peer is gone.
-            raise anyio.BrokenResourceError
-
     result = asyncio.run(
         wait_for_text(
             patterns=["WILL_NEVER_MATCH_BROKEN_rpt5"],
@@ -3988,96 +3986,67 @@ def test_wait_for_text_suppresses_broken_resource_error(
 
 
 def test_wait_for_text_warns_on_invalid_regex(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server, mcp_pane: Pane, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """``wait_for_text`` emits ``ctx.warning`` when the regex won't compile.
+    """``wait_for_text`` logs a warning when the regex won't compile.
 
     Regression guard: agents calling with ``regex=True`` and a malformed
-    pattern previously saw only a generic ``ToolError``. The new
-    ``_maybe_log`` helper at ``wait.py`` lets the same condition surface
-    as a ``notifications/message`` warning so MCP client log panels
-    record the cause independent of the tool result.
+    pattern previously saw only a generic ``ToolError``. The warning
+    lets the same condition reach stderr, so an MCP client's log panel
+    records the cause independent of the tool result.
     """
     import asyncio
 
-    log_calls: list[tuple[str, str]] = []
-
-    class _RecordingContext:
-        async def report_progress(
-            self,
-            progress: float,
-            total: float | None = None,
-            message: str = "",
-        ) -> None:
-            return
-
-        async def warning(self, message: str) -> None:
-            log_calls.append(("warning", message))
-
-    with pytest.raises(ToolError, match="Invalid regex"):
+    with (
+        caplog.at_level(logging.WARNING, logger=_WAIT_LOGGER),
+        pytest.raises(ToolError, match="Invalid regex"),
+    ):
         asyncio.run(
             wait_for_text(
                 patterns=["[unclosed"],
                 regex=True,
                 pane_id=mcp_pane.pane_id,
                 socket_name=mcp_server.socket_name,
-                ctx=t.cast("t.Any", _RecordingContext()),
             )
         )
 
-    # The ``warning`` ran before the ``ToolError`` was raised.
-    assert (
-        "warning",
-        "Invalid regex pattern: missing ), unterminated subpattern at position 0",
-    ) in log_calls or any(
-        level == "warning" and "Invalid regex" in msg for level, msg in log_calls
-    )
+    # The warning was logged before the ``ToolError`` was raised.
+    assert any("Invalid regex" in r.getMessage() for r in caplog.records)
 
 
-def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
-    """``wait_for_text`` warns the client when the poll loop times out.
+def test_wait_for_text_warns_on_timeout(
+    mcp_server: Server, mcp_pane: Pane, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``wait_for_text`` warns on stderr when the poll loop times out.
 
     Sibling guard to the invalid-regex warning. The timeout case is
-    where operators most need a structured signal — the tool returns
+    where operators most need a signal — the tool returns
     ``found=False`` but agents and human log readers have to dig into
     the ``WaitForTextResult`` to notice. The warning surfaces it
     directly.
     """
     import asyncio
 
-    log_calls: list[tuple[str, str]] = []
-
-    class _RecordingContext:
-        async def report_progress(
-            self,
-            progress: float,
-            total: float | None = None,
-            message: str = "",
-        ) -> None:
-            return
-
-        async def warning(self, message: str) -> None:
-            log_calls.append(("warning", message))
-
-    result = asyncio.run(
-        wait_for_text(
-            patterns=["WILL_NEVER_MATCH_TIMEOUT_qZx9"],
-            pane_id=mcp_pane.pane_id,
-            timeout=0.2,
-            interval=0.05,
-            socket_name=mcp_server.socket_name,
-            ctx=t.cast("t.Any", _RecordingContext()),
+    with caplog.at_level(logging.WARNING, logger=_WAIT_LOGGER):
+        result = asyncio.run(
+            wait_for_text(
+                patterns=["WILL_NEVER_MATCH_TIMEOUT_qZx9"],
+                pane_id=mcp_pane.pane_id,
+                timeout=0.2,
+                interval=0.05,
+                socket_name=mcp_server.socket_name,
+            )
         )
-    )
 
+    messages = [r.getMessage() for r in caplog.records]
     assert result.found is False
-    assert any(
-        level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
-    ), f"expected a timeout warning, got: {log_calls}"
+    assert any("timeout" in m.lower() for m in messages), (
+        f"expected a timeout warning, got: {messages}"
+    )
 
 
 def test_wait_for_text_warns_in_history_limit_risk_band(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server, mcp_pane: Pane, caplog: pytest.LogCaptureFixture
 ) -> None:
     """``wait_for_text`` emits a warning when polling near ``history-limit``.
 
@@ -4085,8 +4054,8 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
     ``grid_collect_history`` to fire repeatedly, sampled ``history_size``
     enters the trim-risk band (top 10% of ``history_limit``). The wait's
     strict-shrink predicate cannot see those trims (hsize stays clamped
-    at the cap), so the tool emits a one-shot ``ctx.warning`` notification
-    so MCP clients can decide whether to keep waiting, retry, or switch
+    at the cap), so the tool logs a one-shot warning to stderr so
+    operators can decide whether to keep waiting, retry, or switch
     to ``wait_for_channel``.
 
     The wait's ``found`` result is intentionally not asserted — once
@@ -4110,20 +4079,6 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
 
     retry_until(_hlimit_locked, 5, raises=True)
 
-    log_calls: list[tuple[str, str]] = []
-
-    class _RecordingContext:
-        async def report_progress(
-            self,
-            progress: float,
-            total: float | None = None,
-            message: str = "",
-        ) -> None:
-            return
-
-        async def warning(self, message: str) -> None:
-            log_calls.append(("warning", message))
-
     async def burst_after_delay() -> None:
         await asyncio.sleep(0.1)
         await asyncio.to_thread(
@@ -4140,7 +4095,6 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
                 timeout=2.0,
                 interval=0.05,
                 socket_name=mcp_server.socket_name,
-                ctx=t.cast("t.Any", _RecordingContext()),
             )
         )
         await burst_after_delay()
@@ -4152,15 +4106,17 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
             # we only assert the warning contract, not the result type.
             return
 
-    asyncio.run(run())
+    with caplog.at_level(logging.WARNING, logger=_WAIT_LOGGER):
+        asyncio.run(run())
 
-    assert any(
-        level == "warning" and "trim-risk band" in msg for level, msg in log_calls
-    ), f"expected a trim-risk-band warning, got: {log_calls}"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("trim-risk band" in m for m in messages), (
+        f"expected a trim-risk-band warning, got: {messages}"
+    )
 
 
 def test_wait_for_text_warns_when_already_in_risk_band(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server, mcp_pane: Pane, caplog: pytest.LogCaptureFixture
 ) -> None:
     """``wait_for_text`` warns immediately if entry is already in the risk band.
 
@@ -4193,15 +4149,6 @@ def test_wait_for_text_warns_when_already_in_risk_band(
 
     retry_until(_prefilled, 10, raises=True)
 
-    log_calls: list[tuple[str, str]] = []
-
-    class _RecordingContext:
-        async def report_progress(self, *args: t.Any, **kwargs: t.Any) -> None:
-            return
-
-        async def warning(self, message: str) -> None:
-            log_calls.append(("warning", message))
-
     async def run() -> WaitForTextResult:
         # Idle wait: no new output, no cursor movement.
         return await wait_for_text(
@@ -4210,17 +4157,18 @@ def test_wait_for_text_warns_when_already_in_risk_band(
             timeout=0.5,
             interval=0.1,
             socket_name=mcp_server.socket_name,
-            ctx=t.cast("t.Any", _RecordingContext()),
         )
 
-    # The trim-risk band is surfaced as a client log notification, not
-    # a result field: an agent cannot act on a boolean it gets after
-    # the fact, and the field was permanent weight in ``outputSchema``.
-    asyncio.run(run())
+    # The trim-risk band is surfaced as a stderr log line, not a result
+    # field: an agent cannot act on a boolean it gets after the fact,
+    # and the field was permanent weight in ``outputSchema``.
+    with caplog.at_level(logging.WARNING, logger=_WAIT_LOGGER):
+        asyncio.run(run())
 
-    assert any(
-        level == "warning" and "trim-risk band" in msg for level, msg in log_calls
-    ), f"expected a trim-risk-band warning during idle wait, got: {log_calls}"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("trim-risk band" in m for m in messages), (
+        f"expected a trim-risk-band warning during idle wait, got: {messages}"
+    )
 
 
 def test_wait_for_text_propagates_cancellation(
