@@ -2778,6 +2778,134 @@ def test_search_panes_is_caller(
 # ---------------------------------------------------------------------------
 
 
+class ResolverParityFixture(t.NamedTuple):
+    """One targeting shape both pane resolvers must agree on."""
+
+    test_id: str
+    #: Which of the four shared targeting arguments to populate. Resolved
+    #: against the live fixture at call time, since ids are dynamic.
+    arg: str
+
+
+RESOLVER_PARITY_FIXTURES: list[ResolverParityFixture] = [
+    ResolverParityFixture(test_id="by_pane_id", arg="pane_id"),
+    ResolverParityFixture(test_id="by_window_id", arg="window_id"),
+    ResolverParityFixture(test_id="by_session_id", arg="session_id"),
+    ResolverParityFixture(test_id="by_session_name", arg="session_name"),
+    ResolverParityFixture(test_id="no_target_at_all", arg="none"),
+]
+
+
+@pytest.mark.parametrize(
+    ResolverParityFixture._fields,
+    RESOLVER_PARITY_FIXTURES,
+    ids=[f.test_id for f in RESOLVER_PARITY_FIXTURES],
+)
+def test_wait_resolver_matches_the_canonical_resolver(
+    mcp_server: Server, mcp_session: Session, test_id: str, arg: str
+) -> None:
+    """``wait_for_text``'s private resolver must agree with ``_resolve_pane``.
+
+    ``wait.py`` carries its own async resolver because the canonical one
+    is synchronous and reaches tmux through an untimed
+    ``Popen.communicate()`` — unusable from the event loop, and
+    uncancellable through a thread. The two therefore cannot share an
+    implementation: different sync-ness, and one returns a ``Pane`` while
+    the other returns a pane id.
+
+    What they CAN share is the contract — which argument wins, and which
+    pane you get when several could match. Nothing pinned that, so a
+    change to the canonical precedence would have diverged the wait tools
+    silently. This is that pin. It is deliberately a behavioural
+    equivalence test rather than a refactor: merging the two would mean
+    putting a blocking call back on the event loop.
+
+    Not covered here: ``window_index`` and ``pane_index``, which the wait
+    tools do not accept.
+    """
+    import asyncio
+
+    from libtmux_mcp._utils import _resolve_pane
+    from libtmux_mcp.tools.pane_tools.wait import _resolve_pane_bounded
+
+    # A second window and pane so "first listed" is a real choice rather
+    # than the only option — otherwise every arm agrees trivially.
+    mcp_session.new_window(window_name="parity_second", attach=False)
+    window = mcp_session.active_window
+    window.split(attach=False)
+
+    target_pane = window.panes[0]
+    kwargs: dict[str, str] = {}
+    if arg == "pane_id":
+        kwargs["pane_id"] = str(target_pane.pane_id)
+    elif arg == "window_id":
+        kwargs["window_id"] = str(window.window_id)
+    elif arg == "session_id":
+        kwargs["session_id"] = str(mcp_session.session_id)
+    elif arg == "session_name":
+        kwargs["session_name"] = str(mcp_session.session_name)
+
+    canonical = _resolve_pane(mcp_server, **kwargs)
+    bounded = asyncio.run(
+        _resolve_pane_bounded(
+            mcp_server,
+            pane_id=kwargs.get("pane_id"),
+            session_name=kwargs.get("session_name"),
+            session_id=kwargs.get("session_id"),
+            window_id=kwargs.get("window_id"),
+            deadline=None,
+        )
+    )
+    assert bounded == canonical.pane_id, (
+        f"resolvers disagree for {arg}: bounded={bounded} canonical={canonical.pane_id}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("arg", "value"),
+    [
+        ("pane_id", "%999999"),
+        ("window_id", "@999999"),
+        ("session_id", "$999999"),
+        ("session_name", "no_such_session_parity"),
+    ],
+)
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_resolver_raises_like_the_canonical_resolver(
+    mcp_server: Server, arg: str, value: str
+) -> None:
+    """A miss must raise the same way through both resolvers.
+
+    Precedence parity is only half the contract: the agent-visible error
+    matters just as much, because that text is what an agent reads when
+    it targeted the wrong thing.
+    """
+    import asyncio
+
+    from libtmux_mcp._utils import _resolve_pane
+    from libtmux_mcp.tools.pane_tools.wait import _resolve_pane_bounded
+
+    with pytest.raises(libtmux_exc.LibTmuxException) as canonical_exc:
+        _resolve_pane(mcp_server, **{arg: value})
+
+    with pytest.raises(libtmux_exc.LibTmuxException) as bounded_exc:
+        asyncio.run(
+            _resolve_pane_bounded(
+                mcp_server,
+                pane_id=value if arg == "pane_id" else None,
+                session_name=value if arg == "session_name" else None,
+                session_id=value if arg == "session_id" else None,
+                window_id=value if arg == "window_id" else None,
+                deadline=None,
+            )
+        )
+
+    assert type(bounded_exc.value) is type(canonical_exc.value), (
+        f"{arg}: bounded raised {type(bounded_exc.value).__name__}, "
+        f"canonical raised {type(canonical_exc.value).__name__}"
+    )
+
+
 class WaitForTextFixture(t.NamedTuple):
     """Test fixture for wait_for_text."""
 
