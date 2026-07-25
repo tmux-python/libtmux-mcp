@@ -118,8 +118,42 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
     """``interrupt_gracefully`` refuses SIGQUIT auto-escalation."""
     from libtmux_mcp.prompts.recipes import interrupt_gracefully
 
-    text = interrupt_gracefully(pane_id="%3")
+    # Normalised: the recipe is hard-wrapped, so a raw substring test
+    # breaks whenever a line happens to wrap mid-phrase.
+    text = " ".join(interrupt_gracefully(pane_id="%3").split())
     assert "do NOT escalate automatically" in text
+
+
+def test_interrupt_gracefully_does_not_stop_on_the_caret_c_echo() -> None:
+    r"""``^C`` must not be a ``stop`` marker in the interrupt recipe.
+
+    The recipe used to pass ``stop=["\\^C", "Interrupt"]`` to catch
+    programs that trap SIGINT and keep running. It cannot do that: the
+    terminal's line discipline echoes ``^C`` whenever SIGINT is
+    DELIVERED, whether or not the process dies. Since ``stop`` wins a
+    same-tick tie against ``patterns``, the marker systematically beat
+    the returning shell prompt and reported the SUCCESS path as a
+    failure.
+
+    Measured on sh and bash against a plain ``sleep 60``: the process
+    exited and the wait still returned ``outcome="stopped"``,
+    ``found=false``. The recipe's next documented step on that branch
+    is SIGQUIT and then ``kill-pane`` — i.e. destroying a pane whose
+    command had already been interrupted successfully.
+
+    The reliable signal is ``pane_current_command`` before and after,
+    which is what the recipe now instructs.
+    """
+    from libtmux_mcp.prompts.recipes import interrupt_gracefully
+
+    text = interrupt_gracefully(pane_id="%3")
+    call = next(line for line in text.splitlines() if "wait_for_text(" in line)
+    assert "stop=" not in call, f"interrupt recipe reintroduced a stop list: {call}"
+    assert "^C" not in call
+    assert "pane_current_command" in text, (
+        "the recipe must direct the agent to the signal that actually "
+        "discriminates a dead process from a live one"
+    )
 
 
 def test_diagnose_failing_pane_uses_capture_since_for_repeated_reads() -> None:
@@ -144,10 +178,10 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     ``tail -f`` take over the terminal and never draw a shell prompt,
     so the wait would block until timeout.
 
-    The corrected recipe uses ``wait_for_content_change`` after launch
-    for an optional "program started" confirmation — a screen-change
-    check that works for every shell and every program, no glyph
-    matching required.
+    The corrected recipe uses ``wait_for_text(patterns=null)`` after
+    launch for an optional "program started" confirmation — an
+    any-new-output check that works for every shell and every program,
+    no glyph matching required.
     """
     from libtmux_mcp.prompts.recipes import build_dev_workspace
 
@@ -156,8 +190,8 @@ def test_build_dev_workspace_does_not_deadlock_on_screen_grabbers() -> None:
     assert "wait for the prompt" not in text
     assert "Between each step, wait for the prompt" not in text
     # Post-launch confirmation still uses the right primitive:
-    # content-change, not prompt-match.
-    assert "wait_for_content_change" in text
+    # any-new-output, not prompt-match.
+    assert "patterns=null" in text
 
 
 def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
@@ -184,8 +218,8 @@ def test_build_dev_workspace_has_no_prompt_regex_or_stray_enter() -> None:
     # The stray-Enter-into-idle-shell line must be gone.
     assert 'send_keys(pane_id="%B", keys="")' not in text
     # Positive pin: post-launch UI confirmation is still available
-    # via the shell-agnostic content-change primitive.
-    assert "wait_for_content_change" in text
+    # via the shell-agnostic any-new-output primitive.
+    assert "patterns=null" in text
 
 
 def _extract_tool_calls(
@@ -373,3 +407,41 @@ def test_prompt_tool_calls_match_real_signatures() -> None:
                     f"{recipe_name}: {tool_name}({kw}=...) is invalid — "
                     f"{tool_name} accepts {sorted(valid)}"
                 )
+
+
+def test_docs_sample_render_matches_the_server(mcp_with_prompts: FastMCP) -> None:
+    """``docs/prompts.md``'s sample render must be what the server emits.
+
+    The page publishes a verbatim render under a "Sample render"
+    heading, and nothing pinned it — so when ``wait_for_text`` grew
+    ``patterns``/``stop``, the prompt source was migrated and the page
+    was not. The docs then advertised a call shape the schema rejects,
+    attributed to a prompt the server renders differently.
+
+    Comparing the published block against the live render is the only
+    thing that keeps a hand-copied transcript honest.
+    """
+    import pathlib
+    import re
+
+    from fastmcp import Client
+
+    async def _render() -> str:
+        async with Client(mcp_with_prompts) as client:
+            result = await client.get_prompt("interrupt_gracefully", {"pane_id": "%1"})
+        text: str = result.messages[0].content.text
+        return text.strip()
+
+    live = asyncio.run(_render())
+
+    page = pathlib.Path(__file__).parent.parent / "docs" / "prompts.md"
+    block = re.search(
+        r'\*\*Sample render\*\* \(``pane_id="%1"``\):\n\n````markdown\n(.*?)````',
+        page.read_text(),
+        re.S,
+    )
+    assert block is not None, "interrupt_gracefully sample-render block not found"
+
+    assert block.group(1).strip() == live, (
+        "docs/prompts.md sample render has drifted from the server output"
+    )

@@ -16,7 +16,7 @@ leave socket selection inside each nested tool's arguments. See
 - Need text + cursor + mode in one call? → {tool}`snapshot-pane`
 - Don't know which pane? → {tool}`search-panes`
 - Need to wait for specific output? → {tool}`wait-for-text`
-- Need to wait for *any* change? → {tool}`wait-for-content-change`
+- Need to wait for *any* new output? → {tool}`wait-for-text` with `patterns=null`
 - Only need metadata (PID, path, size)? → {tool}`get-pane-info`
 - Need an arbitrary tmux variable? → {tool}`display-message`
 
@@ -28,7 +28,7 @@ leave socket selection inside each nested tool's arguments. See
 - {tool}`run-command` — one call to run a shell command, wait for completion, capture output, and return exit status
 - {tool}`send-keys` / {tool}`send-keys-batch` — raw interactive input for TUIs, control keys, and persistent shell state
 - {tool}`wait-for-channel` — low-level custom completion when `run-command` does not fit the shell composition
-- For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text`, {tool}`wait-for-content-change`, or {tool}`capture-since`
+- For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text` or {tool}`capture-since`
 - Pasting multi-line text? → {tool}`paste-text`
 
 **Creating workspace structure?**
@@ -187,12 +187,6 @@ Show tmux environment variables.
 :link: snapshot-pane
 :link-type: ref
 Rich capture: content + cursor + mode + scroll.
-:::
-
-:::{grid-item-card} wait_for_content_change
-:link: wait-for-content-change
-:link-type: ref
-Wait for any screen change.
 :::
 
 :::{grid-item-card} display_message

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import pathlib
 import shlex
 import subprocess
@@ -15,9 +16,9 @@ from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
+from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.models import (
     CaptureSinceResult,
-    ContentChangeResult,
     PaneContentMatch,
     PaneSnapshot,
     SearchPanesResult,
@@ -44,9 +45,9 @@ from libtmux_mcp.tools.pane_tools import (
     set_pane_title,
     snapshot_pane,
     swap_pane,
-    wait_for_content_change,
     wait_for_text,
 )
+from tests.conftest import wire_annotations
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -558,6 +559,156 @@ def test_run_command_timeout_reports_without_killing_shell(
         lambda: any(marker in line for line in mcp_pane.capture_pane()),
         2,
         raises=True,
+    )
+
+
+def test_run_command_reports_unclamped_timeout(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A ``timeout`` under the ceiling is reported verbatim, unclamped."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    result = asyncio.run(
+        run_command(
+            command="true",
+            pane_id=mcp_pane.pane_id,
+            timeout=5.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.effective_timeout == 5.0
+
+
+def test_run_command_clamps_oversized_timeout(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An over-large ``timeout`` is clamped to the server wait ceiling.
+
+    Mirrors ``wait_for_text``'s clamp: without it, ``run_command`` would
+    honour a caller-supplied ``timeout`` of any size — including one
+    that stalls the shared MCP connection far longer than the server's
+    wait policy allows. The ceiling is lowered to 0.3 s so the assertion
+    is about the clamp mechanism, not wall-clock patience.
+    """
+    import asyncio
+
+    from libtmux_mcp import _wait_policy
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    monkeypatch.setattr(_wait_policy, "_wait_max_seconds", 0.3)
+
+    started = time.monotonic()
+    result = asyncio.run(
+        run_command(
+            command="sleep 5",
+            pane_id=mcp_pane.pane_id,
+            timeout=3600.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.timed_out is True
+    assert result.effective_timeout == 0.3
+    assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+
+
+def _run_command_wait_pids(socket_name: str) -> list[int]:
+    """Return pids of live ``tmux -L <socket> wait-for r_*`` processes.
+
+    Asks the kernel rather than the tool: the defect this backs is a
+    tool that reports a clean cancellation while its child runs on, so
+    the tool's own return value cannot be the witness. ``run_command``
+    mints a random ``r_<hex>`` channel per call, hence the prefix match
+    rather than an exact name.
+
+    The argv must be the whole five-token vector and ``/proc/<pid>/exe``
+    must resolve to tmux, so a shell (or pytest) whose command line
+    merely mentions the socket cannot register as a hit; this process
+    is skipped outright for the same reason. Reaped children are gone
+    from ``/proc`` and zombies have an empty ``cmdline``, so neither
+    counts as a survivor.
+    """
+    me = os.getpid()
+    pids: list[int] = []
+    for entry in pathlib.Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == me:
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+            exe = (entry / "exe").readlink()
+        except OSError:
+            continue  # process exited, or not ours to inspect
+        argv = [chunk.decode(errors="replace") for chunk in raw.split(b"\0") if chunk]
+        if len(argv) != 5 or argv[1:4] != ["-L", socket_name, "wait-for"]:
+            continue
+        if not argv[4].startswith("r_") or exe.name != "tmux":
+            continue
+        pids.append(pid)
+    return pids
+
+
+def test_run_command_kills_tmux_child_on_cancel(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A cancelled ``run_command`` must not leave its wait-for child running.
+
+    ``asyncio.to_thread(subprocess.run, ...)`` is uninterruptible: the
+    coroutine raises ``CancelledError`` at once while the worker thread
+    stays blocked in ``waitpid``, so ``tmux wait-for`` kept running for
+    the whole remainder of its budget with nobody waiting on it.
+    Measured before the fix: a 25 s ``run_command`` cancelled at 3 s
+    left the child alive another 22 s. ``run_command`` is the wait an
+    agent cancels most — it is the one wrapping long shell commands.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+
+    async def _drive() -> list[int]:
+        task = asyncio.create_task(
+            run_command(
+                command="sleep 30",
+                pane_id=mcp_pane.pane_id,
+                timeout=8.0,
+                socket_name=socket_name,
+            )
+        )
+        deadline = time.monotonic() + 4.0
+        while time.monotonic() < deadline and not _run_command_wait_pids(socket_name):
+            await asyncio.sleep(0.05)
+        assert _run_command_wait_pids(socket_name), (
+            "no tmux wait-for child observed before the cancel — the probe "
+            "is broken, so a later 'no survivors' result would be vacuous"
+        )
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Poll rather than sleep once: the kill is synchronous but the
+        # reap is not instantaneous. The 2 s window is far short of the
+        # remaining budget, so a survivor here is an orphan and not a
+        # slow teardown.
+        reap_deadline = time.monotonic() + 2.0
+        while time.monotonic() < reap_deadline:
+            if not _run_command_wait_pids(socket_name):
+                break
+            await asyncio.sleep(0.05)
+        return _run_command_wait_pids(socket_name)
+
+    survivors = asyncio.run(_drive())
+    assert not survivors, (
+        f"cancelled run_command orphaned tmux child(ren) {survivors}; "
+        "the child outlives the cancellation for the rest of its timeout"
     )
 
 
@@ -2628,6 +2779,143 @@ def test_search_panes_is_caller(
 # ---------------------------------------------------------------------------
 
 
+class ResolverParityFixture(t.NamedTuple):
+    """One targeting shape both pane resolvers must agree on."""
+
+    test_id: str
+    #: Which of the four shared targeting arguments to populate. Resolved
+    #: against the live fixture at call time, since ids are dynamic.
+    arg: str
+
+
+RESOLVER_PARITY_FIXTURES: list[ResolverParityFixture] = [
+    ResolverParityFixture(test_id="by_pane_id", arg="pane_id"),
+    ResolverParityFixture(test_id="by_window_id", arg="window_id"),
+    ResolverParityFixture(test_id="by_session_id", arg="session_id"),
+    ResolverParityFixture(test_id="by_session_name", arg="session_name"),
+    ResolverParityFixture(test_id="no_target_at_all", arg="none"),
+]
+
+
+@pytest.mark.parametrize(
+    ResolverParityFixture._fields,
+    RESOLVER_PARITY_FIXTURES,
+    ids=[f.test_id for f in RESOLVER_PARITY_FIXTURES],
+)
+def test_wait_resolver_matches_the_canonical_resolver(
+    mcp_server: Server, mcp_session: Session, test_id: str, arg: str
+) -> None:
+    """``wait_for_text``'s private resolver must agree with ``_resolve_pane``.
+
+    ``wait.py`` carries its own async resolver because the canonical one
+    is synchronous and reaches tmux through an untimed
+    ``Popen.communicate()`` — unusable from the event loop, and
+    uncancellable through a thread. The two therefore cannot share an
+    implementation: different sync-ness, and one returns a ``Pane`` while
+    the other returns a pane id.
+
+    What they CAN share is the contract — which argument wins, and which
+    pane you get when several could match. Nothing pinned that, so a
+    change to the canonical precedence would have diverged the wait tools
+    silently. This is that pin. It is deliberately a behavioural
+    equivalence test rather than a refactor: merging the two would mean
+    putting a blocking call back on the event loop.
+
+    Not covered here: ``window_index`` and ``pane_index``, which the wait
+    tools do not accept.
+    """
+    import asyncio
+
+    from libtmux_mcp._utils import _resolve_pane
+    from libtmux_mcp.tools.pane_tools.wait import _resolve_pane_bounded
+
+    # A second window and pane so "first listed" is a real choice rather
+    # than the only option — otherwise every arm agrees trivially.
+    mcp_session.new_window(window_name="parity_second", attach=False)
+    window = mcp_session.active_window
+    window.split(attach=False)
+
+    target_pane = window.panes[0]
+    kwargs: dict[str, str] = {}
+    if arg == "pane_id":
+        kwargs["pane_id"] = str(target_pane.pane_id)
+    elif arg == "window_id":
+        kwargs["window_id"] = str(window.window_id)
+    elif arg == "session_id":
+        kwargs["session_id"] = str(mcp_session.session_id)
+    elif arg == "session_name":
+        kwargs["session_name"] = str(mcp_session.session_name)
+
+    canonical = _resolve_pane(mcp_server, **kwargs)
+    bounded = asyncio.run(
+        _resolve_pane_bounded(
+            mcp_server,
+            pane_id=kwargs.get("pane_id"),
+            session_name=kwargs.get("session_name"),
+            session_id=kwargs.get("session_id"),
+            window_id=kwargs.get("window_id"),
+            deadline=None,
+        )
+    )
+    assert bounded == canonical.pane_id, (
+        f"resolvers disagree for {arg}: bounded={bounded} canonical={canonical.pane_id}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("arg", "value"),
+    [
+        ("pane_id", "%999999"),
+        ("window_id", "@999999"),
+        ("session_id", "$999999"),
+        ("session_name", "no_such_session_parity"),
+    ],
+)
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_resolver_raises_like_the_canonical_resolver(
+    mcp_server: Server, arg: str, value: str
+) -> None:
+    """A miss must raise the same way through both resolvers.
+
+    Precedence parity is only half the contract: the agent-visible error
+    matters just as much, because that text is what an agent reads when
+    it targeted the wrong thing.
+    """
+    import asyncio
+
+    from libtmux_mcp._utils import _resolve_pane
+    from libtmux_mcp.tools.pane_tools.wait import _resolve_pane_bounded
+
+    with pytest.raises(libtmux_exc.LibTmuxException) as canonical_exc:
+        _resolve_pane(mcp_server, **{arg: value})
+
+    with pytest.raises(libtmux_exc.LibTmuxException) as bounded_exc:
+        asyncio.run(
+            _resolve_pane_bounded(
+                mcp_server,
+                pane_id=value if arg == "pane_id" else None,
+                session_name=value if arg == "session_name" else None,
+                session_id=value if arg == "session_id" else None,
+                window_id=value if arg == "window_id" else None,
+                deadline=None,
+            )
+        )
+
+    assert type(bounded_exc.value) is type(canonical_exc.value), (
+        f"{arg}: bounded raised {type(bounded_exc.value).__name__}, "
+        f"canonical raised {type(canonical_exc.value).__name__}"
+    )
+    # The type alone is a weak contract — it is the message an agent
+    # reads. Both must name the target that missed, or the agent cannot
+    # tell WHICH of its arguments was wrong.
+    assert value in str(bounded_exc.value), (
+        f"{arg}: bounded error does not name {value!r}: {bounded_exc.value}"
+    )
+    assert value in str(canonical_exc.value), (
+        f"{arg}: canonical error does not name {value!r}: {canonical_exc.value}"
+    )
+
+
 class WaitForTextFixture(t.NamedTuple):
     """Test fixture for wait_for_text."""
 
@@ -2643,7 +2931,7 @@ class WaitForTextFixture(t.NamedTuple):
     #: poll loop — synchronous setup races the shell's enter-processing
     #: on CI and shifts the baseline past single-line output.
     pre_command: str | None
-    pattern: str
+    patterns: list[str]
     timeout: float
     expected_found: bool
 
@@ -2653,7 +2941,7 @@ WAIT_FOR_TEXT_FIXTURES: list[WaitForTextFixture] = [
     WaitForTextFixture(
         test_id="stale_scrollback_does_not_match",
         pre_command="echo WAIT_MARKER_stale",
-        pattern="WAIT_MARKER_stale",
+        patterns=["WAIT_MARKER_stale"],
         timeout=0.5,
         expected_found=False,
     ),
@@ -2661,7 +2949,7 @@ WAIT_FOR_TEXT_FIXTURES: list[WaitForTextFixture] = [
     WaitForTextFixture(
         test_id="timeout_not_found",
         pre_command=None,
-        pattern="NEVER_EXISTS_xyz999",
+        patterns=["NEVER_EXISTS_xyz999"],
         timeout=0.3,
         expected_found=False,
     ),
@@ -2678,7 +2966,7 @@ def test_wait_for_text(
     mcp_pane: Pane,
     test_id: str,
     pre_command: str | None,
-    pattern: str,
+    patterns: list[str],
     timeout: float,
     expected_found: bool,
 ) -> None:
@@ -2720,7 +3008,7 @@ def test_wait_for_text(
             hs_str, cy_str = raw[0].split(":", 1)
             state = (int(hs_str), int(cy_str))
             has_output_line = any(
-                line.strip() == pattern for line in mcp_pane.capture_pane()
+                line.strip() == patterns[0] for line in mcp_pane.capture_pane()
             )
             settled = state == last_state and has_output_line
             last_state = state
@@ -2730,7 +3018,7 @@ def test_wait_for_text(
 
     result = asyncio.run(
         wait_for_text(
-            pattern=pattern,
+            patterns=patterns,
             pane_id=mcp_pane.pane_id,
             timeout=timeout,
             socket_name=mcp_server.socket_name,
@@ -2743,6 +3031,24 @@ def test_wait_for_text(
 
     if expected_found:
         assert len(result.matched_lines) >= 1
+
+
+#: How long the tests that coordinate against a running wait sleep
+#: before writing their marker.
+#:
+#: This is a race, and it only fails in one direction: if the wait has
+#: not locked its entry baseline yet, the marker is PRE-EXISTING content
+#: by the time it does, gets correctly suppressed, and the test fails
+#: for a reason unrelated to the code under test. Locking the baseline
+#: costs five tmux round trips, a few tens of milliseconds at idle —
+#: but this whole cluster went red together on a box at load ~30 with
+#: 20 CPUs, and ``--reruns`` did not save it because the load outlived
+#: the retries.
+#:
+#: 1 s buys roughly an order of magnitude of headroom for a fraction of
+#: a second per test. There is no event to wait on instead: the baseline
+#: read is internal to the tool and not observable from here.
+_EMIT_AFTER_BASELINE_SECONDS = 1.0
 
 
 def test_wait_for_text_matches_new_output_after_baseline(
@@ -2767,15 +3073,15 @@ def test_wait_for_text_matches_new_output_after_baseline(
         # The baseline read is a single display-message round trip
         # (<5 ms in practice); 0.2 s gives wait_for_text plenty of
         # headroom to lock the baseline before the marker fires.
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
         await asyncio.to_thread(mcp_pane.send_keys, "echo WAIT_MARKER_after", True)
 
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="WAIT_MARKER_after",
+                patterns=["WAIT_MARKER_after"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -2787,16 +3093,280 @@ def test_wait_for_text_matches_new_output_after_baseline(
     assert any("WAIT_MARKER_after" in line for line in result.matched_lines)
 
 
+#: Parks a pane on a prompt-shaped row that never moves again: print a
+#: prompt WITHOUT a trailing newline so the cursor stays at the end of
+#: it, then sleep. Fixture teardown kills the pane and the sleep.
+#: ``capture-pane`` strips trailing whitespace, so the token asserted on
+#: deliberately excludes the space that is printed.
+_PARKED_PROMPT = "PARKED_PROMPT:"
+_PARK_COMMAND = f"printf '{_PARKED_PROMPT} '; sleep 60"
+
+
+def _park_pane(pane: Pane) -> None:
+    """Replace the pane's shell with a pane that is genuinely quiescent.
+
+    Settling the default zsh pane is not enough, and the way it fails is
+    silent. Measured: two consecutive identical ``(hsize, cursor_y)``
+    polls are satisfied while zsh is still STARTING, before it has
+    painted anything at all — the screen is empty and the state is a
+    stable ``(0, 0)``. zsh then prints a ``compinit`` warning that wraps
+    to two rows, so by the time a marker is written the cursor has moved
+    to row 2 and the marker lands well BELOW the recorded entry row.
+    The entry-row tests then pass on unfixed code, proving nothing.
+
+    A parked ``sh`` removes the race instead of racing it: one prompt
+    row, cursor at the end of it, and nothing else will ever move.
+    """
+    pane.respawn(kill=True, shell=f'sh -c "{_PARK_COMMAND}"')
+
+    def _parked() -> bool:
+        if not any(_PARKED_PROMPT in line for line in pane.capture_pane()):
+            return False
+        # ``cursor_y`` is the property under test, and it must be the
+        # prompt's own row. ``history_size`` is deliberately NOT asserted
+        # on: respawn does not clear scrollback, so whatever the previous
+        # shell wrote is still in history.
+        raw = pane.cmd("display-message", "-p", "#{cursor_y}").stdout
+        return bool(raw) and raw[0] == "0"
+
+    retry_until(_parked, 5, raises=True)
+
+
+def _write_to_pane_tty(pane: Pane, payload: str) -> None:
+    """Write ``payload`` straight to the pane's tty.
+
+    ``send_keys`` is the wrong tool for the entry-row tests: it types at
+    the shell, which processes the newline and moves the cursor, so the
+    marker can never land on the row the cursor occupied at entry —
+    exactly the row under test. Writing to ``#{pane_tty}`` puts bytes on
+    the terminal without touching the shell's line editor.
+    """
+    tty = pane.display_message("#{pane_tty}", get_text=True)[0]
+    fd = os.open(tty, os.O_WRONLY)
+    try:
+        os.write(fd, payload.encode())
+    finally:
+        os.close(fd)
+
+
+class EntryRowFixture(t.NamedTuple):
+    """Test fixture for entry-cursor-row visibility."""
+
+    test_id: str
+    #: Bytes written straight to the pane tty while the wait is running.
+    payload: str
+    patterns: list[str]
+    expected_found: bool
+
+
+ENTRY_ROW_FIXTURES: list[EntryRowFixture] = [
+    # The regression. On a quiescent pane the cursor sits at the end of
+    # the prompt, so an unprefixed line lands on the entry cursor row.
+    # That row used to be excluded by index and the marker was
+    # unmatchable — the tool's headline case (a daemon printing one
+    # ``ready`` line) always burned the full budget and then reported
+    # ``saw_new_output=false``.
+    EntryRowFixture(
+        test_id="bare_line_lands_on_entry_row",
+        payload="ENTRY_ROW_MARKER\n",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=True,
+    ),
+    # No trailing newline at all: the marker never leaves the entry row.
+    EntryRowFixture(
+        test_id="unterminated_line_stays_on_entry_row",
+        payload="Continue? [y/N] ",
+        patterns=[r"Continue\?"],
+        expected_found=True,
+    ),
+    # The marker is on the entry row and the row below it moves too, so
+    # ``saw_new_output`` was true while ``found`` was false — the
+    # confusing shape that sends an agent into a retry loop.
+    EntryRowFixture(
+        test_id="entry_row_marker_with_trailing_line",
+        payload="ENTRY_ROW_MARKER\ntrailing\n",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=True,
+    ),
+    # In-place rewrites: spinners and single-line status updates land on
+    # the entry row via carriage return and never advance it.
+    EntryRowFixture(
+        test_id="carriage_return_rewrite_on_entry_row",
+        payload="\rworking 1 \rworking 2 ",
+        patterns=["working 2"],
+        expected_found=True,
+    ),
+    # Control: a row BELOW the entry cursor still matches, so a failure
+    # above is a real regression and not a broken harness.
+    EntryRowFixture(
+        test_id="line_below_entry_row_still_matches",
+        payload="\nENTRY_ROW_MARKER\n",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=True,
+    ),
+    # Control: nothing written means nothing matches.
+    EntryRowFixture(
+        test_id="silent_pane_still_times_out",
+        payload="",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=False,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    EntryRowFixture._fields,
+    ENTRY_ROW_FIXTURES,
+    ids=[f.test_id for f in ENTRY_ROW_FIXTURES],
+)
+def test_wait_for_text_sees_the_entry_cursor_row(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    test_id: str,
+    payload: str,
+    patterns: list[str],
+    expected_found: bool,
+) -> None:
+    """Content arriving on the entry cursor row must be matchable.
+
+    The wait anchors on the row the cursor occupied at entry rather than
+    the row below it, and suppresses that row's PRE-EXISTING content by
+    value instead. Suppressing it by index was a shipped false negative:
+    on a quiescent pane the cursor sits at the end of the prompt, which
+    is precisely where the next line of output lands.
+    """
+    import asyncio
+
+    # Must be a genuinely parked pane: against the default zsh pane every
+    # case below passes on unfixed code, because zsh's startup output
+    # moves the cursor off the recorded entry row before the marker
+    # lands. See :func:`_park_pane`.
+    _park_pane(mcp_pane)
+
+    async def emit_after_baseline() -> None:
+        # The baseline is a couple of display-message round trips; 0.2 s
+        # is the same headroom the sibling after-baseline test uses.
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
+        if payload:
+            await asyncio.to_thread(_write_to_pane_tty, mcp_pane, payload)
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                patterns=patterns,
+                pane_id=mcp_pane.pane_id,
+                timeout=5.0,
+                regex=True,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    result = asyncio.run(run())
+    assert result.found is expected_found
+    if expected_found:
+        assert result.outcome == "matched"
+        assert result.matched_lines
+
+
+def test_wait_for_text_does_not_match_the_prompt_on_the_entry_row(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    r"""Anchoring on the entry row must not make the prompt self-match.
+
+    This is the falsifier for
+    :func:`test_wait_for_text_sees_the_entry_cursor_row`. The entry row
+    normally holds the shell prompt, so a pattern broad enough to hit it
+    would match at t=0 and turn a fixed false negative into a much worse
+    false positive. The content snapshot is what prevents that: the
+    prompt text is captured at entry and filtered out of every tick.
+
+    ``\S`` is deliberately the broadest useful pattern — it matches any
+    non-space character anywhere on any captured row.
+    """
+    import asyncio
+
+    _park_pane(mcp_pane)
+
+    for pattern in ("PARKED_PROMPT", r"\S"):
+        result = asyncio.run(
+            wait_for_text(
+                patterns=[pattern],
+                pane_id=mcp_pane.pane_id,
+                timeout=0.5,
+                regex=True,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        assert result.found is False, f"pattern {pattern!r} self-matched the prompt"
+        assert result.matched_at_entry is True
+
+
+def test_wait_for_text_waits_for_a_fresh_occurrence(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A stale match on screen must not short-circuit the wait.
+
+    ``matched_at_entry`` is known before the poll loop starts, which
+    makes returning immediately look like free latency. It is not: the
+    commonest agent loop is run-a-command / wait-for-its-marker /
+    run-it-again / wait-for-the-SAME-marker, and on the second pass the
+    first pass's marker is still on screen. Returning early would answer
+    with the old occurrence and the agent would never learn the second
+    run finished.
+
+    So the wait keeps waiting, and this test pins that: a marker is left
+    on screen BEFORE the wait, an identical one is written during it,
+    and the wait must match the fresh one.
+    """
+    import asyncio
+
+    marker = "RERUN_MARKER"
+    _park_pane(mcp_pane)
+
+    async def emit_after_baseline() -> None:
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
+        await asyncio.to_thread(_write_to_pane_tty, mcp_pane, f"{marker}\n")
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                patterns=[marker],
+                pane_id=mcp_pane.pane_id,
+                timeout=5.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    # Pass one: leave the marker on screen and let the pane settle so it
+    # is unambiguously stale by the time the wait takes its baseline.
+    _write_to_pane_tty(mcp_pane, f"\n{marker}\n")
+
+    def _stale_marker_visible() -> bool:
+        return any(marker in line for line in mcp_pane.capture_pane())
+
+    retry_until(_stale_marker_visible, 5, raises=True)
+
+    result = asyncio.run(run())
+    assert result.found is True
+    assert result.outcome == "matched"
+    # The stale occurrence was on screen but did not answer the wait.
+    assert result.matched_at_entry is False
+
+
 def test_wait_for_text_ignores_stale_below_cursor(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """Stale paint-style content below the cursor must not match.
 
-    The cursor-position anchor (``start_line = cy0 + 1``) captures
-    rows below the entry cursor — which can include content that
-    pre-dates the wait (TUI repaints, ``paste-text``, manual cursor
-    positioning). The entry-time content snapshot filters those rows
-    out so only content written after entry matches the regex.
+    The cursor-position anchor captures the entry cursor row and
+    everything below it — which can include content that pre-dates the
+    wait (TUI repaints, ``paste-text``, manual cursor positioning). The
+    entry-time content snapshot filters those rows out so only content
+    written after entry matches the regex.
 
     Setup parks the cursor at row 0 with ``STALE_BELOW`` painted on
     row 1, then waits for a pattern that's already on screen. The
@@ -2824,7 +3394,7 @@ def test_wait_for_text_ignores_stale_below_cursor(
 
     result = asyncio.run(
         wait_for_text(
-            pattern="STALE_BELOW",
+            patterns=["STALE_BELOW"],
             pane_id=mcp_pane.pane_id,
             timeout=0.5,
             socket_name=mcp_server.socket_name,
@@ -2838,12 +3408,14 @@ def test_wait_for_text_does_not_match_bottom_row_clip(
 ) -> None:
     """wait_for_text must not match stale text sitting on the cursor row.
 
-    When the cursor is at the last visible row at entry,
-    ``start_line = cy0 + 1`` points below the visible region and
-    tmux's ``capture-pane -S`` clips back to the bottom row
-    (``cmd-capture-pane.c``). Without the bottom-aware guard the
-    poll loop captures the stale cursor-row text and matches it
-    instantly.
+    The cursor at the last visible row is the case that used to defeat
+    the index anchor: ``start_line`` pointed below the visible region,
+    tmux's ``capture-pane -S`` clipped back to the bottom row
+    (``cmd-capture-pane.c``), and the poll loop matched the stale
+    cursor-row text instantly. The anchor now lands ON that row, which
+    is always a valid ``-S`` target, so there is nothing to clip — and
+    the entry-time content snapshot is what keeps the stale text from
+    matching. This test pins the outcome, which is unchanged.
 
     The pane is respawned with a shell-free ``sh -c`` command that
     prints the marker without a trailing newline and then sleeps —
@@ -2879,7 +3451,7 @@ def test_wait_for_text_does_not_match_bottom_row_clip(
 
     result = asyncio.run(
         wait_for_text(
-            pattern="STALE_BOTTOM_MARKER",
+            patterns=["STALE_BOTTOM_MARKER"],
             pane_id=mcp_pane.pane_id,
             timeout=0.5,
             socket_name=mcp_server.socket_name,
@@ -2895,7 +3467,7 @@ def test_wait_for_text_invalid_regex(mcp_server: Server, mcp_pane: Pane) -> None
     with pytest.raises(ToolError, match="Invalid regex pattern"):
         asyncio.run(
             wait_for_text(
-                pattern="[invalid",
+                patterns=["[invalid"],
                 regex=True,
                 pane_id=mcp_pane.pane_id,
                 socket_name=mcp_server.socket_name,
@@ -2914,10 +3486,10 @@ def test_wait_for_text_rejects_empty_pattern(
     """
     import asyncio
 
-    with pytest.raises(ToolError, match="pattern must be a non-empty string"):
+    with pytest.raises(ToolError, match="patterns pattern must be a non-empty"):
         asyncio.run(
             wait_for_text(
-                pattern="",
+                patterns=[""],
                 pane_id=mcp_pane.pane_id,
                 socket_name=mcp_server.socket_name,
             )
@@ -2938,7 +3510,7 @@ def test_wait_for_text_rejects_tiny_interval(
     with pytest.raises(ToolError, match=r"interval must be at least 0\.01"):
         asyncio.run(
             wait_for_text(
-                pattern="anything",
+                patterns=["anything"],
                 pane_id=mcp_pane.pane_id,
                 interval=0,
                 socket_name=mcp_server.socket_name,
@@ -2969,9 +3541,9 @@ def test_wait_for_text_raises_on_pane_respawn(
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="NEVER_APPEARS_xyz",
+                patterns=["NEVER_APPEARS_xyz"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3004,7 +3576,7 @@ def test_wait_for_text_raises_on_pane_death(mcp_server: Server, mcp_pane: Pane) 
     with pytest.raises(ToolError, match="died"):
         asyncio.run(
             wait_for_text(
-                pattern="anything",
+                patterns=["anything"],
                 pane_id=mcp_pane.pane_id,
                 timeout=1.0,
                 socket_name=mcp_server.socket_name,
@@ -3027,7 +3599,7 @@ def test_wait_for_text_rejects_non_positive_timeout(
     with pytest.raises(ToolError, match="timeout must be positive"):
         asyncio.run(
             wait_for_text(
-                pattern="anything",
+                patterns=["anything"],
                 pane_id=mcp_pane.pane_id,
                 timeout=0,
                 socket_name=mcp_server.socket_name,
@@ -3064,9 +3636,9 @@ def test_wait_for_text_raises_when_history_is_cleared(
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="NEVER_APPEARS_rollover",
+                patterns=["NEVER_APPEARS_rollover"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3097,9 +3669,9 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="WAIT_MARKER_grows_ok",
+                patterns=["WAIT_MARKER_grows_ok"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3157,7 +3729,7 @@ def test_wait_for_text_survives_resize_grow_with_scrolled_history(
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="NEVER_APPEARS_resize_grow",
+                patterns=["NEVER_APPEARS_resize_grow"],
                 pane_id=mcp_pane.pane_id,
                 timeout=1.0,
                 socket_name=mcp_server.socket_name,
@@ -3205,7 +3777,7 @@ def test_wait_for_text_handles_resize_during_wait(
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="STALE_RESIZE_MARKER",
+                patterns=["STALE_RESIZE_MARKER"],
                 pane_id=mcp_pane.pane_id,
                 timeout=0.5,
                 socket_name=mcp_server.socket_name,
@@ -3247,15 +3819,15 @@ def test_wait_for_text_matches_pattern_across_wrap(
     marker = "WRAPPED_MARKER_xyz"
 
     async def emit_after_baseline() -> None:
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
         await asyncio.to_thread(mcp_pane.send_keys, payload, True)
 
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern=marker,
+                patterns=[marker],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3295,20 +3867,37 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
     stub = _StubContext()
     result = asyncio.run(
         wait_for_text(
-            pattern="WILL_NEVER_MATCH_aBcDeF",
+            patterns=["WILL_NEVER_MATCH_aBcDeF"],
             pane_id=mcp_pane.pane_id,
-            timeout=0.2,
+            timeout=2.0,
             interval=0.05,
             socket_name=mcp_server.socket_name,
             ctx=t.cast("t.Any", stub),
         )
     )
     assert result.found is False
+    # 2 s, not the 0.2 s this used to use. The assertion is about the
+    # CONTENT of the message, which needs two ticks but no particular
+    # wall clock. At 0.2 s the second tick had under 3x headroom
+    # (~13 ms setup + ~8 ms read + a 50 ms sleep), so on a loaded
+    # machine only one tick fired and this failed -- measured 0/20 at
+    # idle and 4/4 under mild oversubscription, and `--reruns` did not
+    # save it because the load persisted across retries.
     assert len(progress_calls) >= 2
     first_progress, first_total, first_msg = progress_calls[0]
     assert first_progress >= 0.0
-    assert first_total == 0.2
-    assert "Polling pane" in first_msg
+    assert first_total == 2.0
+    assert mcp_pane.pane_id is not None
+    assert mcp_pane.pane_id in first_msg
+    # The message must carry the BUDGET, not just restate the pane. A
+    # constant string wastes the one field a client is most likely to
+    # show a human, and it is the field that survives transports which
+    # drop the numeric pair.
+    assert "elapsed" in first_msg
+    assert "left" in first_msg
+    assert first_msg != progress_calls[-1][2], (
+        f"progress message never changed across the wait: {first_msg!r}"
+    )
 
 
 def test_wait_for_text_propagates_unexpected_progress_error(
@@ -3345,7 +3934,7 @@ def test_wait_for_text_propagates_unexpected_progress_error(
     with pytest.raises(ToolError, match="synthetic bug"):
         asyncio.run(
             wait_for_text(
-                pattern="WILL_NEVER_MATCH_PROPAGATE_q2rj",
+                patterns=["WILL_NEVER_MATCH_PROPAGATE_q2rj"],
                 pane_id=mcp_pane.pane_id,
                 timeout=0.5,
                 interval=0.05,
@@ -3387,7 +3976,7 @@ def test_wait_for_text_suppresses_broken_resource_error(
 
     result = asyncio.run(
         wait_for_text(
-            pattern="WILL_NEVER_MATCH_BROKEN_rpt5",
+            patterns=["WILL_NEVER_MATCH_BROKEN_rpt5"],
             pane_id=mcp_pane.pane_id,
             timeout=0.2,
             interval=0.05,
@@ -3428,7 +4017,7 @@ def test_wait_for_text_warns_on_invalid_regex(
     with pytest.raises(ToolError, match="Invalid regex"):
         asyncio.run(
             wait_for_text(
-                pattern="[unclosed",
+                patterns=["[unclosed"],
                 regex=True,
                 pane_id=mcp_pane.pane_id,
                 socket_name=mcp_server.socket_name,
@@ -3472,7 +4061,7 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
 
     result = asyncio.run(
         wait_for_text(
-            pattern="WILL_NEVER_MATCH_TIMEOUT_qZx9",
+            patterns=["WILL_NEVER_MATCH_TIMEOUT_qZx9"],
             pane_id=mcp_pane.pane_id,
             timeout=0.2,
             interval=0.05,
@@ -3482,7 +4071,6 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
     )
 
     assert result.found is False
-    assert result.risk_band_warned is False
     assert any(
         level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
     ), f"expected a timeout warning, got: {log_calls}"
@@ -3547,7 +4135,7 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
     async def run() -> None:
         wait_task = asyncio.create_task(
             wait_for_text(
-                pattern="WILL_NEVER_MATCH_riskband_qZ9",
+                patterns=["WILL_NEVER_MATCH_riskband_qZ9"],
                 pane_id=fresh_pane.pane_id,
                 timeout=2.0,
                 interval=0.05,
@@ -3617,7 +4205,7 @@ def test_wait_for_text_warns_when_already_in_risk_band(
     async def run() -> WaitForTextResult:
         # Idle wait: no new output, no cursor movement.
         return await wait_for_text(
-            pattern="NEVER_MATCH_idle_risk",
+            patterns=["NEVER_MATCH_idle_risk"],
             pane_id=fresh_pane.pane_id,
             timeout=0.5,
             interval=0.1,
@@ -3625,76 +4213,14 @@ def test_wait_for_text_warns_when_already_in_risk_band(
             ctx=t.cast("t.Any", _RecordingContext()),
         )
 
-    result = asyncio.run(run())
+    # The trim-risk band is surfaced as a client log notification, not
+    # a result field: an agent cannot act on a boolean it gets after
+    # the fact, and the field was permanent weight in ``outputSchema``.
+    asyncio.run(run())
 
-    assert result.risk_band_warned is True
     assert any(
         level == "warning" and "trim-risk band" in msg for level, msg in log_calls
     ), f"expected a trim-risk-band warning during idle wait, got: {log_calls}"
-
-
-def test_wait_for_content_change_warns_on_timeout(
-    mcp_server: Server, mcp_pane: Pane
-) -> None:
-    """``wait_for_content_change`` warns the client on timeout.
-
-    Same contract as ``wait_for_text`` — the silently-quiescent pane
-    case otherwise looks identical to a successful detection at the
-    log layer. Operators benefit from a ``no content change before
-    Xs timeout`` warning.
-
-    Uses the same settle-loop pattern as
-    ``test_wait_for_content_change_timeout`` so the assertion is
-    deterministic on slow CI.
-    """
-    import asyncio
-    import time
-
-    settle_streak_required = 3
-    settle_poll_interval = 0.1
-    previous = mcp_pane.capture_pane()
-    streak = 0
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        time.sleep(settle_poll_interval)
-        current = mcp_pane.capture_pane()
-        if current == previous:
-            streak += 1
-            if streak >= settle_streak_required:
-                break
-        else:
-            streak = 0
-            previous = current
-    else:
-        pytest.fail("pane content did not settle within 5s")
-
-    log_calls: list[tuple[str, str]] = []
-
-    class _RecordingContext:
-        async def report_progress(
-            self,
-            progress: float,
-            total: float | None = None,
-            message: str = "",
-        ) -> None:
-            return
-
-        async def warning(self, message: str) -> None:
-            log_calls.append(("warning", message))
-
-    result = asyncio.run(
-        wait_for_content_change(
-            pane_id=mcp_pane.pane_id,
-            timeout=0.5,
-            interval=0.05,
-            socket_name=mcp_server.socket_name,
-            ctx=t.cast("t.Any", _RecordingContext()),
-        )
-    )
-    assert result.changed is False
-    assert any(
-        level == "warning" and "timeout" in msg.lower() for level, msg in log_calls
-    ), f"expected a timeout warning, got: {log_calls}"
 
 
 def test_wait_for_text_propagates_cancellation(
@@ -3719,7 +4245,7 @@ def test_wait_for_text_propagates_cancellation(
     async def _runner() -> None:
         task = asyncio.create_task(
             wait_for_text(
-                pattern="WILL_NEVER_MATCH_CANCEL_aBcD",
+                patterns=["WILL_NEVER_MATCH_CANCEL_aBcD"],
                 pane_id=mcp_pane.pane_id,
                 timeout=10.0,
                 interval=0.05,
@@ -3734,90 +4260,45 @@ def test_wait_for_text_propagates_cancellation(
         asyncio.run(_runner())
 
 
-def test_wait_for_content_change_propagates_cancellation(
-    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``wait_for_content_change`` raises ``CancelledError`` (not ``ToolError``).
-
-    Sibling guard to ``test_wait_for_text_propagates_cancellation`` —
-    both wait tools share the same ``while True:`` poll-and-sleep
-    pattern wrapped by ``handle_tool_errors_async``, so both must
-    surface MCP cancellation as ``asyncio.CancelledError``.
-
-    Stubs ``Pane.capture_pane`` to always return the same line list so
-    the ``current != initial_content`` exit can never fire — without
-    the stub the test races shell prompt redraw, cursor blink, and
-    zsh async hooks (vcs_info, git prompt) on CI runners and exits
-    via ``changed=True`` before the cancel arrives.
-    """
-    import asyncio
-
-    from libtmux.pane import Pane as _LibtmuxPane
-
-    monkeypatch.setattr(_LibtmuxPane, "capture_pane", lambda *_a, **_kw: ["stable"])
-
-    async def _runner() -> None:
-        task = asyncio.create_task(
-            wait_for_content_change(
-                pane_id=mcp_pane.pane_id,
-                timeout=10.0,
-                interval=0.05,
-                socket_name=mcp_server.socket_name,
-            )
-        )
-        await asyncio.sleep(0.1)
-        task.cancel()
-        await task
-
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(_runner())
-
-
 def test_wait_tools_do_not_block_event_loop(
-    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
 ) -> None:
-    """wait_for_text runs its blocking capture off the main event loop.
+    """A wedged tmux must not pin the event loop.
 
-    Regression guard for the critical bug that FastMCP async tools are
-    direct-awaited on the main event loop. ``pane.capture_pane()`` is a
-    sync ``subprocess.run`` call; without ``asyncio.to_thread`` it
-    would block every other coroutine on the same loop for the
-    duration of each poll tick.
+    FastMCP direct-awaits async tools on the main loop, so anything the
+    wait path does synchronously freezes every other coroutine, the MCP
+    transport, and cancellation itself.
 
-    Discriminator: monkeypatch ``pane.capture_pane`` so each call
-    blocks the calling *thread* for 80 ms via ``time.sleep``. With
-    ``asyncio.to_thread`` the default executor runs that off the
-    event loop and the ticker coroutine keeps firing every 10 ms;
-    without it, the event loop is pinned for the full 80 ms per poll
-    and the ticker can only advance during the brief
-    ``await asyncio.sleep(interval)`` gaps. The threshold (~40 ticks
-    expected with the fix vs. <= 6 without) cleanly fails the
-    un-fixed code while remaining robust against 2x CI slowdown.
+    Discriminator: a stub ``tmux`` that never returns. The wait path
+    spawns it with ``asyncio.create_subprocess_exec``, so a concurrent
+    ticker keeps firing every 10 ms while the call is in flight and the
+    call still ends bounded. Route it through a *blocking* spawn and
+    the ticker stops dead for the whole wedge.
 
-    The previous version of this test used the production
-    ``capture_pane`` (which returns instantly under tmux's normal
-    semantics) and asserted ``ticks >= 5``. Since ``await
-    asyncio.sleep(interval=0.05)`` between poll iterations already
-    yielded enough for the ticker to satisfy that bound, the test
-    passed even with ``asyncio.to_thread`` reverted — providing zero
-    actual defense against the bug it claimed to guard. The
-    monkeypatched slow capture is the discriminator.
-
-    See commit ``74ec8f0`` for the project's precedent on stabilizing
-    timing-sensitive tests under ``--reruns 0``.
+    This replaces an earlier version that monkeypatched a slow capture
+    to measure an ``asyncio.to_thread`` offload. That invariant is
+    gone: there is no blocking call left to offload, and a thread was
+    never a safe place for this work anyway -- a worker stuck in
+    ``Popen.communicate()`` cannot be cancelled, and
+    ``concurrent.futures.thread._python_exit`` joins it untimed at
+    interpreter exit. See ``test_wait_path_uses_no_worker_threads``.
     """
     import asyncio
-    import time as _time
 
-    from libtmux.pane import Pane as _LibtmuxPane
+    from libtmux_mcp.tools.pane_tools import wait as _wait_mod
 
-    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
-        _time.sleep(0.08)
-        return []
+    stub = tmp_path / "tmux"
+    stub.write_text("#!/bin/sh\nsleep 60\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(
+        _wait_mod, "_tmux_argv", lambda _server, *args: [str(stub), *args]
+    )
+    monkeypatch.setattr(_wait_mod, "_TMUX_CALL_TIMEOUT_SECONDS", 0.4)
 
-    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
-
-    async def _drive() -> int:
+    async def _drive() -> tuple[int, float]:
         ticks = 0
         stop = asyncio.Event()
 
@@ -3827,31 +4308,575 @@ def test_wait_tools_do_not_block_event_loop(
                 ticks += 1
                 await asyncio.sleep(0.01)
 
+        started = time.monotonic()
+
         async def _waiter() -> None:
             try:
-                await wait_for_text(
-                    pattern="WILL_NEVER_MATCH_EVENT_LOOP_zqr9",
-                    pane_id=mcp_pane.pane_id,
-                    timeout=0.4,
-                    interval=0.05,
-                    socket_name=mcp_server.socket_name,
-                )
+                with contextlib.suppress(ToolError):
+                    await wait_for_text(
+                        patterns=["WILL_NEVER_MATCH_EVENT_LOOP_zqr9"],
+                        pane_id=mcp_pane.pane_id,
+                        timeout=0.5,
+                        interval=0.05,
+                        socket_name=mcp_server.socket_name,
+                    )
             finally:
                 stop.set()
 
         await asyncio.gather(_ticker(), _waiter())
-        return ticks
+        return ticks, time.monotonic() - started
 
-    ticks = asyncio.run(_drive())
-    # With asyncio.to_thread, ticker fires ~40 times in the 400 ms
-    # window. Without, only during the 50 ms inter-poll sleep gaps
-    # (~3 polls x ~5 ticks/sleep = ~15) plus 1 between captures = 6.
-    # The 20-tick threshold is robust against 2x CI slowdown and
-    # unambiguously fails the un-fixed code.
+    ticks, elapsed = asyncio.run(_drive())
+
+    assert elapsed < 5.0, f"wedged tmux was not bounded: {elapsed:.1f}s"
+    # ~40 ticks expected across the wedge; a pinned loop yields none.
     assert ticks >= 20, (
-        f"ticker advanced only {ticks} times — blocking capture is on the "
-        f"main event loop, not in asyncio.to_thread"
+        f"ticker advanced only {ticks} times — a wedged tmux is pinning "
+        f"the event loop instead of running as an async subprocess"
     )
+
+
+# ---------------------------------------------------------------------------
+# wait_for_text: ceiling, stop patterns, catch-all, honesty fields
+# ---------------------------------------------------------------------------
+
+
+def _emit_after_baseline(pane: Pane, payload: str, delay: float = 0.2) -> t.Any:
+    """Return a coroutine that sends ``payload`` once the wait has armed."""
+    import asyncio
+
+    async def _emit() -> None:
+        await asyncio.sleep(delay)
+        await asyncio.to_thread(pane.send_keys, payload, True)
+
+    return _emit()
+
+
+def test_wait_for_text_clamps_oversized_timeout(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An over-large ``timeout`` is clamped, not rejected.
+
+    Clamp-and-report: the call returns at the server ceiling and says
+    so on ``effective_timeout`` / ``timeout_clamped``, so the agent
+    learns the policy from the result instead of from a failed call.
+
+    The ceiling is lowered to 1 s for the test so the assertion is
+    about the clamp mechanism, not about wall-clock patience. The
+    production 30 s value is exercised by the same code path.
+    """
+    import asyncio
+
+    from libtmux_mcp import _wait_policy
+
+    monkeypatch.setattr(_wait_policy, "_wait_max_seconds", 1.0)
+
+    started = time.monotonic()
+    result = asyncio.run(
+        wait_for_text(
+            patterns=["NEVER_APPEARS_CLAMP_q7x"],
+            pane_id=mcp_pane.pane_id,
+            timeout=3600.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.found is False
+    assert result.effective_timeout == 1.0
+    # The clamp is visible as effective_timeout < what we passed.
+    assert result.effective_timeout < 3600.0
+    # Generous headroom for the fixed per-call tmux bound on slow CI.
+    assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+
+
+def test_wait_for_text_reports_unclamped_timeout(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A timeout under the ceiling is reported verbatim, unclamped."""
+    import asyncio
+
+    result = asyncio.run(
+        wait_for_text(
+            patterns=["NEVER_APPEARS_UNCLAMPED_q7x"],
+            pane_id=mcp_pane.pane_id,
+            timeout=0.3,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.effective_timeout == 0.3
+
+
+def test_wait_for_text_stop_pattern_returns_early(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A ``stop`` hit ends the wait immediately and names which one fired.
+
+    This is the whole cap-only bet: the agent already knows its failure
+    markers, so the common failure path collapses to milliseconds
+    without any state-inspection heuristic.
+    """
+    import asyncio
+
+    async def run() -> WaitForTextResult:
+        task = asyncio.create_task(
+            wait_for_text(
+                patterns=["BUILD_OK_marker_z1"],
+                stop=["NEVER_PRINTED_zz", "BUILD_FAILED_marker_z1"],
+                pane_id=mcp_pane.pane_id,
+                timeout=20.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await _emit_after_baseline(mcp_pane, "echo BUILD_FAILED_marker_z1")
+        return await task
+
+    result = asyncio.run(run())
+
+    assert result.outcome == "stopped"
+    assert result.found is False
+    assert result.matched_index == 1
+    assert any("BUILD_FAILED_marker_z1" in line for line in result.matched_lines)
+    assert result.elapsed_seconds < 10.0
+
+
+def test_wait_for_text_pattern_hit_reports_its_index(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A ``patterns`` hit reports source ``patterns`` and the entry index."""
+    import asyncio
+
+    async def run() -> WaitForTextResult:
+        task = asyncio.create_task(
+            wait_for_text(
+                patterns=["NEVER_PRINTED_yy", "DONE_marker_y2"],
+                pane_id=mcp_pane.pane_id,
+                timeout=20.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await _emit_after_baseline(mcp_pane, "echo DONE_marker_y2")
+        return await task
+
+    result = asyncio.run(run())
+
+    assert result.found is True
+    assert result.outcome == "matched"
+    assert result.matched_index == 1
+
+
+def test_wait_for_text_none_patterns_waits_for_any_new_output(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``patterns=None`` is the any-new-output catch-all.
+
+    This subsumes the former ``wait_for_content_change`` tool: no glyph
+    matching, works for any shell and any program.
+    """
+    import asyncio
+
+    async def run() -> WaitForTextResult:
+        task = asyncio.create_task(
+            wait_for_text(
+                pane_id=mcp_pane.pane_id,
+                timeout=20.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await _emit_after_baseline(mcp_pane, "echo ANY_OUTPUT_marker_c3")
+        return await task
+
+    result = asyncio.run(run())
+
+    assert result.found is True
+    assert result.outcome == "any_output"
+    assert result.matched_index is None
+    assert result.saw_new_output is True
+    assert result.elapsed_seconds < 10.0
+
+
+def test_wait_for_text_none_patterns_times_out_on_silent_pane(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """The catch-all still times out cleanly on a quiescent pane."""
+    import asyncio
+
+    mcp_pane.respawn(kill=True, shell="sh -c 'sleep 60'")
+
+    def _parked() -> bool:
+        state = mcp_pane.display_message("#{pane_current_command}", get_text=True)
+        return bool(state) and state[0] in {"sh", "sleep"}
+
+    retry_until(_parked, 5, raises=True)
+
+    result = asyncio.run(
+        wait_for_text(
+            pane_id=mcp_pane.pane_id,
+            timeout=0.4,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.found is False
+    assert result.outcome == "timeout"
+    assert result.saw_new_output is False
+
+
+def test_wait_for_text_rejects_empty_patterns_list(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``patterns=[]`` is ambiguous — null means catch-all, so reject the list."""
+    import asyncio
+
+    with pytest.raises(ToolError, match="patterns must be a non-empty list"):
+        asyncio.run(
+            wait_for_text(
+                patterns=[],
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_wait_for_text_rejects_empty_stop_entry(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """An empty ``stop`` entry matches every line; reject it explicitly."""
+    import asyncio
+
+    with pytest.raises(ToolError, match="stop pattern must be a non-empty"):
+        asyncio.run(
+            wait_for_text(
+                patterns=["anything"],
+                stop=[""],
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_wait_for_text_reports_stale_match_and_tail(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A pattern already painted below the cursor is reported, not matched.
+
+    The delta filter correctly refuses to match stale paint (#45), but
+    an agent that only sees ``found=false`` cannot tell that case apart
+    from "nothing happened". ``suppressed_stale_match`` states the fact
+    without guessing at a cause, and ``tail`` shows the rows the filter
+    suppressed.
+    """
+    import asyncio
+
+    paint_and_park = "printf 'TOP\\nSTALE_TAIL_MARKER\\n'; printf '\\033[H'; sleep 60"
+    mcp_pane.respawn(kill=True, shell=f'sh -c "{paint_and_park}"')
+
+    def _staged() -> bool:
+        return any("STALE_TAIL_MARKER" in line for line in mcp_pane.capture_pane())
+
+    retry_until(_staged, 5, raises=True)
+
+    result = asyncio.run(
+        wait_for_text(
+            patterns=["STALE_TAIL_MARKER"],
+            pane_id=mcp_pane.pane_id,
+            timeout=0.5,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.found is False
+    assert result.matched_at_entry is True
+    assert any("STALE_TAIL_MARKER" in line for line in result.tail)
+
+
+def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``tail`` is capped on both axes.
+
+    ``capture-pane -J`` wrap-joins, so one logical line can be far
+    wider than ``pane_width`` — a line-only cap is not a bound.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools.wait import _TAIL_MAX_BYTES, _TAIL_MAX_LINES
+
+    async def run() -> WaitForTextResult:
+        task = asyncio.create_task(
+            wait_for_text(
+                patterns=["NEVER_APPEARS_TAILCAP_j4"],
+                pane_id=mcp_pane.pane_id,
+                timeout=6.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await _emit_after_baseline(
+            mcp_pane, "for i in $(seq 1 200); do echo tailcap_line_$i; done"
+        )
+        return await task
+
+    result = asyncio.run(run())
+
+    assert result.saw_new_output is True
+    assert len(result.tail) <= _TAIL_MAX_LINES
+    assert len("\n".join(result.tail).encode()) <= _TAIL_MAX_BYTES
+
+
+def test_wait_for_text_never_interpolates_pattern_into_tmux_format(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Caller patterns never reach a tmux argv, let alone a format string.
+
+    Verified on tmux 3.7b: ``#{C/r:HEL{1,2}O}|#{history_size}|#{cursor_y}``
+    returns ``0O}|0|0`` — an ordinary regex quantifier corrupts field
+    parsing — and a pattern merely ENDING in ``#`` swallows the rest of
+    the format (``A#{C/ri:v1#}B|#{pane_dead}|#{alternate_on}`` returns
+    ``A``). Matching therefore stays in Python; this test pins that the
+    pattern text is absent from every tmux invocation.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+
+    recorded: list[tuple[str, ...]] = []
+    original = wait_mod._run_tmux_lines
+
+    async def _spy(server: t.Any, *args: str, **kwargs: t.Any) -> list[str]:
+        recorded.append(args)
+        return await original(server, *args, **kwargs)
+
+    monkeypatch.setattr(wait_mod, "_run_tmux_lines", _spy)
+
+    hostile = ["#{C/r:HEL{1,2}O}", "A#{C/ri:v1#}B", "}}}#"]
+    result = asyncio.run(
+        wait_for_text(
+            patterns=hostile,
+            stop=["#{pane_dead}"],
+            regex=False,
+            pane_id=mcp_pane.pane_id,
+            timeout=0.3,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.found is False
+    assert recorded, "no tmux invocations were recorded"
+    flat = [arg for args in recorded for arg in args]
+    for needle in ("HEL", "v1#", "}}}", "C/r", "C/ri"):
+        assert not any(needle in arg for arg in flat), (
+            f"pattern fragment {needle!r} reached tmux argv: {flat}"
+        )
+
+
+def test_wait_for_text_bounds_every_tmux_call(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every tmux child the wait path spawns is bounded by a timeout.
+
+    Amplifier C. The wait path spawns tmux with
+    ``asyncio.create_subprocess_exec`` and bounds each call with
+    ``asyncio.wait(timeout=...)``. A thread would be unrecoverable
+    here: a worker blocked in ``Popen.communicate()`` cannot be
+    cancelled, and ``concurrent.futures.thread._python_exit`` joins
+    every pool worker untimed at interpreter shutdown, so one wedged
+    tmux hangs process exit forever.
+    """
+    import asyncio
+
+    timeouts: list[float | None] = []
+    original_wait = asyncio.wait
+
+    async def _spy(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        timeouts.append(kwargs.get("timeout"))
+        return await original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "wait", _spy)
+
+    asyncio.run(
+        wait_for_text(
+            patterns=["NEVER_APPEARS_BOUNDED_v8"],
+            pane_id=mcp_pane.pane_id,
+            timeout=0.3,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert timeouts, "the wait path spawned no bounded tmux calls"
+    assert all(v is not None and v > 0 for v in timeouts), (
+        f"an unbounded tmux call slipped through: {timeouts}"
+    )
+
+
+def test_wait_path_uses_no_worker_threads(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait path must never hand tmux work to a thread.
+
+    This is the invariant that keeps a wedged tmux from hanging
+    interpreter shutdown: ``concurrent.futures.thread._python_exit``
+    joins pool workers with no timeout, and no thread-based
+    arrangement escapes it -- not ``asyncio.to_thread``, not a private
+    pool with ``shutdown(wait=False)``. A subprocess we own can be
+    killed; a thread cannot.
+    """
+    import asyncio
+
+    calls: list[t.Any] = []
+    original = asyncio.to_thread
+
+    async def _spy(fn: t.Any, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        calls.append(fn)
+        return await original(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _spy)
+
+    asyncio.run(
+        wait_for_text(
+            patterns=["NEVER_APPEARS_NOTHREAD_v9"],
+            pane_id=mcp_pane.pane_id,
+            timeout=0.3,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert calls == [], f"wait path used worker threads for: {calls}"
+
+
+def test_wait_for_text_wedged_tmux_raises_instead_of_hanging(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tmux binary that never returns surfaces as a bounded tool error.
+
+    Drives the bounded helper directly against a stub ``tmux`` that
+    sleeps far past the bound. Without ``subprocess.run(timeout=...)``
+    this call would block its worker thread for the full sleep.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+
+    stub = tmp_path / "tmux"
+    stub.write_text("#!/bin/sh\nsleep 60\n")
+    stub.chmod(0o755)
+
+    class _StubServer:
+        tmux_bin = str(stub)
+        socket_name = None
+        socket_path = None
+
+    monkeypatch.setattr(wait_mod, "_TMUX_CALL_TIMEOUT_SECONDS", 0.5)
+
+    started = time.monotonic()
+    with pytest.raises(ExpectedToolError, match="unresponsive"):
+        asyncio.run(
+            wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+        )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5.0, f"wedged tmux blocked for {elapsed:.1f}s"
+
+
+def test_run_tmux_lines_cancel_reaps_child(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling a wait mid-read reaps the tmux child, never orphans it.
+
+    Cancellation lands on ``asyncio.wait`` inside ``_run_tmux_lines``,
+    not just on ``task.result()``. If the reap guard does not span the
+    ``asyncio.wait`` the child is left running after the coroutine
+    unwinds. Drives the helper directly against a stub ``tmux`` that
+    records its own pid and sleeps far past the wait, cancels while it
+    is asleep, and asserts BOTH that ``CancelledError`` propagates and
+    that the recorded pid is gone.
+    """
+    import asyncio
+    import os
+
+    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+
+    pidfile = tmp_path / "pid"
+    stub = tmp_path / "tmux"
+    stub.write_text(f'#!/bin/sh\necho $$ > "{pidfile}"\nsleep 60\n')
+    stub.chmod(0o755)
+
+    class _StubServer:
+        tmux_bin = str(stub)
+        socket_name = None
+        socket_path = None
+
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    async def _drive() -> tuple[bool, int]:
+        task = asyncio.ensure_future(
+            wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+        )
+        # Wait for the stub to spawn and record its pid.
+        deadline = time.monotonic() + 5.0
+        while not pidfile.exists() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        assert pidfile.exists(), "stub tmux never started"
+        child_pid = int(pidfile.read_text().strip())
+
+        task.cancel()
+        propagated = False
+        try:
+            await task
+        except asyncio.CancelledError:
+            propagated = True
+        return propagated, child_pid
+
+    propagated, child_pid = asyncio.run(_drive())
+
+    assert propagated, "CancelledError did not propagate to the caller"
+
+    # The event loop's child watcher may finish the reap a beat late.
+    for _ in range(50):
+        if not _pid_alive(child_pid):
+            break
+        time.sleep(0.02)
+    alive = _pid_alive(child_pid)
+    if alive:
+        os.kill(child_pid, 9)  # clean up the orphan we just proved
+    assert not alive, f"child {child_pid} orphaned after cancellation"
+
+
+def test_run_tmux_lines_happy_path_returns_without_kill(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A cleanly-exiting tmux is returned intact, never torn down.
+
+    Complements ``test_run_tmux_lines_cancel_reaps_child``: proves the
+    reap guard does NOT fire on the happy path. A stub ``tmux`` that
+    prints two lines and exits 0 must come back verbatim; if the cancel
+    guard tore down a process that had already exited, the read would
+    still be captured but the widened ``except`` only runs on
+    ``CancelledError``, so this locks in that a returned process is left
+    alone.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+
+    stub = tmp_path / "tmux"
+    stub.write_text("#!/bin/sh\nprintf 'alpha\\nbeta\\n'\n")
+    stub.chmod(0o755)
+
+    class _StubServer:
+        tmux_bin = str(stub)
+        socket_name = None
+        socket_path = None
+
+    out = asyncio.run(
+        wait_mod._run_tmux_lines(t.cast("t.Any", _StubServer()), "display-message")
+    )
+    assert out == ["alpha", "beta"]
 
 
 # ---------------------------------------------------------------------------
@@ -3997,161 +5022,6 @@ def test_snapshot_pane_pads_short_display_message_output(
     assert result.title is None
     assert result.pane_current_command is None
     assert result.pane_current_path is None
-
-
-# ---------------------------------------------------------------------------
-# wait_for_content_change tests
-# ---------------------------------------------------------------------------
-
-
-def test_wait_for_content_change_detects_change(
-    mcp_server: Server, mcp_pane: Pane
-) -> None:
-    """wait_for_content_change detects screen changes."""
-    import threading
-
-    # Send a command after a brief delay to trigger a change
-    def _send_later() -> None:
-        import time
-
-        time.sleep(0.2)
-        mcp_pane.send_keys("echo CHANGE_DETECTED_xyz", enter=True)
-
-    thread = threading.Thread(target=_send_later)
-    thread.start()
-
-    import asyncio
-
-    result = asyncio.run(
-        wait_for_content_change(
-            pane_id=mcp_pane.pane_id,
-            timeout=3.0,
-            socket_name=mcp_server.socket_name,
-        )
-    )
-    thread.join()
-    assert isinstance(result, ContentChangeResult)
-    assert result.changed is True
-    assert result.elapsed_seconds > 0
-
-
-def test_wait_for_content_change_timeout(mcp_server: Server, mcp_pane: Pane) -> None:
-    """wait_for_content_change times out when no change occurs.
-
-    Uses an active-polling settle loop instead of a fixed sleep: we wait
-    until two consecutive ``capture_pane`` reads return the same content
-    before starting the no-change assertion. On slow or loaded CI
-    machines the shell prompt can take well over 500 ms to fully render
-    (cursor blink, zsh right-prompt, git status async hooks) and would
-    otherwise be observed as pane-content change during the test window,
-    failing ``changed=True`` spuriously under ``--reruns=0``.
-    """
-    import time
-
-    #: Number of consecutive matching captures required to call the pane
-    #: "settled". One match is unreliable under zsh async hooks (vcs_info,
-    #: git prompt, right-prompt) that render after an initial quiet
-    #: window. Three requires ~300 ms of continuous quiescence which is
-    #: enough to outwait those hooks on loaded CI.
-    settle_streak_required = 3
-    settle_poll_interval = 0.1
-
-    previous = mcp_pane.capture_pane()
-    streak = 0
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        time.sleep(settle_poll_interval)
-        current = mcp_pane.capture_pane()
-        if current == previous:
-            streak += 1
-            if streak >= settle_streak_required:
-                break
-        else:
-            streak = 0
-            previous = current
-    else:
-        pytest.fail("pane content did not settle within 5s")
-
-    import asyncio
-
-    result = asyncio.run(
-        wait_for_content_change(
-            pane_id=mcp_pane.pane_id,
-            timeout=0.5,
-            socket_name=mcp_server.socket_name,
-        )
-    )
-    assert isinstance(result, ContentChangeResult)
-    assert result.changed is False
-
-
-def test_wait_for_content_change_raises_on_pane_respawn(
-    mcp_server: Server, mcp_pane: Pane
-) -> None:
-    """Respawning the pane mid-wait invalidates the content baseline."""
-    import asyncio
-
-    original_pid = mcp_pane.display_message("#{pane_pid}", get_text=True)
-    assert original_pid
-
-    async def respawn_after_delay() -> None:
-        await asyncio.sleep(0.1)
-        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="sleep 30")
-
-        def _pid_changed() -> bool:
-            current_pid = mcp_pane.display_message("#{pane_pid}", get_text=True)
-            return bool(current_pid) and current_pid[0] != original_pid[0]
-
-        await asyncio.to_thread(retry_until, _pid_changed, 3, raises=True)
-
-    async def run() -> ContentChangeResult:
-        wait_task = asyncio.create_task(
-            wait_for_content_change(
-                pane_id=mcp_pane.pane_id,
-                timeout=3.0,
-                interval=0.25,
-                socket_name=mcp_server.socket_name,
-            )
-        )
-        await respawn_after_delay()
-        return await wait_task
-
-    with pytest.raises(ToolError, match="respawned"):
-        asyncio.run(run())
-
-
-def test_wait_for_content_change_raises_on_pane_death(
-    mcp_server: Server, mcp_pane: Pane
-) -> None:
-    """A pane whose process exits mid-wait invalidates the content baseline."""
-    import asyncio
-
-    mcp_pane.window.set_option("remain-on-exit", "on")
-
-    async def exit_after_delay() -> None:
-        await asyncio.sleep(0.1)
-        await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="true")
-
-        def _is_dead() -> bool:
-            flag = mcp_pane.display_message("#{pane_dead}", get_text=True)
-            return bool(flag) and flag[0] == "1"
-
-        await asyncio.to_thread(retry_until, _is_dead, 3, raises=True)
-
-    async def run() -> ContentChangeResult:
-        wait_task = asyncio.create_task(
-            wait_for_content_change(
-                pane_id=mcp_pane.pane_id,
-                timeout=3.0,
-                interval=0.25,
-                socket_name=mcp_server.socket_name,
-            )
-        )
-        await exit_after_delay()
-        return await wait_task
-
-    with pytest.raises(ToolError, match="died"):
-        asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------
@@ -4348,6 +5218,66 @@ def test_pipe_pane_quotes_path_with_spaces(
             2,
             raises=True,
         )
+    finally:
+        pipe_pane(
+            pane_id=mcp_pane.pane_id,
+            output_path=None,
+            socket_name=mcp_server.socket_name,
+        )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        pytest.param("fmt-#{pane_id}.log", id="format-substitution"),
+        pytest.param("job-#(echo pwned).log", id="command-job"),
+        # Legacy single-char aliases expand too: '#S' is the session name,
+        # so '#Session.log' silently became '<session>ession.log'.
+        pytest.param("#Session.log", id="legacy-alias"),
+        pytest.param("style-#[fg=red].log", id="style-sequence-left-alone"),
+        pytest.param("already-##{x}.log", id="already-doubled"),
+        pytest.param("issue #42.log", id="bare-hash"),
+        # pipe-pane uses format_expand_time(), so strftime runs too:
+        # '100%done.log' became '10025one.log' via %d.
+        pytest.param("100%done.log", id="strftime-percent-d"),
+        pytest.param("date-%Y.log", id="strftime-percent-y"),
+    ],
+)
+def test_pipe_pane_writes_the_exact_path_requested(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any, filename: str
+) -> None:
+    """pipe_pane logs to the literal output_path, not a tmux-expanded one.
+
+    ``pipe-pane`` runs its argument through tmux's format expander before
+    /bin/sh sees it, so ``shlex.quote`` alone guards only the shell layer.
+    An unescaped ``#{pane_id}`` in the path expanded, and the log landed on
+    a different file than the one the tool reported back.
+
+    ``#[`` must NOT be escaped: tmux copies a ``#``-run followed by ``[``
+    verbatim and never collapses ``##[``, so doubling there reintroduces
+    the same wrong-file bug from the other direction.
+    """
+    log_file = tmp_path / filename
+    marker = "PIPE_EXACT_PATH_MARKER"
+
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=str(log_file),
+        socket_name=mcp_server.socket_name,
+    )
+    # The success string must name the file that actually gets written.
+    assert str(log_file) in result
+
+    try:
+        mcp_pane.send_keys(f"echo {marker}", enter=True)
+        retry_until(
+            lambda: log_file.exists() and marker in log_file.read_text(),
+            2,
+            raises=True,
+        )
+        # Nothing else may appear: an expanded path would create a sibling.
+        written = sorted(p.name for p in tmp_path.iterdir())
+        assert written == [filename], f"unexpected files on disk: {written}"
     finally:
         pipe_pane(
             pane_id=mcp_pane.pane_id,
@@ -4586,7 +5516,7 @@ def test_pane_tool_open_world_hint_registration(
     assert tool.annotations is not None, (
         f"{tool_name} registration should carry annotations"
     )
-    assert tool.annotations.openWorldHint is expected_open_world
+    assert wire_annotations(tool).get("openWorldHint") is expected_open_world
 
 
 def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
@@ -4617,9 +5547,9 @@ def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
     assert tool.annotations is not None, (
         "respawn_pane registration should carry annotations"
     )
-    assert tool.annotations.destructiveHint is True
-    assert tool.annotations.idempotentHint is False
-    assert tool.annotations.readOnlyHint is False
+    assert wire_annotations(tool).get("destructiveHint") is True
+    assert wire_annotations(tool).get("idempotentHint") is False
+    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 def test_clear_pane_advertises_destructive_non_idempotent() -> None:
@@ -4636,9 +5566,9 @@ def test_clear_pane_advertises_destructive_non_idempotent() -> None:
     tool = asyncio.run(mcp.get_tool("clear_pane"))
     assert tool is not None, "clear_pane should be registered"
     assert tool.annotations is not None, "clear_pane should carry annotations"
-    assert tool.annotations.destructiveHint is True
-    assert tool.annotations.idempotentHint is False
-    assert tool.annotations.readOnlyHint is False
+    assert wire_annotations(tool).get("destructiveHint") is True
+    assert wire_annotations(tool).get("idempotentHint") is False
+    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,11 @@ from libtmux_mcp._utils import (
     VALID_SAFETY_LEVELS,
     _server_cache,
 )
+from libtmux_mcp._wait_policy import (
+    WAIT_MAX_SECONDS_ENV,
+    _configure_wait_ceiling,
+    _resolve_wait_max_seconds,
+)
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
     AuditMiddleware,
@@ -102,8 +107,9 @@ _INSTR_READ_TOOLS = (
 _INSTR_WAIT_NOT_POLL = (
     "WAIT, DON'T POLL: run_command for authored commands needing "
     "status; wait_for_channel for custom tmux wait-for; capture_since "
-    "for tailing; wait_for_text/wait_for_content_change for output you "
-    "don't author; send_keys_batch for raw input."
+    "for tailing; wait_for_text for output you don't author "
+    "(patterns=null=any output; stop=[] bails); "
+    "send_keys_batch for raw input."
 )
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module
@@ -212,11 +218,49 @@ def _build_instructions(
             f"{context_start}. Tool results mark is_caller=true; filter list_panes "
             "for it to answer 'which pane am I in?' (no whoami tool)."
         )
-        minimal_context = f"\n\nAgent context: tmux pane {tmux_pane}."
-        for candidate in (context, pane_context, minimal_context):
+        # Only the socket name is optional. Dropping it costs an agent
+        # nothing it cannot re-derive, so that degradation stays silent.
+        for candidate in (context, pane_context):
             combined = instructions + candidate
             if len(combined.encode("utf-8")) <= _INSTRUCTIONS_MAX_BYTES:
                 return combined
+
+        # Past this point the is_caller workflow — the only place an
+        # agent learns how to answer "which pane am I in?" — cannot fit.
+        # There are two very different reasons for that, and they need
+        # opposite handling:
+        #
+        #   (a) our own _INSTR_* segments grew until the workflow no
+        #       longer fits alongside them. That is a build-time bug in
+        #       this file, and silently dropping the workflow hides it:
+        #       the budget assertions only check the total size, and
+        #       the degraded form still contains "Agent context", so
+        #       nothing fails. Raise and make the author shorten a
+        #       segment.
+        #
+        #   (b) TMUX_PANE / TMUX are pathologically large. That is
+        #       runtime data we do not control, and refusing to start
+        #       over a hostile environment variable would be a denial
+        #       of service. Degrade, as before.
+        #
+        # A nominal pane id discriminates: if the workflow fits with a
+        # realistic id, only the oversized runtime data pushed us over.
+        nominal_context = (
+            "\n\nAgent context: this MCP runs inside tmux pane %000"
+            ". Tool results mark is_caller=true; filter list_panes "
+            "for it to answer 'which pane am I in?' (no whoami tool)."
+        )
+        if len((instructions + nominal_context).encode("utf-8")) > (
+            _INSTRUCTIONS_MAX_BYTES
+        ):
+            msg = (
+                "server instructions leave no room for the is_caller agent "
+                f"context within the {_INSTRUCTIONS_MAX_BYTES}-byte MCP budget "
+                f"(need {len((instructions + nominal_context).encode('utf-8'))} "
+                "bytes); shorten an _INSTR_* segment rather than letting agent "
+                "context be dropped"
+            )
+            raise RuntimeError(msg)
 
     return instructions
 
@@ -239,6 +283,7 @@ _safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
 _suppress_history = _resolve_suppress_history(
     os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
 )
+_wait_max_seconds = _resolve_wait_max_seconds(os.environ.get(WAIT_MAX_SECONDS_ENV))
 
 #: Tools covered by the tail-preserving response limiter. Only tools
 #: whose output is terminal scrollback benefit from this backstop;
@@ -378,6 +423,10 @@ def _register_all() -> None:
 
     register_tools(mcp)
     _configure_history_defaults(mcp, _suppress_history)
+    # Publish the resolved wait ceiling to the wait tool module. Same
+    # shape as the history default above: server owns env resolution,
+    # tool modules never import server globals.
+    _configure_wait_ceiling(_wait_max_seconds)
     register_resources(mcp)
     register_prompts(mcp)
     _mcp_registered = True

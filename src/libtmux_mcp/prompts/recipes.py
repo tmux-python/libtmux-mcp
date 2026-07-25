@@ -59,6 +59,11 @@ to decide what happened. Do NOT use a `send_keys` + `capture_pane`
 retry loop for authored commands — `run_command` already performs
 deterministic completion and returns tail-preserved output.
 
+`timeout` is capped by the server's wait ceiling (30 s by default), so
+read `result.effective_timeout` rather than assuming the value above was
+honoured. For work that legitimately runs longer, call again — the
+command keeps running in the pane between calls.
+
 If the task needs persistent shell state or TUI keystrokes instead of
 a one-shot shell command, use `send_keys` or `send_keys_batch`, then
 observe later output with `capture_since`.
@@ -136,11 +141,11 @@ a logs tail on the bottom-right:
    `send_keys` immediately after `split_window` is safe and
    shell-agnostic.
 5. Optionally confirm each program drew its UI via
-   `wait_for_content_change(pane_id="%A", timeout=3.0)`
-   (and similarly for `%C`). This is a "did the screen change?"
-   check — it works whether the pane shows a prompt glyph, a vim
-   splash screen, or a log tail, so no shell-specific regex is
-   needed.
+   `wait_for_text(pane_id="%A", patterns=null, timeout=3.0)`
+   (and similarly for `%C`). Omitting `patterns` makes this a
+   "did anything new get printed?" check — it works whether the
+   pane shows a prompt glyph, a vim splash screen, or a log tail,
+   so no shell-specific regex is needed.
 
 Use pane IDs (`%N`) for all subsequent targeting — they are stable
 across layout changes; window renames are not.
@@ -151,7 +156,7 @@ def interrupt_gracefully(pane_id: str) -> str:
     r"""Interrupt a running command and verify the prompt returned.
 
     Sends ``C-c`` through ``send_keys(literal=True)``, then waits on
-    a shell-prompt pattern via ``wait_for_text``. Fails loudly if the
+    shell-prompt patterns via ``wait_for_text``. Fails loudly if the
     process ignores SIGINT — the right escalation point is the caller,
     not an automatic ``C-\`` follow-up (SIGQUIT can core-dump).
 
@@ -163,16 +168,26 @@ def interrupt_gracefully(pane_id: str) -> str:
     return f"""Interrupt whatever is running in pane {pane_id} and
 verify that control returns to the shell:
 
-1. `send_keys(pane_id="{pane_id}", keys="C-c", literal=False,
+1. `get_pane_info(pane_id="{pane_id}")` — note `pane_current_command`.
+   That is the thing you are trying to change, and comparing it
+   before and after is the only reliable answer.
+2. `send_keys(pane_id="{pane_id}", keys="C-c", literal=False,
    enter=False)` — tmux interprets `C-c` as SIGINT.
-2. `wait_for_text(pane_id="{pane_id}", pattern="\\$ |\\# |\\% ",
-   regex=True, timeout=5.0)` — waits for a common shell prompt
-   glyph. Adjust the pattern to match the user's shell theme.
+3. `wait_for_text(pane_id="{pane_id}", patterns=["\\$", "\\#", "\\%", ">"],
+   regex=True, timeout=5.0)` — waits for a common shell prompt glyph.
+   Adjust the patterns to match the user's shell theme.
+   Do NOT put `\\^C` in `stop`: the terminal echoes `^C` whenever SIGINT
+   is DELIVERED, whether or not the process dies, so it marks the
+   success path as a failure. Measured on sh and bash — the process
+   exited and the wait still returned `outcome="stopped"`.
    The `wait_for_channel` pattern doesn't apply here — `C-c` is a
    signal, not a shell command, so there's no statement to compose
-   `tmux wait-for -S` into. The shell prompt itself is the only
-   signal that the interrupt landed.
-3. If the wait times out the process is ignoring SIGINT. Stop and
-   ask the caller how to proceed — do NOT escalate automatically
-   to `C-\\` (SIGQUIT) or `kill`.
+   `tmux wait-for -S` into.
+4. Re-read `get_pane_info(pane_id="{pane_id}")`. If
+   `pane_current_command` is back to a shell, the interrupt worked —
+   trust this over the wait result, which can time out on a prompt
+   whose glyph you did not predict.
+5. Only if the command is UNCHANGED is the process ignoring SIGINT.
+   Stop and ask the caller how to proceed — do NOT escalate
+   automatically to `C-\\` (SIGQUIT) or `kill`.
 """
