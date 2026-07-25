@@ -1,9 +1,25 @@
 """Duration policy for the pane wait tools.
 
 A wait tool is the only MCP tool in this server that blocks for a
-caller-chosen duration. Without a server-side ceiling an agent that
-picks the wrong search text stalls the MCP connection for as long as
-it asked for, and the connection is shared with every other tool call.
+caller-chosen duration. The ceiling bounds the AGENT'S TURN, not the
+transport: the wait tools await throughout, so a long wait does not
+stall the connection. Measured on fastmcp 3.4.4 over stdio, a tool
+awaiting for 6 s served 58 interleaved calls at a 3.4 ms median, while
+a control tool that blocked the event loop for the same 6 s served
+exactly one, at 6014 ms. What an unbounded wait costs is the agent:
+it picks the wrong search text once and the whole turn is gone with
+nothing to show for it, and MCP gives the agent no way to change its
+mind mid-call. The ceiling makes that failure cheap and repeatable.
+
+The second reason is specific to how ``wait_for_text`` works. Its
+baseline is an absolute grid anchor, and ``grid_collect_history``
+(``grid.c``) frees the oldest scrollback once ``history-limit`` is
+reached, which destroys that anchor. The longer a wait runs on a
+productive pane, the likelier it is to be observing through an anchor
+tmux has already invalidated. Bounding the wait bounds that exposure.
+
+Do not "fix" the connection with background tasks. There is nothing to
+unblock — see :doc:`/topics/waiting` for the measurement.
 
 This module owns the ceiling: it resolves the operator-facing
 ``LIBTMUX_MCP_WAIT_MAX_SECONDS`` environment variable and publishes the

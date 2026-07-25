@@ -70,6 +70,38 @@ program exits. (#100)
 
 ### Fixes
 
+**{tooliconl}`wait-for-text` sees the row the cursor was on**
+
+The wait anchored one row BELOW the cursor's position at entry, and on a
+quiescent pane that is exactly where the next line of output lands — the cursor
+sits at the end of the prompt. So the case the tool is reserved for, output you
+did not author such as a daemon printing a single `ready` line, could not match
+at all. The wait burned its whole budget and then reported `saw_new_output:
+false`, documented as "the pane was silent — often the command never ran", which
+sent the agent off to retry with a different pattern when the text had been on
+screen the entire time. Measured before the fix: `READY_MARK\n` missed at 5.02 s
+with the marker provably on screen, while the same marker written with a leading
+newline matched in 1.017 s.
+
+The anchor now lands on the entry row, and the pre-existing content of that row
+is suppressed by value rather than by index — the entry-time content snapshot
+already worked that way for every row below it. Carriage-return rewrites,
+spinners, and single-line status updates on the entry row become matchable,
+retiring a documented caveat. A stale match still does not end the wait: it
+keeps waiting for a fresh occurrence, so re-running a command whose output looks
+identical continues to work.
+
+**{tooliconl}`wait-for-channel` no longer reports a vanished server as a signal**
+
+`tmux wait-for` exits 0 when the tmux server shuts down without ever signalling
+the channel, and it is byte-identical to a genuine signal — same exit code, same
+empty stderr. Measured on tmux 3.7b, `kill-server` and SIGTERM both produce that
+indistinguishable success; only SIGKILL reports itself. So a wait on work that
+never happened returned "Channel 'x' was signalled" and the agent proceeded on a
+false premise. This is the deterministic primitive the pane-scraping waits defer
+to, so it now re-probes the server before claiming success and raises when the
+server is gone.
+
 **{tooliconl}`pipe-pane` writes to the path you asked for**
 
 `output_path` reached tmux's format expander before `/bin/sh`, and only the
@@ -120,6 +152,30 @@ The wait tools now state the split plainly: a command you send belongs on
 {tooliconl}`run-command`, or on {tooliconl}`wait-for-channel` composed with
 `tmux wait-for -S`, and {tooliconl}`wait-for-text` is reserved for output you
 did not author. (#100)
+
+**New topic: Waiting**
+
+Collects which wait to reach for, how {tooliconl}`wait-for-text` decides
+something is new, and how to read each result field. It also records the designs
+that were measured and rejected — MCP background tasks, an event-driven
+`pipe-pane`, and removing the tool — so they are not re-litigated from
+intuition.
+
+**The wait ceiling's rationale was wrong, and the results now say what they mean**
+
+The ceiling was justified as stopping a bad wait from stalling the shared MCP
+connection. It does not do that, because there is no stall: the wait tools await
+throughout and FastMCP serves the stdio connection concurrently. Measured on
+fastmcp 3.4.4, a tool awaiting 6 s served 58 interleaved calls at a 3.4 ms
+median, against exactly one call at 6014 ms for a control that blocked the event
+loop. The ceiling is still right and unchanged — it bounds the agent's turn,
+which MCP gives it no way to abandon mid-call — but the false premise is gone,
+along with the invitation to "fix" the connection with background tasks.
+
+`saw_new_output` no longer claims a quiet pane usually means the command never
+ran, and says what the `true`-with-`found: false` case means. `matched_at_entry`
+now explains that the wait deliberately keeps waiting for a fresh occurrence
+rather than answering with the stale one.
 
 ### Development
 

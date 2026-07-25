@@ -35,6 +35,12 @@ Best-effort Bash, Zsh, and Fish history controls and their limits.
 Symptom-based guide for common issues.
 :::
 
+:::{grid-item-card} Waiting
+:link: waiting
+:link-type: doc
+Which wait to reach for, why they are bounded, and what was rejected.
+:::
+
 :::{grid-item-card} Gotchas
 :link: gotchas
 :link-type: doc
@@ -88,6 +94,7 @@ architecture
 concepts
 safety
 history-suppression
+waiting
 gotchas
 prompting
 completion

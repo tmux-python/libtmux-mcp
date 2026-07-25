@@ -281,8 +281,9 @@ class WaitForTextResult(BaseModel):
     tail: list[str] = Field(
         default_factory=list,
         description=(
-            "Rows below the entry cursor at the final poll, tail-limited by "
-            "lines and bytes. Includes stale rows excluded from matching, so "
+            "Rows from the entry cursor row down at the final poll, "
+            "tail-limited by lines and bytes. Includes stale rows excluded "
+            "from matching, so "
             "it shows what the pane looks like, not what matched. On a "
             "timeout this usually already contains the answer — read it "
             "before retrying with a different pattern."
@@ -291,18 +292,25 @@ class WaitForTextResult(BaseModel):
     saw_new_output: bool = Field(
         default=False,
         description=(
-            "True when any line was written below the entry cursor during "
-            "the wait. False with ``found=false`` means the pane was silent "
-            "— often the command never ran — not that the pattern was wrong."
+            "True when content was written on or below the entry cursor row "
+            "during the wait. False with ``found=false`` means the pane "
+            "really was quiet — suspect the command never ran, or that a "
+            "full-screen program suppressed matching (check "
+            "``alternate_screen``) — rather than that the pattern was wrong. "
+            "True with ``found=false`` is the opposite hint: output arrived "
+            "and did not match, so read ``tail`` and fix the pattern."
         ),
     )
     matched_at_entry: bool = Field(
         default=False,
         description=(
             "True when a ``patterns`` entry already matched text on screen "
-            "before the wait began. Such rows are stale and excluded from "
-            "matching; this flags the 'the text is right there but the wait "
-            "timed out' case. Fix it with a unique sentinel."
+            "before the wait began, and nothing new matched afterwards. The "
+            "wait deliberately keeps waiting for a FRESH occurrence, so "
+            "re-running a command whose output looks identical still works. "
+            "Read this as 'the text you asked for is on screen, but it was "
+            "already there when you called' — if the existing occurrence is "
+            "the answer, you have it; if not, the new one never came."
         ),
     )
     alternate_screen: bool = Field(
