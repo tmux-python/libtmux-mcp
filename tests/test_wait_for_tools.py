@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -95,6 +97,131 @@ def test_wait_for_channel_returns_when_signalled(mcp_server: Server) -> None:
         assert "signalled" in result
     finally:
         thread.join()
+
+
+class ServerDeathFixture(t.NamedTuple):
+    """Test fixture for wait_for_channel's server-disappeared detection."""
+
+    test_id: str
+    #: How the doomed tmux server is taken down mid-wait.
+    kill_mode: str
+    #: Substring the raised error must contain. The clean-shutdown paths
+    #: are caught by the liveness re-probe; SIGKILL is the one tmux
+    #: already reports itself.
+    expected_message: str
+
+
+SERVER_DEATH_FIXTURES: list[ServerDeathFixture] = [
+    ServerDeathFixture(
+        test_id="clean_kill_server",
+        kill_mode="kill-server",
+        expected_message="no longer running",
+    ),
+    ServerDeathFixture(
+        test_id="server_sigterm",
+        kill_mode="sigterm",
+        expected_message="no longer running",
+    ),
+    ServerDeathFixture(
+        test_id="server_sigkill",
+        kill_mode="sigkill",
+        expected_message="server exited unexpectedly",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ServerDeathFixture._fields,
+    SERVER_DEATH_FIXTURES,
+    ids=[f.test_id for f in SERVER_DEATH_FIXTURES],
+)
+def test_wait_for_channel_detects_a_vanished_server(
+    test_id: str, kill_mode: str, expected_message: str
+) -> None:
+    """A server that dies mid-wait must not be reported as a signal.
+
+    ``tmux wait-for`` exits 0 when the server shuts down cleanly without
+    ever signalling the channel, which is byte-identical to the exit of
+    a genuine signal — same code, same empty stderr. Only an unclean
+    death (SIGKILL) reports itself. Without the liveness re-probe the
+    two clean paths returned "Channel ... was signalled", which is the
+    worst answer this tool can give: it exists to be the deterministic
+    primitive the fuzzy pane-scraping waits defer to.
+
+    Runs against its own throwaway server. The shared ``mcp_server``
+    fixture cannot be used here for the obvious reason that the test
+    destroys the server it waits on.
+    """
+    from libtmux.server import Server as LibtmuxServer
+
+    socket_name = f"wfc_death_{test_id}_{os.getpid()}"
+    doomed = LibtmuxServer(socket_name=socket_name)
+    doomed.new_session(session_name="s", detach=True)
+    try:
+        pid = int(doomed.cmd("display-message", "-p", "#{pid}").stdout[0])
+
+        def _kill_after_delay() -> None:
+            time.sleep(0.5)
+            if kill_mode == "kill-server":
+                doomed.cmd("kill-server")
+            elif kill_mode == "sigterm":
+                os.kill(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGKILL)
+
+        thread = threading.Thread(target=_kill_after_delay)
+        thread.start()
+        try:
+            with pytest.raises(ToolError, match=expected_message):
+                asyncio.run(
+                    wait_for_channel(
+                        channel="never_signalled",
+                        timeout=10.0,
+                        socket_name=socket_name,
+                    )
+                )
+        finally:
+            thread.join()
+    finally:
+        with contextlib.suppress(Exception):
+            doomed.cmd("kill-server")
+
+
+def test_wait_for_channel_still_succeeds_on_a_live_server() -> None:
+    """The liveness re-probe must not turn real signals into errors.
+
+    Control for :func:`test_wait_for_channel_detects_a_vanished_server`:
+    a re-probe aggressive enough to fail here would be worse than the
+    bug it fixes. Uses a throwaway server so the two tests differ only
+    in whether the server survives.
+    """
+    from libtmux.server import Server as LibtmuxServer
+
+    socket_name = f"wfc_alive_{os.getpid()}"
+    live = LibtmuxServer(socket_name=socket_name)
+    live.new_session(session_name="s", detach=True)
+    try:
+
+        def _signal_after_delay() -> None:
+            time.sleep(0.3)
+            live.cmd("wait-for", "-S", "really_signalled")
+
+        thread = threading.Thread(target=_signal_after_delay)
+        thread.start()
+        try:
+            result = asyncio.run(
+                wait_for_channel(
+                    channel="really_signalled",
+                    timeout=10.0,
+                    socket_name=socket_name,
+                )
+            )
+            assert "signalled" in result
+        finally:
+            thread.join()
+    finally:
+        with contextlib.suppress(Exception):
+            live.cmd("kill-server")
 
 
 @pytest.mark.usefixtures("mcp_session")

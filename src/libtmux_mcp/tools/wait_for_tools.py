@@ -54,6 +54,7 @@ from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.server import Server
 
 #: Allowed characters and length range for channel names. Channels are
 #: tmux-server-global and names are passed to ``tmux wait-for`` on the
@@ -66,6 +67,36 @@ _CHANNEL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 #: server-local operation; 5 s is a generous ceiling that still bounds
 #: pathological hangs (e.g. tmux server deadlock).
 _SIGNAL_TIMEOUT_SECONDS = 5.0
+
+#: Cap on the post-wait liveness re-probe. Same reasoning as
+#: ``_SIGNAL_TIMEOUT_SECONDS``, and it runs at most once per wait.
+_LIVENESS_TIMEOUT_SECONDS = 5.0
+
+
+async def _server_is_alive(server: Server) -> bool:
+    """Return whether the tmux server still answers on its socket.
+
+    ``list-sessions`` is the probe libtmux's own ``Server.is_alive`` uses.
+    It is safe here specifically because it does NOT auto-start a server:
+    against a socket with no server it exits non-zero with
+    ``error connecting to <path>``, so probing cannot resurrect the thing
+    it is asking about.
+
+    A ``False`` return is deliberately treated as fatal by the caller
+    rather than merely logged. There is a narrow race — a script that
+    signals and then immediately tears the server down would report an
+    error for a wait that genuinely succeeded — but that error names a
+    true fact about the server, whereas the alternative is telling the
+    agent a channel was signalled when nothing signalled it.
+    """
+    argv = _tmux_argv(server, "list-sessions")
+    try:
+        returncode, _stdout, _stderr = await _run_tmux_bounded(
+            argv, timeout=_LIVENESS_TIMEOUT_SECONDS
+        )
+    except (TimeoutError, OSError):
+        return False
+    return returncode == 0
 
 
 def _validate_channel_name(name: str) -> str:
@@ -163,7 +194,11 @@ async def wait_for_channel(
     Raises
     ------
     ExpectedToolError
-        On timeout, invalid channel name, or tmux error.
+        On timeout, invalid channel name, tmux error, or when the tmux
+        server disappeared during the wait — ``tmux wait-for`` exits 0
+        for a clean server shutdown exactly as it does for a real
+        signal, so that case is detected by re-probing the server and
+        reported rather than passed off as success.
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_channel_name(channel)
@@ -191,6 +226,32 @@ async def wait_for_channel(
     if returncode != 0:
         detail = stderr.decode(errors="replace").strip()
         msg = f"wait-for failed for channel {cname!r}: {detail or f'exit {returncode}'}"
+        raise ExpectedToolError(msg)
+    # A zero exit does NOT mean "signalled". ``tmux wait-for`` also exits
+    # 0 when the server goes away without ever signalling the channel,
+    # and it is silent about it. Measured on tmux 3.7b, all three of
+    # these are rc=0 with empty stderr and therefore indistinguishable
+    # from each other by exit status alone:
+    #
+    # ==================  ====  ==================================
+    # how the wait ended  rc    stderr
+    # ==================  ====  ==================================
+    # genuinely signalled  0    *(empty)*
+    # ``kill-server``      0    *(empty)*
+    # server SIGTERM       0    *(empty)*
+    # server SIGKILL       1    ``server exited unexpectedly``
+    # ==================  ====  ==================================
+    #
+    # Only the SIGKILL path was already caught. Re-probe liveness so the
+    # other two stop being reported as success: this tool exists to be
+    # the deterministic primitive the fuzzy ones defer to, and a silent
+    # false "was signalled" is the worst answer it can give.
+    if not await _server_is_alive(server):
+        msg = (
+            f"wait-for returned for channel {cname!r} but the tmux server is "
+            "no longer running, so the channel was probably never signalled "
+            "— tmux exits 0 for both. Re-check the work you were waiting on."
+        )
         raise ExpectedToolError(msg)
     return f"Channel {cname!r} was signalled (timeout {effective_timeout}s)"
 
