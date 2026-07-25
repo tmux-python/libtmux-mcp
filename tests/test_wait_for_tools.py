@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 import threading
 import time
 import typing as t
@@ -220,8 +222,9 @@ def test_wait_for_channel_propagates_cancellation(mcp_server: Server) -> None:
     MCP cancellation semantics: when a client cancels an in-flight tool
     call, the awaiting ``asyncio.Task`` receives ``CancelledError``.
     ``handle_tool_errors_async`` catches ``Exception`` (not
-    ``BaseException``), and the function's narrow ``subprocess.*``
-    except-blocks cannot swallow ``CancelledError`` either — so the
+    ``BaseException``), and neither the narrow ``TimeoutError``
+    except-block nor the kill-and-reap guard inside
+    ``_run_tmux_bounded`` swallows ``CancelledError`` — so the
     cancellation propagates through the decorator naturally. This test
     locks that contract in so a future broadening of the catch
     (e.g. ``except BaseException``) trips immediately.
@@ -238,9 +241,95 @@ def test_wait_for_channel_propagates_cancellation(mcp_server: Server) -> None:
                 socket_name=mcp_server.socket_name,
             )
         )
-        await asyncio.sleep(0.1)  # let the to_thread handoff start
+        await asyncio.sleep(0.1)  # let the tmux child spawn
         task.cancel()
         await task
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(_runner())
+
+
+def _tmux_wait_pids(socket_name: str, channel: str) -> list[int]:
+    """Return pids of live ``tmux -L <socket> wait-for <channel>`` processes.
+
+    Asks the OS rather than the tool: the defect this backs is exactly
+    a tool that reports a clean cancellation while its child runs on.
+    Matches the whole argv vector and skips this process, so neither
+    the test runner's own command line nor the ``ps`` call itself can
+    produce a false positive. Reaped children are absent from ``ps``
+    and zombies render as ``[tmux] <defunct>``, which does not match.
+    """
+    want = ["tmux", "-L", socket_name, "wait-for", channel]
+    listing = subprocess.run(
+        ["ps", "-eo", "pid=,args="],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    me = os.getpid()
+    pids: list[int] = []
+    for line in listing.splitlines():
+        pid_field, _, args = line.strip().partition(" ")
+        if not pid_field.isdigit() or int(pid_field) == me:
+            continue
+        if args.split() == want:
+            pids.append(int(pid_field))
+    return pids
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None:
+    """A cancelled wait must not leave its ``tmux wait-for`` child running.
+
+    ``asyncio.to_thread(subprocess.run, ...)`` is uninterruptible: the
+    coroutine raises ``CancelledError`` at once while the worker thread
+    stays blocked in ``waitpid``, so the tmux child kept running for
+    the whole remainder of its budget with nobody waiting on it.
+    Measured before the fix: a 15 s wait cancelled at 2 s left the
+    child alive another 13 s; through a real agent TUI with a 90 s
+    timeout, ~61 s past the user's Esc.
+
+    Note the harm is the live process itself, not a stolen signal —
+    tmux keeps the server-side waiter registered even after the client
+    dies (verified against ``tmux wait-for``), so ``wait-for -S`` is
+    swallowed either way. Only the process is observable, so that is
+    what this asserts.
+    """
+    channel = "wf_cancel_reap_test"
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+
+    async def _drive() -> list[int]:
+        task = asyncio.create_task(
+            wait_for_channel(
+                channel=channel,
+                timeout=8.0,
+                socket_name=socket_name,
+            )
+        )
+        await asyncio.sleep(0.5)
+        assert _tmux_wait_pids(socket_name, channel), (
+            "no tmux wait-for child observed before the cancel — the probe "
+            "is broken, so a later 'no survivors' result would be vacuous"
+        )
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Poll rather than sleep once: the kill is synchronous but the
+        # reap is not instantaneous. The 2 s window is far short of the
+        # ~7.5 s the child still has on its own budget, so a survivor
+        # here is an orphan and not a slow teardown.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not _tmux_wait_pids(socket_name, channel):
+                break
+            await asyncio.sleep(0.05)
+        return _tmux_wait_pids(socket_name, channel)
+
+    survivors = asyncio.run(_drive())
+    assert not survivors, (
+        f"cancelled wait_for_channel orphaned tmux child(ren) {survivors}; "
+        "the child outlives the cancellation for the rest of its timeout"
+    )
