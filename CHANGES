@@ -156,10 +156,11 @@ did not author. (#100)
 **New topic: Waiting**
 
 Collects which wait to reach for, how {tooliconl}`wait-for-text` decides
-something is new, and how to read each result field. It also records the designs
-that were measured and rejected — MCP background tasks, an event-driven
-`pipe-pane`, and removing the tool — so they are not re-litigated from
-intuition.
+something is new, how to read each result field, and what a wrong search pattern
+actually costs — one bounded call whose `tail` usually already contains the text
+you should have searched for. It also records the designs that were measured and
+rejected — MCP background tasks, an event-driven `pipe-pane`, a deferred resume
+handle, and removing the tool — so they are not re-litigated from intuition.
 
 **The wait ceiling's rationale was wrong, and the results now say what they mean**
 

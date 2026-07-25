@@ -104,6 +104,24 @@ polls. The tool detects that band and emits a warning telling you to use
 {tooliconl}`wait-for-channel`, because it cannot be fixed by polling
 harder.
 
+## What a wrong pattern costs
+
+The failure everyone worries about is picking search text that never
+appears. It costs **one call, bounded by the ceiling**, and the result
+tells you which of the three things went wrong. Measured with a 6-second
+budget:
+
+| what happened | `saw_new_output` | what comes back |
+| --- | --- | --- |
+| the daemon printed something else | `true` | `tail` holds `Server listening on 8080` when you asked for `Ready to accept` |
+| the command never ran | `false` | a prompt-only `tail` — stop guessing patterns, check the command |
+| the pane is scrolling, no match | `true` | a 20-line tail of the real output |
+
+In every case the answer is in the result, so the fix is a better
+pattern on the next call rather than another blind wait. Read `tail`
+before retrying — on a timeout it usually already contains what you were
+waiting for.
+
 ## Designs that were measured and rejected
 
 Recorded so they are not re-litigated from intuition.
@@ -133,3 +151,13 @@ all, because MCP gives an agent no sleep primitive. Measured on a
 45-second dev-server start: {tooliconl}`wait-for-text` took 2 calls and
 538 wire tokens; the same goal polled via {tooliconl}`capture-since` took
 10 calls and 3438.
+
+**A deferred handle** — returning early with a resume cursor so the agent
+can change its mind. Rejected, and this one was close. It would have
+given the "server decides to stop blocking" semantics without needing any
+client capability, reusing {tooliconl}`capture-since`'s existing opaque
+cursor. But it solves the wrong-pattern case, and that case already
+resolves in one self-diagnosing call (table above). Deferring on a soft
+deadline would instead ADD calls to the common good case: a 5-second
+soft deadline turns one legitimate 45-second wait into roughly nine
+calls instead of two.
