@@ -104,6 +104,26 @@ class CallerIdentity:
     Used to scope self-protection checks to the caller's own tmux server —
     a pane ID like ``%1`` is only unique within a single server, so
     comparisons must also verify the socket path matches.
+
+    Attributes
+    ----------
+    socket_path : str | None
+        Filesystem path of the tmux socket the caller is attached to, from
+        the first ``TMUX`` field. ``None`` when ``TMUX`` is unset or its
+        first field is empty — the socket comparisons in
+        :func:`_caller_is_on_server` and
+        :func:`_caller_is_strictly_on_server` then cannot prove which
+        server the caller belongs to.
+    server_pid : int | None
+        PID of the tmux server process, from the second ``TMUX`` field.
+        ``None`` when that field is absent or not an integer.
+    session_id : str | None
+        Session the caller's pane belongs to (e.g. ``$7``), from the third
+        ``TMUX`` field. ``None`` when that field is absent or empty.
+    pane_id : str | None
+        Pane the MCP server process runs in (e.g. ``%3``), read from
+        ``TMUX_PANE``. ``None`` when the variable is unset, meaning no
+        pane can be identified as the caller's own.
     """
 
     socket_path: str | None
