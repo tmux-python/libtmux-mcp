@@ -60,6 +60,14 @@ written, whether the match was stale paint already on screen when the wait
 began, and a bounded tail of the rows below the entry cursor. Every field is
 observed rather than inferred. (#100)
 
+**Progress notifications say how much budget is left**
+
+{tooliconl}`wait-for-text` sent the same constant message on every tick next to
+the numeric progress pair. Clients that surface progress usually render the
+message rather than the raw numbers, so that field now carries the budget:
+`Waiting on pane %0: 1.4s elapsed, 0.6s left`. A 2-second wait emits 36
+distinct messages.
+
 **Pagers and editors are reported instead of matched on paint**
 
 Inside `less`, an editor, or any other full-screen program, a pane capture
