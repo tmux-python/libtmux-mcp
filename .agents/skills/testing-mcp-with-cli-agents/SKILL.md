@@ -130,8 +130,37 @@ found`.
 
 ## High-value test: cancellation / teardown
 
-Cancellation is invisible to the tool list and only reachable through Layer 2 —
-and it is exactly where tmux-MCP servers leak. Reproduce it:
+Cancellation is invisible to the tool list, and it is exactly where tmux-MCP
+servers leak. It is reachable at **Layer 0**, but only by one specific move — and
+the obvious move is not it.
+
+**Cancelling the client's asyncio task does not cancel the server.** Tee both
+directions of the stdio pipe and run exactly that manoeuvre: the client sends
+`initialize`, `notifications/initialized`, `tools/list`, `tools/call` — and
+nothing more. `task.cancel()` unwinds the caller; the server never hears about
+it and keeps working the abandoned call — a `wait_for_text` kept streaming
+`notifications/progress` past the cancel and only stopped when the client
+process exited and closed the pipe. A bare `task.cancel()` measures the *client*
+giving up, not the server's reap path.
+
+**Emit the notification explicitly.** FastMCP's client has
+`await client.cancel(request_id)`, which puts a real `notifications/cancelled`
+on the wire. With it the same run behaves as intended: the progress stream stops
+at the instant of the cancel, and the server answers the in-flight `tools/call`
+with `Request cancelled`. `call_tool` does not hand you the request id — **read
+it off your capture**, do not count. The numbering depends on which requests the
+session actually issues: measured runs put `tools/call` at both id 1 and id 2
+depending on whether a `tools/list` went out first. Getting it wrong fails
+silently — `client.cancel()` accepts an id that matches no in-flight request,
+returns without error, and the call runs to completion. That is the difference
+between measuring a child reaped in 0.1 s and one that lingers 17 s, from the
+same script. Only with the notification landing on the *right* id is the
+server's cancellation path under test.
+
+Layer 0 remains the right layer for wire-contract questions, cancellation
+included — it just has to send the frame. Reach for Layer 2 when the question is
+the *client's* cancellation semantics (approval gate, streaming, what `Esc`
+actually sends) rather than the server's reap path. Layer 2 reproduction:
 
 1. Prompt the agent to call a `wait_for_text` that will never match (long timeout).
 2. While it's mid-call — the TUI shows a "working / esc to interrupt" state — send
@@ -174,7 +203,7 @@ $ uv run scripts/mcp_swap.py doctor --server tmux           # effective environm
 $ uv run scripts/mcp_swap.py status --server tmux           # current entries
 $ uv run scripts/mcp_swap.py use-local --server tmux --env LIBTMUX_SOCKET=mcp-target --dry-run
 $ uv run scripts/mcp_swap.py use-local --server tmux --env LIBTMUX_SOCKET=mcp-target
-$ uv run scripts/mcp_swap.py revert                         # restore from timestamped backups
+$ uv run scripts/mcp_swap.py revert --cli codex --dry-run   # scope it — a bare revert unwinds EVERY recorded swap
 ```
 
 Run `doctor` first — it reports which server name each CLI points at (and warns
@@ -187,29 +216,55 @@ The short version: pass `--server tmux` (the real registration key on this
 machine is `tmux`, not the derived `libtmux`); mcp_swap preserves env but does
 not add new keys, so inject `LIBTMUX_SOCKET=mcp-target` via each CLI's native
 `mcp add ... -e ...` or a post-swap edit; `mcp_swap use-local` mutates the user's
-real CLI configs, so dry-run first and always `revert` at the end.
+real CLI configs, so dry-run first, record the pre-existing swap state, and
+revert only what you swapped.
 
 **Prefer zero-mutation isolation for a test.** mcp_swap is for a swap you *want*
 to persist. To just exercise a checkout, use each CLI's throwaway config-home /
 project-config lever instead — `references/cli-matrix.md` gives the verified one
 per CLI (codex `CODEX_HOME` or `-c` overrides, grok `GROK_HOME`, agy
-`--gemini_dir`, cursor/gemini project config, claude `--mcp-config
---strict-mcp-config`). All six were driven this way with their real config
-confirmed byte-identical afterward, and no swap state touched. Note the machine
-may already carry an un-reverted swap (all CLIs pointing at a local checkout), so
-`revert` returns you to *that* state, not a pristine one — check the swap state
-file before assuming.
+`--gemini_dir` — config only, credentials do not follow it — cursor/gemini
+project config, claude `--mcp-config --strict-mcp-config`). Five of the six
+(codex, claude, cursor, grok, agy) were driven all the way to a real
+model-issued tool call this way, with no swap state touched and every *MCP*
+config file left as found; gemini is vendor-blocked (`IneligibleTierError`), not
+harness-blocked. Isolating the MCP config does not stop a CLI writing its own
+ambient state — a claude `-p` run still grows `~/.claude.json`, a gemini run
+still appends `~/.gemini/projects.json` — so diff what you care about
+afterwards. Note the machine may already carry an un-reverted swap (all CLIs
+pointing at a local checkout); a bare `revert` would unwind that too, so read
+the swap state file before running one.
+
+**Copy credentials into a throwaway config home; never symlink them.** This is
+the most expensive lesson here. A symlink isolates reads, not writes: agy
+refreshed its OAuth token straight *through* the symlink and overwrote the
+user's real `~/.gemini/antigravity-cli/antigravity-oauth-token` — the real
+file's mtime moved. Repeated with a *copy*, the sandbox copy was refreshed and
+the real file was untouched. Both directions were measured. Copy the credential
+files in, and diff the originals when you're done.
 
 ## Cleanup checklist
 
 ```console
 $ tmux -L cli-harness kill-server 2>/dev/null
 $ tmux -L mcp-target  kill-server 2>/dev/null
-$ uv run scripts/mcp_swap.py revert
 ```
 
-Scratch sockets vanish with their server; configs restore from mcp_swap's
-timestamped backups (LIFO if multiple swaps stacked).
+Scratch sockets vanish with their server.
+
+**Revert only a swap you made.** `revert` works off the swap state file
+(`$XDG_STATE_HOME/libtmux-mcp-dev/swap/state.json`, i.e. under `~/.local/state/`
+by default), not off whichever backup is newest on disk: each recorded
+`(cli, scope)` entry names the config it swapped and the backup that restores
+it, and revert writes that backup back, deletes it, and drops the entry. The
+hazard is therefore *scope*, not staleness — a bare `revert` targets every
+recorded entry for every CLI, so a swap an earlier session left behind is
+unwound alongside yours. Name what you swapped with `--cli` (plus `--scope` for
+Claude, which has two layers) and preview with `--dry-run`. State is keyed by
+`(cli, scope)`, so two swaps of the same layer collapse into one entry — there
+is no chain to unwind one step at a time. Re-run `status`/`doctor` and compare
+against the state you recorded before starting. If you stayed on the
+zero-mutation path there is nothing to revert.
 
 ## When NOT to reach for the full harness
 
