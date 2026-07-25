@@ -292,25 +292,21 @@ class WaitForTextResult(BaseModel):
     saw_new_output: bool = Field(
         default=False,
         description=(
-            "True when content was written on or below the entry cursor row "
-            "during the wait. False with ``found=false`` means the pane "
-            "really was quiet — suspect the command never ran, or that a "
-            "full-screen program suppressed matching (check "
-            "``alternate_screen``) — rather than that the pattern was wrong. "
-            "True with ``found=false`` is the opposite hint: output arrived "
-            "and did not match, so read ``tail`` and fix the pattern."
+            "True when content was written on or below the entry cursor row. "
+            "Read it with ``found=false``: true means output arrived and did "
+            "not match — read ``tail`` and fix the pattern; false means the "
+            "pane was quiet — suspect the command never ran, or check "
+            "``alternate_screen``."
         ),
     )
     matched_at_entry: bool = Field(
         default=False,
         description=(
-            "True when a ``patterns`` entry already matched text on screen "
-            "before the wait began, and nothing new matched afterwards. The "
-            "wait deliberately keeps waiting for a FRESH occurrence, so "
-            "re-running a command whose output looks identical still works. "
-            "Read this as 'the text you asked for is on screen, but it was "
-            "already there when you called' — if the existing occurrence is "
-            "the answer, you have it; if not, the new one never came."
+            "True when ``patterns`` already matched on-screen text before the "
+            "wait began and nothing new matched after. The wait holds out for "
+            "a FRESH occurrence, so re-running a command whose output looks "
+            "identical still works. Read it as: the text is there, but it "
+            "predates your call."
         ),
     )
     alternate_screen: bool = Field(
