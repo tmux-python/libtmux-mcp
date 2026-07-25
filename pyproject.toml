@@ -255,9 +255,8 @@ testpaths = [
   "src/libtmux_mcp",
   "tests",
 ]
+# Filter by message, not by module: a module pattern matches the frame
+# `stacklevel` points at, which for a deprecation is our own caller.
 filterwarnings = [
   "ignore:The frontend.Option(Parser)? class.*:DeprecationWarning::",
-  "ignore::DeprecationWarning:libtmux.*:",
-  "ignore::DeprecationWarning:libtmux_mcp.*:",
-  "ignore::DeprecationWarning:tests:",
 ]
