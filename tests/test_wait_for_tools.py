@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import pathlib
 import signal
 import subprocess
 import threading
@@ -99,6 +100,33 @@ def test_wait_for_channel_returns_when_signalled(mcp_server: Server) -> None:
         thread.join()
 
 
+@contextlib.contextmanager
+def _throwaway_server(socket_name: str) -> t.Iterator[Server]:
+    """Yield a private tmux server, then destroy it and its socket file.
+
+    These tests kill the server they are waiting on, so the shared
+    ``mcp_server`` fixture cannot be used.
+
+    Cleanup has to unlink the socket by hand. A server killed with
+    SIGKILL never gets to remove its own socket, so the file outlives
+    it, and ``Server.socket_path`` is ``None`` on a server built from a
+    ``socket_name`` — so the path is read from tmux itself while the
+    server is still alive to answer.
+    """
+    from libtmux.server import Server as LibtmuxServer
+
+    server = LibtmuxServer(socket_name=socket_name)
+    server.new_session(session_name="s", detach=True)
+    socket_path = server.cmd("display-message", "-p", "#{socket_path}").stdout[0]
+    try:
+        yield server
+    finally:
+        with contextlib.suppress(Exception):
+            server.cmd("kill-server")
+        with contextlib.suppress(Exception):
+            pathlib.Path(socket_path).unlink(missing_ok=True)
+
+
 class ServerDeathFixture(t.NamedTuple):
     """Test fixture for wait_for_channel's server-disappeared detection."""
 
@@ -148,16 +176,11 @@ def test_wait_for_channel_detects_a_vanished_server(
     worst answer this tool can give: it exists to be the deterministic
     primitive the fuzzy pane-scraping waits defer to.
 
-    Runs against its own throwaway server. The shared ``mcp_server``
-    fixture cannot be used here for the obvious reason that the test
-    destroys the server it waits on.
+    Runs against its own throwaway server, since the test destroys the
+    server it waits on.
     """
-    from libtmux.server import Server as LibtmuxServer
-
     socket_name = f"wfc_death_{test_id}_{os.getpid()}"
-    doomed = LibtmuxServer(socket_name=socket_name)
-    doomed.new_session(session_name="s", detach=True)
-    try:
+    with _throwaway_server(socket_name) as doomed:
         pid = int(doomed.cmd("display-message", "-p", "#{pid}").stdout[0])
 
         def _kill_after_delay() -> None:
@@ -182,9 +205,6 @@ def test_wait_for_channel_detects_a_vanished_server(
                 )
         finally:
             thread.join()
-    finally:
-        with contextlib.suppress(Exception):
-            doomed.cmd("kill-server")
 
 
 def test_wait_for_channel_still_succeeds_on_a_live_server() -> None:
@@ -195,12 +215,8 @@ def test_wait_for_channel_still_succeeds_on_a_live_server() -> None:
     bug it fixes. Uses a throwaway server so the two tests differ only
     in whether the server survives.
     """
-    from libtmux.server import Server as LibtmuxServer
-
     socket_name = f"wfc_alive_{os.getpid()}"
-    live = LibtmuxServer(socket_name=socket_name)
-    live.new_session(session_name="s", detach=True)
-    try:
+    with _throwaway_server(socket_name) as live:
 
         def _signal_after_delay() -> None:
             time.sleep(0.3)
@@ -219,9 +235,6 @@ def test_wait_for_channel_still_succeeds_on_a_live_server() -> None:
             assert "signalled" in result
         finally:
             thread.join()
-    finally:
-        with contextlib.suppress(Exception):
-            live.cmd("kill-server")
 
 
 @pytest.mark.usefixtures("mcp_session")
