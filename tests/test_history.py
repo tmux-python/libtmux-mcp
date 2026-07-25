@@ -364,8 +364,14 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
                 "same_server": first is second,
                 "transform_counts": [before, after],
                 "schema": schema,
+                # by_alias=True dumps the WIRE names. Without it this
+                # asserts the SDK's Python attribute spelling, which is
+                # camelCase on mcp 1.x and snake_case on 2.x -- so the
+                # assertion below would break on an SDK upgrade while
+                # the protocol output was unchanged. Matches the
+                # by_alias=True already used in tools/batch_tools.py.
                 "annotations": tool.annotations.model_dump(
-                    mode="json", exclude_none=True
+                    mode="json", exclude_none=True, by_alias=True
                 ),
                 "tags": tool.meta["fastmcp"]["tags"],
                 "raw_defaults": {
