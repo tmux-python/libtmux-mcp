@@ -17,6 +17,8 @@ import pytest
 from fastmcp import Client, FastMCP
 from libtmux.test.retry import retry_until
 
+from tests.conftest import wire_properties
+
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
@@ -136,7 +138,7 @@ def test_history_transform_changes_exact_semantic_tool_set() -> None:
             tools = await client.list_tools()
         schemas: dict[str, dict[str, t.Any]] = {}
         for tool in tools:
-            properties = tool.inputSchema["properties"]
+            properties = wire_properties(tool)
             if tool.name in spawn_tools:
                 assert "suppress_history" not in properties
                 schemas[tool.name] = properties["suppress_persistent_history"]
@@ -351,6 +353,12 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
 
         logging.disable(logging.CRITICAL)
 
+        # Local twin of tests/conftest.py::wire_properties -- this
+        # script runs in a subprocess and cannot import the suite.
+        def props(tool):
+            dumped = tool.model_dump(mode="json", by_alias=True)
+            return dumped["inputSchema"]["properties"]
+
         async def main():
             first = build_mcp_server()
             before = len(first.transforms)
@@ -359,7 +367,7 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
             async with Client(first) as client:
                 tools = {tool.name: tool for tool in await client.list_tools()}
             tool = tools["run_command"]
-            schema = tool.inputSchema["properties"]["suppress_history"]
+            schema = props(tool)["suppress_history"]
             print(json.dumps({
                 "same_server": first is second,
                 "transform_counts": [before, after],
@@ -375,14 +383,14 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
                 ),
                 "tags": tool.meta["fastmcp"]["tags"],
                 "raw_defaults": {
-                    "send_keys": tools["send_keys"].inputSchema["properties"]
+                    "send_keys": props(tools["send_keys"])
                     ["suppress_history"]["default"],
-                    "send_keys_batch": tools["send_keys_batch"].inputSchema
-                    ["properties"]["operations"]["items"]["properties"]
+                    "send_keys_batch": props(tools["send_keys_batch"])
+                    ["operations"]["items"]["properties"]
                     ["suppress_history"]["default"],
                 },
                 "spawn_defaults": {
-                    name: tools[name].inputSchema["properties"]
+                    name: props(tools[name])
                     ["suppress_persistent_history"]["default"]
                     for name in (
                         "create_session",
@@ -392,7 +400,7 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
                     )
                 },
                 "spawn_descriptions": {
-                    name: tools[name].inputSchema["properties"]
+                    name: props(tools[name])
                     ["suppress_persistent_history"]["description"]
                     for name in (
                         "create_session",
@@ -646,19 +654,19 @@ def test_global_history_transform_keeps_raw_and_paste_schemas_explicit_only() ->
             return {tool.name: tool for tool in await client.list_tools()}
 
     tools = asyncio.run(_list_tools())
-    run_command = tools["run_command"].inputSchema["properties"]
-    send_keys = tools["send_keys"].inputSchema["properties"]
-    operation = tools["send_keys_batch"].inputSchema["properties"]["operations"][
-        "items"
-    ]["properties"]
+    run_command = wire_properties(tools["run_command"])
+    send_keys = wire_properties(tools["send_keys"])
+    operation = wire_properties(tools["send_keys_batch"])["operations"]["items"][
+        "properties"
+    ]
 
     assert run_command["suppress_history"]["type"] == "boolean"
     assert run_command["suppress_history"]["default"] is True
     assert "anyOf" not in run_command["suppress_history"]
     assert send_keys["suppress_history"]["default"] is False
     assert operation["suppress_history"]["default"] is False
-    assert "suppress_history" not in tools["paste_text"].inputSchema["properties"]
-    assert "suppress_history" not in tools["paste_buffer"].inputSchema["properties"]
+    assert "suppress_history" not in wire_properties(tools["paste_text"])
+    assert "suppress_history" not in wire_properties(tools["paste_buffer"])
 
 
 def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(

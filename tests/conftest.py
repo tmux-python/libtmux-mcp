@@ -92,3 +92,31 @@ def wire_annotations(tool: t.Any) -> dict[str, t.Any]:
         mode="json", by_alias=True, exclude_none=True
     )
     return dumped
+
+
+def wire_input_schema(tool: t.Any) -> dict[str, t.Any]:
+    """Return a tool's input schema read by its PROTOCOL name.
+
+    Sibling to :func:`wire_annotations`, for the same reason: ``mcp``
+    2.x renames the Python attribute ``inputSchema`` to ``input_schema``
+    while keeping ``inputSchema`` as the wire alias. Reading the
+    attribute directly pins the SDK spelling; dumping ``by_alias=True``
+    pins the name a client actually sees, which is the only thing the
+    protocol guarantees.
+
+    Routing every read through here also makes that migration one edit
+    instead of one per call site.
+    """
+    dumped: dict[str, t.Any] = tool.model_dump(mode="json", by_alias=True)
+    schema: dict[str, t.Any] = dumped["inputSchema"]
+    return schema
+
+
+def wire_properties(tool: t.Any) -> dict[str, t.Any]:
+    """Return ``wire_input_schema(tool)["properties"]``.
+
+    Every caller in the suite wants the properties map, not the schema
+    envelope.
+    """
+    properties: dict[str, t.Any] = wire_input_schema(tool)["properties"]
+    return properties
