@@ -12,7 +12,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import MiddlewareContext
 from libtmux import exc as libtmux_exc
-from mcp.types import CallToolRequestParams
+from mcp_types import CallToolRequestParams
 
 from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.middleware import (
@@ -592,7 +592,7 @@ def test_audit_middleware_redacts_sensitive_args(
 
 def test_tail_preserving_truncation_keeps_tail() -> None:
     """Over-sized text is truncated from the head, tail is preserved."""
-    from mcp.types import TextContent
+    from mcp_types import TextContent
 
     from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
 
@@ -615,7 +615,7 @@ def test_tail_preserving_truncation_keeps_tail() -> None:
 
 def test_tail_preserving_passthrough_when_under_cap() -> None:
     """Text within the cap passes through unchanged."""
-    from mcp.types import TextContent
+    from mcp_types import TextContent
 
     from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
 
@@ -1560,14 +1560,14 @@ def test_unexpected_argument_suggestion(
     and flags ``wait_for_previous`` as a client scheduling leak, naming
     the client from the MCP initialize handshake when available.
     """
-    import mcp.types
+    import mcp_types
     from fastmcp import Client
 
     probe = _error_probe_server()
 
     client_kwargs: dict[str, t.Any] = {}
     if client_name is not None:
-        client_kwargs["client_info"] = mcp.types.Implementation(
+        client_kwargs["client_info"] = mcp_types.Implementation(
             name=client_name, version="9.9"
         )
 
