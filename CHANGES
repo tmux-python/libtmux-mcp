@@ -73,10 +73,12 @@ program exits. (#100)
 **{tooliconl}`pipe-pane` writes to the path you asked for**
 
 `output_path` reached tmux's format expander before `/bin/sh`, and only the
-shell layer was escaped. A path containing `#{...}` — or a legacy alias like the
-`#S` in `#Session.log` — was substituted, so the log landed on a different file
-while the tool reported back the path that was requested: a silent wrong-file
-write. The path is now escaped for the expander too. A `#`-run followed by `[`
+shell layer was escaped. tmux applies two expansions here — `cmd-pipe-pane.c`
+calls `format_expand_time()` — so both `#` and `%` were live: `#Session.log`
+lost its `#S` to the session name, and `100%done.log` became `10025one.log` via
+strftime's `%d`. Either way the log landed on a different file while the tool
+reported back the path that was requested: a silent wrong-file write. The path
+is now escaped for both expansions. A `#`-run followed by `[`
 is deliberately left alone, because tmux copies those through verbatim and never
 collapses `##[`; doubling there would corrupt the path in the same way.
 

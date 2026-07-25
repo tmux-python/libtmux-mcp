@@ -4798,6 +4798,10 @@ def test_pipe_pane_quotes_path_with_spaces(
         pytest.param("style-#[fg=red].log", id="style-sequence-left-alone"),
         pytest.param("already-##{x}.log", id="already-doubled"),
         pytest.param("issue #42.log", id="bare-hash"),
+        # pipe-pane uses format_expand_time(), so strftime runs too:
+        # '100%done.log' became '10025one.log' via %d.
+        pytest.param("100%done.log", id="strftime-percent-d"),
+        pytest.param("date-%Y.log", id="strftime-percent-y"),
     ],
 )
 def test_pipe_pane_writes_the_exact_path_requested(

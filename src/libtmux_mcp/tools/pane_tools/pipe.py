@@ -26,6 +26,14 @@ def _escape_tmux_format(value: str) -> str:
     enough -- it guards the shell layer while tmux has already rewritten
     the string.
 
+    There are TWO expansions to escape, not one. ``cmd-pipe-pane.c``
+    calls ``format_expand_time()``, which runs the argument through
+    ``strftime`` as well as the ``#``-format expander, so a ``%`` is as
+    dangerous as a ``#``: ``100%done.log`` became ``10025one.log``
+    (``%d`` -> day of month) and ``date-%Y.log`` became
+    ``date-2026.log``. ``%%`` is strftime's literal escape and is safe
+    to apply to every ``%``.
+
     Doubling every ``#`` is the obvious escape and it is wrong. A
     ``#``-run followed by ``[`` is a style sequence, reserved for
     ``format_draw``, and the expander copies the whole run through
@@ -51,7 +59,8 @@ def _escape_tmux_format(value: str) -> str:
     named ``#Session.log`` loses its ``#S`` to the session name and
     lands on ``<session>ession.log``.
 
-    So: leave a run alone when ``[`` follows it, double it otherwise.
+    So: leave a run alone when ``[`` follows it, double it otherwise,
+    and double every ``%`` for strftime.
     """
 
     def _escape_run(match: re.Match[str]) -> str:
@@ -60,7 +69,7 @@ def _escape_tmux_format(value: str) -> str:
             return f"{run}{bracket}"
         return run * 2
 
-    return _TMUX_HASH_RUN.sub(_escape_run, value)
+    return _TMUX_HASH_RUN.sub(_escape_run, value).replace("%", "%%")
 
 
 @handle_tool_errors
