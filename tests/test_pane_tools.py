@@ -2905,6 +2905,15 @@ def test_wait_resolver_raises_like_the_canonical_resolver(
         f"{arg}: bounded raised {type(bounded_exc.value).__name__}, "
         f"canonical raised {type(canonical_exc.value).__name__}"
     )
+    # The type alone is a weak contract — it is the message an agent
+    # reads. Both must name the target that missed, or the agent cannot
+    # tell WHICH of its arguments was wrong.
+    assert value in str(bounded_exc.value), (
+        f"{arg}: bounded error does not name {value!r}: {bounded_exc.value}"
+    )
+    assert value in str(canonical_exc.value), (
+        f"{arg}: canonical error does not name {value!r}: {canonical_exc.value}"
+    )
 
 
 class WaitForTextFixture(t.NamedTuple):
@@ -3024,6 +3033,24 @@ def test_wait_for_text(
         assert len(result.matched_lines) >= 1
 
 
+#: How long the tests that coordinate against a running wait sleep
+#: before writing their marker.
+#:
+#: This is a race, and it only fails in one direction: if the wait has
+#: not locked its entry baseline yet, the marker is PRE-EXISTING content
+#: by the time it does, gets correctly suppressed, and the test fails
+#: for a reason unrelated to the code under test. Locking the baseline
+#: costs five tmux round trips, a few tens of milliseconds at idle —
+#: but this whole cluster went red together on a box at load ~30 with
+#: 20 CPUs, and ``--reruns`` did not save it because the load outlived
+#: the retries.
+#:
+#: 1 s buys roughly an order of magnitude of headroom for a fraction of
+#: a second per test. There is no event to wait on instead: the baseline
+#: read is internal to the tool and not observable from here.
+_EMIT_AFTER_BASELINE_SECONDS = 1.0
+
+
 def test_wait_for_text_matches_new_output_after_baseline(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -3046,7 +3073,7 @@ def test_wait_for_text_matches_new_output_after_baseline(
         # The baseline read is a single display-message round trip
         # (<5 ms in practice); 0.2 s gives wait_for_text plenty of
         # headroom to lock the baseline before the marker fires.
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
         await asyncio.to_thread(mcp_pane.send_keys, "echo WAIT_MARKER_after", True)
 
     async def run() -> WaitForTextResult:
@@ -3054,7 +3081,7 @@ def test_wait_for_text_matches_new_output_after_baseline(
             wait_for_text(
                 patterns=["WAIT_MARKER_after"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3219,7 +3246,7 @@ def test_wait_for_text_sees_the_entry_cursor_row(
     async def emit_after_baseline() -> None:
         # The baseline is a couple of display-message round trips; 0.2 s
         # is the same headroom the sibling after-baseline test uses.
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
         if payload:
             await asyncio.to_thread(_write_to_pane_tty, mcp_pane, payload)
 
@@ -3228,7 +3255,7 @@ def test_wait_for_text_sees_the_entry_cursor_row(
             wait_for_text(
                 patterns=patterns,
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 regex=True,
                 socket_name=mcp_server.socket_name,
             )
@@ -3299,7 +3326,7 @@ def test_wait_for_text_waits_for_a_fresh_occurrence(
     _park_pane(mcp_pane)
 
     async def emit_after_baseline() -> None:
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
         await asyncio.to_thread(_write_to_pane_tty, mcp_pane, f"{marker}\n")
 
     async def run() -> WaitForTextResult:
@@ -3307,7 +3334,7 @@ def test_wait_for_text_waits_for_a_fresh_occurrence(
             wait_for_text(
                 patterns=[marker],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3516,7 +3543,7 @@ def test_wait_for_text_raises_on_pane_respawn(
             wait_for_text(
                 patterns=["NEVER_APPEARS_xyz"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3611,7 +3638,7 @@ def test_wait_for_text_raises_when_history_is_cleared(
             wait_for_text(
                 patterns=["NEVER_APPEARS_rollover"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3644,7 +3671,7 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
             wait_for_text(
                 patterns=["WAIT_MARKER_grows_ok"],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3792,7 +3819,7 @@ def test_wait_for_text_matches_pattern_across_wrap(
     marker = "WRAPPED_MARKER_xyz"
 
     async def emit_after_baseline() -> None:
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
         await asyncio.to_thread(mcp_pane.send_keys, payload, True)
 
     async def run() -> WaitForTextResult:
@@ -3800,7 +3827,7 @@ def test_wait_for_text_matches_pattern_across_wrap(
             wait_for_text(
                 patterns=[marker],
                 pane_id=mcp_pane.pane_id,
-                timeout=3.0,
+                timeout=5.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3842,17 +3869,24 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
         wait_for_text(
             patterns=["WILL_NEVER_MATCH_aBcDeF"],
             pane_id=mcp_pane.pane_id,
-            timeout=0.2,
+            timeout=2.0,
             interval=0.05,
             socket_name=mcp_server.socket_name,
             ctx=t.cast("t.Any", stub),
         )
     )
     assert result.found is False
+    # 2 s, not the 0.2 s this used to use. The assertion is about the
+    # CONTENT of the message, which needs two ticks but no particular
+    # wall clock. At 0.2 s the second tick had under 3x headroom
+    # (~13 ms setup + ~8 ms read + a 50 ms sleep), so on a loaded
+    # machine only one tick fired and this failed -- measured 0/20 at
+    # idle and 4/4 under mild oversubscription, and `--reruns` did not
+    # save it because the load persisted across retries.
     assert len(progress_calls) >= 2
     first_progress, first_total, first_msg = progress_calls[0]
     assert first_progress >= 0.0
-    assert first_total == 0.2
+    assert first_total == 2.0
     assert mcp_pane.pane_id is not None
     assert mcp_pane.pane_id in first_msg
     # The message must carry the BUDGET, not just restate the pane. A

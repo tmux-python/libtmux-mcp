@@ -607,6 +607,7 @@ def _resolve_session(
                 obj_key="session_id",
                 obj_id=session_id,
                 list_cmd="list-sessions",
+                list_extra_args=(),
             )
         return session
 
@@ -617,6 +618,7 @@ def _resolve_session(
                 obj_key="session_name",
                 obj_id=session_name,
                 list_cmd="list-sessions",
+                list_extra_args=(),
             )
         return session
 
@@ -626,6 +628,7 @@ def _resolve_session(
             obj_key="session",
             obj_id="(any)",
             list_cmd="list-sessions",
+            list_extra_args=(),
         )
     return sessions[0]
 
@@ -671,6 +674,7 @@ def _resolve_window(
                 obj_key="window_id",
                 obj_id=window_id,
                 list_cmd="list-windows",
+                list_extra_args=(),
             )
         return window
 
@@ -688,6 +692,7 @@ def _resolve_window(
                 obj_key="window_index",
                 obj_id=window_index,
                 list_cmd="list-windows",
+                list_extra_args=(),
             )
         return window
 

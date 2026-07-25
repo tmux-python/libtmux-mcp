@@ -118,41 +118,42 @@ def test_interrupt_gracefully_does_not_escalate() -> None:
     """``interrupt_gracefully`` refuses SIGQUIT auto-escalation."""
     from libtmux_mcp.prompts.recipes import interrupt_gracefully
 
-    text = interrupt_gracefully(pane_id="%3")
+    # Normalised: the recipe is hard-wrapped, so a raw substring test
+    # breaks whenever a line happens to wrap mid-phrase.
+    text = " ".join(interrupt_gracefully(pane_id="%3").split())
     assert "do NOT escalate automatically" in text
 
 
-def test_interrupt_gracefully_escapes_caret_in_stop_marker() -> None:
-    r"""The ``^C`` stop marker survives ``regex=True`` compilation.
+def test_interrupt_gracefully_does_not_stop_on_the_caret_c_echo() -> None:
+    r"""``^C`` must not be a ``stop`` marker in the interrupt recipe.
 
-    Regression guard: the recipe emitted ``stop=["^C", "Interrupt"]``
-    on a ``wait_for_text`` call that also passes ``regex=True``, so the
-    marker compiled to a start-anchored ``C``. That never matched the
-    literal ``^C`` echo a shell prints on SIGINT — the whole point of
-    the marker — while false-firing ``outcome="stopped"`` on any line
-    beginning with ``C`` (``Compiling``, ``Cloning``, ...).
+    The recipe used to pass ``stop=["\\^C", "Interrupt"]`` to catch
+    programs that trap SIGINT and keep running. It cannot do that: the
+    terminal's line discipline echoes ``^C`` whenever SIGINT is
+    DELIVERED, whether or not the process dies. Since ``stop`` wins a
+    same-tick tie against ``patterns``, the marker systematically beat
+    the returning shell prompt and reported the SUCCESS path as a
+    failure.
 
-    Escaping the caret is the fix rather than dropping ``regex=True``,
-    because ``patterns`` on the same call genuinely needs regex.
+    Measured on sh and bash against a plain ``sleep 60``: the process
+    exited and the wait still returned ``outcome="stopped"``,
+    ``found=false``. The recipe's next documented step on that branch
+    is SIGQUIT and then ``kill-pane`` — i.e. destroying a pane whose
+    command had already been interrupted successfully.
+
+    The reliable signal is ``pane_current_command`` before and after,
+    which is what the recipe now instructs.
     """
-    import re
-    import warnings
-
     from libtmux_mcp.prompts.recipes import interrupt_gracefully
 
     text = interrupt_gracefully(pane_id="%3")
-    stop_line = next(line for line in text.splitlines() if "stop=" in line)
-    _, _, payload = stop_line.partition("stop=")
-    markers_literal, _, _ = payload.partition("]")
-    with warnings.catch_warnings():
-        # The emitted marker is ``"\^C"``, an invalid Python escape.
-        warnings.simplefilter("ignore", SyntaxWarning)
-        markers = ast.literal_eval(f"{markers_literal}]")
-    caret_c = markers[0]
-
-    assert caret_c == r"\^C"
-    assert re.search(caret_c, "^C") is not None
-    assert re.search(caret_c, "Compiling") is None
+    call = next(line for line in text.splitlines() if "wait_for_text(" in line)
+    assert "stop=" not in call, f"interrupt recipe reintroduced a stop list: {call}"
+    assert "^C" not in call
+    assert "pane_current_command" in text, (
+        "the recipe must direct the agent to the signal that actually "
+        "discriminates a dead process from a live one"
+    )
 
 
 def test_diagnose_failing_pane_uses_capture_since_for_repeated_reads() -> None:

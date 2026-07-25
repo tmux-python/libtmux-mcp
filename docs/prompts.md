@@ -223,20 +223,28 @@ without operator consent — by drawing a clear escalation boundary.
 Interrupt whatever is running in pane %1 and
 verify that control returns to the shell:
 
-1. `send_keys(pane_id="%1", keys="C-c", literal=False,
+1. `get_pane_info(pane_id="%1")` — note `pane_current_command`.
+   That is the thing you are trying to change, and comparing it
+   before and after is the only reliable answer.
+2. `send_keys(pane_id="%1", keys="C-c", literal=False,
    enter=False)` — tmux interprets `C-c` as SIGINT.
-2. `wait_for_text(pane_id="%1", patterns=["\$ ", "\# ", "\% "],
-   stop=["\^C", "Interrupt"], regex=True, timeout=5.0)` — waits for a
-   common shell prompt glyph. Adjust the patterns to match the user's
-   shell theme. The `stop` list exits early on the markers many
-   programs print when they catch SIGINT and keep running.
+3. `wait_for_text(pane_id="%1", patterns=["\$", "\#", "\%", ">"],
+   regex=True, timeout=5.0)` — waits for a common shell prompt glyph.
+   Adjust the patterns to match the user's shell theme.
+   Do NOT put `\^C` in `stop`: the terminal echoes `^C` whenever SIGINT
+   is DELIVERED, whether or not the process dies, so it marks the
+   success path as a failure. Measured on sh and bash — the process
+   exited and the wait still returned `outcome="stopped"`.
    The `wait_for_channel` pattern doesn't apply here — `C-c` is a
    signal, not a shell command, so there's no statement to compose
-   `tmux wait-for -S` into. The shell prompt itself is the only
-   signal that the interrupt landed.
-3. If the wait times out the process is ignoring SIGINT. Stop and
-   ask the caller how to proceed — do NOT escalate automatically
-   to `C-\` (SIGQUIT) or `kill`.
+   `tmux wait-for -S` into.
+4. Re-read `get_pane_info(pane_id="%1")`. If
+   `pane_current_command` is back to a shell, the interrupt worked —
+   trust this over the wait result, which can time out on a prompt
+   whose glyph you did not predict.
+5. Only if the command is UNCHANGED is the process ignoring SIGINT.
+   Stop and ask the caller how to proceed — do NOT escalate
+   automatically to `C-\` (SIGQUIT) or `kill`.
 ````
 
 The shell-prompt regexes cover default bash / zsh — adjust for fish

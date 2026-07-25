@@ -305,7 +305,10 @@ async def _resolve_pane_bounded(
         matches = [row for row in rows if row == window_id]
         if not matches:
             raise exc.TmuxObjectDoesNotExist(
-                obj_key="window_id", obj_id=window_id, list_cmd="list-windows"
+                obj_key="window_id",
+                obj_id=window_id,
+                list_cmd="list-windows",
+                list_extra_args=("-a",),
             )
         if len(matches) > 1:
             # ``list-windows -a`` emits a window once per session it is
@@ -350,7 +353,10 @@ async def _resolve_session_native(
         )
         if session_id not in rows:
             raise exc.TmuxObjectDoesNotExist(
-                obj_key="session_id", obj_id=session_id, list_cmd="list-sessions"
+                obj_key="session_id",
+                obj_id=session_id,
+                list_cmd="list-sessions",
+                list_extra_args=(),
             )
         return session_id
     if session_name is not None:
@@ -366,14 +372,20 @@ async def _resolve_session_native(
             if name == session_name:
                 return sid
         raise exc.TmuxObjectDoesNotExist(
-            obj_key="session_name", obj_id=session_name, list_cmd="list-sessions"
+            obj_key="session_name",
+            obj_id=session_name,
+            list_cmd="list-sessions",
+            list_extra_args=(),
         )
     rows = await _run_tmux_lines(
         server, "list-sessions", "-F", "#{session_id}", deadline=deadline
     )
     if not rows:
         raise exc.TmuxObjectDoesNotExist(
-            obj_key="session", obj_id="(any)", list_cmd="list-sessions"
+            obj_key="session",
+            obj_id="(any)",
+            list_cmd="list-sessions",
+            list_extra_args=(),
         )
     return rows[0]
 
