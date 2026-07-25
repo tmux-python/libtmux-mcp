@@ -4689,6 +4689,62 @@ def test_pipe_pane_quotes_path_with_spaces(
         )
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        pytest.param("fmt-#{pane_id}.log", id="format-substitution"),
+        pytest.param("job-#(echo pwned).log", id="command-job"),
+        # Legacy single-char aliases expand too: '#S' is the session name,
+        # so '#Session.log' silently became '<session>ession.log'.
+        pytest.param("#Session.log", id="legacy-alias"),
+        pytest.param("style-#[fg=red].log", id="style-sequence-left-alone"),
+        pytest.param("already-##{x}.log", id="already-doubled"),
+        pytest.param("issue #42.log", id="bare-hash"),
+    ],
+)
+def test_pipe_pane_writes_the_exact_path_requested(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: t.Any, filename: str
+) -> None:
+    """pipe_pane logs to the literal output_path, not a tmux-expanded one.
+
+    ``pipe-pane`` runs its argument through tmux's format expander before
+    /bin/sh sees it, so ``shlex.quote`` alone guards only the shell layer.
+    An unescaped ``#{pane_id}`` in the path expanded, and the log landed on
+    a different file than the one the tool reported back.
+
+    ``#[`` must NOT be escaped: tmux copies a ``#``-run followed by ``[``
+    verbatim and never collapses ``##[``, so doubling there reintroduces
+    the same wrong-file bug from the other direction.
+    """
+    log_file = tmp_path / filename
+    marker = "PIPE_EXACT_PATH_MARKER"
+
+    result = pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=str(log_file),
+        socket_name=mcp_server.socket_name,
+    )
+    # The success string must name the file that actually gets written.
+    assert str(log_file) in result
+
+    try:
+        mcp_pane.send_keys(f"echo {marker}", enter=True)
+        retry_until(
+            lambda: log_file.exists() and marker in log_file.read_text(),
+            2,
+            raises=True,
+        )
+        # Nothing else may appear: an expanded path would create a sibling.
+        written = sorted(p.name for p in tmp_path.iterdir())
+        assert written == [filename], f"unexpected files on disk: {written}"
+    finally:
+        pipe_pane(
+            pane_id=mcp_pane.pane_id,
+            output_path=None,
+            socket_name=mcp_server.socket_name,
+        )
+
+
 def test_pipe_pane_rejects_empty_path(mcp_server: Server, mcp_pane: Pane) -> None:
     """pipe_pane raises ToolError when output_path is empty or whitespace."""
     for bad in ("", "   ", "\t"):
