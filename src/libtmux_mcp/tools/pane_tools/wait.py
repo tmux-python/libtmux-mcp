@@ -486,7 +486,8 @@ async def wait_for_text(
         wait for any new output.
     stop : list of str, optional
         Failure patterns. A hit ends the wait immediately with
-        ``stopped=true`` and ``found=false``.
+        ``outcome="stopped"`` and ``found=false``; ``matched_index``
+        says which entry fired.
     regex : bool
         Interpret ``patterns`` and ``stop`` as regular expressions.
         Default False (literal text).

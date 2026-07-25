@@ -64,7 +64,8 @@ The agent calls {tooliconl}`list-panes` on the `myapp` session. Several panes sh
 The agent calls {tooliconl}`send-keys` in pane `%4`:
 `PLAYWRIGHT_BASE_URL=http://localhost:5173 pnpm exec playwright test`
 
-Then it calls {tooliconl}`wait-for-text` on pane `%4` with `pattern: "passed|failed|timed out"`, `regex: true`, and `timeout: 120`. Once the
+Then it calls {tooliconl}`wait-for-text` on pane `%4` with `patterns: ["passed", "failed", "timed out"]` and `timeout: 120` — which the
+server clamps to its wait ceiling and reports back on `effective_timeout`. Once the
 wait resolves, it calls {tooliconl}`capture-pane` on `%4` with `start: -80` to
 read the test results.
 
@@ -127,8 +128,9 @@ pane, but the `pane_id` of the pane I just identified stays stable.
 ### Act
 
 The agent calls {tooliconl}`send-keys` in that pane: `pnpm start`. Then
-{tooliconl}`wait-for-text` with `pattern: "Local:"` and a generous
-`timeout` so Vite has room to start.
+{tooliconl}`wait-for-text` with `patterns: ["Local:"]` and a generous
+`timeout` so Vite has room to start. A `timeout` above the server ceiling is
+clamped, so a slow start may need a second call.
 
 ```{tip}
 "The bottom-right pane" is a *role* -- a layout-relative target the
@@ -195,7 +197,7 @@ create a new pane, then calls {tooliconl}`send-keys` in that pane:
 `npm run serve`.
 
 The agent calls {tooliconl}`wait-for-text` on the server pane with
-`pattern: "Listening on"` and `timeout: 30`. Once the wait resolves, the
+`patterns: ["Listening on"]` and `timeout: 30`. Once the wait resolves, the
 agent calls {tooliconl}`run-command` in the original pane with
 `command: "npm test -- --integration"` and a test-appropriate
 timeout, then reads `exit_status`, `timed_out`, and `output`.
@@ -329,7 +331,7 @@ for a shell prompt to reappear. Developers use custom prompts, so I cannot
 just look for `$`.
 ```
 
-The agent calls {tooliconl}`wait-for-text` with `pattern: "[$#>%] *$"`,
+The agent calls {tooliconl}`wait-for-text` with `patterns: ["[$#>%] *$"]`,
 `regex: true`, and `timeout: 5`.
 
 ```{admonition} Agent reasoning
@@ -453,8 +455,8 @@ The agent calls {tooliconl}`set-pane-title` on each pane: `editor`, `server`,
 `tests`.
 
 The agent calls {tooliconl}`send-keys` in the server pane: `npm run dev`, then
-{tooliconl}`wait-for-text` for `pattern: "ready|listening|Local:"` with
-`regex: true` and `timeout: 30`.
+{tooliconl}`wait-for-text` for `patterns: ["ready", "listening", "Local:"]`
+with `timeout: 30`.
 
 ```{tip}
 If the session *does* already exist, the right move is to reuse and extend

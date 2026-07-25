@@ -406,3 +406,41 @@ def test_prompt_tool_calls_match_real_signatures() -> None:
                     f"{recipe_name}: {tool_name}({kw}=...) is invalid — "
                     f"{tool_name} accepts {sorted(valid)}"
                 )
+
+
+def test_docs_sample_render_matches_the_server(mcp_with_prompts: FastMCP) -> None:
+    """``docs/prompts.md``'s sample render must be what the server emits.
+
+    The page publishes a verbatim render under a "Sample render"
+    heading, and nothing pinned it — so when ``wait_for_text`` grew
+    ``patterns``/``stop``, the prompt source was migrated and the page
+    was not. The docs then advertised a call shape the schema rejects,
+    attributed to a prompt the server renders differently.
+
+    Comparing the published block against the live render is the only
+    thing that keeps a hand-copied transcript honest.
+    """
+    import pathlib
+    import re
+
+    from fastmcp import Client
+
+    async def _render() -> str:
+        async with Client(mcp_with_prompts) as client:
+            result = await client.get_prompt("interrupt_gracefully", {"pane_id": "%1"})
+        text: str = result.messages[0].content.text
+        return text.strip()
+
+    live = asyncio.run(_render())
+
+    page = pathlib.Path(__file__).parent.parent / "docs" / "prompts.md"
+    block = re.search(
+        r'\*\*Sample render\*\* \(``pane_id="%1"``\):\n\n````markdown\n(.*?)````',
+        page.read_text(),
+        re.S,
+    )
+    assert block is not None, "interrupt_gracefully sample-render block not found"
+
+    assert block.group(1).strip() == live, (
+        "docs/prompts.md sample render has drifted from the server output"
+    )

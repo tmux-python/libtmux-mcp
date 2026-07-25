@@ -59,6 +59,11 @@ to decide what happened. Do NOT use a `send_keys` + `capture_pane`
 retry loop for authored commands — `run_command` already performs
 deterministic completion and returns tail-preserved output.
 
+`timeout` is capped by the server's wait ceiling (30 s by default), so
+read `result.effective_timeout` rather than assuming the value above was
+honoured. For work that legitimately runs longer, call again — the
+command keeps running in the pane between calls.
+
 If the task needs persistent shell state or TUI keystrokes instead of
 a one-shot shell command, use `send_keys` or `send_keys_batch`, then
 observe later output with `capture_since`.

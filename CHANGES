@@ -32,13 +32,23 @@ Use `wait_for_text(patterns=null)`, which waits for any new output and
 additionally excludes pre-existing scrollback and stale below-cursor paint from
 the change predicate. (#100)
 
-**{tooliconl}`run-command` can no longer be nested in a batch wrapper**
+**Self-bounded tools can no longer be nested in a batch wrapper**
 
-It blocks under the same server wait ceiling as the wait tools, and the batch
-wrappers run their operations serially with no aggregate deadline — batching it
-multiplied that ceiling by the operation count. All three wrappers now reject it
-per operation. Use {tooliconl}`send-keys-batch` for command sequences, or call
-{tooliconl}`run-command` directly. (#100)
+{tooliconl}`run-command`, {tooliconl}`wait-for-text` and
+{tooliconl}`wait-for-channel` each block under the server wait ceiling, and the
+batch wrappers run their operations serially with no aggregate deadline —
+batching one multiplied that ceiling by the operation count. All three wrappers
+now reject all three tools per operation. Use {tooliconl}`send-keys-batch` for
+command sequences, or call the tool directly. (#100)
+
+**{tooliconl}`run-command` and {tooliconl}`wait-for-channel` clamp `timeout` too**
+
+The ceiling is not scoped to {tooliconl}`wait-for-text`. Both of these
+previously honoured a caller `timeout` verbatim and now enforce the same
+`LIBTMUX_MCP_WAIT_MAX_SECONDS` limit — {tooliconl}`run-command` reports the
+enforced value on `effective_timeout`, {tooliconl}`wait-for-channel` names it in
+the returned message. A call that used to block for an hour now returns at the
+ceiling. (#100)
 
 **{class}`~libtmux_mcp.models.WaitForTextResult` drops `risk_band_warned`**
 

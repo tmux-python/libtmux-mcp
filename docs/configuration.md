@@ -39,6 +39,29 @@ Safety tier controlling which tools are available. See {ref}`safety`.
 - **Default:** `mutating`
 - **Values:** `readonly`, `mutating`, `destructive`
 
+```{envvar} LIBTMUX_MCP_WAIT_MAX_SECONDS
+```
+
+Server ceiling on how long any one wait may block. Applies to
+{tooliconl}`wait-for-text`, {tooliconl}`wait-for-channel`, and
+{tooliconl}`run-command`.
+
+- **Type:** float, seconds
+- **Default:** `30.0`
+- **Range:** clamped to `[1.0, 120.0]`
+
+Clamp, never reject: an over-large caller `timeout` is not an error — the
+tool honours the ceiling instead and reports the value it actually
+enforced, so the agent learns the policy from the result rather than
+from a failed call. {tooliconl}`wait-for-text` and
+{tooliconl}`run-command` report it on `effective_timeout`;
+{tooliconl}`wait-for-channel` names it in the returned message. Compare
+against the `timeout` you passed to see a clamp.
+
+A bad value warns and falls back to the default rather than failing
+startup. See {ref}`waiting` for why the ceiling exists and which wait to
+reach for.
+
 ```{envvar} LIBTMUX_SUPPRESS_HISTORY
 ```
 
