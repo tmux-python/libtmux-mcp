@@ -244,11 +244,20 @@ def _unexpected_kwargs(error: BaseException) -> list[str]:
 def _client_label(context: MiddlewareContext | None) -> str | None:
     """``"name version"`` of the connected client, when the handshake exposed it.
 
-    Walks ``fastmcp_context.session.client_params.clientInfo`` — the
-    MCP ``initialize`` handshake's client identity. Every hop can be
-    absent (unit-test contexts, background tasks, clients that omit
-    ``clientInfo``), so any failure resolves to ``None``. Used only to
-    word error suggestions; never gates behavior.
+    Walks the ``initialize`` handshake's client identity on
+    ``fastmcp_context.session.client_params``. Every hop can be absent
+    (unit-test contexts, background tasks, clients that omit the field),
+    so any failure resolves to ``None``. Used only to word error
+    suggestions; never gates behavior.
+
+    The field is read under BOTH its Python names. The SDK renamed it
+    ``clientInfo`` -> ``client_info`` between ``mcp`` 1.x and 2.x while
+    keeping the camelCase wire alias, so the attribute is what moved,
+    not the protocol. Since a miss here is swallowed by design, pinning
+    one spelling turns that rename into a silent feature loss — measured
+    on mcp 2.0.0b2, where the suggestion quietly fell back to generic
+    wording with nothing logged. Reading both keeps this working across
+    the migration and costs one ``getattr``.
     """
     if context is None:
         return None
@@ -259,7 +268,11 @@ def _client_label(context: MiddlewareContext | None) -> str | None:
         params = fastmcp_ctx.session.client_params
         if params is None:
             return None
-        info = params.clientInfo
+        info = getattr(params, "client_info", None)
+        if info is None:
+            info = getattr(params, "clientInfo", None)
+        if info is None:
+            return None
         return f"{info.name} {info.version}".strip()
     except (AttributeError, RuntimeError):
         return None

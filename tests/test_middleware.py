@@ -19,6 +19,7 @@ from libtmux_mcp.middleware import (
     AuditMiddleware,
     ReadonlyRetryMiddleware,
     SafetyMiddleware,
+    _client_label,
     _redact_digest,
     _summarize_args,
 )
@@ -1642,3 +1643,50 @@ def test_wait_for_text_is_registered_self_bounded_and_still_readonly() -> None:
 
     for tier in (TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE):
         assert SafetyMiddleware(max_tier=tier)._is_allowed(set(tool.tags)) is True
+
+
+class ClientLabelFieldFixture(t.NamedTuple):
+    """Test fixture for the SDK's clientInfo/client_info rename."""
+
+    test_id: str
+    #: Python attribute name the stub params object exposes.
+    attr: str
+    expected: str | None
+
+
+CLIENT_LABEL_FIELD_FIXTURES: list[ClientLabelFieldFixture] = [
+    ClientLabelFieldFixture("mcp_1x_camelCase", "clientInfo", "acme 1.2"),
+    ClientLabelFieldFixture("mcp_2x_snake_case", "client_info", "acme 1.2"),
+    ClientLabelFieldFixture("neither_present", "somethingElse", None),
+]
+
+
+@pytest.mark.parametrize(
+    ClientLabelFieldFixture._fields,
+    CLIENT_LABEL_FIELD_FIXTURES,
+    ids=[f.test_id for f in CLIENT_LABEL_FIELD_FIXTURES],
+)
+def test_client_label_reads_both_sdk_field_names(
+    test_id: str, attr: str, expected: str | None
+) -> None:
+    """The handshake identity survives the SDK's field rename.
+
+    ``mcp`` 2.x renamed the Python attribute ``clientInfo`` ->
+    ``client_info`` while keeping the camelCase wire alias. Because
+    ``_client_label`` swallows attribute misses by design, pinning one
+    spelling turns that rename into a SILENT feature loss — the error
+    suggestion drops from "your client (gemini-test 9.9)" to generic
+    wording with nothing logged. Measured against mcp 2.0.0b2.
+    """
+    assert test_id
+
+    class _Info:
+        name = "acme"
+        version = "1.2"
+
+    params = type("_Params", (), {attr: _Info()})()
+    session = type("_Session", (), {"client_params": params})()
+    fastmcp_ctx = type("_Ctx", (), {"session": session})()
+    context = type("_MW", (), {"fastmcp_context": fastmcp_ctx})()
+
+    assert _client_label(t.cast("t.Any", context)) == expected
