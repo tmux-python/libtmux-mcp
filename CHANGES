@@ -108,6 +108,17 @@ did not author. (#100)
 
 ### Development
 
+**`mcp_swap.py` keeps the pre-swap config on a repeat swap**
+
+Swapping a CLI layer that was already swapped and not yet reverted used to take
+a fresh backup of the swapped config. Inside the same second that backup
+overwrote the original one (the filename is second-granular); across seconds it
+displaced it in the state file. Either way `revert` restored an already-swapped
+config and the only pristine copy was lost or left untracked. A re-swap now
+keeps the first backup, backup files are never overwritten, and `doctor` no
+longer calls untracked backups "safe to delete" — one can be the last pre-swap
+copy of a config.
+
 **`mcp_swap.py doctor` and `use-local --env`**
 
 The dev config-swap helper gains a read-only `doctor` subcommand that reports

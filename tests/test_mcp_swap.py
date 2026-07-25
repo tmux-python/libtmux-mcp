@@ -11,6 +11,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+import types
 import typing as t
 
 import pytest
@@ -1728,3 +1729,243 @@ def test_orphaned_backups_matches_swap_pattern(
     found = mcp_swap._orphaned_backups(info.config_path)
     assert b1 in found
     assert info.config_path not in found
+
+
+def test_doctor_does_not_call_orphaned_backups_safe_to_delete(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Orphan advice must not read as "safe to delete".
+
+    An untracked backup can be the *only* pre-swap copy of a config — a
+    swap whose write failed leaves exactly that. Telling the user to bin
+    it turns a recoverable state into data loss.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _local_entry(fake_repo)}})
+    orphan = info.config_path.parent / (
+        info.config_path.name + ".bak.mcp-swap-20190101000000"
+    )
+    orphan.write_text("pristine")
+
+    args = mcp_swap.build_parser().parse_args(["doctor", "--repo", str(fake_repo)])
+    assert mcp_swap.cmd_doctor(args) == 0
+    out = capsys.readouterr().out
+    assert "orphaned backups" in out
+    assert "safe to delete" not in out
+    assert "inspect before deleting" in out
+
+
+# ---------------------------------------------------------------------------
+# Repeat swaps must not destroy the pre-swap config.
+# ---------------------------------------------------------------------------
+
+
+def _freeze_timestamps(monkeypatch: pytest.MonkeyPatch, stamps: list[str]) -> None:
+    """Make the script's ``time.strftime`` yield ``stamps`` in order.
+
+    The backup filename embeds ``%Y%m%d%H%M%S``, so same-second vs
+    different-second is the difference between two swaps deriving the
+    same path or two distinct ones. Pinning the sequence makes both
+    cases deterministic instead of a race against the wall clock. Only
+    the script's own ``time`` reference is swapped, so pytest's log
+    formatting keeps the real clock.
+    """
+    remaining = list(stamps)
+
+    def fake_strftime(*_args: object) -> str:
+        return remaining.pop(0) if remaining else stamps[-1]
+
+    monkeypatch.setattr(mcp_swap, "time", types.SimpleNamespace(strftime=fake_strftime))
+
+
+@pytest.mark.parametrize(
+    ("case", "stamps"),
+    [
+        ("same_second", ["20260101000000", "20260101000000"]),
+        ("different_second", ["20260101000000", "20260101000001"]),
+    ],
+)
+def test_repeat_swap_then_revert_restores_pristine_config(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    stamps: list[str],
+) -> None:
+    """Swap -> swap -> revert must yield the byte-identical pre-swap config.
+
+    Regression for two ways the second swap used to destroy the only
+    pristine copy: with a same-second timestamp both swaps derived the
+    same backup path and the second write clobbered the first; with a
+    different-second timestamp the second swap wrote a fresh backup (of
+    the already-swapped config) and repointed state at it, orphaning the
+    pristine one. Either way ``revert`` restored a swapped config.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+    original = info.config_path.read_bytes()
+    _freeze_timestamps(monkeypatch, stamps)
+    parser = mcp_swap.build_parser()
+
+    def swap(value: str) -> None:
+        # Distinct --env per swap so the second run is a real rewrite,
+        # not the "already local" no-op.
+        assert (
+            mcp_swap.cmd_use_local(
+                parser.parse_args(
+                    [
+                        "use-local",
+                        "--repo",
+                        str(fake_repo),
+                        "--cli",
+                        "cursor",
+                        "--env",
+                        f"LIBTMUX_SOCKET={value}",
+                    ]
+                )
+            )
+            == 0
+        )
+
+    swap("one")
+    first_backup = pathlib.Path(mcp_swap.load_state()[("cursor", "user")].backup_path)
+    assert first_backup.read_bytes() == original
+
+    swap("two")
+
+    # The second swap keeps the first backup: same path, same bytes, and
+    # no second backup file left behind.
+    entry = mcp_swap.load_state()[("cursor", "user")]
+    assert pathlib.Path(entry.backup_path) == first_backup
+    assert first_backup.read_bytes() == original
+    assert mcp_swap._orphaned_backups(info.config_path) == [first_backup]
+
+    assert mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "cursor"])) == 0
+    assert info.config_path.read_bytes() == original
+
+
+def test_repeat_swap_keeps_claude_lifo_order_across_scopes(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-swapping one Claude scope must not reorder the LIFO unwind.
+
+    Both scopes back the same physical file, so a backup's position in
+    the stack is fixed by what it captured, not by when it was last
+    touched. Bumping ``seq_no`` on the re-swap would make ``revert``
+    peel the user layer off first and leave the project layer's backup
+    (which still contains the user swap) as the final state.
+    """
+    info = mcp_swap.CLIS["claude"]
+    _write_json(
+        info.config_path,
+        {
+            "mcpServers": {"libtmux": _pinned_claude_entry()},
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                },
+            },
+        },
+    )
+    original = info.config_path.read_bytes()
+    _freeze_timestamps(
+        monkeypatch, ["20260101000000", "20260101000001", "20260101000002"]
+    )
+    parser = mcp_swap.build_parser()
+
+    def swap(scope: str, value: str) -> None:
+        assert (
+            mcp_swap.cmd_use_local(
+                parser.parse_args(
+                    [
+                        "use-local",
+                        "--repo",
+                        str(fake_repo),
+                        "--cli",
+                        "claude",
+                        "--scope",
+                        scope,
+                        "--env",
+                        f"LIBTMUX_SOCKET={value}",
+                    ]
+                )
+            )
+            == 0
+        )
+
+    swap("user", "one")
+    swap("project", "one")
+    # Re-swap the *older* layer; its backup still holds the pristine file.
+    swap("user", "two")
+
+    state = mcp_swap.load_state()
+    assert state[("claude", "user")].seq_no < state[("claude", "project")].seq_no
+
+    assert mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "claude"])) == 0
+    assert info.config_path.read_bytes() == original
+    assert not mcp_swap.STATE_FILE.exists()
+
+
+def test_write_new_backup_never_overwrites(tmp_path: pathlib.Path) -> None:
+    """A taken backup path is left alone; the write lands on a suffixed sibling."""
+    base = tmp_path / "config.toml.bak.mcp-swap-20260101000000"
+    first = mcp_swap.write_new_backup(base, b"pristine\n")
+    assert first == base
+
+    second = mcp_swap.write_new_backup(base, b"later\n")
+    assert second == base.with_name(base.name + "-1")
+    assert base.read_bytes() == b"pristine\n"
+    assert second.read_bytes() == b"later\n"
+
+    third = mcp_swap.write_new_backup(base, b"later still\n")
+    assert third == base.with_name(base.name + "-2")
+
+
+def test_swap_after_backup_vanished_warns_and_writes_new_backup(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A re-swap whose recorded backup was deleted says so and re-registers.
+
+    Nothing can recover the pristine bytes at that point, so the new
+    backup is of the swapped config; the warning keeps that explicit
+    instead of implying ``revert`` will undo the original swap.
+    """
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+    parser = mcp_swap.build_parser()
+
+    def swap(value: str) -> None:
+        assert (
+            mcp_swap.cmd_use_local(
+                parser.parse_args(
+                    [
+                        "use-local",
+                        "--repo",
+                        str(fake_repo),
+                        "--cli",
+                        "cursor",
+                        "--env",
+                        f"LIBTMUX_SOCKET={value}",
+                    ]
+                )
+            )
+            == 0
+        )
+
+    swap("one")
+    stale = pathlib.Path(mcp_swap.load_state()[("cursor", "user")].backup_path)
+    swapped_bytes = info.config_path.read_bytes()
+    stale.unlink()
+    capsys.readouterr()
+
+    swap("two")
+
+    assert "recorded backup is gone" in capsys.readouterr().err
+    fresh = pathlib.Path(mcp_swap.load_state()[("cursor", "user")].backup_path)
+    assert fresh.read_bytes() == swapped_bytes

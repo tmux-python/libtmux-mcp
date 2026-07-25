@@ -9,6 +9,8 @@ Use when you want every installed agent CLI to run a local checkout of an
 MCP server (editable) instead of a pinned release. ``use-local`` rewrites
 each CLI's config to invoke the checkout via ``uv --directory <repo> run
 <entry>``; ``revert`` restores from the timestamped backup the swap wrote.
+Swapping a layer that is already swapped keeps that first backup rather
+than taking a new one, so ``revert`` always lands on the pre-swap config.
 
 Defaults are derived from the current repo's ``pyproject.toml``:
 
@@ -334,6 +336,35 @@ def atomic_write(path: pathlib.Path, data: bytes) -> None:
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def write_new_backup(base: pathlib.Path, data: bytes) -> pathlib.Path:
+    """Write ``data`` to ``base``, or to ``base-1`` / ``base-2`` / … if taken.
+
+    A backup is the only copy of the config as it stood before a swap, so
+    clobbering one is unrecoverable data loss. The timestamp embedded in
+    ``base`` has one-second granularity, which is not fine enough on its
+    own: two swaps inside the same second derive the same path. Creation
+    goes through ``O_CREAT | O_EXCL`` so the check and the claim are one
+    atomic step and an existing file can never be truncated — the same
+    exclusive-create discipline CPython's ``tempfile`` uses to hand out
+    unique names.
+
+    Returns the path actually written.
+    """
+    base.parent.mkdir(parents=True, exist_ok=True)
+    candidate = base
+    attempt = 0
+    while True:
+        try:
+            fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            attempt += 1
+            candidate = base.with_name(f"{base.name}-{attempt}")
+            continue
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        return candidate
 
 
 # ---------------------------------------------------------------------------
@@ -906,17 +937,40 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             sys.stdout.writelines(diff)
             continue
 
-        # Claude is the only CLI where two swaps (different scopes) can
-        # touch the same config file in one second; embed the scope so
-        # the second backup doesn't overwrite the first. Non-Claude
-        # backup filenames carry no scope suffix.
-        backup_suffix = f"{BACKUP_SUFFIX_PREFIX}{ts}"
-        if cli == "claude":
-            backup_suffix += f"-{scope}"
-        backup_path = info.config_path.with_suffix(
-            info.config_path.suffix + backup_suffix
-        )
-        backup_path.write_bytes(original_bytes)
+        # Re-swapping a layer that was never reverted must NOT re-back-up:
+        # ``original_bytes`` is this script's own earlier output, so
+        # recording it would make ``revert`` restore a swapped config and
+        # strand the pristine one. Keep the first backup — it is the only
+        # copy of what the user had — and leave its ``seq_no`` /
+        # ``swapped_at`` untouched so the LIFO unwind order (which is
+        # pinned by what each backup captured, not by when it was last
+        # rewritten) stays correct.
+        prior = state.get((cli, scope))
+        prior_backup = pathlib.Path(prior.backup_path) if prior is not None else None
+        if prior_backup is not None and prior_backup.exists():
+            backup_path = prior_backup
+            backup_note = f"pre-swap backup kept: {backup_path}"
+        else:
+            if prior is not None:
+                print(
+                    f"[{label}] recorded backup is gone ({prior.backup_path}); the "
+                    "new backup captures the already-swapped config, not the "
+                    "original",
+                    file=sys.stderr,
+                )
+            # Claude is the only CLI where two swaps (different scopes) can
+            # touch the same config file in one second; embed the scope so
+            # the two backups read distinctly. Non-Claude backup filenames
+            # carry no scope suffix. Collisions past that are resolved by
+            # ``write_new_backup``, which never overwrites.
+            backup_suffix = f"{BACKUP_SUFFIX_PREFIX}{ts}"
+            if cli == "claude":
+                backup_suffix += f"-{scope}"
+            backup_path = write_new_backup(
+                info.config_path.with_suffix(info.config_path.suffix + backup_suffix),
+                original_bytes,
+            )
+            backup_note = f"backup: {backup_path}"
         try:
             atomic_write(info.config_path, new_bytes)
             _revalidate(info)
@@ -928,16 +982,23 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             )
             had_error = 1
             continue
-        next_seq = max((e.seq_no for e in state.values()), default=-1) + 1
+        if prior is not None and backup_path == prior_backup:
+            # ``swapped_at`` mirrors the timestamp in the backup filename
+            # and ``seq_no`` fixes the backup's place in the unwind
+            # stack; both describe the kept backup, not this run.
+            seq_no, swapped_at = prior.seq_no, prior.swapped_at
+        else:
+            seq_no = max((e.seq_no for e in state.values()), default=-1) + 1
+            swapped_at = ts
         state[(cli, scope)] = SwapEntry(
             config_path=str(info.config_path),
             backup_path=str(backup_path),
             server=server,
             action=action,
-            swapped_at=ts,
-            seq_no=next_seq,
+            swapped_at=swapped_at,
+            seq_no=seq_no,
         )
-        print(f"[{label}] {action}; backup: {backup_path}")
+        print(f"[{label}] {action}; {backup_note}")
 
     if not args.dry_run:
         save_state(state)
@@ -1204,7 +1265,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         total = sum(b.stat().st_size for b in orphans if b.exists())
         print(
             f"  orphaned backups: {len(orphans)} file(s), {total} bytes not tracked "
-            "by state — safe to delete"
+            "by state — inspect before deleting: an untracked backup can be the "
+            "only surviving pre-swap copy of a config"
         )
 
     auth_hits = [
