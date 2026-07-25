@@ -89,14 +89,17 @@ Every tmux call a wait makes, pane resolution included, is now bounded against
 the wait's own deadline and killed on expiry, so the server exits promptly even
 when tmux stops responding. (#100)
 
-**A cancelled {tooliconl}`wait-for-channel` kills its tmux child**
+**A cancelled {tooliconl}`wait-for-channel` or {tooliconl}`run-command` kills its
+tmux child**
 
-Cancelling the call — a client hanging up, an agent pressing Esc — returned
-immediately but left `tmux wait-for` running for the whole remainder of its
-timeout, because the child was owned by a worker thread that cannot be
-interrupted. Measured at 61 seconds of orphan behind a 90-second wait. The tool
-now owns a killable subprocess, the same one {tooliconl}`wait-for-text` uses, so
-the child dies with the call. (#100)
+Cancelling the call — a client hanging up, an agent pressing Esc out of a long
+shell command — returned immediately but left `tmux wait-for` running for the
+whole remainder of its timeout, because the child was owned by a worker thread
+that cannot be interrupted. Measured at stock settings: a 15-second wait
+cancelled at 2 seconds orphaned its child for another 13, and a 25-second
+{tooliconl}`run-command` cancelled at 3 seconds for another 22. Both tools now
+own a killable subprocess, the same one {tooliconl}`wait-for-text` uses, so the
+child dies with the call. (#100)
 
 **A wait can no longer be multiplied past its ceiling**
 

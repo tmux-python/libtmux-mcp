@@ -286,8 +286,8 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
     stays blocked in ``waitpid``, so the tmux child kept running for
     the whole remainder of its budget with nobody waiting on it.
     Measured before the fix: a 15 s wait cancelled at 2 s left the
-    child alive another 13 s; through a real agent TUI with a 90 s
-    timeout, ~61 s past the user's Esc.
+    child alive another 13 s; through a real agent TUI with the ceiling
+    raised to 120 s and a 90 s timeout, ~61 s past the user's Esc.
 
     Note the harm is the live process itself, not a stolen signal —
     tmux keeps the server-side waiter registered even after the client
