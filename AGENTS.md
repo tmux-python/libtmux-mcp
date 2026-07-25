@@ -252,6 +252,26 @@ type
 """
 ```
 
+**Classes with fields** — `NamedTuple`, dataclasses — document every field in
+an `Attributes` section:
+
+```python
+@dataclasses.dataclass(frozen=True)
+class CallerIdentity:
+    """Identity of the tmux pane hosting this MCP server process.
+
+    Attributes
+    ----------
+    socket_path : str | None
+        tmux socket the caller's server listens on, or ``None`` outside tmux.
+    """
+```
+
+Autodoc renders every field whether or not you describe it, so an
+undocumented `NamedTuple` field ships to the API docs as "Alias for field
+number 0" and a dataclass field ships bare. Document all of them — a class
+with three fields and two documented still ships a stub for the third.
+
 ### Doctests
 
 This repo is an **MCP server**, not a general-purpose library. Most tools
