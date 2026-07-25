@@ -47,6 +47,7 @@ from libtmux_mcp.tools.pane_tools import (
     swap_pane,
     wait_for_text,
 )
+from tests.conftest import wire_annotations
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -5481,7 +5482,7 @@ def test_pane_tool_open_world_hint_registration(
     assert tool.annotations is not None, (
         f"{tool_name} registration should carry annotations"
     )
-    assert tool.annotations.openWorldHint is expected_open_world
+    assert wire_annotations(tool).get("openWorldHint") is expected_open_world
 
 
 def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
@@ -5512,9 +5513,9 @@ def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
     assert tool.annotations is not None, (
         "respawn_pane registration should carry annotations"
     )
-    assert tool.annotations.destructiveHint is True
-    assert tool.annotations.idempotentHint is False
-    assert tool.annotations.readOnlyHint is False
+    assert wire_annotations(tool).get("destructiveHint") is True
+    assert wire_annotations(tool).get("idempotentHint") is False
+    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 def test_clear_pane_advertises_destructive_non_idempotent() -> None:
@@ -5531,9 +5532,9 @@ def test_clear_pane_advertises_destructive_non_idempotent() -> None:
     tool = asyncio.run(mcp.get_tool("clear_pane"))
     assert tool is not None, "clear_pane should be registered"
     assert tool.annotations is not None, "clear_pane should carry annotations"
-    assert tool.annotations.destructiveHint is True
-    assert tool.annotations.idempotentHint is False
-    assert tool.annotations.readOnlyHint is False
+    assert wire_annotations(tool).get("destructiveHint") is True
+    assert wire_annotations(tool).get("idempotentHint") is False
+    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 # ---------------------------------------------------------------------------

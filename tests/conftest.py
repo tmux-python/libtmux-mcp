@@ -70,3 +70,25 @@ def mcp_pane(mcp_window: Window) -> Pane:
     active_pane = mcp_window.active_pane
     assert active_pane is not None
     return active_pane
+
+
+def wire_annotations(tool: t.Any) -> dict[str, t.Any]:
+    """Return a tool's annotations keyed by their PROTOCOL names.
+
+    Reading ``tool.annotations.readOnlyHint`` asserts the SDK's Python
+    attribute spelling, which is not stable: ``mcp`` 2.x renamed every
+    hint to snake_case while keeping the camelCase wire alias. fastmcp
+    ships a deprecation shim so the old spelling still resolves at
+    runtime, which means a suite can keep passing while ``mypy`` fails
+    and the codebase quietly depends on a shim.
+
+    Dumping ``by_alias=True`` asserts the names that actually go on the
+    wire, which is what a client sees and the only thing the protocol
+    guarantees. Same idiom as ``tools/batch_tools.py``.
+    """
+    annotations = tool.annotations
+    assert annotations is not None, f"{tool.name} carries no annotations"
+    dumped: dict[str, t.Any] = annotations.model_dump(
+        mode="json", by_alias=True, exclude_none=True
+    )
+    return dumped

@@ -17,6 +17,7 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     TAG_SELF_BOUNDED,
 )
+from tests.conftest import wire_annotations
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -568,7 +569,7 @@ def test_batch_wrappers_advertise_worst_case_annotations(
     tool = asyncio.run(mcp.get_tool(tool_name))
     assert tool is not None, f"{tool_name} should be registered"
     assert tool.annotations is not None, f"{tool_name} should carry annotations"
-    assert tool.annotations.readOnlyHint is read_only_hint
-    assert tool.annotations.destructiveHint is destructive_hint
-    assert tool.annotations.idempotentHint is idempotent_hint
-    assert tool.annotations.openWorldHint is open_world_hint
+    assert wire_annotations(tool).get("readOnlyHint") is read_only_hint
+    assert wire_annotations(tool).get("destructiveHint") is destructive_hint
+    assert wire_annotations(tool).get("idempotentHint") is idempotent_hint
+    assert wire_annotations(tool).get("openWorldHint") is open_world_hint
