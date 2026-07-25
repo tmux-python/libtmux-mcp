@@ -220,6 +220,14 @@ async def signal_channel(
     server = _get_server(socket_name=socket_name)
     cname = _validate_channel_name(channel)
     argv = _tmux_argv(server, "wait-for", "-S", cname)
+    # Deliberately still a worker thread, unlike every other tmux call
+    # in this package. The orphan-on-cancel defect that pushed the
+    # waits onto ``_run_tmux_bounded`` needs a child that blocks for a
+    # caller-chosen duration; ``wait-for -S`` is edge-triggered and
+    # returns in milliseconds, so the worst case here is a 5 s child
+    # against an already-wedged tmux — and that bound is ours, not the
+    # caller's. Converting it would buy nothing and change this tool's
+    # error messages.
     try:
         await asyncio.to_thread(
             subprocess.run,

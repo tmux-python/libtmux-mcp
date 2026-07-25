@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import pathlib
 import shlex
 import subprocess
@@ -611,6 +612,103 @@ def test_run_command_clamps_oversized_timeout(
     assert result.timed_out is True
     assert result.effective_timeout == 0.3
     assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+
+
+def _run_command_wait_pids(socket_name: str) -> list[int]:
+    """Return pids of live ``tmux -L <socket> wait-for r_*`` processes.
+
+    Asks the kernel rather than the tool: the defect this backs is a
+    tool that reports a clean cancellation while its child runs on, so
+    the tool's own return value cannot be the witness. ``run_command``
+    mints a random ``r_<hex>`` channel per call, hence the prefix match
+    rather than an exact name.
+
+    The argv must be the whole five-token vector and ``/proc/<pid>/exe``
+    must resolve to tmux, so a shell (or pytest) whose command line
+    merely mentions the socket cannot register as a hit; this process
+    is skipped outright for the same reason. Reaped children are gone
+    from ``/proc`` and zombies have an empty ``cmdline``, so neither
+    counts as a survivor.
+    """
+    me = os.getpid()
+    pids: list[int] = []
+    for entry in pathlib.Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == me:
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+            exe = (entry / "exe").readlink()
+        except OSError:
+            continue  # process exited, or not ours to inspect
+        argv = [chunk.decode(errors="replace") for chunk in raw.split(b"\0") if chunk]
+        if len(argv) != 5 or argv[1:4] != ["-L", socket_name, "wait-for"]:
+            continue
+        if not argv[4].startswith("r_") or exe.name != "tmux":
+            continue
+        pids.append(pid)
+    return pids
+
+
+def test_run_command_kills_tmux_child_on_cancel(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A cancelled ``run_command`` must not leave its wait-for child running.
+
+    ``asyncio.to_thread(subprocess.run, ...)`` is uninterruptible: the
+    coroutine raises ``CancelledError`` at once while the worker thread
+    stays blocked in ``waitpid``, so ``tmux wait-for`` kept running for
+    the whole remainder of its budget with nobody waiting on it.
+    Measured before the fix: a 25 s ``run_command`` cancelled at 3 s
+    left the child alive another 22 s. ``run_command`` is the wait an
+    agent cancels most — it is the one wrapping long shell commands.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+
+    async def _drive() -> list[int]:
+        task = asyncio.create_task(
+            run_command(
+                command="sleep 30",
+                pane_id=mcp_pane.pane_id,
+                timeout=8.0,
+                socket_name=socket_name,
+            )
+        )
+        deadline = time.monotonic() + 4.0
+        while time.monotonic() < deadline and not _run_command_wait_pids(socket_name):
+            await asyncio.sleep(0.05)
+        assert _run_command_wait_pids(socket_name), (
+            "no tmux wait-for child observed before the cancel — the probe "
+            "is broken, so a later 'no survivors' result would be vacuous"
+        )
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Poll rather than sleep once: the kill is synchronous but the
+        # reap is not instantaneous. The 2 s window is far short of the
+        # remaining budget, so a survivor here is an orphan and not a
+        # slow teardown.
+        reap_deadline = time.monotonic() + 2.0
+        while time.monotonic() < reap_deadline:
+            if not _run_command_wait_pids(socket_name):
+                break
+            await asyncio.sleep(0.05)
+        return _run_command_wait_pids(socket_name)
+
+    survivors = asyncio.run(_drive())
+    assert not survivors, (
+        f"cancelled run_command orphaned tmux child(ren) {survivors}; "
+        "the child outlives the cancellation for the rest of its timeout"
+    )
 
 
 @pytest.mark.parametrize(

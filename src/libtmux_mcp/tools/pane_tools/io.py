@@ -15,6 +15,7 @@ import uuid
 
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
@@ -428,20 +429,28 @@ async def run_command(
 
     timed_out = False
     wait_argv = _tmux_argv(server, "wait-for", channel)
+    # The wait must be owned by a killable child, not a worker thread.
+    # ``asyncio.to_thread(subprocess.run, ...)`` cannot be interrupted:
+    # cancelling the call raised ``CancelledError`` at once while the
+    # thread stayed blocked in an untimed ``waitpid``, so ``tmux
+    # wait-for`` ran on for the rest of the budget — measured at 22 s
+    # of orphan for a 25 s ``run_command`` cancelled at 3 s. This is
+    # the most-cancelled wait of the three: agents routinely bail out
+    # of a long shell command. ``_run_tmux_bounded`` kills the child on
+    # expiry and on cancellation alike.
+    returncode = 0
+    stderr_bytes = b""
     try:
-        await asyncio.to_thread(
-            subprocess.run,
-            wait_argv,
-            check=True,
-            capture_output=True,
-            timeout=effective_timeout,
+        returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
+            wait_argv, timeout=effective_timeout
         )
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         timed_out = True
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"wait-for failed for run_command channel {channel!r}: {stderr or e}"
-        raise ExpectedToolError(msg) from e
+    if returncode != 0:
+        stderr = stderr_bytes.decode(errors="replace").strip()
+        detail = stderr or f"exit {returncode}"
+        msg = f"wait-for failed for run_command channel {channel!r}: {detail}"
+        raise ExpectedToolError(msg)
 
     elapsed = time.monotonic() - started
     exit_status: int | None = None
