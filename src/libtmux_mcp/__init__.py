@@ -31,11 +31,26 @@ def main(argv: t.Sequence[str] | None = None) -> None:
 
     try:
         from libtmux_mcp.server import run_server
-    except ImportError:
+    except ImportError as exc:
+        # Name the module that actually failed. This catch spans the
+        # WHOLE server import tree, and it used to blame fastmcp for
+        # everything it caught — which is close to the one cause it
+        # cannot have, since fastmcp is a hard dependency. Measured
+        # against mcp 2.0.0b2, which deleted ``mcp.types``: the server
+        # printed "requires fastmcp" while fastmcp was installed and
+        # importable.
+        #
+        # This string is the whole diagnosis. An MCP client sees one
+        # stderr line before the pipe closes and then reports nothing
+        # more useful than "Connection closed".
+        blamed = (exc.name or "").split(".")[0]
+        subject = f"cannot import {blamed!r}: {exc}" if blamed else str(exc)
         print(
-            "libtmux-mcp requires fastmcp. Install with: pip install libtmux-mcp",
+            f"libtmux-mcp failed to start: {subject}. The installed "
+            "dependency set is incomplete or incompatible — repair it "
+            "with: pip install --force-reinstall libtmux-mcp",
             file=sys.stderr,
         )
-        raise SystemExit(1) from None
+        raise SystemExit(1) from exc
 
     run_server()
