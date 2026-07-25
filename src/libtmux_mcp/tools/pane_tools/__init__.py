@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp.server.tasks.config import TaskConfig
+
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -140,10 +142,28 @@ def register(mcp: FastMCP) -> None:
     )
     # TAG_SELF_BOUNDED excludes this tool from retry and from batch
     # wrappers: both would multiply the wait ceiling it enforces.
+    #
+    # ``mode="optional"`` (SEP-1686): a ``tools/call`` carrying
+    # ``params.task = {"ttl": ...}`` gets a task id back in ~3 ms and
+    # collects the result later over ``tasks/result``; a call without it
+    # is the same blocking call it always was. The ceiling, outcome
+    # enum, stale-match suppression and bounded tail all live in the
+    # tool body, so both modes return identical results — asserted in
+    # ``tests/test_wait_for_text_tasks.py``.
+    #
+    # The mode is ``optional`` and not ``required`` because task
+    # execution is strictly worse when the queue is busy: FastMCP runs
+    # tasks on a Docket worker whose concurrency defaults to 10, and a
+    # queued wait does not snapshot its baseline until a slot frees.
+    # Output that lands while it waits in line is pre-existing
+    # scrollback by the time it looks, so it reports ``found=false``
+    # for text that did appear. A blocking call starts polling
+    # immediately and has no such queue.
     mcp.tool(
         title="Wait For Text",
         annotations=ANNOTATIONS_RO,
         tags={TAG_READONLY, TAG_SELF_BOUNDED},
+        task=TaskConfig(mode="optional"),
     )(wait_for_text)
     mcp.tool(
         title="Snapshot Pane",

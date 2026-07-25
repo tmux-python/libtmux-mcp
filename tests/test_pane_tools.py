@@ -5610,3 +5610,63 @@ def test_pane_read_tools_return_pydantic_models(
         result = maybe_result
     assert type(result).__name__ == expected_type
     assert hasattr(result, "model_dump"), "expected a Pydantic BaseModel instance"
+
+
+# ---------------------------------------------------------------------------
+# SEP-1686 task registration
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_text_advertises_optional_task_support() -> None:
+    """``wait_for_text`` is the one pane tool that accepts task execution.
+
+    It is the only pane tool that blocks for a caller-chosen duration,
+    so it is the only one worth running out-of-band: a task-augmented
+    call returns a task id in milliseconds and leaves the shared MCP
+    connection free while the wait runs.
+
+    ``mode="optional"`` is load-bearing. A client that sends no task
+    metadata still gets the ordinary blocking call, so the tool keeps
+    working for every client that has never heard of SEP-1686.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-pane-tasks")
+    pane_tools.register(mcp)
+
+    tool = asyncio.run(mcp.get_tool("wait_for_text"))
+    assert tool is not None, "wait_for_text should be registered"
+    assert tool.task_config is not None, "wait_for_text should carry a TaskConfig"
+    assert tool.task_config.mode == "optional"
+    execution = tool.to_mcp_tool().execution
+    assert execution is not None
+    assert execution.taskSupport == "optional"
+
+
+def test_other_pane_tools_do_not_advertise_task_support() -> None:
+    """Only the wait tool opts in; the rest stay plain synchronous calls.
+
+    Task support costs an ``execution`` block in ``tools/list`` and a
+    second round trip to collect the result. Neither is worth paying on
+    a tool that returns in milliseconds, and a server-wide
+    ``tasks=True`` would apply it to all 51 of them.
+    """
+    import asyncio
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import pane_tools
+
+    mcp = FastMCP(name="test-pane-tasks-off")
+    pane_tools.register(mcp)
+
+    for name in ("capture_pane", "run_command", "send_keys", "snapshot_pane"):
+        tool = asyncio.run(mcp.get_tool(name))
+        assert tool is not None
+        assert tool.task_config is None or tool.task_config.mode == "forbidden", (
+            f"{name} should not advertise task support"
+        )
