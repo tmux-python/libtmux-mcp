@@ -2937,16 +2937,280 @@ def test_wait_for_text_matches_new_output_after_baseline(
     assert any("WAIT_MARKER_after" in line for line in result.matched_lines)
 
 
+#: Parks a pane on a prompt-shaped row that never moves again: print a
+#: prompt WITHOUT a trailing newline so the cursor stays at the end of
+#: it, then sleep. Fixture teardown kills the pane and the sleep.
+#: ``capture-pane`` strips trailing whitespace, so the token asserted on
+#: deliberately excludes the space that is printed.
+_PARKED_PROMPT = "PARKED_PROMPT:"
+_PARK_COMMAND = f"printf '{_PARKED_PROMPT} '; sleep 60"
+
+
+def _park_pane(pane: Pane) -> None:
+    """Replace the pane's shell with a pane that is genuinely quiescent.
+
+    Settling the default zsh pane is not enough, and the way it fails is
+    silent. Measured: two consecutive identical ``(hsize, cursor_y)``
+    polls are satisfied while zsh is still STARTING, before it has
+    painted anything at all — the screen is empty and the state is a
+    stable ``(0, 0)``. zsh then prints a ``compinit`` warning that wraps
+    to two rows, so by the time a marker is written the cursor has moved
+    to row 2 and the marker lands well BELOW the recorded entry row.
+    The entry-row tests then pass on unfixed code, proving nothing.
+
+    A parked ``sh`` removes the race instead of racing it: one prompt
+    row, cursor at the end of it, and nothing else will ever move.
+    """
+    pane.respawn(kill=True, shell=f'sh -c "{_PARK_COMMAND}"')
+
+    def _parked() -> bool:
+        if not any(_PARKED_PROMPT in line for line in pane.capture_pane()):
+            return False
+        # ``cursor_y`` is the property under test, and it must be the
+        # prompt's own row. ``history_size`` is deliberately NOT asserted
+        # on: respawn does not clear scrollback, so whatever the previous
+        # shell wrote is still in history.
+        raw = pane.cmd("display-message", "-p", "#{cursor_y}").stdout
+        return bool(raw) and raw[0] == "0"
+
+    retry_until(_parked, 5, raises=True)
+
+
+def _write_to_pane_tty(pane: Pane, payload: str) -> None:
+    """Write ``payload`` straight to the pane's tty.
+
+    ``send_keys`` is the wrong tool for the entry-row tests: it types at
+    the shell, which processes the newline and moves the cursor, so the
+    marker can never land on the row the cursor occupied at entry —
+    exactly the row under test. Writing to ``#{pane_tty}`` puts bytes on
+    the terminal without touching the shell's line editor.
+    """
+    tty = pane.display_message("#{pane_tty}", get_text=True)[0]
+    fd = os.open(tty, os.O_WRONLY)
+    try:
+        os.write(fd, payload.encode())
+    finally:
+        os.close(fd)
+
+
+class EntryRowFixture(t.NamedTuple):
+    """Test fixture for entry-cursor-row visibility."""
+
+    test_id: str
+    #: Bytes written straight to the pane tty while the wait is running.
+    payload: str
+    patterns: list[str]
+    expected_found: bool
+
+
+ENTRY_ROW_FIXTURES: list[EntryRowFixture] = [
+    # The regression. On a quiescent pane the cursor sits at the end of
+    # the prompt, so an unprefixed line lands on the entry cursor row.
+    # That row used to be excluded by index and the marker was
+    # unmatchable — the tool's headline case (a daemon printing one
+    # ``ready`` line) always burned the full budget and then reported
+    # ``saw_new_output=false``.
+    EntryRowFixture(
+        test_id="bare_line_lands_on_entry_row",
+        payload="ENTRY_ROW_MARKER\n",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=True,
+    ),
+    # No trailing newline at all: the marker never leaves the entry row.
+    EntryRowFixture(
+        test_id="unterminated_line_stays_on_entry_row",
+        payload="Continue? [y/N] ",
+        patterns=[r"Continue\?"],
+        expected_found=True,
+    ),
+    # The marker is on the entry row and the row below it moves too, so
+    # ``saw_new_output`` was true while ``found`` was false — the
+    # confusing shape that sends an agent into a retry loop.
+    EntryRowFixture(
+        test_id="entry_row_marker_with_trailing_line",
+        payload="ENTRY_ROW_MARKER\ntrailing\n",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=True,
+    ),
+    # In-place rewrites: spinners and single-line status updates land on
+    # the entry row via carriage return and never advance it.
+    EntryRowFixture(
+        test_id="carriage_return_rewrite_on_entry_row",
+        payload="\rworking 1 \rworking 2 ",
+        patterns=["working 2"],
+        expected_found=True,
+    ),
+    # Control: a row BELOW the entry cursor still matches, so a failure
+    # above is a real regression and not a broken harness.
+    EntryRowFixture(
+        test_id="line_below_entry_row_still_matches",
+        payload="\nENTRY_ROW_MARKER\n",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=True,
+    ),
+    # Control: nothing written means nothing matches.
+    EntryRowFixture(
+        test_id="silent_pane_still_times_out",
+        payload="",
+        patterns=["ENTRY_ROW_MARKER"],
+        expected_found=False,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    EntryRowFixture._fields,
+    ENTRY_ROW_FIXTURES,
+    ids=[f.test_id for f in ENTRY_ROW_FIXTURES],
+)
+def test_wait_for_text_sees_the_entry_cursor_row(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    test_id: str,
+    payload: str,
+    patterns: list[str],
+    expected_found: bool,
+) -> None:
+    """Content arriving on the entry cursor row must be matchable.
+
+    The wait anchors on the row the cursor occupied at entry rather than
+    the row below it, and suppresses that row's PRE-EXISTING content by
+    value instead. Suppressing it by index was a shipped false negative:
+    on a quiescent pane the cursor sits at the end of the prompt, which
+    is precisely where the next line of output lands.
+    """
+    import asyncio
+
+    # Must be a genuinely parked pane: against the default zsh pane every
+    # case below passes on unfixed code, because zsh's startup output
+    # moves the cursor off the recorded entry row before the marker
+    # lands. See :func:`_park_pane`.
+    _park_pane(mcp_pane)
+
+    async def emit_after_baseline() -> None:
+        # The baseline is a couple of display-message round trips; 0.2 s
+        # is the same headroom the sibling after-baseline test uses.
+        await asyncio.sleep(0.2)
+        if payload:
+            await asyncio.to_thread(_write_to_pane_tty, mcp_pane, payload)
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                patterns=patterns,
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                regex=True,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    result = asyncio.run(run())
+    assert result.found is expected_found
+    if expected_found:
+        assert result.outcome == "matched"
+        assert result.matched_lines
+
+
+def test_wait_for_text_does_not_match_the_prompt_on_the_entry_row(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    r"""Anchoring on the entry row must not make the prompt self-match.
+
+    This is the falsifier for
+    :func:`test_wait_for_text_sees_the_entry_cursor_row`. The entry row
+    normally holds the shell prompt, so a pattern broad enough to hit it
+    would match at t=0 and turn a fixed false negative into a much worse
+    false positive. The content snapshot is what prevents that: the
+    prompt text is captured at entry and filtered out of every tick.
+
+    ``\S`` is deliberately the broadest useful pattern — it matches any
+    non-space character anywhere on any captured row.
+    """
+    import asyncio
+
+    _park_pane(mcp_pane)
+
+    for pattern in ("PARKED_PROMPT", r"\S"):
+        result = asyncio.run(
+            wait_for_text(
+                patterns=[pattern],
+                pane_id=mcp_pane.pane_id,
+                timeout=0.5,
+                regex=True,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        assert result.found is False, f"pattern {pattern!r} self-matched the prompt"
+        assert result.matched_at_entry is True
+
+
+def test_wait_for_text_waits_for_a_fresh_occurrence(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A stale match on screen must not short-circuit the wait.
+
+    ``matched_at_entry`` is known before the poll loop starts, which
+    makes returning immediately look like free latency. It is not: the
+    commonest agent loop is run-a-command / wait-for-its-marker /
+    run-it-again / wait-for-the-SAME-marker, and on the second pass the
+    first pass's marker is still on screen. Returning early would answer
+    with the old occurrence and the agent would never learn the second
+    run finished.
+
+    So the wait keeps waiting, and this test pins that: a marker is left
+    on screen BEFORE the wait, an identical one is written during it,
+    and the wait must match the fresh one.
+    """
+    import asyncio
+
+    marker = "RERUN_MARKER"
+    _park_pane(mcp_pane)
+
+    async def emit_after_baseline() -> None:
+        await asyncio.sleep(0.2)
+        await asyncio.to_thread(_write_to_pane_tty, mcp_pane, f"{marker}\n")
+
+    async def run() -> WaitForTextResult:
+        wait_task = asyncio.create_task(
+            wait_for_text(
+                patterns=[marker],
+                pane_id=mcp_pane.pane_id,
+                timeout=3.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await emit_after_baseline()
+        return await wait_task
+
+    # Pass one: leave the marker on screen and let the pane settle so it
+    # is unambiguously stale by the time the wait takes its baseline.
+    _write_to_pane_tty(mcp_pane, f"\n{marker}\n")
+
+    def _stale_marker_visible() -> bool:
+        return any(marker in line for line in mcp_pane.capture_pane())
+
+    retry_until(_stale_marker_visible, 5, raises=True)
+
+    result = asyncio.run(run())
+    assert result.found is True
+    assert result.outcome == "matched"
+    # The stale occurrence was on screen but did not answer the wait.
+    assert result.matched_at_entry is False
+
+
 def test_wait_for_text_ignores_stale_below_cursor(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """Stale paint-style content below the cursor must not match.
 
-    The cursor-position anchor (``start_line = cy0 + 1``) captures
-    rows below the entry cursor — which can include content that
-    pre-dates the wait (TUI repaints, ``paste-text``, manual cursor
-    positioning). The entry-time content snapshot filters those rows
-    out so only content written after entry matches the regex.
+    The cursor-position anchor captures the entry cursor row and
+    everything below it — which can include content that pre-dates the
+    wait (TUI repaints, ``paste-text``, manual cursor positioning). The
+    entry-time content snapshot filters those rows out so only content
+    written after entry matches the regex.
 
     Setup parks the cursor at row 0 with ``STALE_BELOW`` painted on
     row 1, then waits for a pattern that's already on screen. The
@@ -2988,12 +3252,14 @@ def test_wait_for_text_does_not_match_bottom_row_clip(
 ) -> None:
     """wait_for_text must not match stale text sitting on the cursor row.
 
-    When the cursor is at the last visible row at entry,
-    ``start_line = cy0 + 1`` points below the visible region and
-    tmux's ``capture-pane -S`` clips back to the bottom row
-    (``cmd-capture-pane.c``). Without the bottom-aware guard the
-    poll loop captures the stale cursor-row text and matches it
-    instantly.
+    The cursor at the last visible row is the case that used to defeat
+    the index anchor: ``start_line`` pointed below the visible region,
+    tmux's ``capture-pane -S`` clipped back to the bottom row
+    (``cmd-capture-pane.c``), and the poll loop matched the stale
+    cursor-row text instantly. The anchor now lands ON that row, which
+    is always a valid ``-S`` target, so there is nothing to clip — and
+    the entry-time content snapshot is what keeps the stale text from
+    matching. This test pins the outcome, which is unchanged.
 
     The pane is respawned with a shell-free ``sh -c`` command that
     prints the marker without a trailing newline and then sleeps —

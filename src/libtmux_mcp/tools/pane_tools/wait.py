@@ -532,10 +532,12 @@ async def wait_for_text(
     thread, so a wedged tmux server can neither pin the event loop nor
     hang interpreter shutdown.
 
-    **Alternate screen / pagers are not handled.** Inside ``less``,
-    ``capture-pane`` returns the pager's painted rows, so a wait for
-    text the pager has drawn matches on paint. That is a false
-    positive, not a hang, and this tool does not detect it.
+    **Alternate screen / pagers suppress matching.** Inside ``less`` or
+    any full-screen program, ``capture-pane`` returns the program's
+    painted rows, so matching them would report text the program had
+    already drawn. Matching is skipped for as long as the alternate
+    screen lasts and the result comes back as ``alternate_screen``
+    rather than ``timeout`` — read the screen, don't retry the wait.
 
     **Scrollback rollover detection is partial.** The tool raises when
     ``hsize`` shrinks below the entry value (``clear-history``, and any
@@ -544,11 +546,6 @@ async def wait_for_text(
     output; a runtime ``ctx.warning`` fires when sampled state enters
     the trim-risk band. Use ``wait_for_channel`` when correctness
     matters more than convenience.
-
-    **In-place rewrites of the entry cursor row are invisible.**
-    Carriage-return rewrites, spinners, and single-line status updates
-    happen on the baseline row, which is excluded. Pair those with a
-    sentinel on a fresh line.
     """
     ceiling = _wait_ceiling_seconds()
 
@@ -612,14 +609,22 @@ async def wait_for_text(
     baseline_pid = entry.pane_pid
     baseline_hlimit = await _bounded_history_limit(server, target, deadline=deadline)
 
-    # Snapshot rows below the entry cursor by content. The cursor anchor
-    # alone matches any row at start_line onward, which includes stale
-    # paint-style content (TUI repaints, paste-text, manual cursor
-    # positioning) that pre-dates the wait. Filtering per-tick captures
-    # against this set turns the cursor anchor into an honest "content
-    # written after entry" predicate.
+    # Snapshot the entry cursor row and everything below it, BY CONTENT.
+    # The cursor anchor alone matches any row at start_line onward, which
+    # includes stale paint-style content (TUI repaints, paste-text, manual
+    # cursor positioning) that pre-dates the wait. Filtering per-tick
+    # captures against this set turns the cursor anchor into an honest
+    # "content written after entry" predicate.
+    #
+    # The capture starts AT ``cursor_y``, not below it. Suppressing the
+    # entry row by index instead was a shipped false negative: on a
+    # quiescent pane the cursor sits at the end of the prompt, so the
+    # first line a command prints lands on that very row and was never
+    # matchable. Content-filtering covers the same stale-paint case
+    # without the blind spot, because the prompt text that was on the row
+    # at entry is in this set while text appended to it afterwards is not.
     entry_rows = await _bounded_capture(
-        server, target, start=entry.cursor_y + 1, deadline=deadline
+        server, target, start=entry.cursor_y, deadline=deadline
     )
     entry_below_cursor: frozenset[str] = frozenset(entry_rows)
 
@@ -712,9 +717,13 @@ async def wait_for_text(
                         ),
                     )
                     warned_risk_band = True
-            # ``+ 1`` skips the baseline line itself so we don't
-            # re-match the row the cursor sat on at entry.
-            start_line = baseline_abs - state.history_size + 1
+            # Anchored ON the entry cursor row, not below it. That row is
+            # where the next line lands on a quiescent pane, so skipping
+            # it by index made the tool's headline case — a daemon
+            # printing one ``ready`` line — structurally unmatchable. The
+            # ``entry_below_cursor`` content filter below suppresses what
+            # was already on the row without hiding what arrives on it.
+            start_line = baseline_abs - state.history_size
             # ``capture-pane -S`` clips a below-visible start back to the
             # bottom row (cmd-capture-pane.c, post-tmux-3.0), so a naive
             # capture would return stale bottom-row text whenever no new rows
