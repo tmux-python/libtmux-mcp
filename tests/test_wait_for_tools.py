@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import os
 import pathlib
 import signal
@@ -54,8 +55,8 @@ def test_channel_tools_are_coroutines() -> None:
     assertion pins the async surface so a silent revert doesn't sneak
     through.
     """
-    assert asyncio.iscoroutinefunction(wait_for_channel)
-    assert asyncio.iscoroutinefunction(signal_channel)
+    assert inspect.iscoroutinefunction(wait_for_channel)
+    assert inspect.iscoroutinefunction(signal_channel)
 
 
 @pytest.mark.usefixtures("mcp_session")
