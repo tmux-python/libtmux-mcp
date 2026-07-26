@@ -41,7 +41,10 @@ itself; enabled rules go from 351 to 565. The findings that surfaced are fixed â
 `re.DOTALL` spelled out in place of `re.S`, `str.removesuffix` and `min()` in
 `scripts/mcp_swap.py`, the server instruction blob built as an f-string, and the
 wrapped marker fixtures parenthesized so a dropped comma can no longer pass for
-a deliberate join. Two rules are scoped ignores with their reasons recorded in
+a deliberate join. `scripts/mcp_swap.py` is now executable and its shebang points
+at `uv run --script`, so running it directly honours the PEP 723 metadata instead
+of failing to import `tomlkit` under a bare `python3`. Two rules are scoped
+ignores with their reasons recorded in
 `pyproject.toml`: `exec` in `docs/conf.py`, which is how Sphinx reads version
 metadata, and the `except Exception` boundaries in the error middleware, the
 batch runners, the best-effort tmux probes, and `mcp_swap`'s config rollback.
