@@ -6,6 +6,14 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Documentation
+
+#### Caller identity fields are described (#105)
+
+The dataclass identifying an MCP caller now says what each field holds. They
+previously reached the rendered API reference as "Alias for field number 0"
+or as a bare name carrying only its type.
+
 ### Development
 
 #### CI actions updated to current majors
