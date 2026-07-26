@@ -32,6 +32,21 @@ blocks inside Markdown, so `uv run ruff format .` reaches the README and the
 `docs/` tree. Neither the lint nor the format change rewrites anything here.
 (#113)
 
+**ruff's curated default rule set is now enabled**
+
+`[tool.ruff.lint]` layers this project's linters on with `extend-select` instead
+of `select`. An explicit `select` replaces ruff's default set rather than adding
+to it, so the project had been silently opting out of every rule it did not name
+itself; enabled rules go from 351 to 565. The findings that surfaced are fixed —
+`re.DOTALL` spelled out in place of `re.S`, `str.removesuffix` and `min()` in
+`scripts/mcp_swap.py`, the server instruction blob built as an f-string, and the
+wrapped marker fixtures parenthesized so a dropped comma can no longer pass for
+a deliberate join. Two rules are scoped ignores with their reasons recorded in
+`pyproject.toml`: `exec` in `docs/conf.py`, which is how Sphinx reads version
+metadata, and the `except Exception` boundaries in the error middleware, the
+batch runners, the best-effort tmux probes, and `mcp_swap`'s config rollback.
+(#113)
+
 ## libtmux-mcp 0.1.0a19 (2026-07-25)
 
 libtmux-mcp 0.1.0a19 makes {tooliconl}`wait-for-text` see the output it was asked to watch for, and puts a ceiling under every wait. The tool anchored one row below the cursor's position at entry, which on a quiescent pane is exactly where the next line lands, so the case it exists for — output you did not author, a daemon printing a single `ready` line — could not match at all. Waits are now bounded by a server ceiling, cancellable without orphaning their tmux child, and report an `outcome` that distinguishes a command that never ran from output that did not match from a pager owning the pane. The wait API changes shape in the process: `pattern` becomes `patterns`, `stop` markers end a wait early, and `wait_for_content_change` is removed in favour of `wait_for_text(patterns=null)`.
