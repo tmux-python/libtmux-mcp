@@ -244,6 +244,26 @@ convention = "numpy"
 # version metadata without importing the package (and its dependencies)
 # into the docs build. The path is a repo-local file, not user input.
 "docs/conf.py" = ["S102"]
+# Boundary catch-alls. Every `except Exception` in these files converts
+# an arbitrary failure into a reported result or a debug log instead of
+# letting it escape a place that cannot report it:
+#   middleware.py     the MCP error boundary, renders any tool exception
+#                     as an `is_error` result
+#   batch_tools.py    isolates one failed operation from its batch
+#   pane_tools/io.py  same, per send_keys operation
+#   server.py         best-effort buffer GC during lifespan shutdown
+#   server_tools.py   best-effort tmux metadata probes over sockets that
+#                     may be stale, denied, or running an old tmux
+#   mcp_swap.py       restores a CLI config's original bytes when a
+#                     write fails
+# tmux and the CLI configs fail in more ways than a narrowed clause can
+# enumerate, so narrowing here trades a logged degradation for a crash.
+"scripts/mcp_swap.py" = ["BLE001"]
+"src/libtmux_mcp/middleware.py" = ["BLE001"]
+"src/libtmux_mcp/server.py" = ["BLE001"]
+"src/libtmux_mcp/tools/batch_tools.py" = ["BLE001"]
+"src/libtmux_mcp/tools/pane_tools/io.py" = ["BLE001"]
+"src/libtmux_mcp/tools/server_tools.py" = ["BLE001"]
 
 [tool.pytest.ini_options]
 addopts = [
