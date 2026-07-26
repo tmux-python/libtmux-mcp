@@ -23,6 +23,15 @@ Workflow actions moved to their current major releases: `actions/checkout` v7,
 and `dorny/paths-filter` v4. Workflow behavior is unchanged, though setup-uv no
 longer prunes the uv cache, so the first run after this repopulates it.
 
+**Minimum `ruff>=0.16.0`** (was unpinned)
+
+The `dev` and `lint` dependency groups now require ruff 0.16.0 or newer, so
+contributors and CI see the same diagnostics rather than whichever ruff each
+machine resolved. From this release on, `ruff format` also formats Python code
+blocks inside Markdown, so `uv run ruff format .` reaches the README and the
+`docs/` tree. Neither the lint nor the format change rewrites anything here.
+(#113)
+
 ## libtmux-mcp 0.1.0a19 (2026-07-25)
 
 libtmux-mcp 0.1.0a19 makes {tooliconl}`wait-for-text` see the output it was asked to watch for, and puts a ceiling under every wait. The tool anchored one row below the cursor's position at entry, which on a quiescent pane is exactly where the next line lands, so the case it exists for — output you did not author, a daemon printing a single `ready` line — could not match at all. Waits are now bounded by a server ceiling, cancellable without orphaning their tmux child, and report an `outcome` that distinguishes a command that never ran from output that did not match from a pager owning the pane. The wait API changes shape in the process: `pattern` becomes `patterns`, `stop` markers end a wait early, and `wait_for_content_change` is removed in favour of `wait_for_text(patterns=null)`.
