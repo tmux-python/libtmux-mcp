@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["tomlkit>=0.13"]
@@ -648,7 +648,7 @@ def resolve_repo_meta(repo: pathlib.Path) -> tuple[str, str]:
         msg = f"{pyproject} has no [project] table"
         raise RuntimeError(msg)
     name = str(project["name"])
-    server = name[: -len("-mcp")] if name.endswith("-mcp") else name
+    server = name.removesuffix("-mcp")
     scripts = project.get("scripts") or {}
     if not scripts:
         msg = f"{pyproject} has no [project.scripts] — cannot derive entry"
@@ -1187,7 +1187,7 @@ def _naming_hint(repo: pathlib.Path, server: str) -> str | None:
                 names.add(name)
     if server_points or not names:
         return None
-    pick = sorted(names)[0]
+    pick = min(names)
     return (
         f"note: nothing is registered under server {server!r}, but this repo is "
         f"registered as {sorted(names)} — pass --server {pick} to target it"
@@ -1237,7 +1237,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("    (no CLI currently points at this repo)")
 
     if all_repo_names and server not in all_repo_names:
-        pick = sorted(all_repo_names)[0]
+        pick = min(all_repo_names)
         print(
             f"  ! server name mismatch: this repo is registered as "
             f"{sorted(all_repo_names)}, not {server!r} — use --server {pick}"

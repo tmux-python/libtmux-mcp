@@ -77,7 +77,7 @@ dev = [
   "coverage",
   "pytest-cov",
   # Lint
-  "ruff",
+  "ruff>=0.16.0",
   "mypy",
 ]
 
@@ -103,7 +103,7 @@ coverage =[
 ]
 lint = [
   "typing-extensions; python_version < '3.11'",
-  "ruff",
+  "ruff>=0.16.0",
   "mypy",
 ]
 
@@ -188,7 +188,10 @@ exclude_lines = [
 target-version = "py310"
 
 [tool.ruff.lint]
-select = [
+# `select` is deliberately unset: ruff 0.16 enables a curated default rule
+# set, and an explicit `select` would replace it rather than extend it.
+# `extend-select` layers this project's additional linters on top.
+extend-select = [
   "E", # pycodestyle
   "F", # pyflakes
   "I", # isort
@@ -237,6 +240,30 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 "*/__init__.py" = ["F401"]
+# The Sphinx conf idiom: `exec` the package's `__about__.py` to read
+# version metadata without importing the package (and its dependencies)
+# into the docs build. The path is a repo-local file, not user input.
+"docs/conf.py" = ["S102"]
+# Boundary catch-alls. Every `except Exception` in these files converts
+# an arbitrary failure into a reported result or a debug log instead of
+# letting it escape a place that cannot report it:
+#   middleware.py     the MCP error boundary, renders any tool exception
+#                     as an `is_error` result
+#   batch_tools.py    isolates one failed operation from its batch
+#   pane_tools/io.py  same, per send_keys operation
+#   server.py         best-effort buffer GC during lifespan shutdown
+#   server_tools.py   best-effort tmux metadata probes over sockets that
+#                     may be stale, denied, or running an old tmux
+#   mcp_swap.py       restores a CLI config's original bytes when a
+#                     write fails
+# tmux and the CLI configs fail in more ways than a narrowed clause can
+# enumerate, so narrowing here trades a logged degradation for a crash.
+"scripts/mcp_swap.py" = ["BLE001"]
+"src/libtmux_mcp/middleware.py" = ["BLE001"]
+"src/libtmux_mcp/server.py" = ["BLE001"]
+"src/libtmux_mcp/tools/batch_tools.py" = ["BLE001"]
+"src/libtmux_mcp/tools/pane_tools/io.py" = ["BLE001"]
+"src/libtmux_mcp/tools/server_tools.py" = ["BLE001"]
 
 [tool.pytest.ini_options]
 addopts = [

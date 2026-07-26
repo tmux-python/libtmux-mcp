@@ -980,10 +980,14 @@ FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
         "current_wrapped_long_marker",
         [
             "RUN_OK",
-            "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
-            f"@libtmux_mcp_status_{_CURRENT_ID[:10]}",
-            f'{_CURRENT_ID[10:]} "$__libtmux_mcp_status"; '
-            "tmux wait-for -S libtmux_mcp_run_",
+            (
+                "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
+                f"@libtmux_mcp_status_{_CURRENT_ID[:10]}"
+            ),
+            (
+                f'{_CURRENT_ID[10:]} "$__libtmux_mcp_status"; '
+                "tmux wait-for -S libtmux_mcp_run_"
+            ),
             _CURRENT_ID,
         ],
         f"libtmux_mcp_run_{_CURRENT_ID}",
@@ -993,10 +997,14 @@ FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
         "previous_wrapped_long_marker",
         [
             "RUN_OK",
-            "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
-            f"@libtmux_mcp_status_{_PREVIOUS_ID[:10]}",
-            f'{_PREVIOUS_ID[10:]} "$__libtmux_mcp_status"; '
-            "tmux wait-for -S libtmux_mcp_run_",
+            (
+                "∙ }; __libtmux_mcp_status=$?; tmux set-option -p "
+                f"@libtmux_mcp_status_{_PREVIOUS_ID[:10]}"
+            ),
+            (
+                f'{_PREVIOUS_ID[10:]} "$__libtmux_mcp_status"; '
+                "tmux wait-for -S libtmux_mcp_run_"
+            ),
             _PREVIOUS_ID,
         ],
         f"libtmux_mcp_run_{_CURRENT_ID}",
@@ -1006,8 +1014,10 @@ FILTER_DROP_FIXTURES: list[FilterDropFixture] = [
         "current_short_marker",
         [
             "RUN_OK",
-            f'∙ }}; s=$?; tmux set-option -p @s_{_SHORT_CURRENT_ID} "$s"; '
-            f"tmux wait-for -S r_{_SHORT_CURRENT_ID}",
+            (
+                f'∙ }}; s=$?; tmux set-option -p @s_{_SHORT_CURRENT_ID} "$s"; '
+                f"tmux wait-for -S r_{_SHORT_CURRENT_ID}"
+            ),
         ],
         f"r_{_SHORT_CURRENT_ID}",
         f"@s_{_SHORT_CURRENT_ID}",

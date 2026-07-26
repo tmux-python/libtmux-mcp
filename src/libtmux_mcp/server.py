@@ -128,16 +128,14 @@ _INSTR_BUFFERS_GAP = (
     "clipboard history."
 )
 
-_BASE_INSTRUCTIONS = "\n\n".join(
-    (
-        _INSTR_HIERARCHY,
-        _INSTR_SCOPE,
-        _INSTR_METADATA_VS_CONTENT,
-        _INSTR_READ_TOOLS,
-        _INSTR_WAIT_NOT_POLL,
-        _INSTR_HOOKS_GAP,
-        _INSTR_BUFFERS_GAP,
-    )
+_BASE_INSTRUCTIONS = (
+    f"{_INSTR_HIERARCHY}\n\n"
+    f"{_INSTR_SCOPE}\n\n"
+    f"{_INSTR_METADATA_VS_CONTENT}\n\n"
+    f"{_INSTR_READ_TOOLS}\n\n"
+    f"{_INSTR_WAIT_NOT_POLL}\n\n"
+    f"{_INSTR_HOOKS_GAP}\n\n"
+    f"{_INSTR_BUFFERS_GAP}"
 )
 
 _INSTRUCTIONS_MAX_BYTES = 2048

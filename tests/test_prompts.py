@@ -438,7 +438,7 @@ def test_docs_sample_render_matches_the_server(mcp_with_prompts: FastMCP) -> Non
     block = re.search(
         r'\*\*Sample render\*\* \(``pane_id="%1"``\):\n\n````markdown\n(.*?)````',
         page.read_text(),
-        re.S,
+        re.DOTALL,
     )
     assert block is not None, "interrupt_gracefully sample-render block not found"
 
