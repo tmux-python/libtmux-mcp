@@ -648,7 +648,7 @@ def resolve_repo_meta(repo: pathlib.Path) -> tuple[str, str]:
         msg = f"{pyproject} has no [project] table"
         raise RuntimeError(msg)
     name = str(project["name"])
-    server = name[: -len("-mcp")] if name.endswith("-mcp") else name
+    server = name.removesuffix("-mcp")
     scripts = project.get("scripts") or {}
     if not scripts:
         msg = f"{pyproject} has no [project.scripts] — cannot derive entry"
