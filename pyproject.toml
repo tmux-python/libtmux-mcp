@@ -41,7 +41,8 @@ include = [
 
 dependencies = [
   "libtmux>=0.62.0,<1.0",
-  "fastmcp>=3.4.2,<4.0.0",
+  "fastmcp==4.0.0a2",
+  "fastmcp-tasks==4.0.0a2",
 ]
 
 [project.urls]
@@ -111,7 +112,24 @@ lint = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# SPIKE ONLY (branch `tasks`). fastmcp 4.x is published as an alpha, so
+# resolution needs pre-releases enabled. Declaring it here rather than
+# relying on UV_PRERELEASE in the environment: uv records the mode it
+# resolved under in uv.lock, so without this every `uv sync` / `uv lock`
+# that forgot the variable fails the lockfile check.
+prerelease = "allow"
+
 [tool.uv.exclude-newer-package]
+# SPIKE ONLY (branch `tasks`): the fastmcp 4.x alpha is younger than the
+# 3-day cooldown. Exempted here so this throwaway worktree can evaluate it;
+# this must never reach a shipping branch.
+fastmcp = false
+fastmcp-slim = false
+fastmcp-tasks = false
+mcp-types = false
+mcp = false
+pydocket = false
 # git-pull packages release in lockstep with their workspaces, so a
 # fresh release blocking on the 3-day cooldown blocks every
 # contributor's `uv sync` until it clears. `false` exempts each

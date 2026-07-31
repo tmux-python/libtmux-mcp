@@ -40,7 +40,7 @@ from fastmcp.server.middleware.error_handling import (
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
-from mcp.types import CallToolRequestParams, TextContent
+from mcp_types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
 from libtmux_mcp._utils import (
