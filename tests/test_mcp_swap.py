@@ -99,6 +99,14 @@ def fake_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
                 container=("mcp",),
                 dialect="opencode",
             ),
+            "pi": mcp_swap.CLIInfo(
+                name="pi",
+                binary="pi",
+                config_path=tmp_path / ".pi" / "agent" / "mcp.json",
+                fmt="json",
+                container=("mcpServers",),
+                dialect="standard",
+            ),
         },
     )
     state_dir = tmp_path / "state"
