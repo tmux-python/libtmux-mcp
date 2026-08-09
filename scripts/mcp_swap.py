@@ -85,7 +85,9 @@ import typing as t
 import tomlkit
 import tomlkit.items
 
-CLIName = t.Literal["claude", "codex", "cursor", "gemini", "grok", "agy", "opencode"]
+CLIName = t.Literal[
+    "claude", "codex", "cursor", "gemini", "grok", "agy", "opencode", "pi"
+]
 ALL_CLIS: tuple[CLIName, ...] = (
     "claude",
     "codex",
@@ -94,6 +96,7 @@ ALL_CLIS: tuple[CLIName, ...] = (
     "grok",
     "agy",
     "opencode",
+    "pi",
 )
 
 #: Width of the CLI-name column in ``detect`` output, derived rather
@@ -293,12 +296,34 @@ CLIS: dict[CLIName, CLIInfo] = {
         container=("mcp",),
         dialect="opencode",
     ),
+    "pi": CLIInfo(
+        name="pi",
+        binary="pi",
+        # Read by the pi-mcp-adapter extension, not by pi itself; see
+        # PI_ADAPTER_DIR. Claude-Desktop schema, so the standard dialect.
+        config_path=pathlib.Path.home() / ".pi" / "agent" / "mcp.json",
+        fmt="json",
+        container=("mcpServers",),
+        dialect="standard",
+    ),
 }
 
 #: Written into an opencode config this script creates from nothing.
 #: opencode injects the same line itself on first load; seeding it here
 #: keeps the swap from being followed by a surprise rewrite.
 OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json"
+
+#: pi ships no MCP client — its README says "No MCP" outright, and the
+#: released build contains no MCP code at all. MCP reaches pi only
+#: through the third-party ``pi-mcp-adapter`` extension, which is what
+#: reads ``~/.pi/agent/mcp.json``. The swap writes that file because it
+#: is the one pi-family location with a settled schema, but until the
+#: adapter is installed pi does not read it, so ``detect`` says so
+#: instead of reporting a swap that cannot take effect.
+PI_ADAPTER_DIR = (
+    pathlib.Path.home() / ".pi" / "agent" / "npm" / "node_modules" / "pi-mcp-adapter"
+)
+PI_ADAPTER_HINT = "needs the pi-mcp-adapter package; pi has no built-in MCP client"
 
 
 @dataclasses.dataclass
@@ -1227,6 +1252,8 @@ def cmd_detect(args: argparse.Namespace) -> int:
             extra.append("binary missing")
         if not p.config_found:
             extra.append(f"config missing: {CLIS[p.cli].config_path}")
+        if p.cli == "pi" and not PI_ADAPTER_DIR.is_dir():
+            extra.append(PI_ADAPTER_HINT)
         suffix = f"  ({', '.join(extra)})" if extra else ""
         print(f"  [{flag}] {p.cli:<{_CLI_COLUMN}}{suffix}")
     return 0
