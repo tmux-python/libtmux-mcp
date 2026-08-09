@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["tomlkit>=0.13"]
 # ///
-"""Swap MCP server configs across Claude / Codex / Cursor / Gemini / Grok / agy.
+"""Swap MCP server configs across every installed agent CLI.
 
 Use when you want every installed agent CLI to run a local checkout of an
 MCP server (editable) instead of a pinned release. ``use-local`` rewrites
@@ -37,16 +37,33 @@ This script is best-effort and intentionally narrow:
 - **Global configs only.** Writes to ``~/.cursor/mcp.json``,
   ``~/.claude.json``, ``~/.codex/config.toml``,
   ``~/.gemini/settings.json``, ``~/.grok/config.toml`` (TOML
-  ``mcp_servers``, same shape as Codex), and
+  ``mcp_servers``, same shape as Codex),
   ``~/.gemini/config/mcp_config.json`` (agy / Antigravity CLI, JSON
   ``mcpServers`` — the shared-config file the CLI reads, sibling to the
-  ``config.json`` it loads at startup). Workspace / project-local configs
-  (``$PWD/.cursor/mcp.json``, ``$PWD/.gemini/settings.json``,
-  per-project ``projects.<abs>.mcpServers`` entries inside
-  ``~/.claude.json`` *are* recognised for Claude only) are NOT
-  walked — workspace files for Cursor/Gemini are silently ignored.
+  ``config.json`` it loads at startup),
+  ``$XDG_CONFIG_HOME/opencode/opencode.jsonc`` (JSONC ``mcp``, comments
+  preserved) and ``~/.pi/agent/mcp.json``. Workspace / project-local
+  configs (``$PWD/.cursor/mcp.json``, ``$PWD/.gemini/settings.json``,
+  ``$PWD/opencode.json``, per-project ``projects.<abs>.mcpServers``
+  entries inside ``~/.claude.json`` *are* recognised for Claude only)
+  are NOT walked — workspace files for the others are silently ignored.
   When workspace precedence matters, run the CLI's own
-  ``cursor mcp add ...`` / ``gemini mcp add ...`` directly.
+  ``cursor mcp add ...`` / ``gemini mcp add ...`` /
+  ``opencode mcp add ...`` directly.
+
+- **opencode reads three global files.** ``config.json``,
+  ``opencode.json`` and ``opencode.jsonc`` in the same directory are all
+  loaded and merged, with ``.jsonc`` winning. This script owns
+  ``.jsonc`` — the file opencode itself writes to — so its entry is the
+  one that takes effect. A stale ``mcp.<name>`` left in a sibling
+  ``opencode.json`` still merges underneath rather than being shadowed
+  outright; remove it by hand if that matters.
+
+- **pi has no MCP client of its own.** Its README says so, and the
+  released build ships no MCP code. ``~/.pi/agent/mcp.json`` is read by
+  the third-party ``pi-mcp-adapter`` extension, so a swap written there
+  takes effect only once that package is installed. ``detect`` says as
+  much rather than reporting a swap that cannot do anything.
 
 - **Claude scope.** ``use-local`` and ``revert`` accept
   ``--scope {user,project}``. The default ``project`` writes the
@@ -55,8 +72,8 @@ This script is best-effort and intentionally narrow:
   pre-flag behaviour. ``--scope user`` writes Claude's top-level
   ``mcpServers`` fallback so every project that has no per-project
   override picks up the swap; useful when QA-ing a branch across
-  many directories. Codex, Cursor, Gemini, Grok, and agy have no per-project
-  layer in their config files; the flag is silently coerced to
+  many directories. Every other CLI here has no per-project layer in
+  the config file this script writes; the flag is silently coerced to
   ``user`` for them. Both Claude scopes can coexist with
   independent backups; full ``revert`` unwinds in LIFO order.
 - **Simple binary detection.** Probing is ``shutil.which(<binary>)``
