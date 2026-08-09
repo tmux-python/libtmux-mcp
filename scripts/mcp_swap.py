@@ -366,11 +366,14 @@ class McpServerSpec:
             # One array for argv, and the table is "environment" -- an
             # "env" key here is dropped in silence, and a scalar command
             # is a decode error that takes the whole config down with it.
-            out = {"type": "local", "command": [self.command, *self.args]}
+            local: dict[str, t.Any] = {
+                "type": "local",
+                "command": [self.command, *self.args],
+            }
             if self.env:
-                out["environment"] = dict(self.env)
-            return out
-        out = {"command": self.command, "args": list(self.args)}
+                local["environment"] = dict(self.env)
+            return local
+        out: dict[str, t.Any] = {"command": self.command, "args": list(self.args)}
         if self.env:
             out["env"] = dict(self.env)
         return out
@@ -935,7 +938,21 @@ def _claude_user_servers(
     return existing
 
 
-def _server_map(info: CLIInfo, config: t.Any, *, create: bool) -> t.Any | None:
+@t.overload
+def _server_map(
+    info: CLIInfo, config: t.Any, *, create: t.Literal[True]
+) -> dict[str, t.Any]: ...
+
+
+@t.overload
+def _server_map(
+    info: CLIInfo, config: t.Any, *, create: t.Literal[False]
+) -> dict[str, t.Any] | None: ...
+
+
+def _server_map(
+    info: CLIInfo, config: t.Any, *, create: bool
+) -> dict[str, t.Any] | None:
     """Walk ``info.container`` to the mapping holding this CLI's entries.
 
     Returns ``None`` when the path is absent and ``create`` is false.
@@ -950,7 +967,7 @@ def _server_map(info: CLIInfo, config: t.Any, *, create: bool) -> t.Any | None:
         Reported rather than overwritten — a swap must never discard
         config it cannot interpret.
     """
-    node = config
+    node: dict[str, t.Any] = config
     for depth, key in enumerate(info.container):
         child = node.get(key)
         if child is None:
