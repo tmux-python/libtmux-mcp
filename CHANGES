@@ -16,6 +16,16 @@ or as a bare name carrying only its type.
 
 ### Development
 
+**`mcp_swap` can point every agent CLI at a pull request**
+
+`use-local --pr N` rewrites each CLI's entry to run the pull request's head
+through `uvx` instead of a working copy. Nothing is checked out, so reverting
+is the ordinary config restore with no worktree to prune, and a pull request
+from a fork needs no special handling. The swap completes an MCP `initialize`
+round trip against the resolved command first, so a ref that does not exist —
+or a dependency that cannot resolve — fails before it reaches any config
+rather than surfacing as an opaque startup error inside every agent.
+
 #### CI actions updated to current majors
 
 Workflow actions moved to their current major releases: `actions/checkout` v7,

@@ -76,7 +76,9 @@ import difflib
 import json
 import os
 import pathlib
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -235,6 +237,12 @@ CLIS: dict[CLIName, CLIInfo] = {
 }
 
 
+#: A ``--from`` argument pointing at a pull request's head commit.
+#: GitHub publishes ``refs/pull/<n>/head`` on the *base* repository, so
+#: one URL serves same-repo and fork pull requests alike.
+PR_REF_RE = re.compile(r"git\+(?P<url>.+?)@refs/pull/(?P<number>\d+)/head")
+
+
 @dataclasses.dataclass
 class McpServerSpec:
     """The portable shape shared across CLI configs."""
@@ -274,6 +282,16 @@ class McpServerSpec:
         if i + 1 >= len(self.args):
             return None
         return pathlib.Path(self.args[i + 1])
+
+    def pr_ref(self) -> tuple[str, int] | None:
+        """Return ``(repo_url, pr_number)`` for a ``uvx`` pull-request spec."""
+        if self.command != "uvx":
+            return None
+        for arg in self.args:
+            match = PR_REF_RE.fullmatch(arg)
+            if match:
+                return match.group("url"), int(match.group("number"))
+        return None
 
 
 @dataclasses.dataclass
@@ -665,6 +683,161 @@ def build_local_spec(repo: pathlib.Path, entry: str) -> McpServerSpec:
     )
 
 
+def build_pr_spec(repo_url: str, pr: int, entry: str) -> McpServerSpec:
+    """Build the ``uvx --from git+<url>@refs/pull/<n>/head <entry>`` spec.
+
+    Nothing is checked out: ``uv`` resolves the ref itself, so a swap
+    leaves no worktree to refresh or prune and ``revert`` needs no
+    cleanup beyond restoring the config.
+    """
+    return McpServerSpec(
+        command="uvx",
+        args=["--from", f"git+{repo_url}@refs/pull/{pr}/head", entry],
+    )
+
+
+def _run_text(argv: list[str], cwd: pathlib.Path | None = None) -> str:
+    """Run ``argv`` and return stdout, raising on a non-zero exit."""
+    return subprocess.run(
+        argv,
+        cwd=None if cwd is None else str(cwd),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def remote_https_url(repo: pathlib.Path, remote: str = "origin") -> str:
+    """Return ``https://<host>/<owner>/<name>`` for a repo's git remote.
+
+    Normalizes the spellings git accepts — ``git@host:owner/name.git``,
+    an ``ssh://`` or ``git+ssh://`` scheme, an embedded user, a trailing
+    ``.git`` — because the pull-request ref is fetched over https however
+    the working copy was cloned.
+    """
+    try:
+        raw = _run_text(["git", "-C", str(repo), "remote", "get-url", remote])
+    except (OSError, subprocess.CalledProcessError) as exc:
+        msg = f"cannot read git remote {remote!r} in {repo}"
+        raise RuntimeError(msg) from exc
+    return _normalize_remote_url(raw.strip())
+
+
+def _normalize_remote_url(url: str) -> str:
+    """Rewrite any git remote spelling as a plain https URL.
+
+    Examples
+    --------
+    >>> _normalize_remote_url("git+ssh://git@github.com/o/n.git")
+    'https://github.com/o/n'
+    >>> _normalize_remote_url("git@github.com:o/n.git")
+    'https://github.com/o/n'
+    >>> _normalize_remote_url("https://github.com/o/n")
+    'https://github.com/o/n'
+    """
+    url = url.removeprefix("git+")
+    if url.startswith("ssh://"):
+        url = "https://" + url.removeprefix("ssh://")
+    elif "://" not in url and ":" in url:
+        host, _, path = url.partition(":")
+        url = f"https://{host}/{path}"
+    scheme, sep, rest = url.partition("://")
+    authority, slash, path = rest.partition("/")
+    return f"{scheme}{sep}{authority.rpartition('@')[2]}{slash}{path}".removesuffix(
+        ".git"
+    )
+
+
+def gh_pr_summary(repo: pathlib.Path, pr: int) -> dict[str, t.Any] | None:
+    """Return ``gh``'s view of a pull request, or ``None`` when unreadable.
+
+    Used to confirm the number exists and to label output. Resolution
+    does not depend on it: the ref and URL come from git, so a missing
+    or unauthenticated ``gh`` degrades to an unlabelled swap rather than
+    a failure.
+    """
+    try:
+        out = _run_text(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr),
+                "--json",
+                "number,title,state,headRefName,isCrossRepository",
+            ],
+            cwd=repo,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    try:
+        loaded = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+#: One MCP ``initialize`` request, newline-framed for stdio.
+_INITIALIZE_FRAME = (
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "mcp_swap-preflight", "version": "1"},
+            },
+        }
+    )
+    + "\n"
+)
+
+
+def preflight_spec(spec: McpServerSpec, *, timeout: float = 300.0) -> str | None:
+    """Launch ``spec`` and complete one MCP ``initialize`` round trip.
+
+    Returns ``None`` when the server answered, otherwise a reason to
+    show the operator. A pull-request spec resolves its dependencies at
+    launch time, inside whichever agent starts it, so an unresolvable
+    ref would otherwise land in every config and surface later as an
+    opaque startup failure in each one.
+
+    Closing stdin after the frame lets a well-behaved stdio server exit
+    on its own, which keeps this free of signal handling.
+    """
+    try:
+        proc = subprocess.Popen(
+            [spec.command, *spec.args],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, **spec.env},
+            text=True,
+        )
+    except OSError as exc:
+        return f"could not launch {spec.command}: {exc}"
+
+    try:
+        out, err = proc.communicate(_INITIALIZE_FRAME, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return f"no MCP response within {timeout:.0f}s"
+
+    for line in out.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(message, dict) and message.get("id") == 1 and "result" in message:
+            return None
+
+    tail = "\n".join(err.strip().splitlines()[-3:])
+    return tail or "server exited without answering initialize"
+
+
 # ---------------------------------------------------------------------------
 # State file
 # ---------------------------------------------------------------------------
@@ -845,16 +1018,30 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def _describe_spec(spec: McpServerSpec, repo: pathlib.Path) -> str:
-    """Return a short label classifying a spec (local/pypi-pin/other)."""
+    """Return a short label classifying a spec (local/PR/pypi-pin/other)."""
     if spec.is_local_uv_directory():
         local = spec.local_repo_path()
         if local and local.resolve() == repo.resolve():
             return "local: this repo"
         return f"local: {local}"
+    pr = spec.pr_ref()
+    if pr is not None:
+        # Checked before the pin branch below: a PR ref contains `@`,
+        # which that branch would report as a version pin.
+        return f"PR #{pr[1]}: {pr[0]}"
     if spec.command == "uvx":
         pinned = next((a for a in spec.args if "==" in a or "@" in a), None)
         return f"pypi pin: {pinned}" if pinned else "pypi (unpinned)"
     return "other"
+
+
+def _points_at(
+    current: McpServerSpec, target: McpServerSpec, repo: pathlib.Path
+) -> bool:
+    """Return True when ``current`` already runs what ``target`` describes."""
+    if target.pr_ref() is not None:
+        return current.pr_ref() == target.pr_ref()
+    return current.is_local_uv_directory() and current.local_repo_path() == repo
 
 
 def cmd_use_local(args: argparse.Namespace) -> int:
@@ -868,8 +1055,29 @@ def cmd_use_local(args: argparse.Namespace) -> int:
     server, default_entry = resolve_repo_meta(repo)
     server = args.server or server
     entry = args.entry or default_entry
-    spec = build_local_spec(repo, entry)
     extra_env = dict(args.env or [])
+
+    pr = getattr(args, "pr", None)
+    if pr is None:
+        spec = build_local_spec(repo, entry)
+    else:
+        try:
+            spec = build_pr_spec(remote_https_url(repo), pr, entry)
+        except RuntimeError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        spec = dataclasses.replace(spec, env=dict(extra_env))
+        summary = gh_pr_summary(repo, pr)
+        if summary is None:
+            print(f"PR #{pr}: gh could not read it — swapping anyway", file=sys.stderr)
+        else:
+            fork = " (fork)" if summary.get("isCrossRepository") else ""
+            print(
+                f"PR #{summary.get('number', pr)} [{summary.get('state', '?')}]"
+                f"{fork} {summary.get('headRefName', '?')} — "
+                f"{summary.get('title', '')}",
+                file=sys.stderr,
+            )
 
     hint = _naming_hint(repo, server)
     if hint:
@@ -879,6 +1087,15 @@ def cmd_use_local(args: argparse.Namespace) -> int:
     if not targets:
         print("no CLIs detected — nothing to do", file=sys.stderr)
         return 1
+
+    # Runs under --dry-run too: resolving the ref is the only signal a
+    # dry run can give about whether the swap would actually start.
+    if pr is not None and not args.no_preflight:
+        print(f"preflight: {spec.command} {' '.join(spec.args)}", file=sys.stderr)
+        failure = preflight_spec(spec)
+        if failure is not None:
+            print(f"preflight failed, nothing written:\n{failure}", file=sys.stderr)
+            return 1
 
     ts = time.strftime("%Y%m%d%H%M%S")
     state = load_state()
@@ -901,11 +1118,11 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             current = get_server(cli, config, server, repo, scope=scope)
             if (
                 current
-                and current.is_local_uv_directory()
-                and current.local_repo_path() == repo
+                and _points_at(current, spec, repo)
                 and all(current.env.get(k) == v for k, v in extra_env.items())
             ):
-                print(f"[{label}] already local (this repo) — no change")
+                where = "local (this repo)" if pr is None else f"PR #{pr}"
+                print(f"[{label}] already {where} — no change")
                 continue
             # Preserve the existing entry's env on replacement. ``build_local_spec``
             # writes an empty env, so without this merge a swap would silently drop
@@ -1320,6 +1537,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     pu = sub.add_parser("use-local", help="rewrite configs to run this checkout")
     pu.add_argument("--repo", default=".", help="repo root (default: .)")
+    pu.add_argument(
+        "--pr",
+        type=int,
+        metavar="N",
+        help=(
+            "Point the CLIs at pull request N instead of the working copy. "
+            "Writes 'uvx --from git+<remote>@refs/pull/N/head <entry>', so "
+            "nothing is checked out and 'revert' needs no cleanup. The ref "
+            "lives on the base repo, so fork PRs work unchanged."
+        ),
+    )
+    pu.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help=(
+            "Skip the MCP initialize round trip --pr runs before writing. "
+            "The probe resolves the ref once so a bad PR fails here instead "
+            "of inside every agent; skip it when offline or already warm."
+        ),
+    )
     pu.add_argument(
         "--server", help="MCP server name (default: derived from pyproject.toml)"
     )

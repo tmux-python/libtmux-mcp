@@ -1969,3 +1969,177 @@ def test_swap_after_backup_vanished_warns_and_writes_new_backup(
     assert "recorded backup is gone" in capsys.readouterr().err
     fresh = pathlib.Path(mcp_swap.load_state()[("cursor", "user")].backup_path)
     assert fresh.read_bytes() == swapped_bytes
+
+
+# ---------------------------------------------------------------------------
+# Pull-request targeting
+# ---------------------------------------------------------------------------
+
+
+class RemoteURLFixture(t.NamedTuple):
+    """One git remote spelling and the https URL it normalizes to.
+
+    Attributes
+    ----------
+    test_id : str
+        Identifier shown in the parametrized test name.
+    remote : str
+        A URL as ``git remote get-url`` may report it.
+    expected : str
+        The https form the pull-request ref is fetched from.
+    """
+
+    test_id: str
+    remote: str
+    expected: str
+
+
+REMOTE_URL_FIXTURES: list[RemoteURLFixture] = [
+    RemoteURLFixture(
+        "git_ssh_scheme", "git+ssh://git@github.com/o/n.git", "https://github.com/o/n"
+    ),
+    RemoteURLFixture(
+        "ssh_scheme", "ssh://git@github.com/o/n.git", "https://github.com/o/n"
+    ),
+    RemoteURLFixture(
+        "scp_shorthand", "git@github.com:o/n.git", "https://github.com/o/n"
+    ),
+    RemoteURLFixture(
+        "https_dotgit", "https://github.com/o/n.git", "https://github.com/o/n"
+    ),
+    RemoteURLFixture("https_plain", "https://github.com/o/n", "https://github.com/o/n"),
+    RemoteURLFixture(
+        "self_hosted",
+        "git@git.example.com:team/n.git",
+        "https://git.example.com/team/n",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    RemoteURLFixture._fields,
+    REMOTE_URL_FIXTURES,
+    ids=[f.test_id for f in REMOTE_URL_FIXTURES],
+)
+def test_normalize_remote_url(test_id: str, remote: str, expected: str) -> None:
+    """Every spelling git accepts resolves to the same https URL."""
+    assert test_id
+    assert mcp_swap._normalize_remote_url(remote) == expected
+
+
+def test_build_pr_spec_round_trips_through_pr_ref() -> None:
+    """A built pull-request spec is recognized by the reader that parses it."""
+    spec = mcp_swap.build_pr_spec("https://github.com/o/n", 114, "libtmux-mcp")
+
+    assert spec.command == "uvx"
+    assert spec.args == [
+        "--from",
+        "git+https://github.com/o/n@refs/pull/114/head",
+        "libtmux-mcp",
+    ]
+    assert spec.pr_ref() == ("https://github.com/o/n", 114)
+    assert spec.is_local_uv_directory() is False
+
+
+def test_pr_ref_ignores_non_pr_specs() -> None:
+    """A local checkout and a version pin are not pull-request specs."""
+    local = mcp_swap.McpServerSpec(
+        command="uv", args=["--directory", "/tmp", "run", "x"]
+    )
+    pinned = mcp_swap.McpServerSpec(command="uvx", args=["libtmux-mcp==0.1.0a2"])
+    branch = mcp_swap.McpServerSpec(
+        command="uvx", args=["--from", "git+https://github.com/o/n@main", "x"]
+    )
+
+    assert local.pr_ref() is None
+    assert pinned.pr_ref() is None
+    assert branch.pr_ref() is None
+
+
+def test_describe_spec_labels_a_pr_before_the_version_pin_branch(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A pull-request ref is described as a PR, not as a version pin.
+
+    The ref carries an ``@``, which the pin branch would otherwise report
+    as ``pypi pin: git+...@refs/pull/114/head``.
+    """
+    spec = mcp_swap.build_pr_spec("https://github.com/o/n", 114, "libtmux-mcp")
+
+    assert mcp_swap._describe_spec(spec, tmp_path) == "PR #114: https://github.com/o/n"
+
+
+def test_points_at_distinguishes_pr_numbers(tmp_path: pathlib.Path) -> None:
+    """A swap to one pull request is not treated as already pointing at another."""
+    target = mcp_swap.build_pr_spec("https://github.com/o/n", 114, "x")
+    same = mcp_swap.build_pr_spec("https://github.com/o/n", 114, "x")
+    other = mcp_swap.build_pr_spec("https://github.com/o/n", 115, "x")
+    local = mcp_swap.build_local_spec(tmp_path, "x")
+
+    assert mcp_swap._points_at(same, target, tmp_path) is True
+    assert mcp_swap._points_at(other, target, tmp_path) is False
+    assert mcp_swap._points_at(local, target, tmp_path) is False
+    assert mcp_swap._points_at(local, local, tmp_path) is True
+
+
+def test_preflight_accepts_a_server_that_answers_initialize(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A stdio server that replies to ``initialize`` passes preflight."""
+    server = tmp_path / "server.py"
+    server.write_text(
+        "import json, sys\n"
+        "line = sys.stdin.readline()\n"
+        "req = json.loads(line)\n"
+        'print(json.dumps({"jsonrpc": "2.0", "id": req["id"], "result": {}}))\n',
+        encoding="utf-8",
+    )
+    spec = mcp_swap.McpServerSpec(command=sys.executable, args=[str(server)])
+
+    assert mcp_swap.preflight_spec(spec, timeout=60) is None
+
+
+def test_preflight_reports_stderr_when_the_server_never_answers(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A server that dies is reported with the tail of its stderr."""
+    server = tmp_path / "server.py"
+    server.write_text(
+        'import sys\nsys.stderr.write("could not resolve ref\\n")\nsys.exit(1)\n',
+        encoding="utf-8",
+    )
+    spec = mcp_swap.McpServerSpec(command=sys.executable, args=[str(server)])
+
+    assert mcp_swap.preflight_spec(spec, timeout=60) == "could not resolve ref"
+
+
+def test_preflight_reports_a_command_that_cannot_launch() -> None:
+    """A missing binary is named rather than raising."""
+    spec = mcp_swap.McpServerSpec(command="mcp-swap-no-such-binary", args=[])
+
+    failure = mcp_swap.preflight_spec(spec, timeout=60)
+
+    assert failure is not None
+    assert "mcp-swap-no-such-binary" in failure
+
+
+def test_preflight_passes_spec_env_to_the_process(tmp_path: pathlib.Path) -> None:
+    """``spec.env`` reaches the launched server.
+
+    The cooldown bypass a prerelease branch needs travels this way, so a
+    preflight that dropped it would reject a spec that works in an agent.
+    """
+    server = tmp_path / "server.py"
+    server.write_text(
+        "import json, os, sys\n"
+        "req = json.loads(sys.stdin.readline())\n"
+        'if os.environ.get("MCP_SWAP_PROBE") != "1":\n'
+        "    sys.exit(2)\n"
+        'print(json.dumps({"jsonrpc": "2.0", "id": req["id"], "result": {}}))\n',
+        encoding="utf-8",
+    )
+    spec = mcp_swap.McpServerSpec(
+        command=sys.executable, args=[str(server)], env={"MCP_SWAP_PROBE": "1"}
+    )
+
+    assert mcp_swap.preflight_spec(spec, timeout=60) is None
