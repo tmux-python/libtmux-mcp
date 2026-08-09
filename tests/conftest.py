@@ -92,3 +92,21 @@ def wire_annotations(tool: t.Any) -> dict[str, t.Any]:
         mode="json", by_alias=True, exclude_none=True
     )
     return dumped
+
+
+def wire_input_schema(tool: t.Any) -> dict[str, t.Any]:
+    """Return a tool's argument schema under its PROTOCOL name.
+
+    ``tool.inputSchema`` is the SDK v1 attribute spelling. SDK v2
+    renamed it to ``input_schema`` and fastmcp answers the old name
+    through a deprecation shim it plans to remove; the suite runs with
+    that shim disabled (see the root ``conftest.py``), so the camelCase
+    read is an ``AttributeError`` here.
+
+    Dumping ``by_alias=True`` reads the name that goes on the wire,
+    which is what a client sees and what the protocol guarantees.
+    Sibling of :func:`wire_annotations`.
+    """
+    dumped: dict[str, t.Any] = tool.model_dump(mode="json", by_alias=True)
+    schema: dict[str, t.Any] = dumped["inputSchema"]
+    return schema

@@ -38,6 +38,15 @@ or as a bare name carrying only its type.
 
 ### Development
 
+**The test suite runs without FastMCP's camelCase compatibility shims**
+
+FastMCP still answers MCP SDK v1 attribute spellings through warn-once
+shims it plans to remove. Neither gate catches a test that depends on one:
+the type checker sees `Any`, and the warning fires once per attribute for a
+whole run. The suite now disables the shims, so a read that needs them
+fails the test that made it, and tests read argument schemas under the name
+that goes on the wire instead.
+
 #### CI actions updated to current majors
 
 Workflow actions moved to their current major releases: `actions/checkout` v7,

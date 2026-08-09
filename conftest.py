@@ -10,6 +10,7 @@ https://docs.pytest.org/en/stable/deprecations.html
 
 from __future__ import annotations
 
+import os
 import shutil
 import typing as t
 
@@ -23,6 +24,21 @@ from libtmux.window import Window
 
 if t.TYPE_CHECKING:
     import pathlib
+
+# Run the suite with fastmcp's camelCase compatibility bridge switched
+# off. fastmcp 4 still answers SDK v1 spellings like `tool.inputSchema`
+# through warn-once shims that are scheduled for removal, and neither
+# gate catches a read that depends on them: mypy sees `Any` (the SDK
+# objects arrive through `Client.__aenter__`, which is unannotated) and
+# the warning fires once per (class, attribute) for the whole run, so
+# one stray read is easy to miss. With the bridge off a surviving read
+# raises `AttributeError` and fails the test that made it.
+#
+# Set before anything imports fastmcp — its settings singleton is built
+# at import — and via the environment rather than the settings object so
+# the subprocess-based tests inherit it through `os.environ.copy()`.
+# `test_camelcase_bridge_is_disabled_for_the_suite` asserts it took.
+os.environ.setdefault("FASTMCP_MCP_CAMELCASE_COMPAT", "false")
 
 pytest_plugins = ["pytester", "sphinx.testing.fixtures"]
 
