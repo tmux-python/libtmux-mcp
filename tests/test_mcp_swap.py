@@ -2560,3 +2560,105 @@ def test_parser_rejects_a_bad_pr_argument(raw: str) -> None:
     """The parser exits rather than building a ref from a bad number."""
     with pytest.raises(SystemExit):
         mcp_swap.build_parser().parse_args(["use-local", "--pr", raw])
+
+
+# ---------------------------------------------------------------------------
+# Atomic writes through symlinked configs
+# ---------------------------------------------------------------------------
+
+
+def _build_symlink_chain(
+    root: pathlib.Path, hops: int
+) -> tuple[pathlib.Path, pathlib.Path, list[pathlib.Path]]:
+    """Create ``hops`` links ending at an existing config file.
+
+    Parameters
+    ----------
+    root : pathlib.Path
+        Empty directory where the link and target trees are created.
+    hops : int
+        Number of links in the chain.
+
+    Returns
+    -------
+    tuple of pathlib.Path, pathlib.Path, list of pathlib.Path
+        Entry path, final target, and each link in the chain.
+    """
+    target = root / "dotfiles" / "mcp.json"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"original\n")
+    link_dir = root / "home"
+    link_dir.mkdir()
+    links: list[pathlib.Path] = []
+    entry = target
+    for hop in range(hops):
+        link = link_dir / f"hop-{hop}.json"
+        link.symlink_to(entry)
+        links.append(link)
+        entry = link
+    return entry, target, links
+
+
+@pytest.mark.parametrize("hops", [1, 3], ids=["single", "chain"])
+def test_atomic_write_updates_the_symlink_target(
+    tmp_path: pathlib.Path, hops: int
+) -> None:
+    """The final target receives the bytes and every link survives."""
+    entry, target, links = _build_symlink_chain(tmp_path, hops)
+
+    mcp_swap.atomic_write(entry, b"swapped\n")
+
+    assert all(link.is_symlink() for link in links)
+    assert target.read_bytes() == b"swapped\n"
+    assert entry.read_bytes() == b"swapped\n"
+
+
+def test_atomic_write_stages_beside_the_symlink_target(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The temp file shares the final target's filesystem for atomic rename."""
+    entry, target, _links = _build_symlink_chain(tmp_path, 1)
+    real_mkstemp = mcp_swap.tempfile.mkstemp
+    staged_in: list[str | None] = []
+
+    def recording_mkstemp(*args: t.Any, **kwargs: t.Any) -> tuple[int, str]:
+        staged_in.append(kwargs.get("dir"))
+        return t.cast(tuple[int, str], real_mkstemp(*args, **kwargs))
+
+    monkeypatch.setattr(mcp_swap.tempfile, "mkstemp", recording_mkstemp)
+
+    mcp_swap.atomic_write(entry, b"swapped\n")
+
+    assert staged_in == [str(target.parent)]
+
+
+def test_symlinked_config_swap_and_revert_round_trip(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Swap and revert update the target without replacing the config link."""
+    info = mcp_swap.CLIS["cursor"]
+    target = fake_home / "dotfiles" / "cursor" / "mcp.json"
+    _write_json(target, {"mcpServers": {"libtmux": _pinned_json_entry()}})
+    original = target.read_bytes()
+    info.config_path.parent.mkdir(parents=True)
+    info.config_path.symlink_to(target)
+    parser = mcp_swap.build_parser()
+
+    assert (
+        mcp_swap.cmd_use_local(
+            parser.parse_args(
+                ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+            )
+        )
+        == 0
+    )
+    state = mcp_swap.load_state()["cursor", "user"]
+    backup = pathlib.Path(state.backup_path)
+    assert info.config_path.is_symlink()
+    assert backup.parent == info.config_path.parent
+    assert json.loads(target.read_text())["mcpServers"]["libtmux"]["command"] == "uv"
+
+    assert mcp_swap.cmd_revert(parser.parse_args(["revert", "--cli", "cursor"])) == 0
+    assert info.config_path.is_symlink()
+    assert target.read_bytes() == original
+    assert not backup.exists()

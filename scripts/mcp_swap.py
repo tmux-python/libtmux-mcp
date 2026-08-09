@@ -377,14 +377,24 @@ def dump_config_bytes(info: CLIInfo, config: t.Any, *, original: bytes) -> bytes
 
 
 def atomic_write(path: pathlib.Path, data: bytes) -> None:
-    """Write bytes to ``path`` via tempfile + ``os.replace`` to avoid partial writes."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    """Write bytes to ``path`` without replacing a symlinked config.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Destination path. A symlink resolves to its final target so the
+        write preserves every link in the chain.
+    data : bytes
+        Bytes to write atomically.
+    """
+    target = path.resolve() if path.is_symlink() else path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=target.name + ".", dir=str(target.parent))
     tmp = pathlib.Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-        tmp.replace(path)
+        tmp.replace(target)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
