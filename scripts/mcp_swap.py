@@ -325,8 +325,10 @@ CLIS: dict[CLIName, CLIInfo] = {
         binary="pi",
         # Read by the pi-mcp-adapter extension, not by pi itself; see
         # PI_ADAPTER_DIR. Claude-Desktop schema, so the standard dialect.
+        # The adapter parses through strip-json-comments with trailing
+        # commas allowed, so the file is JSONC despite the .json suffix.
         config_path=pathlib.Path.home() / ".pi" / "agent" / "mcp.json",
-        fmt="json",
+        fmt="jsonc",
         container=("mcpServers",),
         dialect="standard",
     ),
