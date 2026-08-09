@@ -25,7 +25,7 @@
 | Package | Required version |
 |---------|-----------------|
 | [libtmux](https://libtmux.git-pull.com/) | >= 0.62.0, < 1.0 |
-| [FastMCP](https://github.com/jlowin/fastmcp) | >= 3.4.2, < 4.0.0 |
+| [FastMCP](https://github.com/jlowin/fastmcp) | >= 4.0.0b2, < 5.0.0 |
 
 ## MCP clients
 
