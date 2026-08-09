@@ -1234,10 +1234,20 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             backup_suffix = f"{BACKUP_SUFFIX_PREFIX}{ts}"
             if cli == "claude":
                 backup_suffix += f"-{scope}"
-            backup_path = write_new_backup(
-                info.config_path.with_suffix(info.config_path.suffix + backup_suffix),
-                original_bytes,
-            )
+            # A backup that cannot be written must abort this CLI rather
+            # than degrade into a swap with nothing to revert to — an
+            # unwritable directory is the case that produces both.
+            try:
+                backup_path = write_new_backup(
+                    info.config_path.with_suffix(
+                        info.config_path.suffix + backup_suffix
+                    ),
+                    original_bytes,
+                )
+            except OSError as exc:
+                print(f"[{label}] cannot write backup: {exc}", file=sys.stderr)
+                had_error = 1
+                continue
             backup_note = f"backup: {backup_path}"
         try:
             atomic_write(info.config_path, new_bytes)

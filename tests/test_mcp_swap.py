@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import types
@@ -2480,3 +2481,58 @@ def test_revert_survives_a_corrupt_state_file(
     revert_args = mcp_swap.build_parser().parse_args(["revert", "--cli", "cursor"])
 
     assert mcp_swap.cmd_revert(revert_args) in (0, 1)
+
+
+def test_unwritable_directory_aborts_before_swapping(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A config whose backup cannot be written is left alone.
+
+    The backup is the only copy of the pre-swap config, so a swap that
+    could not take one would leave nothing to revert to. Aborting the
+    CLI is the safe half of that trade.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    info = mcp_swap.CLIS["grok"]
+    info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    original = '[mcp_servers.other]\ncommand = "x"\n'
+    info.config_path.write_text(original, encoding="utf-8")
+    info.config_path.parent.chmod(0o500)
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "grok"]
+    )
+
+    try:
+        assert mcp_swap.cmd_use_local(args) == 1
+        assert "backup" in capsys.readouterr().err
+        assert info.config_path.read_text() == original
+    finally:
+        info.config_path.parent.chmod(0o700)
+
+
+def test_unwritable_directory_does_not_stop_the_other_clis(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+) -> None:
+    """One unwritable config directory does not abort the whole run."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permissions")
+    blocked = mcp_swap.CLIS["grok"]
+    blocked.config_path.parent.mkdir(parents=True, exist_ok=True)
+    blocked.config_path.write_text('[mcp_servers.o]\ncommand = "x"\n', encoding="utf-8")
+    blocked.config_path.parent.chmod(0o500)
+    reachable = mcp_swap.CLIS["cursor"]
+    _write_json(reachable.config_path, {"mcpServers": {}})
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "grok", "--cli", "cursor"]
+    )
+
+    try:
+        assert mcp_swap.cmd_use_local(args) == 1
+        written = json.loads(reachable.config_path.read_text())
+        assert "libtmux" in written["mcpServers"]
+    finally:
+        blocked.config_path.parent.chmod(0o700)
