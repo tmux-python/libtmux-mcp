@@ -73,13 +73,16 @@ This script is best-effort and intentionally narrow:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import difflib
+import fcntl
 import json
 import os
 import pathlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -317,6 +320,15 @@ class SwapEntry:
     #: ``Lib/sched.py`` uses to break ties on ``Event(time, priority,
     #: sequence, …)``.
     seq_no: int
+    #: Exact destination changed by the swap. ``config_path`` may be a
+    #: symlink that is later repointed, so it is not sufficient recovery
+    #: identity. Older state entries omit this field and fall back to
+    #: ``config_path`` during revert.
+    target_path: str | None = None
+
+
+class SwapStateError(RuntimeError):
+    """Swap state is unsafe to use for a mutating operation."""
 
 
 # ---------------------------------------------------------------------------
@@ -389,10 +401,13 @@ def atomic_write(path: pathlib.Path, data: bytes) -> None:
     """
     target = path.resolve() if path.is_symlink() else path
     target.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
     fd, tmp_name = tempfile.mkstemp(prefix=target.name + ".", dir=str(target.parent))
     tmp = pathlib.Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as fh:
+            if mode is not None:
+                os.fchmod(fh.fileno(), mode)
             fh.write(data)
         tmp.replace(target)
     except Exception:
@@ -887,7 +902,7 @@ def preflight_spec(spec: McpServerSpec, *, timeout: float = 300.0) -> str | None
 # ---------------------------------------------------------------------------
 
 
-def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
+def load_state(*, strict: bool = False) -> dict[tuple[CLIName, Scope], SwapEntry]:
     """Read the swap-state file, returning an empty mapping when absent.
 
     The state file's schema is internal — no compatibility contract —
@@ -900,28 +915,61 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
     silently: it means the record of every swap is gone, so ``revert``
     is about to say there is nothing to unwind while swapped configs
     and their backups sit on disk. Saying so is what lets the operator
-    go find those backups.
+    go find those backups. Mutating callers pass ``strict=True`` so an
+    unreadable or malformed record blocks changes instead of being
+    overwritten as empty state.
     """
     if not STATE_FILE.exists():
         return {}
     try:
         raw = json.loads(STATE_FILE.read_text())
     except (OSError, ValueError) as exc:
-        print(f"swap state unreadable ({STATE_FILE}): {exc}", file=sys.stderr)
+        message = f"swap state unreadable ({STATE_FILE}): {exc}"
+        print(message, file=sys.stderr)
+        if strict:
+            raise SwapStateError(message) from exc
         return {}
-    entries = raw.get("entries", {}) if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        if strict:
+            message = f"swap state has invalid shape: {STATE_FILE}"
+            print(message, file=sys.stderr)
+            raise SwapStateError(message)
+        return {}
+    entries = raw.get("entries", {})
     if not isinstance(entries, dict):
+        if strict:
+            message = f"swap state has invalid entries: {STATE_FILE}"
+            print(message, file=sys.stderr)
+            raise SwapStateError(message)
         entries = {}
     out: dict[tuple[CLIName, Scope], SwapEntry] = {}
     for k, v in entries.items():
         parsed = _parse_state_key(k)
         if parsed is None:
+            if strict:
+                message = f"swap state has invalid key {k!r}: {STATE_FILE}"
+                print(message, file=sys.stderr)
+                raise SwapStateError(message)
             continue
         entry = _parse_state_entry(v)
         if entry is None:
+            if strict:
+                message = f"swap state has invalid entry {k!r}: {STATE_FILE}"
+                print(message, file=sys.stderr)
+                raise SwapStateError(message)
             continue
         out[parsed] = entry
     return out
+
+
+@contextlib.contextmanager
+def _state_lock() -> t.Iterator[None]:
+    """Serialize config mutations that share the swap state file."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    fd = os.open(STATE_DIR / "state.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        yield
 
 
 def save_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
@@ -936,13 +984,10 @@ def save_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
     atomic_write(STATE_FILE, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
 
 
-def clear_state(keys: t.Iterable[tuple[CLIName, Scope]]) -> None:
-    """Remove the given ``(cli, scope)`` keys; delete the file if empty."""
-    current = load_state()
-    for key in keys:
-        current.pop(key, None)
-    if current:
-        save_state(current)
+def _save_or_clear_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
+    """Persist ``entries``, removing the state file when the mapping is empty."""
+    if entries:
+        save_state(entries)
     elif STATE_FILE.exists():
         STATE_FILE.unlink()
 
@@ -1100,7 +1145,7 @@ def _points_at(
     return current.is_local_uv_directory() and current.local_repo_path() == repo
 
 
-def cmd_use_local(args: argparse.Namespace) -> int:
+def _cmd_use_local(args: argparse.Namespace) -> int:
     """Rewrite each target CLI's config to run the repo, or a pull request.
 
     Without ``--pr`` the entry runs the repo's checkout via ``uv``; with
@@ -1157,7 +1202,7 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             return 1
 
     ts = time.strftime("%Y%m%d%H%M%S")
-    state = load_state()
+    state = load_state(strict=True)
     had_error = 0
     for cli in targets:
         scope = _normalize_scope(cli, args.scope)
@@ -1165,7 +1210,10 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         info = CLIS[cli]
         if not info.config_path.exists():
             print(f"[{label}] skip — config not found at {info.config_path}")
+            had_error = 1
             continue
+        target_path = info.config_path.resolve()
+        target_info = dataclasses.replace(info, config_path=target_path)
         # Wrap the read + shape-guarded mutation so an unreadable config
         # surfaces as a clean per-CLI error instead of an uncaught traceback.
         # The three arms are the three ways it fails: a shape this script
@@ -1174,8 +1222,8 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         # unopenable one raises OSError. Same trio ``doctor`` catches, and
         # the same per-CLI continuation the write-failure handler below uses.
         try:
-            original_bytes = info.config_path.read_bytes()
-            config = load_config(info)
+            original_bytes = target_path.read_bytes()
+            config = load_config(target_info)
             current = get_server(cli, config, server, repo, scope=scope)
             if (
                 current
@@ -1259,17 +1307,6 @@ def cmd_use_local(args: argparse.Namespace) -> int:
                 had_error = 1
                 continue
             backup_note = f"backup: {backup_path}"
-        try:
-            atomic_write(info.config_path, new_bytes)
-            _revalidate(info)
-        except Exception as exc:
-            atomic_write(info.config_path, original_bytes)
-            print(
-                f"[{label}] write failed ({exc}); backup at {backup_path}",
-                file=sys.stderr,
-            )
-            had_error = 1
-            continue
         if prior is not None and backup_path == prior_backup:
             # ``swapped_at`` mirrors the timestamp in the backup filename
             # and ``seq_no`` fixes the backup's place in the unwind
@@ -1278,19 +1315,68 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         else:
             seq_no = max((e.seq_no for e in state.values()), default=-1) + 1
             swapped_at = ts
-        state[(cli, scope)] = SwapEntry(
+        next_state = dict(state)
+        next_state[(cli, scope)] = SwapEntry(
             config_path=str(info.config_path),
             backup_path=str(backup_path),
             server=server,
             action=action,
             swapped_at=swapped_at,
             seq_no=seq_no,
+            target_path=str(target_path),
         )
+        try:
+            save_state(next_state)
+        except OSError as exc:
+            print(
+                f"[{label}] cannot save recovery state ({exc}); config unchanged; "
+                f"backup at {backup_path}",
+                file=sys.stderr,
+            )
+            had_error = 1
+            continue
+        previous_state = state
+        state = next_state
+        try:
+            atomic_write(target_path, new_bytes)
+            _revalidate(target_info)
+        except Exception as exc:
+            try:
+                atomic_write(target_path, original_bytes)
+            except Exception as rollback_exc:
+                rollback_note = f"; rollback failed ({rollback_exc})"
+            else:
+                rollback_note = "; original config restored"
+                try:
+                    _save_or_clear_state(previous_state)
+                except OSError as state_exc:
+                    rollback_note += f"; recovery state cleanup failed ({state_exc})"
+                else:
+                    state = previous_state
+            print(
+                f"[{label}] write failed ({exc}){rollback_note}; "
+                f"backup at {backup_path}",
+                file=sys.stderr,
+            )
+            had_error = 1
+            continue
         print(f"[{label}] {action}; {backup_note}")
 
-    if not args.dry_run:
-        save_state(state)
     return had_error
+
+
+def cmd_use_local(args: argparse.Namespace) -> int:
+    """Run :func:`_cmd_use_local` under the shared mutation lock."""
+    if args.dry_run:
+        return _cmd_use_local(args)
+    try:
+        with _state_lock():
+            return _cmd_use_local(args)
+    except SwapStateError:
+        return 1
+    except OSError as exc:
+        print(f"swap state unavailable: {exc}", file=sys.stderr)
+        return 1
 
 
 def _revalidate(info: CLIInfo) -> None:
@@ -1298,7 +1384,7 @@ def _revalidate(info: CLIInfo) -> None:
     load_config(info)
 
 
-def cmd_revert(args: argparse.Namespace) -> int:
+def _cmd_revert(args: argparse.Namespace) -> int:
     """Restore each target CLI's config from the backup recorded in the state file.
 
     Without ``--scope``, every recorded entry for the targeted CLIs is
@@ -1307,14 +1393,14 @@ def cmd_revert(args: argparse.Namespace) -> int:
     the matching scope is reverted; the parameter is silently coerced
     to ``"user"`` for non-Claude CLIs.
     """
-    state = load_state()
+    state = load_state(strict=True)
     # Without --cli, revert every CLI that has any recorded swap.
     targets = list(args.cli) if args.cli else list({cli for cli, _scope in state})
     if not targets:
         print("no recorded swaps — nothing to revert", file=sys.stderr)
         return 1
 
-    reverted: list[tuple[CLIName, Scope]] = []
+    had_error = 0
     for cli in targets:
         if args.scope is not None:
             wanted_scopes: tuple[Scope, ...] = (_normalize_scope(cli, args.scope),)
@@ -1347,28 +1433,56 @@ def cmd_revert(args: argparse.Namespace) -> int:
             entry = state[key]
             label = f"{sc_cli}:{sc_scope}" if sc_cli == "claude" else sc_cli
             backup = pathlib.Path(entry.backup_path)
-            dest = pathlib.Path(entry.config_path)
+            dest = pathlib.Path(entry.target_path or entry.config_path)
             if not backup.exists():
                 print(f"[{label}] backup missing: {backup}", file=sys.stderr)
-                continue
+                had_error = 1
+                break
             if args.dry_run:
                 print(f"[{label}] would restore {dest} from {backup}")
                 continue
-            atomic_write(dest, backup.read_bytes())
-            # Backup served its purpose; LIFO unwind for this layer is
-            # complete. Delete on success, keep on error — same idiom
-            # CPython's ``tempfile.NamedTemporaryFile`` uses
-            # (Lib/tempfile.py:614-618). If ``atomic_write`` had raised,
-            # this line wouldn't run and the backup would survive for
-            # post-mortem; on success the backup is redundant and would
-            # otherwise accumulate forever across swap/revert cycles.
-            backup.unlink()
+            try:
+                atomic_write(dest, backup.read_bytes())
+            except OSError as exc:
+                print(f"[{label}] restore failed: {exc}", file=sys.stderr)
+                had_error = 1
+                break
+            next_state = dict(state)
+            next_state.pop(key)
+            try:
+                _save_or_clear_state(next_state)
+            except OSError as exc:
+                print(
+                    f"[{label}] restored, but recovery state could not be updated: "
+                    f"{exc}",
+                    file=sys.stderr,
+                )
+                had_error = 1
+                break
+            state = next_state
+            try:
+                backup.unlink()
+            except OSError as exc:
+                print(
+                    f"[{label}] restored; backup cleanup failed: {exc}", file=sys.stderr
+                )
+                had_error = 1
             print(f"[{label}] restored from {backup}")
-            reverted.append(key)
+    return had_error
 
-    if not args.dry_run and reverted:
-        clear_state(reverted)
-    return 0
+
+def cmd_revert(args: argparse.Namespace) -> int:
+    """Run :func:`_cmd_revert` under the shared mutation lock."""
+    if args.dry_run:
+        return _cmd_revert(args)
+    try:
+        with _state_lock():
+            return _cmd_revert(args)
+    except SwapStateError:
+        return 1
+    except OSError as exc:
+        print(f"swap state unavailable: {exc}", file=sys.stderr)
+        return 1
 
 
 # ---------------------------------------------------------------------------
