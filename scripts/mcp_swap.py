@@ -885,11 +885,23 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
     (those that don't parse as ``cli:scope``) and entries with a
     non-coercible ``seq_no`` or missing required fields are dropped
     silently so a hand-edited file cannot crash the script.
+
+    A file that will not parse at all is reported rather than dropped
+    silently: it means the record of every swap is gone, so ``revert``
+    is about to say there is nothing to unwind while swapped configs
+    and their backups sit on disk. Saying so is what lets the operator
+    go find those backups.
     """
     if not STATE_FILE.exists():
         return {}
-    raw = json.loads(STATE_FILE.read_text())
-    entries = raw.get("entries", {})
+    try:
+        raw = json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError) as exc:
+        print(f"swap state unreadable ({STATE_FILE}): {exc}", file=sys.stderr)
+        return {}
+    entries = raw.get("entries", {}) if isinstance(raw, dict) else {}
+    if not isinstance(entries, dict):
+        entries = {}
     out: dict[tuple[CLIName, Scope], SwapEntry] = {}
     for k, v in entries.items():
         parsed = _parse_state_key(k)

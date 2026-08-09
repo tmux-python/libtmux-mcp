@@ -2399,3 +2399,84 @@ def test_unreadable_config_does_not_stop_the_other_clis(
 
     written = json.loads(good.config_path.read_text())
     assert "libtmux" in written["mcpServers"]
+
+
+class CorruptStateCase(t.NamedTuple):
+    """A swap-state file body that cannot yield entries.
+
+    Attributes
+    ----------
+    test_id : str
+        Identifier shown in the parametrized test name.
+    body : str
+        Exact text written to the state file.
+    """
+
+    test_id: str
+    body: str
+
+
+CORRUPT_STATE: list[CorruptStateCase] = [
+    CorruptStateCase("not_json", "{ not json at all"),
+    CorruptStateCase("empty_file", ""),
+    CorruptStateCase("json_but_a_list", "[1, 2, 3]"),
+    CorruptStateCase("entries_not_a_mapping", '{"entries": "nope"}'),
+]
+
+
+@pytest.mark.parametrize(
+    CorruptStateCase._fields,
+    CORRUPT_STATE,
+    ids=[c.test_id for c in CORRUPT_STATE],
+)
+def test_corrupt_swap_state_is_reported_not_raised(
+    fake_home: pathlib.Path,
+    test_id: str,
+    body: str,
+) -> None:
+    """A state file that yields no entries degrades to empty, never raises.
+
+    ``revert`` and ``doctor`` both read this file before doing anything,
+    so a hand-edited or truncated one would otherwise take down every
+    command that consults it.
+    """
+    assert test_id
+    mcp_swap.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mcp_swap.STATE_FILE.write_text(body, encoding="utf-8")
+
+    assert mcp_swap.load_state() == {}
+
+
+def test_unparseable_swap_state_names_the_file(
+    fake_home: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unreadable state file says so, because backups are now orphaned.
+
+    Returning empty silently would let ``revert`` report nothing to do
+    while swapped configs and their backups sit on disk.
+    """
+    mcp_swap.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mcp_swap.STATE_FILE.write_text("{ not json", encoding="utf-8")
+
+    mcp_swap.load_state()
+
+    assert str(mcp_swap.STATE_FILE) in capsys.readouterr().err
+
+
+def test_revert_survives_a_corrupt_state_file(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+) -> None:
+    """``revert`` reports nothing to unwind rather than crashing."""
+    info = mcp_swap.CLIS["cursor"]
+    _write_json(info.config_path, {"mcpServers": {}})
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+    mcp_swap.STATE_FILE.write_text("{ corrupted", encoding="utf-8")
+
+    revert_args = mcp_swap.build_parser().parse_args(["revert", "--cli", "cursor"])
+
+    assert mcp_swap.cmd_revert(revert_args) in (0, 1)
