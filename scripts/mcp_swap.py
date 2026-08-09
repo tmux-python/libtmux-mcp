@@ -1572,7 +1572,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ps.set_defaults(func=cmd_status)
 
-    pu = sub.add_parser("use-local", help="rewrite configs to run this checkout")
+    pu = sub.add_parser(
+        "use-local", help="rewrite configs to run this checkout, or a pull request"
+    )
     pu.add_argument("--repo", default=".", help="repo root (default: .)")
     pu.add_argument(
         "--pr",
