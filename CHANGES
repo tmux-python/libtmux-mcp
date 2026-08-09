@@ -16,24 +16,12 @@ or as a bare name carrying only its type.
 
 ### Development
 
-**`mcp_swap` can point every agent CLI at a pull request**
+**`mcp_swap` can target a pull request**
 
-`use-local --pr N` rewrites each CLI's entry to run the pull request's head
-through `uvx` instead of a working copy. Nothing is checked out, so reverting
-is the ordinary config restore with no worktree to prune, and a pull request
-from a fork needs no special handling. The swap completes an MCP `initialize`
-round trip against the resolved command first, so a ref that does not exist —
-or a dependency that cannot resolve — fails before it reaches any config
-rather than surfacing as an opaque startup error inside every agent.
-
-**`mcp_swap` rewrites only the entry it was asked to change**
-
-Swapping one MCP entry in a JSON config also re-encoded every non-ASCII
-character in the file as a `\uXXXX` escape and appended a trailing newline the
-file may never have had. In `~/.claude.json` that reached model labels and
-prompt history the swap never read, turning a one-entry edit into a diff
-spanning the file. A config the swap does not modify now comes back
-byte-identical, asserted across the shapes the agent CLIs write.
+`use-local --pr N` points every agent CLI at a pull request's head, so
+reviewing a branch across your agents needs no checkout and leaves nothing to
+clean up afterwards. Swapping a config no longer rewrites text it was not
+asked to change. (#115)
 
 #### CI actions updated to current majors
 
