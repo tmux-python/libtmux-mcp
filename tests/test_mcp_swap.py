@@ -2295,6 +2295,7 @@ PRESERVED_JSONC: list[tuple[str, str]] = [
     ("literal_backslash_u", '{\n  "a": "C:\\\\u0041"\n}\n'),
     ("emoji_and_cjk", '{\n  "a": "🙂 日本語 café"\n}\n'),
     ("empty_object", "{}\n"),
+    ("comment_only_object", '{\n  "mcp": {\n    // none yet\n  }\n}\n'),
 ]
 
 
@@ -2366,6 +2367,46 @@ def test_jsonc_config_is_not_written_through_the_toml_writer(
     text = out.decode()
     assert text.lstrip().startswith("{")
     assert mcp_swap._jsonc_loads(text)["mcp"]["x"]["type"] == "local"
+
+
+def test_jsonc_merge_inserting_into_a_comment_only_object_keeps_the_comment() -> None:
+    """Regression: blanking made a documented object look empty.
+
+    The emptiness guard reads the comment-blanked text, where a comment is
+    indistinguishable from whitespace, so insertion used to splice over the
+    whole interior and take the comment with it.
+    """
+    src = '{\n  "mcp": {\n    // why there are no servers yet\n  }\n}\n'
+    data = mcp_swap._jsonc_loads(src)
+    data["mcp"]["tmux"] = {"type": "local", "command": ["uv"]}
+    out = mcp_swap._jsonc_merge(src, data, ensure_ascii=False)
+    assert out == (
+        '{\n  "mcp": {\n    // why there are no servers yet\n'
+        '    "tmux": {\n      "type": "local",\n      "command": [\n'
+        '        "uv"\n      ]\n    }\n  }\n}\n'
+    )
+
+
+def test_jsonc_merge_inserting_into_a_comment_only_document_keeps_the_comment() -> None:
+    """The same splice at the root, where there is no enclosing member."""
+    src = "{\n  // root rationale\n}\n"
+    data = mcp_swap._jsonc_loads(src)
+    data["mcp"] = {}
+    out = mcp_swap._jsonc_merge(src, data, ensure_ascii=False)
+    assert out == '{\n  // root rationale\n  "mcp": {}\n}\n'
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["{}\n", "{ }\n", '{\n  "mcp": {}\n}\n', '{\n  "mcp": {\n  }\n}\n'],
+)
+def test_jsonc_merge_inserting_into_an_empty_object_is_unchanged(body: str) -> None:
+    """A genuinely empty interior still collapses to the old splice point."""
+    data = mcp_swap._jsonc_loads(body)
+    data.setdefault("mcp", {})["tmux"] = {"type": "local"}
+    out = mcp_swap._jsonc_merge(body, data, ensure_ascii=False)
+    assert mcp_swap._jsonc_loads(out)["mcp"]["tmux"] == {"type": "local"}
+    assert out.rstrip().endswith("}")
 
 
 def test_jsonc_comment_blanking_preserves_offsets() -> None:

@@ -691,8 +691,12 @@ def _jsonc_next_edit(
                 return tail, tail, f',\n{pad}"{key}": {body}'
             if blanked[obj_start + 1 : obj_end - 1].strip():
                 return None
+            # Blanking hid any comment the object holds, so measure the
+            # interior in the original text and splice after it, not over it.
+            interior = text[obj_start + 1 : obj_end - 1]
+            anchor = obj_start + 1 + len(interior.rstrip())
             closing = "  " * (depth - 1)
-            return obj_start + 1, obj_end - 1, f'\n{pad}"{key}": {body}\n{closing}'
+            return anchor, obj_end - 1, f'\n{pad}"{key}": {body}\n{closing}'
         current = json.loads(
             _jsonc_blank_trailing_commas(blanked[member.value_start : member.value_end])
         )
