@@ -3305,6 +3305,9 @@ PRESERVED_JSONC: list[JSONFidelityCase] = [
     JSONFidelityCase("emoji_and_cjk", '{\n  "a": "🙂 日本語 café"\n}\n'),
     JSONFidelityCase("empty_object", "{}\n"),
     JSONFidelityCase("comment_only_object", '{\n  "mcp": {\n    // none yet\n  }\n}\n'),
+    JSONFidelityCase(
+        "comment_before_the_delimiter", '{\n  "a": 1 /* x */,\n  "b": 2\n}\n'
+    ),
 ]
 
 
@@ -3376,6 +3379,88 @@ def test_jsonc_config_is_not_written_through_the_toml_writer(
     text = out.decode()
     assert text.lstrip().startswith("{")
     assert mcp_swap._jsonc_loads(text)["mcp"]["x"]["type"] == "local"
+
+
+class JsoncDeletionCase(t.NamedTuple):
+    """A member removal whose exact resulting text is pinned.
+
+    Attributes
+    ----------
+    test_id : str
+        Identifier shown in the parametrized test name.
+    body : str
+        The config text before the merge.
+    data : dict[str, t.Any]
+        The reconciled data the merge is driven with.
+    expected : str
+        The exact text the merge must produce.
+    """
+
+    test_id: str
+    body: str
+    data: dict[str, t.Any]
+    expected: str
+
+
+JSONC_DELETIONS: list[JsoncDeletionCase] = [
+    JsoncDeletionCase(
+        "first_member",
+        '{\n  "a": 1,\n  "b": 2\n}\n',
+        {"b": 2},
+        '{\n  "b": 2\n}\n',
+    ),
+    JsoncDeletionCase(
+        "middle_member",
+        '{\n  "a": 1,\n  "b": 2,\n  "c": 3\n}\n',
+        {"a": 1, "c": 3},
+        '{\n  "a": 1,\n  "c": 3\n}\n',
+    ),
+    JsoncDeletionCase(
+        "last_member",
+        '{\n  "a": 1,\n  "b": 2\n}\n',
+        {"a": 1},
+        '{\n  "a": 1\n}\n',
+    ),
+    JsoncDeletionCase(
+        "comma_hidden_behind_a_comment",
+        '{\n  "a": 1 /* x, y */,\n  "b": 2\n}\n',
+        {"b": 2},
+        '{\n  "b": 2\n}\n',
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    JsoncDeletionCase._fields,
+    JSONC_DELETIONS,
+    ids=[c.test_id for c in JSONC_DELETIONS],
+)
+def test_jsonc_merge_removing_a_member_takes_exactly_one_comma(
+    test_id: str, body: str, data: dict[str, t.Any], expected: str
+) -> None:
+    """Regression: a removal took the comma on both sides of the member.
+
+    Deleting a member between two others left its neighbours undelimited,
+    so the next merge pass raised ``JSONDecodeError`` and the swap reported
+    the config unreadable. ``comma_hidden_behind_a_comment`` covers the
+    partner defect: the delimiter scan read the raw text, where a comma
+    inside a comment passes for the separator.
+    """
+    assert test_id
+    assert mcp_swap._jsonc_merge(body, data, ensure_ascii=False) == expected
+
+
+def test_jsonc_merge_removing_a_middle_member_stays_parseable() -> None:
+    """The shape that surfaced it: an opencode entry losing optional fields."""
+    src = (
+        '{\n  "mcp": {\n    "tmux": {\n      "type": "local",\n'
+        '      "enabled": true,\n      "timeout": 5000,\n'
+        '      "command": ["uvx", "old"]\n    }\n  }\n}\n'
+    )
+    data = mcp_swap._jsonc_loads(src)
+    data["mcp"]["tmux"] = {"type": "local", "command": ["uv", "run", "x"]}
+    out = mcp_swap._jsonc_merge(src, data, ensure_ascii=False)
+    assert mcp_swap._jsonc_loads(out) == data
 
 
 def test_jsonc_merge_inserting_into_a_comment_only_object_keeps_the_comment() -> None:

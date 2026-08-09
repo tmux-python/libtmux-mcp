@@ -745,18 +745,20 @@ def _jsonc_next_edit(
                 _jsonc_render(value, depth, ensure_ascii=ensure_ascii),
             )
 
-    for member in members:
+    for index, member in enumerate(members):
         if member.key in data:
             continue
-        preceding = max(
-            (other.end for other in members if other.end <= member.start),
-            default=obj_start + 1,
-        )
-        trailing = text[member.end : obj_end]
+        # Exactly one delimiter leaves with the member: the comma before
+        # it, or, for the first member which has none, the comma after.
+        if index:
+            return members[index - 1].end, member.end, ""
+        # Read that comma out of the blanked text -- one inside a comment
+        # is not a delimiter, and a real one behind a comment still is.
+        trailing = blanked[member.end : obj_end]
         drop_to = member.end
         if trailing.lstrip(_JSON_WS).startswith(","):
             drop_to += trailing.index(",") + 1
-        return preceding, drop_to, ""
+        return obj_start + 1, drop_to, ""
     return None
 
 
