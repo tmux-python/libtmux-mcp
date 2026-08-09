@@ -92,8 +92,20 @@ import typing as t
 import tomlkit
 import tomlkit.items
 
-CLIName = t.Literal["claude", "codex", "cursor", "gemini", "grok", "agy"]
-ALL_CLIS: tuple[CLIName, ...] = ("claude", "codex", "cursor", "gemini", "grok", "agy")
+CLIName = t.Literal["claude", "codex", "cursor", "gemini", "grok", "agy", "opencode"]
+ALL_CLIS: tuple[CLIName, ...] = (
+    "claude",
+    "codex",
+    "cursor",
+    "gemini",
+    "grok",
+    "agy",
+    "opencode",
+)
+
+#: Width of the CLI-name column in ``detect`` output, derived rather
+#: than hardcoded so adding a longer name cannot silently misalign it.
+_CLI_COLUMN = max(len(name) for name in ALL_CLIS) + 1
 
 #: Claude config scope: ``"user"`` targets the user/system-level top-level
 #: ``mcpServers`` fallback that applies to every project without its own
@@ -196,10 +208,12 @@ BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
 #: the Claude-Desktop lineage every CLI here started from — scalar
 #: ``command``, sibling ``args`` list, optional ``env`` table.
 #: ``claude`` is that shape plus an explicit ``type``/``env`` that
-#: Claude writes even when empty. Dialects exist because the shape is
-#: not implied by the file format: two CLIs sharing ``fmt="json"`` can
-#: still disagree about how one entry is spelled.
-Dialect = t.Literal["standard", "claude"]
+#: Claude writes even when empty. ``opencode`` packs argv into a single
+#: ``command`` array and spells the environment table ``environment``.
+#: Dialects exist because the shape is not implied by the file format:
+#: two CLIs sharing ``fmt="json"`` can still disagree about how one
+#: entry is spelled.
+Dialect = t.Literal["standard", "claude", "opencode"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -268,7 +282,30 @@ CLIS: dict[CLIName, CLIInfo] = {
         container=("mcpServers",),
         dialect="standard",
     ),
+    "opencode": CLIInfo(
+        name="opencode",
+        binary="opencode",
+        # opencode reads config.json, opencode.json and opencode.jsonc from
+        # this directory and merges all three, with .jsonc winning. It writes
+        # to the first that exists, defaulting to .jsonc — so that is the one
+        # file a swap can own without being shadowed.
+        config_path=(
+            pathlib.Path(
+                os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config"
+            )
+            / "opencode"
+            / "opencode.jsonc"
+        ),
+        fmt="jsonc",
+        container=("mcp",),
+        dialect="opencode",
+    ),
 }
+
+#: Written into an opencode config this script creates from nothing.
+#: opencode injects the same line itself on first load; seeding it here
+#: keeps the swap from being followed by a surprise rewrite.
+OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json"
 
 
 #: A ``--from`` argument pointing at a pull request's head commit.
@@ -296,7 +333,15 @@ class McpServerSpec:
                 "args": list(self.args),
                 "env": dict(self.env),
             }
-        out: dict[str, t.Any] = {"command": self.command, "args": list(self.args)}
+        if dialect == "opencode":
+            # One array for argv, and the table is "environment" -- an
+            # "env" key here is dropped in silence, and a scalar command
+            # is a decode error that takes the whole config down with it.
+            out = {"type": "local", "command": [self.command, *self.args]}
+            if self.env:
+                out["environment"] = dict(self.env)
+            return out
+        out = {"command": self.command, "args": list(self.args)}
         if self.env:
             out["env"] = dict(self.env)
         return out
@@ -1043,6 +1088,10 @@ def set_server(
         servers[name] = spec.to_entry_dict("claude")
         return "replaced" if had else "added"
     info = CLIS[cli]
+    if info.dialect == "opencode" and not config:
+        # Seeding from nothing: opencode rewrites the file on load to add
+        # this line, so writing it now avoids an immediate second edit.
+        config["$schema"] = OPENCODE_SCHEMA_URL
     servers = _server_map(info, config, create=True)
     had = name in servers
     entry = spec.to_entry_dict(info.dialect)
@@ -1083,7 +1132,16 @@ def delete_server(
 
 
 def _spec_from_entry(entry: t.Any, *, info: CLIInfo) -> McpServerSpec:
-    """Convert a raw config entry (dict or tomlkit Table) into an McpServerSpec."""
+    """Convert a raw config entry (dict or tomlkit Table) into an McpServerSpec.
+
+    Every dialect is normalised down to the portable scalar-command
+    shape, so the helpers that reason about a spec —
+    :meth:`McpServerSpec.is_local_uv_directory`, :meth:`McpServerSpec.pr_ref`,
+    ``_points_at`` — stay dialect-agnostic. Skipping this is not a
+    cosmetic loss: an unsplit array command makes the "already local, no
+    change" check miss, and every run rewrites a config it did not need
+    to touch.
+    """
     # tomlkit items quack like dicts/lists; coerce to plain Python for our spec.
     if info.fmt == "toml":
         entry = (
@@ -1091,10 +1149,20 @@ def _spec_from_entry(entry: t.Any, *, info: CLIInfo) -> McpServerSpec:
             if isinstance(entry, tomlkit.items.Table)
             else dict(entry)
         )
-    command = str(entry.get("command", ""))
-    raw_args = entry.get("args", [])
-    args = [str(a) for a in raw_args] if raw_args else []
-    raw_env = entry.get("env") or {}
+    if info.dialect == "opencode":
+        raw_command = entry.get("command", [])
+        argv = (
+            [str(part) for part in raw_command]
+            if isinstance(raw_command, (list, tuple))
+            else [str(raw_command)]
+        )
+        command, args = (argv[0], argv[1:]) if argv else ("", [])
+        raw_env = entry.get("environment") or {}
+    else:
+        command = str(entry.get("command", ""))
+        raw_args = entry.get("args", [])
+        args = [str(a) for a in raw_args] if raw_args else []
+        raw_env = entry.get("env") or {}
     env = {str(k): str(v) for k, v in dict(raw_env).items()}
     return McpServerSpec(command=command, args=args, env=env)
 
@@ -1440,7 +1508,7 @@ def cmd_detect(args: argparse.Namespace) -> int:
         if not p.config_found:
             extra.append(f"config missing: {CLIS[p.cli].config_path}")
         suffix = f"  ({', '.join(extra)})" if extra else ""
-        print(f"  [{flag}] {p.cli:<7}{suffix}")
+        print(f"  [{flag}] {p.cli:<{_CLI_COLUMN}}{suffix}")
     return 0
 
 
