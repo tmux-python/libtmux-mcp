@@ -744,6 +744,19 @@ def test_server_advertised_as_tmux() -> None:
     assert mcp.name == "tmux"
 
 
+def test_camelcase_bridge_is_disabled_for_the_suite() -> None:
+    """The suite runs without fastmcp's camelCase compatibility shims.
+
+    The root ``conftest.py`` clears the setting through the environment,
+    which only takes effect if nothing imported fastmcp first. Assert it
+    here so a future import-order change fails loudly instead of quietly
+    handing the suite back its safety net.
+    """
+    import fastmcp
+
+    assert fastmcp.settings.mcp_camelcase_compat is False
+
+
 def test_build_mcp_server_registers_catalog_idempotently() -> None:
     """The FastMCP factory returns a populated server every time."""
     import asyncio

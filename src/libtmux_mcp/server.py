@@ -12,6 +12,7 @@ import shutil
 import typing as t
 
 from fastmcp import FastMCP
+from fastmcp.resources import ResourceSecurity
 from fastmcp.server.middleware.timing import TimingMiddleware
 
 if t.TYPE_CHECKING:
@@ -362,6 +363,12 @@ mcp = FastMCP(
     ),
     website_url="https://libtmux-mcp.git-pull.com/",
     lifespan=_lifespan,
+    # No resource parameter is ever joined onto a path, so the absolute-path
+    # screen only misfires: on the socket paths list_servers hands back, and
+    # on `<letter>:<rest>` session names tmux accepts. Traversal screening
+    # stays on — socket_name reaches `tmux -L`, where `../..` really does
+    # place the socket outside the tmux socket directory.
+    resource_security=ResourceSecurity(reject_absolute_paths=False),
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early
     #      as possible so timing captures middleware cost too.
@@ -370,8 +377,8 @@ mcp = FastMCP(
     #      ToolResult(is_error=True) here, so truncation preserves that
     #      flag instead of turning expected failures into schema errors.
     #   3. ToolErrorResultMiddleware — converts tool-call failures to
-    #      rich ToolResult(is_error=True) results and transforms
-    #      resource errors to MCP code -32002. Must stay OUTSIDE the
+    #      rich ToolResult(is_error=True) results and leaves non-tool
+    #      messages to the inherited transform. Must stay OUTSIDE the
     #      audit + retry + safety trio: all three depend on exception
     #      semantics (audit catches to record outcome=error, retry
     #      matches LibTmuxException via __cause__, and safety's tier

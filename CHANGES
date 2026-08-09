@@ -6,6 +6,28 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**Minimum `fastmcp>=4.0.0b2`** (was `>=3.4.2`)
+
+libtmux-mcp now tracks the FastMCP 4 prerelease line. The requirement is a
+floor rather than an exact pin, so installs pick up 4.0.0 once it ships
+without another release here. FastMCP 4 builds on MCP Python SDK v2, which
+brings `mcp>=2.0.0` and pydantic 2.12 with it; no tool, resource, or prompt
+changes shape, and servers serve the same protocol eras their clients ask
+for.
+
+**`tmux://` reads keep accepting tmux names that look like paths**
+
+FastMCP 4 screens templated resource parameters before a handler runs.
+Its absolute-path check does not fit tmux identifiers: it rejects the
+socket paths {tooliconl}`list-servers` reports, and reads any
+`<letter>:<rest>` session name — which tmux accepts — as a Windows
+drive-relative path. Both stay readable, so `tmux://` and the equivalent
+tools continue to agree on which sessions and servers exist. Traversal and
+null-byte screening remain on, where they still guard `socket_name` on its
+way to `tmux -L`.
+
 ### Documentation
 
 #### Caller identity fields are described (#105)
@@ -15,6 +37,15 @@ previously reached the rendered API reference as "Alias for field number 0"
 or as a bare name carrying only its type.
 
 ### Development
+
+**The test suite runs without FastMCP's camelCase compatibility shims**
+
+FastMCP still answers MCP SDK v1 attribute spellings through warn-once
+shims it plans to remove. Neither gate catches a test that depends on one:
+the type checker sees `Any`, and the warning fires once per attribute for a
+whole run. The suite now disables the shims, so a read that needs them
+fails the test that made it, and tests read argument schemas under the name
+that goes on the wire instead.
 
 #### CI actions updated to current majors
 

@@ -12,6 +12,8 @@ import pytest
 from fastmcp import Client, FastMCP
 from libtmux.test.retry import retry_until
 
+from tests.conftest import wire_input_schema
+
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
@@ -137,7 +139,7 @@ def test_spawn_environment_schemas_disclose_visibility() -> None:
     tools = asyncio.run(_list_tools())
 
     for name in ("create_window", "split_window"):
-        description = tools[name].inputSchema["properties"]["environment"][
+        description = wire_input_schema(tools[name])["properties"]["environment"][
             "description"
         ]
         for fragment in (
@@ -151,7 +153,7 @@ def test_spawn_environment_schemas_disclose_visibility() -> None:
         ):
             assert fragment in description
 
-    session_description = tools["create_session"].inputSchema["properties"][
+    session_description = wire_input_schema(tools["create_session"])["properties"][
         "environment"
     ]["description"]
     for fragment in (

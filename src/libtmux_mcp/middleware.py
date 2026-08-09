@@ -38,7 +38,7 @@ from fastmcp.server.middleware.error_handling import (
     RetryMiddleware,
 )
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
-from fastmcp.tools.base import ToolResult
+from fastmcp.tools import ToolResult
 from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
@@ -360,9 +360,13 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     intercepts tool-call exceptions first (``on_call_tool`` is the
     innermost hook of a middleware's chain) and returns
     :func:`_error_tool_result` instead; non-tool messages fall through
-    to the inherited ``on_message``, preserving the MCP ``-32002``
-    resource-not-found transform this middleware was originally
-    adopted for.
+    to the inherited ``on_message``.
+
+    That inherited transform maps only the not-found exception types
+    fastmcp matches exactly (:exc:`FileNotFoundError`, :exc:`KeyError`,
+    ``NotFoundError``) to MCP ``-32002``. The ``tmux://`` resources
+    raise :exc:`~fastmcp.exceptions.ResourceError`, which is none of
+    them, so a missing session reaches the client as ``-32603``.
 
     Logging honors ``FastMCPError.log_level`` (fastmcp >= 3.3): the
     expected failures demoted to WARNING by
