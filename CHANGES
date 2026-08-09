@@ -16,12 +16,13 @@ or as a bare name carrying only its type.
 
 ### Development
 
-**`mcp_swap` can target a pull request**
+**Safer pull-request testing with `mcp_swap.py`**
 
-`use-local --pr N` points every agent CLI at a pull request's head, so
-reviewing a branch across your agents needs no checkout and leaves nothing to
-clean up afterwards. Swapping a config no longer rewrites text it was not
-asked to change. (#115)
+`use-local --pr N` points installed agent CLIs at a pull request without a
+checkout and verifies the server before changing their configuration. Swaps
+preserve unrelated config text, file permissions, and symlink targets, while
+retaining the original recovery data across failed or concurrent updates.
+(#115)
 
 #### CI actions updated to current majors
 
