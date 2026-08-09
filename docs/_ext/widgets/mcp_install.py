@@ -170,17 +170,14 @@ _CURSOR_SCOPES: tuple[Scope, ...] = (
     ),
 )
 
+#: User scope only: `opencode mcp add` writes the global config whether or
+#: not a project one exists, so a Project panel would advertise a file the
+#: command it prints never touches.
 _OPENCODE_SCOPES: tuple[Scope, ...] = (
     Scope(
         id="user",
         label="User",
         config_file="~/.config/opencode/opencode.jsonc",
-        note=None,
-    ),
-    Scope(
-        id="project",
-        label="Project",
-        config_file="./opencode.json (in repo)",
         note=None,
     ),
 )
