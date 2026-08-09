@@ -8,7 +8,8 @@
 Use when you want every installed agent CLI to run a local checkout of an
 MCP server (editable) instead of a pinned release. ``use-local`` rewrites
 each CLI's config to invoke the checkout via ``uv --directory <repo> run
-<entry>``; ``revert`` restores from the timestamped backup the swap wrote.
+<entry>``, or a pull request's head via ``uvx`` with ``--pr``; ``revert``
+restores from the timestamped backup the swap wrote.
 Swapping a layer that is already swapped keeps that first backup rather
 than taking a new one, so ``revert`` always lands on the pre-swap config.
 
@@ -25,6 +26,7 @@ $ uv run scripts/mcp_swap.py detect
 $ uv run scripts/mcp_swap.py status
 $ uv run scripts/mcp_swap.py use-local --dry-run
 $ uv run scripts/mcp_swap.py use-local
+$ uv run scripts/mcp_swap.py use-local --pr 115
 $ uv run scripts/mcp_swap.py revert
 ```
 
@@ -71,12 +73,17 @@ This script is best-effort and intentionally narrow:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import difflib
+import fcntl
 import json
 import os
 import pathlib
+import re
 import shutil
+import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -235,6 +242,12 @@ CLIS: dict[CLIName, CLIInfo] = {
 }
 
 
+#: A ``--from`` argument pointing at a pull request's head commit.
+#: GitHub publishes ``refs/pull/<n>/head`` on the *base* repository, so
+#: one URL serves same-repo and fork pull requests alike.
+PR_REF_RE = re.compile(r"git\+(?P<url>.+?)@refs/pull/(?P<number>\d+)/head")
+
+
 @dataclasses.dataclass
 class McpServerSpec:
     """The portable shape shared across CLI configs."""
@@ -275,6 +288,16 @@ class McpServerSpec:
             return None
         return pathlib.Path(self.args[i + 1])
 
+    def pr_ref(self) -> tuple[str, int] | None:
+        """Return ``(repo_url, pr_number)`` for a ``uvx`` pull-request spec."""
+        if self.command != "uvx":
+            return None
+        for arg in self.args:
+            match = PR_REF_RE.fullmatch(arg)
+            if match:
+                return match.group("url"), int(match.group("number"))
+        return None
+
 
 @dataclasses.dataclass
 class SwapEntry:
@@ -297,6 +320,15 @@ class SwapEntry:
     #: ``Lib/sched.py`` uses to break ties on ``Event(time, priority,
     #: sequence, …)``.
     seq_no: int
+    #: Exact destination changed by the swap. ``config_path`` may be a
+    #: symlink that is later repointed, so it is not sufficient recovery
+    #: identity. Older state entries omit this field and fall back to
+    #: ``config_path`` during revert.
+    target_path: str | None = None
+
+
+class SwapStateError(RuntimeError):
+    """Swap state is unsafe to use for a mutating operation."""
 
 
 # ---------------------------------------------------------------------------
@@ -317,22 +349,67 @@ def load_config(info: CLIInfo) -> t.Any:
     return tomlkit.parse(raw.decode())
 
 
-def dump_config_bytes(info: CLIInfo, config: t.Any) -> bytes:
-    """Serialize an edited config back to bytes in its original format."""
-    if info.fmt == "json":
-        return (json.dumps(config, indent=2) + "\n").encode()
-    return tomlkit.dumps(config).encode()
+def _json_trailer(original: bytes) -> str:
+    """Return the newline a rewritten JSON config should end with.
+
+    Claude writes ``~/.claude.json`` without a trailing newline, so
+    appending one unconditionally grows the file by a byte on every swap
+    and shows as a diff hunk in a region the swap never touched. Empty
+    bytes mean a file being seeded, which gets the conventional newline.
+    """
+    if not original:
+        return "\n"
+    return "\n" if original.endswith(b"\n") else ""
+
+
+def dump_config_bytes(info: CLIInfo, config: t.Any, *, original: bytes) -> bytes:
+    """Serialize an edited config back to bytes in its original format.
+
+    ``original`` is the file's pre-edit bytes, or empty when seeding a
+    new one. The parsed structure does not record the byte-level
+    conventions of the file it came from, so they are carried over from
+    the source instead. Required rather than defaulted: a caller that
+    omitted it would silently start rewriting regions it never touched,
+    which is the defect this parameter exists to prevent. tomlkit
+    preserves those conventions itself; only the JSON writer needs it.
+    """
+    if info.fmt != "json":
+        return tomlkit.dumps(config).encode()
+    trailer = _json_trailer(original)
+    # ensure_ascii would re-escape every non-ASCII character in the file,
+    # including config text the swap never read.
+    text = json.dumps(config, indent=2, ensure_ascii=False) + trailer
+    try:
+        return text.encode()
+    except UnicodeEncodeError:
+        # A lone surrogate — a JS writer slicing a string mid-pair — has no
+        # UTF-8 encoding. Escaping the document is then the only form that
+        # can be written at all.
+        return (json.dumps(config, indent=2) + trailer).encode()
 
 
 def atomic_write(path: pathlib.Path, data: bytes) -> None:
-    """Write bytes to ``path`` via tempfile + ``os.replace`` to avoid partial writes."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    """Write bytes to ``path`` without replacing a symlinked config.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Destination path. A symlink resolves to its final target so the
+        write preserves every link in the chain.
+    data : bytes
+        Bytes to write atomically.
+    """
+    target = path.resolve() if path.is_symlink() else path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else None
+    fd, tmp_name = tempfile.mkstemp(prefix=target.name + ".", dir=str(target.parent))
     tmp = pathlib.Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as fh:
+            if mode is not None:
+                os.fchmod(fh.fileno(), mode)
             fh.write(data)
-        tmp.replace(path)
+        tmp.replace(target)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -665,12 +742,167 @@ def build_local_spec(repo: pathlib.Path, entry: str) -> McpServerSpec:
     )
 
 
+def build_pr_spec(repo_url: str, pr: int, entry: str) -> McpServerSpec:
+    """Build the ``uvx --from git+<url>@refs/pull/<n>/head <entry>`` spec.
+
+    Nothing is checked out: ``uv`` resolves the ref itself, so a swap
+    leaves no worktree to refresh or prune and ``revert`` needs no
+    cleanup beyond restoring the config.
+    """
+    return McpServerSpec(
+        command="uvx",
+        args=["--from", f"git+{repo_url}@refs/pull/{pr}/head", entry],
+    )
+
+
+def _run_text(argv: list[str], cwd: pathlib.Path | None = None) -> str:
+    """Run ``argv`` and return stdout, raising on a non-zero exit."""
+    return subprocess.run(
+        argv,
+        cwd=None if cwd is None else str(cwd),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def remote_https_url(repo: pathlib.Path, remote: str = "origin") -> str:
+    """Return ``https://<host>/<owner>/<name>`` for a repo's git remote.
+
+    Normalizes the spellings git accepts — ``git@host:owner/name.git``,
+    an ``ssh://`` or ``git+ssh://`` scheme, an embedded user, a trailing
+    ``.git`` — because the pull-request ref is fetched over https however
+    the working copy was cloned.
+    """
+    try:
+        raw = _run_text(["git", "-C", str(repo), "remote", "get-url", remote])
+    except (OSError, subprocess.CalledProcessError) as exc:
+        msg = f"cannot read git remote {remote!r} in {repo}"
+        raise RuntimeError(msg) from exc
+    return _normalize_remote_url(raw.strip())
+
+
+def _normalize_remote_url(url: str) -> str:
+    """Rewrite any git remote spelling as a plain https URL.
+
+    Examples
+    --------
+    >>> _normalize_remote_url("git+ssh://git@github.com/o/n.git")
+    'https://github.com/o/n'
+    >>> _normalize_remote_url("git@github.com:o/n.git")
+    'https://github.com/o/n'
+    >>> _normalize_remote_url("https://github.com/o/n")
+    'https://github.com/o/n'
+    """
+    url = url.removeprefix("git+")
+    if url.startswith("ssh://"):
+        url = "https://" + url.removeprefix("ssh://")
+    elif "://" not in url and ":" in url:
+        host, _, path = url.partition(":")
+        url = f"https://{host}/{path}"
+    scheme, sep, rest = url.partition("://")
+    authority, slash, path = rest.partition("/")
+    return f"{scheme}{sep}{authority.rpartition('@')[2]}{slash}{path}".removesuffix(
+        ".git"
+    )
+
+
+def gh_pr_summary(repo: pathlib.Path, pr: int) -> dict[str, t.Any] | None:
+    """Return ``gh``'s view of a pull request, or ``None`` when unreadable.
+
+    Used to confirm the number exists and to label output. Resolution
+    does not depend on it: the ref and URL come from git, so a missing
+    or unauthenticated ``gh`` degrades to an unlabelled swap rather than
+    a failure.
+    """
+    try:
+        out = _run_text(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(pr),
+                "--json",
+                "number,title,state,headRefName,isCrossRepository",
+            ],
+            cwd=repo,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    try:
+        loaded = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+#: One MCP ``initialize`` request, newline-framed for stdio.
+_INITIALIZE_FRAME = (
+    json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "mcp_swap-preflight", "version": "1"},
+            },
+        }
+    )
+    + "\n"
+)
+
+
+def preflight_spec(spec: McpServerSpec, *, timeout: float = 300.0) -> str | None:
+    """Launch ``spec`` and complete one MCP ``initialize`` round trip.
+
+    Returns ``None`` when the server answered, otherwise a reason to
+    show the operator. A pull-request spec resolves its dependencies at
+    launch time, inside whichever agent starts it, so an unresolvable
+    ref would otherwise land in every config and surface later as an
+    opaque startup failure in each one.
+
+    Closing stdin after the frame lets a well-behaved stdio server exit
+    on its own, which keeps this free of signal handling.
+    """
+    try:
+        proc = subprocess.Popen(
+            [spec.command, *spec.args],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, **spec.env},
+            text=True,
+        )
+    except OSError as exc:
+        return f"could not launch {spec.command}: {exc}"
+
+    try:
+        out, err = proc.communicate(_INITIALIZE_FRAME, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        return f"no MCP response within {timeout:.0f}s"
+
+    for line in out.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(message, dict) and message.get("id") == 1 and "result" in message:
+            return None
+
+    tail = "\n".join(err.strip().splitlines()[-3:])
+    return tail or "server exited without answering initialize"
+
+
 # ---------------------------------------------------------------------------
 # State file
 # ---------------------------------------------------------------------------
 
 
-def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
+def load_state(*, strict: bool = False) -> dict[tuple[CLIName, Scope], SwapEntry]:
     """Read the swap-state file, returning an empty mapping when absent.
 
     The state file's schema is internal — no compatibility contract —
@@ -678,21 +910,66 @@ def load_state() -> dict[tuple[CLIName, Scope], SwapEntry]:
     (those that don't parse as ``cli:scope``) and entries with a
     non-coercible ``seq_no`` or missing required fields are dropped
     silently so a hand-edited file cannot crash the script.
+
+    A file that will not parse at all is reported rather than dropped
+    silently: it means the record of every swap is gone, so ``revert``
+    is about to say there is nothing to unwind while swapped configs
+    and their backups sit on disk. Saying so is what lets the operator
+    go find those backups. Mutating callers pass ``strict=True`` so an
+    unreadable or malformed record blocks changes instead of being
+    overwritten as empty state.
     """
     if not STATE_FILE.exists():
         return {}
-    raw = json.loads(STATE_FILE.read_text())
+    try:
+        raw = json.loads(STATE_FILE.read_text())
+    except (OSError, ValueError) as exc:
+        message = f"swap state unreadable ({STATE_FILE}): {exc}"
+        print(message, file=sys.stderr)
+        if strict:
+            raise SwapStateError(message) from exc
+        return {}
+    if not isinstance(raw, dict):
+        if strict:
+            message = f"swap state has invalid shape: {STATE_FILE}"
+            print(message, file=sys.stderr)
+            raise SwapStateError(message)
+        return {}
     entries = raw.get("entries", {})
+    if not isinstance(entries, dict):
+        if strict:
+            message = f"swap state has invalid entries: {STATE_FILE}"
+            print(message, file=sys.stderr)
+            raise SwapStateError(message)
+        entries = {}
     out: dict[tuple[CLIName, Scope], SwapEntry] = {}
     for k, v in entries.items():
         parsed = _parse_state_key(k)
         if parsed is None:
+            if strict:
+                message = f"swap state has invalid key {k!r}: {STATE_FILE}"
+                print(message, file=sys.stderr)
+                raise SwapStateError(message)
             continue
         entry = _parse_state_entry(v)
         if entry is None:
+            if strict:
+                message = f"swap state has invalid entry {k!r}: {STATE_FILE}"
+                print(message, file=sys.stderr)
+                raise SwapStateError(message)
             continue
         out[parsed] = entry
     return out
+
+
+@contextlib.contextmanager
+def _state_lock() -> t.Iterator[None]:
+    """Serialize config mutations that share the swap state file."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    fd = os.open(STATE_DIR / "state.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        yield
 
 
 def save_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
@@ -707,13 +984,10 @@ def save_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
     atomic_write(STATE_FILE, (json.dumps(payload, indent=2) + "\n").encode("utf-8"))
 
 
-def clear_state(keys: t.Iterable[tuple[CLIName, Scope]]) -> None:
-    """Remove the given ``(cli, scope)`` keys; delete the file if empty."""
-    current = load_state()
-    for key in keys:
-        current.pop(key, None)
-    if current:
-        save_state(current)
+def _save_or_clear_state(entries: dict[tuple[CLIName, Scope], SwapEntry]) -> None:
+    """Persist ``entries``, removing the state file when the mapping is empty."""
+    if entries:
+        save_state(entries)
     elif STATE_FILE.exists():
         STATE_FILE.unlink()
 
@@ -838,27 +1112,44 @@ def cmd_status(args: argparse.Namespace) -> int:
                 print(
                     f"[{cli}] {server} = {spec.command} {' '.join(spec.args)}  ({tag})"
                 )
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError, OSError) as exc:
             print(f"[{cli}] {exc}", file=sys.stderr)
             continue
     return 0
 
 
 def _describe_spec(spec: McpServerSpec, repo: pathlib.Path) -> str:
-    """Return a short label classifying a spec (local/pypi-pin/other)."""
+    """Return a short label classifying a spec (local/PR/pypi-pin/other)."""
     if spec.is_local_uv_directory():
         local = spec.local_repo_path()
         if local and local.resolve() == repo.resolve():
             return "local: this repo"
         return f"local: {local}"
+    pr = spec.pr_ref()
+    if pr is not None:
+        # Checked before the pin branch below: a PR ref contains `@`,
+        # which that branch would report as a version pin.
+        return f"PR #{pr[1]}: {pr[0]}"
     if spec.command == "uvx":
         pinned = next((a for a in spec.args if "==" in a or "@" in a), None)
         return f"pypi pin: {pinned}" if pinned else "pypi (unpinned)"
     return "other"
 
 
-def cmd_use_local(args: argparse.Namespace) -> int:
-    """Rewrite each target CLI's config to run the repo's checkout via ``uv``.
+def _points_at(
+    current: McpServerSpec, target: McpServerSpec, repo: pathlib.Path
+) -> bool:
+    """Return True when ``current`` already runs what ``target`` describes."""
+    if target.pr_ref() is not None:
+        return current.pr_ref() == target.pr_ref()
+    return current.is_local_uv_directory() and current.local_repo_path() == repo
+
+
+def _cmd_use_local(args: argparse.Namespace) -> int:
+    """Rewrite each target CLI's config to run the repo, or a pull request.
+
+    Without ``--pr`` the entry runs the repo's checkout via ``uv``; with
+    it, the pull request's head via ``uvx``.
 
     The optional ``--scope`` flag selects Claude's user-level fallback
     vs. per-project override; see :data:`Scope`. The flag is silently
@@ -868,8 +1159,29 @@ def cmd_use_local(args: argparse.Namespace) -> int:
     server, default_entry = resolve_repo_meta(repo)
     server = args.server or server
     entry = args.entry or default_entry
-    spec = build_local_spec(repo, entry)
     extra_env = dict(args.env or [])
+
+    pr = getattr(args, "pr", None)
+    if pr is None:
+        spec = build_local_spec(repo, entry)
+    else:
+        try:
+            spec = build_pr_spec(remote_https_url(repo), pr, entry)
+        except RuntimeError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        spec = dataclasses.replace(spec, env=dict(extra_env))
+        summary = gh_pr_summary(repo, pr)
+        if summary is None:
+            print(f"PR #{pr}: gh could not read it — swapping anyway", file=sys.stderr)
+        else:
+            fork = " (fork)" if summary.get("isCrossRepository") else ""
+            print(
+                f"PR #{summary.get('number', pr)} [{summary.get('state', '?')}]"
+                f"{fork} {summary.get('headRefName', '?')} — "
+                f"{summary.get('title', '')}",
+                file=sys.stderr,
+            )
 
     hint = _naming_hint(repo, server)
     if hint:
@@ -880,8 +1192,17 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         print("no CLIs detected — nothing to do", file=sys.stderr)
         return 1
 
+    # Runs under --dry-run too: resolving the ref is the only signal a
+    # dry run can give about whether the swap would actually start.
+    if pr is not None and not args.no_preflight:
+        print(f"preflight: {spec.command} {' '.join(spec.args)}", file=sys.stderr)
+        failure = preflight_spec(spec)
+        if failure is not None:
+            print(f"preflight failed, nothing written:\n{failure}", file=sys.stderr)
+            return 1
+
     ts = time.strftime("%Y%m%d%H%M%S")
-    state = load_state()
+    state = load_state(strict=True)
     had_error = 0
     for cli in targets:
         scope = _normalize_scope(cli, args.scope)
@@ -889,23 +1210,28 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         info = CLIS[cli]
         if not info.config_path.exists():
             print(f"[{label}] skip — config not found at {info.config_path}")
+            had_error = 1
             continue
-        # Wrap the read + shape-guarded mutation in try/except RuntimeError
-        # so a malformed Claude config (top-level mcpServers / projects not a
-        # mapping) surfaces as a clean per-CLI error instead of an uncaught
-        # traceback. Same per-CLI continuation pattern the inner write-failure
-        # handler below uses.
+        target_path = info.config_path.resolve()
+        target_info = dataclasses.replace(info, config_path=target_path)
+        # Wrap the read + shape-guarded mutation so an unreadable config
+        # surfaces as a clean per-CLI error instead of an uncaught traceback.
+        # The three arms are the three ways it fails: a shape this script
+        # rejects raises RuntimeError, an unparseable one raises ValueError
+        # (JSON, TOML and UTF-8 decode errors all derive from it), and an
+        # unopenable one raises OSError. Same trio ``doctor`` catches, and
+        # the same per-CLI continuation the write-failure handler below uses.
         try:
-            original_bytes = info.config_path.read_bytes()
-            config = load_config(info)
+            original_bytes = target_path.read_bytes()
+            config = load_config(target_info)
             current = get_server(cli, config, server, repo, scope=scope)
             if (
                 current
-                and current.is_local_uv_directory()
-                and current.local_repo_path() == repo
+                and _points_at(current, spec, repo)
                 and all(current.env.get(k) == v for k, v in extra_env.items())
             ):
-                print(f"[{label}] already local (this repo) — no change")
+                where = "local (this repo)" if pr is None else f"PR #{pr}"
+                print(f"[{label}] already {where} — no change")
                 continue
             # Preserve the existing entry's env on replacement. ``build_local_spec``
             # writes an empty env, so without this merge a swap would silently drop
@@ -920,8 +1246,8 @@ def cmd_use_local(args: argparse.Namespace) -> int:
                 else spec
             )
             action = set_server(cli, config, server, cli_spec, repo, scope=scope)
-            new_bytes = dump_config_bytes(info, config)
-        except RuntimeError as exc:
+            new_bytes = dump_config_bytes(info, config, original=original_bytes)
+        except (RuntimeError, ValueError, OSError) as exc:
             print(f"[{label}] {exc}", file=sys.stderr)
             had_error = 1
             continue
@@ -966,22 +1292,21 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             backup_suffix = f"{BACKUP_SUFFIX_PREFIX}{ts}"
             if cli == "claude":
                 backup_suffix += f"-{scope}"
-            backup_path = write_new_backup(
-                info.config_path.with_suffix(info.config_path.suffix + backup_suffix),
-                original_bytes,
-            )
+            # A backup that cannot be written must abort this CLI rather
+            # than degrade into a swap with nothing to revert to — an
+            # unwritable directory is the case that produces both.
+            try:
+                backup_path = write_new_backup(
+                    info.config_path.with_suffix(
+                        info.config_path.suffix + backup_suffix
+                    ),
+                    original_bytes,
+                )
+            except OSError as exc:
+                print(f"[{label}] cannot write backup: {exc}", file=sys.stderr)
+                had_error = 1
+                continue
             backup_note = f"backup: {backup_path}"
-        try:
-            atomic_write(info.config_path, new_bytes)
-            _revalidate(info)
-        except Exception as exc:
-            atomic_write(info.config_path, original_bytes)
-            print(
-                f"[{label}] write failed ({exc}); backup at {backup_path}",
-                file=sys.stderr,
-            )
-            had_error = 1
-            continue
         if prior is not None and backup_path == prior_backup:
             # ``swapped_at`` mirrors the timestamp in the backup filename
             # and ``seq_no`` fixes the backup's place in the unwind
@@ -990,19 +1315,68 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         else:
             seq_no = max((e.seq_no for e in state.values()), default=-1) + 1
             swapped_at = ts
-        state[(cli, scope)] = SwapEntry(
+        next_state = dict(state)
+        next_state[(cli, scope)] = SwapEntry(
             config_path=str(info.config_path),
             backup_path=str(backup_path),
             server=server,
             action=action,
             swapped_at=swapped_at,
             seq_no=seq_no,
+            target_path=str(target_path),
         )
+        try:
+            save_state(next_state)
+        except OSError as exc:
+            print(
+                f"[{label}] cannot save recovery state ({exc}); config unchanged; "
+                f"backup at {backup_path}",
+                file=sys.stderr,
+            )
+            had_error = 1
+            continue
+        previous_state = state
+        state = next_state
+        try:
+            atomic_write(target_path, new_bytes)
+            _revalidate(target_info)
+        except Exception as exc:
+            try:
+                atomic_write(target_path, original_bytes)
+            except Exception as rollback_exc:
+                rollback_note = f"; rollback failed ({rollback_exc})"
+            else:
+                rollback_note = "; original config restored"
+                try:
+                    _save_or_clear_state(previous_state)
+                except OSError as state_exc:
+                    rollback_note += f"; recovery state cleanup failed ({state_exc})"
+                else:
+                    state = previous_state
+            print(
+                f"[{label}] write failed ({exc}){rollback_note}; "
+                f"backup at {backup_path}",
+                file=sys.stderr,
+            )
+            had_error = 1
+            continue
         print(f"[{label}] {action}; {backup_note}")
 
-    if not args.dry_run:
-        save_state(state)
     return had_error
+
+
+def cmd_use_local(args: argparse.Namespace) -> int:
+    """Run :func:`_cmd_use_local` under the shared mutation lock."""
+    if args.dry_run:
+        return _cmd_use_local(args)
+    try:
+        with _state_lock():
+            return _cmd_use_local(args)
+    except SwapStateError:
+        return 1
+    except OSError as exc:
+        print(f"swap state unavailable: {exc}", file=sys.stderr)
+        return 1
 
 
 def _revalidate(info: CLIInfo) -> None:
@@ -1010,7 +1384,7 @@ def _revalidate(info: CLIInfo) -> None:
     load_config(info)
 
 
-def cmd_revert(args: argparse.Namespace) -> int:
+def _cmd_revert(args: argparse.Namespace) -> int:
     """Restore each target CLI's config from the backup recorded in the state file.
 
     Without ``--scope``, every recorded entry for the targeted CLIs is
@@ -1019,14 +1393,14 @@ def cmd_revert(args: argparse.Namespace) -> int:
     the matching scope is reverted; the parameter is silently coerced
     to ``"user"`` for non-Claude CLIs.
     """
-    state = load_state()
+    state = load_state(strict=True)
     # Without --cli, revert every CLI that has any recorded swap.
     targets = list(args.cli) if args.cli else list({cli for cli, _scope in state})
     if not targets:
         print("no recorded swaps — nothing to revert", file=sys.stderr)
         return 1
 
-    reverted: list[tuple[CLIName, Scope]] = []
+    had_error = 0
     for cli in targets:
         if args.scope is not None:
             wanted_scopes: tuple[Scope, ...] = (_normalize_scope(cli, args.scope),)
@@ -1059,28 +1433,56 @@ def cmd_revert(args: argparse.Namespace) -> int:
             entry = state[key]
             label = f"{sc_cli}:{sc_scope}" if sc_cli == "claude" else sc_cli
             backup = pathlib.Path(entry.backup_path)
-            dest = pathlib.Path(entry.config_path)
+            dest = pathlib.Path(entry.target_path or entry.config_path)
             if not backup.exists():
                 print(f"[{label}] backup missing: {backup}", file=sys.stderr)
-                continue
+                had_error = 1
+                break
             if args.dry_run:
                 print(f"[{label}] would restore {dest} from {backup}")
                 continue
-            atomic_write(dest, backup.read_bytes())
-            # Backup served its purpose; LIFO unwind for this layer is
-            # complete. Delete on success, keep on error — same idiom
-            # CPython's ``tempfile.NamedTemporaryFile`` uses
-            # (Lib/tempfile.py:614-618). If ``atomic_write`` had raised,
-            # this line wouldn't run and the backup would survive for
-            # post-mortem; on success the backup is redundant and would
-            # otherwise accumulate forever across swap/revert cycles.
-            backup.unlink()
+            try:
+                atomic_write(dest, backup.read_bytes())
+            except OSError as exc:
+                print(f"[{label}] restore failed: {exc}", file=sys.stderr)
+                had_error = 1
+                break
+            next_state = dict(state)
+            next_state.pop(key)
+            try:
+                _save_or_clear_state(next_state)
+            except OSError as exc:
+                print(
+                    f"[{label}] restored, but recovery state could not be updated: "
+                    f"{exc}",
+                    file=sys.stderr,
+                )
+                had_error = 1
+                break
+            state = next_state
+            try:
+                backup.unlink()
+            except OSError as exc:
+                print(
+                    f"[{label}] restored; backup cleanup failed: {exc}", file=sys.stderr
+                )
+                had_error = 1
             print(f"[{label}] restored from {backup}")
-            reverted.append(key)
+    return had_error
 
-    if not args.dry_run and reverted:
-        clear_state(reverted)
-    return 0
+
+def cmd_revert(args: argparse.Namespace) -> int:
+    """Run :func:`_cmd_revert` under the shared mutation lock."""
+    if args.dry_run:
+        return _cmd_revert(args)
+    try:
+        with _state_lock():
+            return _cmd_revert(args)
+    except SwapStateError:
+        return 1
+    except OSError as exc:
+        print(f"swap state unavailable: {exc}", file=sys.stderr)
+        return 1
 
 
 # ---------------------------------------------------------------------------
@@ -1108,6 +1510,19 @@ def _env_pair(raw: str) -> tuple[str, str]:
         msg = f"--env expects KEY=VALUE, got {raw!r}"
         raise argparse.ArgumentTypeError(msg)
     return key, value
+
+
+def _pr_number(raw: str) -> int:
+    """Parse a ``--pr`` argument as a pull-request number, or raise for argparse."""
+    try:
+        number = int(raw)
+    except ValueError:
+        msg = f"--pr expects a number, got {raw!r}"
+        raise argparse.ArgumentTypeError(msg) from None
+    if number < 1:
+        msg = f"--pr expects a positive number, got {number}"
+        raise argparse.ArgumentTypeError(msg)
+    return number
 
 
 def _config_present_clis() -> list[CLIName]:
@@ -1318,8 +1733,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ps.set_defaults(func=cmd_status)
 
-    pu = sub.add_parser("use-local", help="rewrite configs to run this checkout")
+    pu = sub.add_parser(
+        "use-local", help="rewrite configs to run this checkout, or a pull request"
+    )
     pu.add_argument("--repo", default=".", help="repo root (default: .)")
+    pu.add_argument(
+        "--pr",
+        type=_pr_number,
+        metavar="N",
+        help=(
+            "Point the CLIs at pull request N instead of the working copy. "
+            "Writes 'uvx --from git+<remote>@refs/pull/N/head <entry>', so "
+            "nothing is checked out and 'revert' needs no cleanup. The ref "
+            "lives on the base repo, so fork PRs work unchanged."
+        ),
+    )
+    pu.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help=(
+            "Skip the MCP initialize round trip --pr runs before writing. "
+            "The probe resolves the ref once so a bad PR fails here instead "
+            "of inside every agent; skip it when offline or already warm."
+        ),
+    )
     pu.add_argument(
         "--server", help="MCP server name (default: derived from pyproject.toml)"
     )

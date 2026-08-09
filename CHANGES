@@ -16,6 +16,14 @@ or as a bare name carrying only its type.
 
 ### Development
 
+**Safer pull-request testing with `mcp_swap.py`**
+
+`use-local --pr N` points installed agent CLIs at a pull request without a
+checkout and verifies the server before changing their configuration. Swaps
+preserve unrelated config text, file permissions, and symlink targets, while
+retaining the original recovery data across failed or concurrent updates.
+(#115)
+
 #### CI actions updated to current majors
 
 Workflow actions moved to their current major releases: `actions/checkout` v7,
