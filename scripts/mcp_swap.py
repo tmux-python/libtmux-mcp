@@ -8,7 +8,8 @@
 Use when you want every installed agent CLI to run a local checkout of an
 MCP server (editable) instead of a pinned release. ``use-local`` rewrites
 each CLI's config to invoke the checkout via ``uv --directory <repo> run
-<entry>``; ``revert`` restores from the timestamped backup the swap wrote.
+<entry>``, or a pull request's head via ``uvx`` with ``--pr``; ``revert``
+restores from the timestamped backup the swap wrote.
 Swapping a layer that is already swapped keeps that first backup rather
 than taking a new one, so ``revert`` always lands on the pre-swap config.
 
@@ -25,6 +26,7 @@ $ uv run scripts/mcp_swap.py detect
 $ uv run scripts/mcp_swap.py status
 $ uv run scripts/mcp_swap.py use-local --dry-run
 $ uv run scripts/mcp_swap.py use-local
+$ uv run scripts/mcp_swap.py use-local --pr 115
 $ uv run scripts/mcp_swap.py revert
 ```
 
