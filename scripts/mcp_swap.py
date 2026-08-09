@@ -1079,7 +1079,10 @@ def _points_at(
 
 
 def cmd_use_local(args: argparse.Namespace) -> int:
-    """Rewrite each target CLI's config to run the repo's checkout via ``uv``.
+    """Rewrite each target CLI's config to run the repo, or a pull request.
+
+    Without ``--pr`` the entry runs the repo's checkout via ``uv``; with
+    it, the pull request's head via ``uvx``.
 
     The optional ``--scope`` flag selects Claude's user-level fallback
     vs. per-project override; see :data:`Scope`. The flag is silently
