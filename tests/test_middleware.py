@@ -676,12 +676,14 @@ def test_server_middleware_stack_order() -> None:
 def test_error_handling_middleware_transforms_errors() -> None:
     """ToolErrorResultMiddleware is configured with transform_errors=True.
 
-    Regression guard: without ``transform_errors=True`` the inherited
-    ``on_message`` would still log but not map resource errors to MCP
-    error code ``-32002``, which is the protocol-correctness point of
-    keeping the ErrorHandlingMiddleware base for non-tool messages
-    (tool-call errors are converted to ``is_error`` results before
-    they reach ``on_message``).
+    Regression guard for the inherited ``on_message`` transform, which
+    non-tool messages still rely on. Tool-call errors never reach it —
+    they become ``is_error`` results first.
+
+    This asserts the flag, not a wire code: the transform maps only the
+    not-found types fastmcp matches exactly, and the ``tmux://``
+    resources raise :exc:`~fastmcp.exceptions.ResourceError`, so a
+    missing session surfaces as ``-32603`` rather than ``-32002``.
     """
     from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 

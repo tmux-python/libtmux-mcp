@@ -370,8 +370,8 @@ mcp = FastMCP(
     #      ToolResult(is_error=True) here, so truncation preserves that
     #      flag instead of turning expected failures into schema errors.
     #   3. ToolErrorResultMiddleware — converts tool-call failures to
-    #      rich ToolResult(is_error=True) results and transforms
-    #      resource errors to MCP code -32002. Must stay OUTSIDE the
+    #      rich ToolResult(is_error=True) results and leaves non-tool
+    #      messages to the inherited transform. Must stay OUTSIDE the
     #      audit + retry + safety trio: all three depend on exception
     #      semantics (audit catches to record outcome=error, retry
     #      matches LibTmuxException via __cause__, and safety's tier
