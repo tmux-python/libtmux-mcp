@@ -7,6 +7,7 @@ config fixtures that mirror each CLI's real layout.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -2536,3 +2537,26 @@ def test_unwritable_directory_does_not_stop_the_other_clis(
         assert "libtmux" in written["mcpServers"]
     finally:
         blocked.config_path.parent.chmod(0o700)
+
+
+@pytest.mark.parametrize("raw", ["0", "-5", "notanumber", "1.5", ""])
+def test_pr_number_rejects_what_is_not_a_pull_request(raw: str) -> None:
+    """``--pr`` takes a positive number; anything else stops at the parser.
+
+    Pull requests are numbered from one, so a non-positive value can only
+    be a typo. Catching it here keeps it out of the ref the swap builds.
+    """
+    with pytest.raises(argparse.ArgumentTypeError):
+        mcp_swap._pr_number(raw)
+
+
+def test_pr_number_accepts_a_pull_request_number() -> None:
+    """A positive number parses to an int."""
+    assert mcp_swap._pr_number("115") == 115
+
+
+@pytest.mark.parametrize("raw", ["0", "-5", "notanumber"])
+def test_parser_rejects_a_bad_pr_argument(raw: str) -> None:
+    """The parser exits rather than building a ref from a bad number."""
+    with pytest.raises(SystemExit):
+        mcp_swap.build_parser().parse_args(["use-local", "--pr", raw])

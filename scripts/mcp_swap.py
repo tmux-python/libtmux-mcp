@@ -1388,6 +1388,19 @@ def _env_pair(raw: str) -> tuple[str, str]:
     return key, value
 
 
+def _pr_number(raw: str) -> int:
+    """Parse a ``--pr`` argument as a pull-request number, or raise for argparse."""
+    try:
+        number = int(raw)
+    except ValueError:
+        msg = f"--pr expects a number, got {raw!r}"
+        raise argparse.ArgumentTypeError(msg) from None
+    if number < 1:
+        msg = f"--pr expects a positive number, got {number}"
+        raise argparse.ArgumentTypeError(msg)
+    return number
+
+
 def _config_present_clis() -> list[CLIName]:
     """CLIs whose config file exists — enough to *read* entries (no binary needed).
 
@@ -1602,7 +1615,7 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--repo", default=".", help="repo root (default: .)")
     pu.add_argument(
         "--pr",
-        type=int,
+        type=_pr_number,
         metavar="N",
         help=(
             "Point the CLIs at pull request N instead of the working copy. "
