@@ -48,36 +48,48 @@ def fake_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
                 binary="claude",
                 config_path=tmp_path / ".claude.json",
                 fmt="json",
+                container=("mcpServers",),
+                dialect="claude",
             ),
             "codex": mcp_swap.CLIInfo(
                 name="codex",
                 binary="codex",
                 config_path=tmp_path / ".codex" / "config.toml",
                 fmt="toml",
+                container=("mcp_servers",),
+                dialect="standard",
             ),
             "cursor": mcp_swap.CLIInfo(
                 name="cursor",
                 binary="cursor-agent",
                 config_path=tmp_path / ".cursor" / "mcp.json",
                 fmt="json",
+                container=("mcpServers",),
+                dialect="standard",
             ),
             "gemini": mcp_swap.CLIInfo(
                 name="gemini",
                 binary="gemini",
                 config_path=tmp_path / ".gemini" / "settings.json",
                 fmt="json",
+                container=("mcpServers",),
+                dialect="standard",
             ),
             "grok": mcp_swap.CLIInfo(
                 name="grok",
                 binary="grok",
                 config_path=tmp_path / ".grok" / "config.toml",
                 fmt="toml",
+                container=("mcp_servers",),
+                dialect="standard",
             ),
             "agy": mcp_swap.CLIInfo(
                 name="agy",
                 binary="agy",
                 config_path=tmp_path / ".gemini" / "config" / "mcp_config.json",
                 fmt="json",
+                container=("mcpServers",),
+                dialect="standard",
             ),
         },
     )
@@ -213,7 +225,14 @@ def test_load_config_tolerates_empty_json(tmp_path: pathlib.Path) -> None:
     """An empty JSON config can be seeded with the first MCP server entry."""
     cfg = tmp_path / "mcp_config.json"
     cfg.write_text("")
-    info = mcp_swap.CLIInfo(name="agy", binary="agy", config_path=cfg, fmt="json")
+    info = mcp_swap.CLIInfo(
+        name="agy",
+        binary="agy",
+        config_path=cfg,
+        fmt="json",
+        container=("mcpServers",),
+        dialect="standard",
+    )
     assert mcp_swap.load_config(info) == {}
 
 
@@ -2296,7 +2315,12 @@ def _json_config(tmp_path: pathlib.Path, body: str) -> tuple[t.Any, bytes]:
     raw = body.encode()
     path.write_bytes(raw)
     info = mcp_swap.CLIInfo(
-        name="cursor", binary="cursor-agent", config_path=path, fmt="json"
+        name="cursor",
+        binary="cursor-agent",
+        config_path=path,
+        fmt="json",
+        container=("mcpServers",),
+        dialect="standard",
     )
     return info, raw
 

@@ -192,6 +192,16 @@ BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
 # ---------------------------------------------------------------------------
 
 
+#: Per-entry shape a CLI expects under its server map. ``standard`` is
+#: the Claude-Desktop lineage every CLI here started from — scalar
+#: ``command``, sibling ``args`` list, optional ``env`` table.
+#: ``claude`` is that shape plus an explicit ``type``/``env`` that
+#: Claude writes even when empty. Dialects exist because the shape is
+#: not implied by the file format: two CLIs sharing ``fmt="json"`` can
+#: still disagree about how one entry is spelled.
+Dialect = t.Literal["standard", "claude"]
+
+
 @dataclasses.dataclass(frozen=True)
 class CLIInfo:
     """Static descriptor for a CLI's config file and discovery heuristics."""
@@ -200,6 +210,13 @@ class CLIInfo:
     binary: str
     config_path: pathlib.Path
     fmt: t.Literal["json", "toml"]
+    #: Key path from the document root down to the mapping of server
+    #: name -> entry. A path rather than a single key so a CLI that
+    #: nests deeper needs no new branch in the four functions that
+    #: read, write, delete and enumerate entries.
+    container: tuple[str, ...]
+    #: Entry shape written and read back for this CLI.
+    dialect: Dialect
 
 
 CLIS: dict[CLIName, CLIInfo] = {
@@ -208,36 +225,48 @@ CLIS: dict[CLIName, CLIInfo] = {
         binary="claude",
         config_path=pathlib.Path.home() / ".claude.json",
         fmt="json",
+        container=("mcpServers",),
+        dialect="claude",
     ),
     "codex": CLIInfo(
         name="codex",
         binary="codex",
         config_path=pathlib.Path.home() / ".codex" / "config.toml",
         fmt="toml",
+        container=("mcp_servers",),
+        dialect="standard",
     ),
     "cursor": CLIInfo(
         name="cursor",
         binary="cursor-agent",
         config_path=pathlib.Path.home() / ".cursor" / "mcp.json",
         fmt="json",
+        container=("mcpServers",),
+        dialect="standard",
     ),
     "gemini": CLIInfo(
         name="gemini",
         binary="gemini",
         config_path=pathlib.Path.home() / ".gemini" / "settings.json",
         fmt="json",
+        container=("mcpServers",),
+        dialect="standard",
     ),
     "grok": CLIInfo(
         name="grok",
         binary="grok",
         config_path=pathlib.Path.home() / ".grok" / "config.toml",
         fmt="toml",
+        container=("mcp_servers",),
+        dialect="standard",
     ),
     "agy": CLIInfo(
         name="agy",
         binary="agy",
         config_path=(pathlib.Path.home() / ".gemini" / "config" / "mcp_config.json"),
         fmt="json",
+        container=("mcpServers",),
+        dialect="standard",
     ),
 }
 
@@ -256,11 +285,11 @@ class McpServerSpec:
     args: list[str] = dataclasses.field(default_factory=list)
     env: dict[str, str] = dataclasses.field(default_factory=dict)
 
-    def to_json_dict(self, *, include_stdio_type: bool = False) -> dict[str, t.Any]:
-        """Serialize to the JSON shape (Claude-extended when ``include_stdio_type``)."""
-        # Claude's format always includes ``type`` and ``env`` (even when empty);
-        # Cursor/Gemini omit both. include_stdio_type selects Claude shape.
-        if include_stdio_type:
+    def to_entry_dict(self, dialect: Dialect = "standard") -> dict[str, t.Any]:
+        """Serialize to the entry shape ``dialect`` expects."""
+        # Claude's format always includes ``type`` and ``env`` (even when
+        # empty); the standard shape omits both when there is nothing to say.
+        if dialect == "claude":
             return {
                 "type": "stdio",
                 "command": self.command,
@@ -560,6 +589,58 @@ def _claude_user_servers(
     return existing
 
 
+def _server_map(info: CLIInfo, config: t.Any, *, create: bool) -> t.Any | None:
+    """Walk ``info.container`` to the mapping holding this CLI's entries.
+
+    Returns ``None`` when the path is absent and ``create`` is false.
+    Intermediate levels are created on demand so a nested container needs
+    no special case; TOML gets tomlkit tables so the written document
+    keeps its formatting.
+
+    Raises
+    ------
+    RuntimeError
+        A key along the path holds something other than a mapping.
+        Reported rather than overwritten — a swap must never discard
+        config it cannot interpret.
+    """
+    node = config
+    for depth, key in enumerate(info.container):
+        child = node.get(key)
+        if child is None:
+            if not create:
+                return None
+            child = tomlkit.table() if info.fmt == "toml" else {}
+            node[key] = child
+        elif not isinstance(child, dict):
+            path = ".".join(info.container[: depth + 1])
+            msg = (
+                f"{info.config_path}: {path} is a {type(child).__name__}, "
+                f"expected a table of server entries"
+            )
+            raise RuntimeError(msg)
+        node = child
+    return node
+
+
+def _as_toml_table(entry: dict[str, t.Any]) -> tomlkit.items.Table:
+    """Render one entry dict as a tomlkit table.
+
+    Nested mappings (``env``) become sub-tables so the written document
+    keeps TOML's own structure instead of an inline dict literal.
+    """
+    table = tomlkit.table()
+    for key, value in entry.items():
+        if isinstance(value, dict):
+            sub = tomlkit.table()
+            for sub_key, sub_value in value.items():
+                sub[sub_key] = sub_value
+            table[key] = sub
+        else:
+            table[key] = value
+    return table
+
+
 def get_server(
     cli: CLIName,
     config: t.Any,
@@ -583,13 +664,12 @@ def get_server(
             if not node:
                 return None
             entry = node.get("mcpServers", {}).get(name)
-    elif cli in ("cursor", "gemini", "agy"):
-        entry = config.get("mcpServers", {}).get(name)
-    else:  # cli in ("codex", "grok")
-        entry = config.get("mcp_servers", {}).get(name)
+    else:
+        servers = _server_map(CLIS[cli], config, create=False)
+        entry = servers.get(name) if servers else None
     if entry is None:
         return None
-    return _spec_from_entry(entry, fmt=CLIS[cli].fmt)
+    return _spec_from_entry(entry, info=CLIS[cli])
 
 
 def set_server(
@@ -613,37 +693,19 @@ def set_server(
         if scope == "user":
             servers = _claude_user_servers(config, create=True)
             had = name in servers
-            servers[name] = spec.to_json_dict(include_stdio_type=True)
+            servers[name] = spec.to_entry_dict("claude")
             return "replaced" if had else "added"
         node = _claude_project_node(config, repo, create=True)
         servers = node.setdefault("mcpServers", {})
         had = name in servers
-        servers[name] = spec.to_json_dict(include_stdio_type=True)
+        servers[name] = spec.to_entry_dict("claude")
         return "replaced" if had else "added"
-    if cli in ("cursor", "gemini", "agy"):
-        servers = config.setdefault("mcpServers", {})
-        had = name in servers
-        servers[name] = spec.to_json_dict()
-        return "replaced" if had else "added"
-    if cli in ("codex", "grok"):
-        # tomlkit: top-level tables are accessed via dict protocol too.
-        mcp_servers = config.get("mcp_servers")
-        if mcp_servers is None:
-            mcp_servers = tomlkit.table()
-            config["mcp_servers"] = mcp_servers
-        had = name in mcp_servers
-        table = tomlkit.table()
-        table["command"] = spec.command
-        table["args"] = list(spec.args)
-        if spec.env:
-            env_tbl = tomlkit.table()
-            for k, v in spec.env.items():
-                env_tbl[k] = v
-            table["env"] = env_tbl
-        mcp_servers[name] = table
-        return "replaced" if had else "added"
-    msg = f"unreachable: unknown CLI {cli!r}"
-    raise AssertionError(msg)
+    info = CLIS[cli]
+    servers = _server_map(info, config, create=True)
+    had = name in servers
+    entry = spec.to_entry_dict(info.dialect)
+    servers[name] = _as_toml_table(entry) if info.fmt == "toml" else entry
+    return "replaced" if had else "added"
 
 
 def delete_server(
@@ -671,24 +733,17 @@ def delete_server(
             return False
         servers = node.get("mcpServers", {})
         return servers.pop(name, None) is not None
-    if cli in ("cursor", "gemini", "agy"):
-        return config.get("mcpServers", {}).pop(name, None) is not None
-    if cli in ("codex", "grok"):
-        mcp_servers = config.get("mcp_servers")
-        if mcp_servers is None:
-            return False
-        if name in mcp_servers:
-            del mcp_servers[name]
-            return True
+    servers = _server_map(CLIS[cli], config, create=False)
+    if servers is None or name not in servers:
         return False
-    msg = f"unreachable: unknown CLI {cli!r}"
-    raise AssertionError(msg)
+    del servers[name]
+    return True
 
 
-def _spec_from_entry(entry: t.Any, *, fmt: t.Literal["json", "toml"]) -> McpServerSpec:
+def _spec_from_entry(entry: t.Any, *, info: CLIInfo) -> McpServerSpec:
     """Convert a raw config entry (dict or tomlkit Table) into an McpServerSpec."""
     # tomlkit items quack like dicts/lists; coerce to plain Python for our spec.
-    if fmt == "toml":
+    if info.fmt == "toml":
         entry = (
             tomlkit.items.Table.unwrap(entry)
             if isinstance(entry, tomlkit.items.Table)
@@ -1555,17 +1610,15 @@ def _all_server_specs(
         for name, entry in raw.items():
             if not isinstance(entry, dict):
                 continue
-            out[str(name)] = _spec_from_entry(entry, fmt=CLIS[cli].fmt)
+            out[str(name)] = _spec_from_entry(entry, info=CLIS[cli])
 
     if cli == "claude":
         _add(_claude_user_servers(config, create=False))
         node = _claude_project_node(config, repo, create=False)
         if node:
             _add(node.get("mcpServers"))
-    elif cli in ("cursor", "gemini", "agy"):
-        _add(config.get("mcpServers"))
-    else:  # codex, grok
-        _add(config.get("mcp_servers"))
+    else:
+        _add(_server_map(CLIS[cli], config, create=False))
     return out
 
 
