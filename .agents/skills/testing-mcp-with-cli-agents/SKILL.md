@@ -2,7 +2,8 @@
 name: testing-mcp-with-cli-agents
 description: >-
   Test an MCP server by driving real CLI agents (Claude, Codex, Cursor, Gemini,
-  Grok, agy) against it, using isolated tmux sockets and send-keys instead of
+  Grok, agy, opencode) against it, using isolated tmux sockets and send-keys
+  instead of
   trusting unit tests alone. Use this whenever verifying MCP-server behavior
   end-to-end, checking that a local branch or checkout works across installed
   agent CLIs, comparing trunk-vs-branch MCP behavior, driving an interactive
@@ -195,7 +196,17 @@ transcripts), and the **ground-truth socket state** after the run.
 ## Wiring a checkout into the CLIs: mcp_swap
 
 `scripts/mcp_swap.py` rewrites each CLI's config to `uv --directory <repo> run
-<entry>` and preserves existing env on replacement:
+<entry>` and preserves existing env on replacement. It covers eight CLIs; the
+two newest are not yet driven through this harness, so
+`references/cli-matrix.md` has no verified row for them:
+
+- **opencode** — `$XDG_CONFIG_HOME/opencode/opencode.jsonc`. JSONC, so
+  comments survive a swap; the entry packs argv into one `command` array
+  under a top-level `mcp` key, and its env table is spelled `environment`.
+  A scalar `command` there is a decode error that stops opencode starting.
+- **pi** — `~/.pi/agent/mcp.json`. pi ships no MCP client of its own; that
+  file is read by the third-party `pi-mcp-adapter` extension, so a swap
+  does nothing until it is installed. `detect` reports this.
 
 ```console
 $ uv run scripts/mcp_swap.py detect                        # which CLIs are present

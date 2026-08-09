@@ -94,14 +94,18 @@ the user-level fallback; the project entry stays. `revert` without
 
 ### Scope
 
-Covers four CLIs and their canonical **global** config paths:
+Covers eight CLIs and their canonical **global** config paths:
 
-| CLI    | Config                       | Format |
-|--------|-------------------------------|--------|
-| Claude | `~/.claude.json`              | JSON (per-project keying) |
-| Codex  | `~/.codex/config.toml`        | TOML (format-preserving via `tomlkit`) |
-| Cursor | `~/.cursor/mcp.json`          | JSON |
-| Gemini | `~/.gemini/settings.json`     | JSON |
+| CLI | Config | Format |
+|-----|--------|--------|
+| Claude | `~/.claude.json` | JSON (per-project keying) |
+| Codex | `~/.codex/config.toml` | TOML (format-preserving via `tomlkit`) |
+| Cursor | `~/.cursor/mcp.json` | JSON |
+| Gemini | `~/.gemini/settings.json` | JSON |
+| Grok | `~/.grok/config.toml` | TOML (same shape as Codex) |
+| agy | `~/.gemini/config/mcp_config.json` | JSON |
+| opencode | `$XDG_CONFIG_HOME/opencode/opencode.jsonc` | JSONC (comments preserved) |
+| pi | `~/.pi/agent/mcp.json` | JSON (read by `pi-mcp-adapter`, not by pi) |
 
 Claude's config is keyed per-project under the repo's absolute path — the
 script writes only under the current repo's key, leaving other projects'
@@ -109,11 +113,21 @@ entries untouched.
 
 #### Out of scope (use the CLI's native command)
 
-- **Workspace / project-local configs** for Cursor and Gemini
-  (`$PWD/.cursor/mcp.json`, `$PWD/.gemini/settings.json`). When
-  workspace precedence matters, use `cursor mcp add` / `gemini mcp add`
-  directly — workspace files take precedence over the global ones this
-  script writes.
+- **Workspace / project-local configs** for Cursor, Gemini and opencode
+  (`$PWD/.cursor/mcp.json`, `$PWD/.gemini/settings.json`,
+  `$PWD/opencode.json`). When workspace precedence matters, use
+  `cursor mcp add` / `gemini mcp add` / `opencode mcp add` directly —
+  workspace files take precedence over the global ones this script
+  writes.
+- **opencode's sibling global files.** opencode merges `config.json`,
+  `opencode.json` and `opencode.jsonc` from the same directory, with
+  `.jsonc` winning. This script writes `.jsonc`, so its entry is the one
+  that takes effect, but a stale `mcp.<name>` in a sibling
+  `opencode.json` merges underneath rather than being shadowed.
+- **pi without `pi-mcp-adapter`.** pi ships no MCP client. The file this
+  script writes is read by that third-party extension, so until it is
+  installed the swap has no effect — `detect` reports this rather than
+  claiming otherwise.
 - **Custom binary install locations.** Detection is `shutil.which` plus
   the file existing at the configured global path. Homebrew, npm
   prefixes (`~/.npm-global/bin`), and the canonical local-install
@@ -122,7 +136,27 @@ entries untouched.
 
 ### Extending to a new CLI
 
-Add an entry to the `CLIS` table in `mcp_swap.py` and extend the three
-per-CLI branches in `get_server` / `set_server` / `delete_server`. Tests
-in `tests/test_mcp_swap.py` use a `fake_home` fixture that monkeypatches
-`CLIS`, so the extension pattern is already established.
+Add an entry to the `CLIS` table in `mcp_swap.py`. Each `CLIInfo` carries
+the three things that vary per CLI, so no `get_server` / `set_server` /
+`delete_server` / `_all_server_specs` branch needs touching:
+
+- `fmt` — `json`, `jsonc` or `toml`, selecting the reader and writer
+- `container` — the key path to the server map, e.g. `("mcpServers",)`
+  or `("mcp",)`
+- `dialect` — the shape of one entry: `standard` (scalar `command`,
+  sibling `args`, optional `env`), `claude` (adds `type` and always
+  writes `env`), or `opencode` (one `command` array, env under
+  `environment`)
+
+Add the name to `CLIName` and `ALL_CLIS` too — a CLI in `CLIS` but not
+`ALL_CLIS` has its state entries dropped on load, so `revert` forgets the
+swap and leaves the config rewritten.
+
+A dialect no existing CLI speaks needs a branch in
+`McpServerSpec.to_entry_dict` and its mirror in `_spec_from_entry`; that
+mirror is what keeps `is_local_uv_directory` and `local_repo_path`
+working, and those drive the "already local" short-circuit.
+
+Tests in `tests/test_mcp_swap.py` use a `fake_home` fixture that
+monkeypatches `CLIS` wholesale, so every new CLI must be added there as
+well — `test_fake_home_covers_every_registered_cli` enforces it.
