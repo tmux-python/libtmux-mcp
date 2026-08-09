@@ -153,9 +153,10 @@ entries untouched.
 - **Workspace / project-local configs** for Cursor, Gemini and opencode
   (`$PWD/.cursor/mcp.json`, `$PWD/.gemini/settings.json`,
   `$PWD/opencode.json`). When workspace precedence matters, use
-  `cursor mcp add` / `gemini mcp add` / `opencode mcp add` directly —
-  workspace files take precedence over the global ones this script
-  writes.
+  `cursor mcp add` / `gemini mcp add` directly — workspace files take
+  precedence over the global ones this script writes. opencode has no
+  non-interactive project-scope add (`opencode mcp add` writes the global
+  file), so edit `$PWD/opencode.json` by hand.
 - **opencode's sibling global files.** opencode merges `config.json`,
   `opencode.json` and `opencode.jsonc` from the same directory, with
   `.jsonc` winning. This script writes `.jsonc`, so its entry is the one

@@ -48,8 +48,9 @@ This script is best-effort and intentionally narrow:
   entries inside ``~/.claude.json`` *are* recognised for Claude only)
   are NOT walked — workspace files for the others are silently ignored.
   When workspace precedence matters, run the CLI's own
-  ``cursor mcp add ...`` / ``gemini mcp add ...`` /
-  ``opencode mcp add ...`` directly.
+  ``cursor mcp add ...`` / ``gemini mcp add ...`` directly. opencode has
+  no non-interactive project-scope add -- ``opencode mcp add`` writes the
+  global file -- so edit ``$PWD/opencode.json`` by hand for that.
 
 - **opencode reads three global files.** ``config.json``,
   ``opencode.json`` and ``opencode.jsonc`` in the same directory are all
