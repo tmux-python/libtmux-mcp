@@ -6,6 +6,10 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a20 (2026-08-09)
+
+libtmux-mcp 0.1.0a20 changes no tool behavior. `scripts/mcp_swap.py` gains `use-local --pr N`, which points installed agent CLIs at a pull request without a checkout and verifies the server before it rewrites any configuration, and its edits now preserve unrelated config text, file permissions, and symlink targets. ruff's curated default rule set is enabled behind a `ruff>=0.16.0` floor, taking the project from 351 enabled rules to 565 and fixing what that surfaced, and the CI workflow actions move to their current majors. In the documentation, the dataclass identifying an MCP caller describes each of its fields instead of reaching the API reference as "Alias for field number 0".
+
 ### Documentation
 
 #### Caller identity fields are described (#105)
