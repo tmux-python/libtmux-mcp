@@ -2155,7 +2155,7 @@ def test_preflight_passes_spec_env_to_the_process(tmp_path: pathlib.Path) -> Non
 #
 # Out of scope, and normalized rather than preserved: indent width, CRLF,
 # `\/` and `\uXXXX` escapes of characters that need none, duplicate keys,
-# and number spelling (`1e5` -> `100000.0`). None appear in what the six
+# and number spelling (`1e5` -> `100000.0`). None appear in what the JSON
 # CLIs write — they all emit `JSON.stringify(x, null, 2)` — and none
 # change what a CLI reads, only the bytes a dotfile diff shows.
 # ---------------------------------------------------------------------------
