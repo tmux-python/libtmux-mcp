@@ -2004,3 +2004,380 @@ def test_swap_after_backup_vanished_warns_and_writes_new_backup(
     assert "recorded backup is gone" in capsys.readouterr().err
     fresh = pathlib.Path(mcp_swap.load_state()[("cursor", "user")].backup_path)
     assert fresh.read_bytes() == swapped_bytes
+
+
+# ---------------------------------------------------------------------------
+# opencode and pi
+#
+# These two exercise axes the first six never did. opencode is the first
+# JSONC config, the first container key that is not ``mcpServers`` or
+# ``mcp_servers``, and the first entry dialect that packs argv into one
+# array; pi is the first CLI whose config is read by an extension rather
+# than by the agent itself. The comment-fidelity cases are the point of
+# the JSONC codec, so they are asserted on bytes, not on parsed values.
+# ---------------------------------------------------------------------------
+
+
+def test_fake_home_covers_every_registered_cli(fake_home: pathlib.Path) -> None:
+    """``fake_home`` replaces ``CLIS`` wholesale, so it must list every CLI.
+
+    Regression guard rather than a behavior test. ``_config_present_clis``
+    iterates ``ALL_CLIS`` while indexing ``CLIS``, so a CLI added to the
+    registry but not to this fixture raises ``KeyError`` from half a dozen
+    unrelated doctor and naming-hint tests. Naming the invariant here turns
+    that into one obvious failure.
+    """
+    assert set(mcp_swap.CLIS) == set(mcp_swap.ALL_CLIS)
+
+
+def test_opencode_and_pi_registered() -> None:
+    """Both new CLIs are first-class ``--cli`` choices with their own shapes."""
+    assert "opencode" in mcp_swap.ALL_CLIS
+    assert "pi" in mcp_swap.ALL_CLIS
+    opencode = mcp_swap.CLIS["opencode"]
+    assert opencode.fmt == "jsonc"
+    assert opencode.config_path.name == "opencode.jsonc"
+    assert opencode.container == ("mcp",)
+    assert opencode.dialect == "opencode"
+    pi = mcp_swap.CLIS["pi"]
+    assert pi.fmt == "json"
+    assert pi.config_path.name == "mcp.json"
+    assert pi.container == ("mcpServers",)
+    assert pi.dialect == "standard"
+    parser = mcp_swap.build_parser()
+    assert parser.parse_args(["status", "--cli", "opencode"]).cli == ["opencode"]
+    assert parser.parse_args(["status", "--cli", "pi"]).cli == ["pi"]
+
+
+@pytest.mark.parametrize("cli", ["opencode", "pi"])
+def test_new_cli_set_get_delete_roundtrip(cli: str, fake_repo: pathlib.Path) -> None:
+    """Each new CLI's four container branches agree with one another.
+
+    Proves the name was threaded through ``get_server``, ``set_server``,
+    ``delete_server`` and ``_all_server_specs`` rather than falling through
+    to another CLI's container key.
+    """
+    config: dict[str, t.Any] = {}
+    spec = mcp_swap.McpServerSpec(
+        command="uv", args=["--directory", str(fake_repo), "run", "libtmux-mcp"]
+    )
+    assert mcp_swap.set_server(cli, config, "libtmux", spec, fake_repo) == "added"
+    assert mcp_swap.CLIS[cli].container[0] in config
+    got = mcp_swap.get_server(cli, config, "libtmux", fake_repo)
+    assert got is not None
+    assert got.is_local_uv_directory()
+    assert got.local_repo_path() == fake_repo
+    assert mcp_swap.set_server(cli, config, "libtmux", spec, fake_repo) == "replaced"
+    assert mcp_swap._all_server_specs(cli, config, fake_repo).keys() == {"libtmux"}
+    assert mcp_swap.delete_server(cli, config, "libtmux", fake_repo)
+    assert mcp_swap.get_server(cli, config, "libtmux", fake_repo) is None
+
+
+def test_opencode_entry_packs_argv_into_one_command_array(
+    fake_repo: pathlib.Path,
+) -> None:
+    """The opencode dialect uses one argv array and the key ``environment``.
+
+    A scalar ``command`` is a decode error that stops opencode starting at
+    all, and an ``env`` key is dropped without a warning, so both spellings
+    are pinned here rather than left to the round-trip tests.
+    """
+    spec = mcp_swap.McpServerSpec(
+        command="uv", args=["--directory", "/repo", "run"], env={"A": "b"}
+    )
+    entry = spec.to_entry_dict("opencode")
+    assert entry["type"] == "local"
+    assert entry["command"] == ["uv", "--directory", "/repo", "run"]
+    assert entry["environment"] == {"A": "b"}
+    assert "args" not in entry
+    assert "env" not in entry
+
+
+def test_opencode_array_entry_reads_back_as_command_plus_args() -> None:
+    """An array ``command`` normalizes to the portable scalar-plus-args spec.
+
+    Regression: without the split, ``command`` becomes the ``str()`` of a
+    Python list, ``is_local_uv_directory`` is False for a correct entry, and
+    the "already local — no change" short-circuit never fires, so every run
+    rewrites a config that needed no change.
+    """
+    info = mcp_swap.CLIS["opencode"]
+    spec = mcp_swap._spec_from_entry(
+        {
+            "type": "local",
+            "command": ["uv", "--directory", "/repo", "run", "libtmux-mcp"],
+            "environment": {"A": "b"},
+        },
+        info=info,
+    )
+    assert spec.command == "uv"
+    assert spec.args == ["--directory", "/repo", "run", "libtmux-mcp"]
+    assert spec.env == {"A": "b"}
+    assert spec.is_local_uv_directory()
+    assert spec.local_repo_path() == pathlib.Path("/repo")
+
+
+def _opencode_config(fake_home: pathlib.Path, body: str) -> t.Any:
+    """Write ``body`` to the fake opencode config and return its ``CLIInfo``."""
+    info = mcp_swap.CLIS["opencode"]
+    info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    info.config_path.write_text(body)
+    return info
+
+
+def _swap_opencode(fake_repo: pathlib.Path) -> int:
+    """Run ``use-local`` against opencode only."""
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "opencode"]
+    )
+    return int(mcp_swap.cmd_use_local(args))
+
+
+def test_opencode_swap_preserves_jsonc_comments(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Line comments, block comments and sibling servers survive a swap."""
+    info = _opencode_config(
+        fake_home,
+        "{\n"
+        "  // header comment\n"
+        '  "$schema": "https://opencode.ai/config.json",\n'
+        "  /* a block comment\n"
+        "     spanning lines */\n"
+        '  "model": "openrouter/x",\n'
+        '  "mcp": {\n'
+        '    "other": { "type": "local", "command": ["echo", "keep"] }\n'
+        "  }\n"
+        "}\n",
+    )
+    assert _swap_opencode(fake_repo) == 0
+    text = info.config_path.read_text()
+    assert "// header comment" in text
+    assert "/* a block comment" in text
+    assert "spanning lines */" in text
+    doc = mcp_swap._jsonc_loads(text)
+    assert doc["model"] == "openrouter/x"
+    assert doc["mcp"]["other"]["command"] == ["echo", "keep"]
+    assert doc["mcp"]["libtmux"]["command"][0] == "uv"
+
+
+def test_opencode_comment_inside_the_replaced_entry_survives(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """A comment attached to the entry being rewritten is not collateral.
+
+    The case a whole-entry rewrite loses and a field-level splice keeps.
+    Real opencode configs carry the rationale for a pinned ``command``
+    directly above it, which is exactly the text a swap would destroy.
+    """
+    info = _opencode_config(
+        fake_home,
+        "{\n"
+        '  "mcp": {\n'
+        '    "libtmux": {\n'
+        '      "type": "local",\n'
+        "      // Pinned deliberately; this rationale must outlive the swap.\n"
+        '      "command": ["uvx", "libtmux-mcp==0.1.0a2"],\n'
+        '      "environment": { "KEEP": "me" }\n'
+        "    }\n"
+        "  }\n"
+        "}\n",
+    )
+    assert _swap_opencode(fake_repo) == 0
+    text = info.config_path.read_text()
+    assert "// Pinned deliberately; this rationale must outlive the swap." in text
+    entry = mcp_swap._jsonc_loads(text)["mcp"]["libtmux"]
+    assert entry["command"][0] == "uv"
+    assert entry["environment"] == {"KEEP": "me"}
+
+
+def test_opencode_swap_and_revert_round_trip_is_byte_identical(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Revert restores a commented JSONC config byte for byte."""
+    body = (
+        "{\n"
+        "  // keep me\n"
+        '  "model": "m",\n'
+        '  "mcp": {\n'
+        '    "libtmux": {\n'
+        '      "type": "local",\n'
+        '      "command": ["uvx", "libtmux-mcp==0.1.0a2"]\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+    info = _opencode_config(fake_home, body)
+    original = info.config_path.read_bytes()
+    assert _swap_opencode(fake_repo) == 0
+    assert info.config_path.read_bytes() != original
+    revert = mcp_swap.build_parser().parse_args(["revert", "--cli", "opencode"])
+    assert mcp_swap.cmd_revert(revert) == 0
+    assert info.config_path.read_bytes() == original
+
+
+def test_opencode_second_swap_reports_no_change(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """The idempotence check fires for the array command shape.
+
+    Depends on ``_spec_from_entry`` splitting the array; without it the
+    config is rewritten on every invocation.
+    """
+    info = _opencode_config(fake_home, '{\n  "mcp": {}\n}\n')
+    assert _swap_opencode(fake_repo) == 0
+    after_first = info.config_path.read_bytes()
+    assert _swap_opencode(fake_repo) == 0
+    assert info.config_path.read_bytes() == after_first
+
+
+def test_opencode_seeds_schema_into_an_empty_config(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Seeding an empty file writes ``$schema`` alongside the server entry."""
+    info = _opencode_config(fake_home, "")
+    assert _swap_opencode(fake_repo) == 0
+    doc = mcp_swap._jsonc_loads(info.config_path.read_text())
+    assert doc["$schema"] == mcp_swap.OPENCODE_SCHEMA_URL
+    assert doc["mcp"]["libtmux"]["type"] == "local"
+
+
+def test_detect_reports_the_pi_adapter_prerequisite(
+    fake_home: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``detect`` says why a pi swap will not take effect on its own.
+
+    pi ships no MCP client, so the file this script writes is read only by
+    the ``pi-mcp-adapter`` extension. Reporting pi as swappable without
+    that caveat would be the one thing this script must never do: claim an
+    agent will run something it will not.
+    """
+    monkeypatch.setattr(mcp_swap, "PI_ADAPTER_DIR", fake_home / "absent")
+    monkeypatch.setattr(mcp_swap.shutil, "which", lambda _binary: "/usr/bin/stub")
+    info = mcp_swap.CLIS["pi"]
+    info.config_path.parent.mkdir(parents=True)
+    info.config_path.write_text('{"mcpServers": {}}\n')
+
+    assert mcp_swap.cmd_detect(mcp_swap.build_parser().parse_args(["detect"])) == 0
+    out = capsys.readouterr().out
+    assert mcp_swap.PI_ADAPTER_HINT in out
+
+    monkeypatch.setattr(mcp_swap, "PI_ADAPTER_DIR", fake_home)
+    assert mcp_swap.cmd_detect(mcp_swap.build_parser().parse_args(["detect"])) == 0
+    assert mcp_swap.PI_ADAPTER_HINT not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# JSONC writer fidelity
+#
+# The JSON writer reserializes the whole document, so it can only promise
+# to preserve values. The JSONC writer splices text and therefore promises
+# bytes: anything it did not deliberately change must come back identical,
+# including the comments, the trailing comma, the indent width and the
+# absence of a final newline. The string cases exist because a
+# comment-stripper that is not string-aware corrupts a URL or a Windows
+# path silently, which is the worst failure this codec could have.
+# ---------------------------------------------------------------------------
+
+
+PRESERVED_JSONC: list[tuple[str, str]] = [
+    ("line_comment", '{\n  // note\n  "mcp": {}\n}\n'),
+    ("block_comment", '{\n  /* note\n     more */\n  "mcp": {}\n}\n'),
+    ("comment_after_last_member", '{\n  "mcp": {}\n  // tail\n}\n'),
+    ("trailing_comma", '{\n  "mcp": {},\n}\n'),
+    ("no_trailing_newline", '{\n  "mcp": {}\n}'),
+    ("four_space_indent", '{\n    "mcp": {}\n}\n'),
+    ("url_containing_double_slash", '{\n  "a": "https://x/y//z"\n}\n'),
+    ("block_marker_inside_string", '{\n  "a": "/* not one */"\n}\n'),
+    ("windows_path", '{\n  "a": "C:\\\\tmp\\\\x"\n}\n'),
+    ("literal_backslash_u", '{\n  "a": "C:\\\\u0041"\n}\n'),
+    ("emoji_and_cjk", '{\n  "a": "🙂 日本語 café"\n}\n'),
+    ("empty_object", "{}\n"),
+]
+
+
+def _jsonc_config(tmp_path: pathlib.Path, body: str) -> tuple[t.Any, bytes]:
+    """Write ``body`` verbatim and return its ``CLIInfo`` and exact bytes."""
+    path = tmp_path / "opencode.jsonc"
+    path.write_text(body)
+    info = mcp_swap.CLIInfo(
+        name="opencode",
+        binary="opencode",
+        config_path=path,
+        fmt="jsonc",
+        container=("mcp",),
+        dialect="opencode",
+    )
+    return info, path.read_bytes()
+
+
+@pytest.mark.parametrize(
+    ("test_id", "body"),
+    PRESERVED_JSONC,
+    ids=[case[0] for case in PRESERVED_JSONC],
+)
+def test_untouched_jsonc_config_round_trips_byte_identical(
+    test_id: str, body: str, tmp_path: pathlib.Path
+) -> None:
+    """Loading and rewriting an unmodified JSONC config changes no byte."""
+    assert test_id
+    info, raw = _jsonc_config(tmp_path, body)
+    config = mcp_swap.load_config(info)
+    assert mcp_swap.dump_config_bytes(info, config, original=raw) == raw
+
+
+@pytest.mark.parametrize(
+    ("test_id", "body"),
+    PRESERVED_JSONC,
+    ids=[case[0] for case in PRESERVED_JSONC],
+)
+def test_jsonc_values_match_stdlib_json(
+    test_id: str, body: str, tmp_path: pathlib.Path
+) -> None:
+    r"""JSONC parsing agrees with stdlib json wherever stdlib can parse.
+
+    Escape handling is the standard library's, not a reimplementation's.
+    The rejected ``json-five`` dependency failed exactly here: it raised on
+    ``"C:\\x"`` and decoded a literal ``\\u0041`` to ``"A"``.
+    """
+    assert test_id
+    try:
+        expected = json.loads(body)
+    except json.JSONDecodeError:
+        pytest.skip("comment or trailing comma — stdlib cannot parse it")
+    assert mcp_swap._jsonc_loads(body) == expected
+
+
+def test_jsonc_config_is_not_written_through_the_toml_writer(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A jsonc config comes back as JSON text, not TOML.
+
+    Regression: ``dump_config_bytes`` branched on ``fmt != "json"``, so any
+    third format reached ``tomlkit.dumps`` and put TOML bytes in a JSON
+    file. The dispatch is on the exact format now.
+    """
+    info, raw = _jsonc_config(tmp_path, '{\n  "mcp": {}\n}\n')
+    out = mcp_swap.dump_config_bytes(
+        info, {"mcp": {"x": {"type": "local"}}}, original=raw
+    )
+    text = out.decode()
+    assert text.lstrip().startswith("{")
+    assert mcp_swap._jsonc_loads(text)["mcp"]["x"]["type"] == "local"
+
+
+def test_jsonc_comment_blanking_preserves_offsets() -> None:
+    """Blanking a comment must not move the bytes around it.
+
+    Offsets are what let a span found in the blanked text address the same
+    bytes in the original; if blanking changed the length, every splice
+    would land in the wrong place.
+    """
+    src = '{\n  // note\n  "a": 1, /* x */\n  "b": "//not a comment"\n}\n'
+    blanked = mcp_swap._jsonc_blank_comments(src)
+    assert len(blanked) == len(src)
+    assert "//not a comment" in blanked
+    assert "note" not in blanked
+    assert blanked.count("\n") == src.count("\n")

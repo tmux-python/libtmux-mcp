@@ -1078,8 +1078,8 @@ def _spec_from_entry(entry: t.Any, *, info: CLIInfo) -> McpServerSpec:
 
     Every dialect is normalised down to the portable scalar-command
     shape, so the helpers that reason about a spec —
-    :meth:`McpServerSpec.is_local_uv_directory`, :meth:`McpServerSpec.pr_ref`,
-    ``_points_at`` — stay dialect-agnostic. Skipping this is not a
+    :meth:`McpServerSpec.is_local_uv_directory` and ``_points_at`` — stay
+    dialect-agnostic. Skipping this is not a
     cosmetic loss: an unsplit array command makes the "already local, no
     change" check miss, and every run rewrites a config it did not need
     to touch.
