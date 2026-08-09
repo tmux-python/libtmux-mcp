@@ -99,7 +99,7 @@ def fake_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathli
                 name="pi",
                 binary="pi",
                 config_path=tmp_path / ".pi" / "agent" / "mcp.json",
-                fmt="json",
+                fmt="jsonc",
                 container=("mcpServers",),
                 dialect="standard",
             ),
@@ -2040,7 +2040,7 @@ def test_opencode_and_pi_registered() -> None:
     assert opencode.container == ("mcp",)
     assert opencode.dialect == "opencode"
     pi = mcp_swap.CLIS["pi"]
-    assert pi.fmt == "json"
+    assert pi.fmt == "jsonc"
     assert pi.config_path.name == "mcp.json"
     assert pi.container == ("mcpServers",)
     assert pi.dialect == "standard"
@@ -2240,6 +2240,32 @@ def test_opencode_seeds_schema_into_an_empty_config(
     doc = mcp_swap._jsonc_loads(info.config_path.read_text())
     assert doc["$schema"] == mcp_swap.OPENCODE_SCHEMA_URL
     assert doc["mcp"]["libtmux"]["type"] == "local"
+
+
+def test_pi_config_with_comments_is_readable(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Regression: pi's adapter accepts JSONC, so strict JSON rejected it.
+
+    ``pi-mcp-adapter`` reads the file through ``strip-json-comments`` with
+    trailing commas allowed. Parsing it as strict JSON made ``status`` and
+    ``use-local`` report a config the adapter reads fine as unreadable.
+    """
+    info = mcp_swap.CLIS["pi"]
+    info.config_path.parent.mkdir(parents=True)
+    info.config_path.write_text(
+        '{\n  // the adapter allows comments\n  "mcpServers": {\n'
+        '    "keep": { "command": "echo", "args": ["hi"] },\n  }\n}\n'
+    )
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "pi"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+    text = info.config_path.read_text()
+    assert "// the adapter allows comments" in text
+    servers = mcp_swap._jsonc_loads(text)["mcpServers"]
+    assert servers["keep"]["command"] == "echo"
+    assert servers["libtmux"]["command"] == "uv"
 
 
 def test_detect_reports_the_pi_adapter_prerequisite(
