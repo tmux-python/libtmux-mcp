@@ -1045,7 +1045,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                 print(
                     f"[{cli}] {server} = {spec.command} {' '.join(spec.args)}  ({tag})"
                 )
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError, OSError) as exc:
             print(f"[{cli}] {exc}", file=sys.stderr)
             continue
     return 0
@@ -1144,11 +1144,13 @@ def cmd_use_local(args: argparse.Namespace) -> int:
         if not info.config_path.exists():
             print(f"[{label}] skip — config not found at {info.config_path}")
             continue
-        # Wrap the read + shape-guarded mutation in try/except RuntimeError
-        # so a malformed Claude config (top-level mcpServers / projects not a
-        # mapping) surfaces as a clean per-CLI error instead of an uncaught
-        # traceback. Same per-CLI continuation pattern the inner write-failure
-        # handler below uses.
+        # Wrap the read + shape-guarded mutation so an unreadable config
+        # surfaces as a clean per-CLI error instead of an uncaught traceback.
+        # The three arms are the three ways it fails: a shape this script
+        # rejects raises RuntimeError, an unparseable one raises ValueError
+        # (JSON, TOML and UTF-8 decode errors all derive from it), and an
+        # unopenable one raises OSError. Same trio ``doctor`` catches, and
+        # the same per-CLI continuation the write-failure handler below uses.
         try:
             original_bytes = info.config_path.read_bytes()
             config = load_config(info)
@@ -1175,7 +1177,7 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             )
             action = set_server(cli, config, server, cli_spec, repo, scope=scope)
             new_bytes = dump_config_bytes(info, config, original=original_bytes)
-        except RuntimeError as exc:
+        except (RuntimeError, ValueError, OSError) as exc:
             print(f"[{label}] {exc}", file=sys.stderr)
             had_error = 1
             continue

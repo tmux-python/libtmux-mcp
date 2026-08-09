@@ -2325,3 +2325,77 @@ def test_swap_does_not_append_a_newline_the_cli_never_wrote(
     assert mcp_swap.cmd_use_local(args) == 0
 
     assert not info.config_path.read_bytes().endswith(b"\n")
+
+
+class UnreadableConfigCase(t.NamedTuple):
+    """A config body that cannot be parsed, and the error it provokes.
+
+    Attributes
+    ----------
+    test_id : str
+        Identifier shown in the parametrized test name.
+    body : bytes
+        Exact bytes written to the config file.
+    """
+
+    test_id: str
+    body: bytes
+
+
+UNREADABLE_CONFIGS: list[UnreadableConfigCase] = [
+    UnreadableConfigCase("malformed_json", b"{ this is not json"),
+    UnreadableConfigCase("truncated_json", b'{"mcpServers": {'),
+    UnreadableConfigCase("invalid_utf8", b'{"a": "\xff\xfe"}'),
+]
+
+
+@pytest.mark.parametrize(
+    UnreadableConfigCase._fields,
+    UNREADABLE_CONFIGS,
+    ids=[c.test_id for c in UNREADABLE_CONFIGS],
+)
+def test_unreadable_config_reports_instead_of_crashing(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    test_id: str,
+    body: bytes,
+) -> None:
+    """A config that will not parse is reported and skipped, not raised through.
+
+    ``load_config`` raises ``ValueError`` for every unparseable form —
+    JSON, TOML and UTF-8 decode errors all derive from it — which the
+    per-CLI handler has to catch for the run to survive one bad file.
+    """
+    assert test_id
+    info = mcp_swap.CLIS["cursor"]
+    info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    info.config_path.write_bytes(body)
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+    )
+
+    assert mcp_swap.cmd_use_local(args) == 1
+
+    assert "cursor" in capsys.readouterr().err
+    assert info.config_path.read_bytes() == body
+
+
+def test_unreadable_config_does_not_stop_the_other_clis(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+) -> None:
+    """One bad config does not prevent the remaining CLIs from swapping."""
+    bad = mcp_swap.CLIS["cursor"]
+    bad.config_path.parent.mkdir(parents=True, exist_ok=True)
+    bad.config_path.write_bytes(b"{ not json")
+    good = mcp_swap.CLIS["gemini"]
+    _write_json(good.config_path, {"mcpServers": {}})
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor", "--cli", "gemini"]
+    )
+
+    assert mcp_swap.cmd_use_local(args) == 1
+
+    written = json.loads(good.config_path.read_text())
+    assert "libtmux" in written["mcpServers"]
