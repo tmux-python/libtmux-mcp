@@ -38,7 +38,7 @@ from fastmcp.server.middleware.error_handling import (
     RetryMiddleware,
 )
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
-from fastmcp.tools.base import ToolResult
+from fastmcp.tools import ToolResult
 from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
