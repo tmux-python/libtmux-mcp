@@ -335,11 +335,43 @@ def load_config(info: CLIInfo) -> t.Any:
     return tomlkit.parse(raw.decode())
 
 
-def dump_config_bytes(info: CLIInfo, config: t.Any) -> bytes:
-    """Serialize an edited config back to bytes in its original format."""
-    if info.fmt == "json":
-        return (json.dumps(config, indent=2) + "\n").encode()
-    return tomlkit.dumps(config).encode()
+def _json_trailer(original: bytes) -> str:
+    """Return the newline a rewritten JSON config should end with.
+
+    Claude writes ``~/.claude.json`` without a trailing newline, so
+    appending one unconditionally grows the file by a byte on every swap
+    and shows as a diff hunk in a region the swap never touched. Empty
+    bytes mean a file being seeded, which gets the conventional newline.
+    """
+    if not original:
+        return "\n"
+    return "\n" if original.endswith(b"\n") else ""
+
+
+def dump_config_bytes(info: CLIInfo, config: t.Any, *, original: bytes) -> bytes:
+    """Serialize an edited config back to bytes in its original format.
+
+    ``original`` is the file's pre-edit bytes, or empty when seeding a
+    new one. The parsed structure does not record the byte-level
+    conventions of the file it came from, so they are carried over from
+    the source instead. Required rather than defaulted: a caller that
+    omitted it would silently start rewriting regions it never touched,
+    which is the defect this parameter exists to prevent. tomlkit
+    preserves those conventions itself; only the JSON writer needs it.
+    """
+    if info.fmt != "json":
+        return tomlkit.dumps(config).encode()
+    trailer = _json_trailer(original)
+    # ensure_ascii would re-escape every non-ASCII character in the file,
+    # including config text the swap never read.
+    text = json.dumps(config, indent=2, ensure_ascii=False) + trailer
+    try:
+        return text.encode()
+    except UnicodeEncodeError:
+        # A lone surrogate — a JS writer slicing a string mid-pair — has no
+        # UTF-8 encoding. Escaping the document is then the only form that
+        # can be written at all.
+        return (json.dumps(config, indent=2) + trailer).encode()
 
 
 def atomic_write(path: pathlib.Path, data: bytes) -> None:
@@ -1137,7 +1169,7 @@ def cmd_use_local(args: argparse.Namespace) -> int:
                 else spec
             )
             action = set_server(cli, config, server, cli_spec, repo, scope=scope)
-            new_bytes = dump_config_bytes(info, config)
+            new_bytes = dump_config_bytes(info, config, original=original_bytes)
         except RuntimeError as exc:
             print(f"[{label}] {exc}", file=sys.stderr)
             had_error = 1

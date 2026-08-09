@@ -2143,3 +2143,185 @@ def test_preflight_passes_spec_env_to_the_process(tmp_path: pathlib.Path) -> Non
     )
 
     assert mcp_swap.preflight_spec(spec, timeout=60) is None
+
+
+# ---------------------------------------------------------------------------
+# JSON writer fidelity
+#
+# The swap edits one entry inside a file the user owns, so bytes it did
+# not set out to change must survive the rewrite. ``load_config`` ->
+# ``dump_config_bytes`` is the whole write path, so an unmodified config
+# has to come back byte-identical.
+#
+# Out of scope, and normalized rather than preserved: indent width, CRLF,
+# `\/` and `\uXXXX` escapes of characters that need none, duplicate keys,
+# and number spelling (`1e5` -> `100000.0`). None appear in what the six
+# CLIs write — they all emit `JSON.stringify(x, null, 2)` — and none
+# change what a CLI reads, only the bytes a dotfile diff shows.
+# ---------------------------------------------------------------------------
+
+
+class JSONFidelityCase(t.NamedTuple):
+    """A JSON config body whose exact bytes survive a no-op rewrite.
+
+    Attributes
+    ----------
+    test_id : str
+        Identifier shown in the parametrized test name.
+    body : str
+        The config file's text, written to disk verbatim.
+    """
+
+    test_id: str
+    body: str
+
+
+PRESERVED_JSON: list[JSONFidelityCase] = [
+    JSONFidelityCase(
+        "mcp_servers_block",
+        '{\n  "mcpServers": {\n    "libtmux": {\n      "command": "uvx",\n'
+        '      "args": [\n        "libtmux-mcp==0.1.0a2"\n      ]\n    }\n  }\n}\n',
+    ),
+    JSONFidelityCase(
+        "non_ascii_model_label",
+        '{\n  "model": "Fable 5 · Most capable…",\n  "mcpServers": {}\n}\n',
+    ),
+    JSONFidelityCase(
+        "emoji_and_cjk", '{\n  "history": [\n    "🙂 日本語 café"\n  ]\n}\n'
+    ),
+    JSONFidelityCase("escaped_lone_surrogate", '{\n  "truncated": "\\ud800"\n}\n'),
+    JSONFidelityCase("unsorted_keys", '{\n  "zeta": 1,\n  "alpha": 2\n}\n'),
+    JSONFidelityCase(
+        "claude_shape_without_trailing_newline",
+        '{\n  "model": "Fable 5 · Most capable…",\n  "projects": {\n'
+        '    "/home/someone/repo": {\n      "mcpServers": {}\n    }\n  }\n}',
+    ),
+]
+
+
+def _json_config(tmp_path: pathlib.Path, body: str) -> tuple[t.Any, bytes]:
+    """Write ``body`` verbatim and return its ``CLIInfo`` and exact bytes."""
+    path = tmp_path / "config.json"
+    raw = body.encode()
+    path.write_bytes(raw)
+    info = mcp_swap.CLIInfo(
+        name="cursor", binary="cursor-agent", config_path=path, fmt="json"
+    )
+    return info, raw
+
+
+@pytest.mark.parametrize(
+    JSONFidelityCase._fields,
+    PRESERVED_JSON,
+    ids=[c.test_id for c in PRESERVED_JSON],
+)
+def test_untouched_json_config_round_trips_byte_identical(
+    tmp_path: pathlib.Path, test_id: str, body: str
+) -> None:
+    """Parsing a config and writing it back unmodified changes nothing.
+
+    Every case is a shape the JavaScript agent CLIs actually emit:
+    two-space indent, literal non-ASCII, escapes only below ``0x20`` plus
+    lone surrogates, and no terminating newline.
+    """
+    assert test_id
+    info, raw = _json_config(tmp_path, body)
+
+    assert (
+        mcp_swap.dump_config_bytes(info, mcp_swap.load_config(info), original=raw)
+        == raw
+    )
+
+
+def test_dump_config_bytes_ends_a_seeded_file_with_a_newline(
+    tmp_path: pathlib.Path,
+) -> None:
+    """With no original to match, a JSON config gets the conventional newline."""
+    info, _ = _json_config(tmp_path, "")
+
+    assert (
+        mcp_swap.dump_config_bytes(info, {"mcpServers": {}}, original=b"")
+        == b'{\n  "mcpServers": {}\n}\n'
+    )
+
+
+def test_dump_config_bytes_escapes_a_config_it_cannot_encode(
+    tmp_path: pathlib.Path,
+) -> None:
+    r"""A lone surrogate has no UTF-8 form, so the document is escaped instead.
+
+    JavaScript writes a string sliced through a surrogate pair as
+    ``"\ud800"``, which parses to a Python string ``str.encode`` rejects.
+    Escaping the whole document is what keeps the file writable at all.
+    """
+    config = {"truncated": "\ud800", "label": "café"}
+
+    with pytest.raises(UnicodeEncodeError):
+        json.dumps(config, indent=2, ensure_ascii=False).encode()
+
+    info, _ = _json_config(tmp_path, "")
+    written = mcp_swap.dump_config_bytes(info, config, original=b"")
+
+    assert written == b'{\n  "truncated": "\\ud800",\n  "label": "caf\\u00e9"\n}\n'
+    assert json.loads(written.decode()) == config
+
+
+def test_swap_leaves_non_ascii_elsewhere_in_the_config_alone(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """A real swap does not re-escape config text it never read.
+
+    Claude stores model labels and prompt history alongside the MCP
+    entries, so escaping on write turns a one-entry edit into a diff
+    spanning the file.
+    """
+    info = mcp_swap.CLIS["claude"]
+    label = "Fable 5 · Most capable…"
+    _write_json(
+        info.config_path,
+        {
+            "model": label,
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()},
+                    "history": ["café ☕"],
+                }
+            },
+        },
+    )
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "claude"]
+    )
+
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    after = info.config_path.read_text()
+    assert f'"model": "{label}"' in after
+    assert '"café ☕"' in after
+    assert "\\u" not in after
+
+
+def test_swap_does_not_append_a_newline_the_cli_never_wrote(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """Claude's config has no trailing newline, and swapping must not add one."""
+    info = mcp_swap.CLIS["claude"]
+    body = json.dumps(
+        {
+            "projects": {
+                str(fake_repo.resolve()): {
+                    "mcpServers": {"libtmux": _pinned_claude_entry()}
+                }
+            }
+        },
+        indent=2,
+    )
+    info.config_path.parent.mkdir(parents=True, exist_ok=True)
+    info.config_path.write_text(body)
+
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "claude"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    assert not info.config_path.read_bytes().endswith(b"\n")
