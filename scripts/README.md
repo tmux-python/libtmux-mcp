@@ -105,7 +105,7 @@ Covers eight CLIs and their canonical **global** config paths:
 | Grok | `~/.grok/config.toml` | TOML (same shape as Codex) |
 | agy | `~/.gemini/config/mcp_config.json` | JSON |
 | opencode | `$XDG_CONFIG_HOME/opencode/opencode.jsonc` | JSONC (comments preserved) |
-| pi | `~/.pi/agent/mcp.json` | JSON (read by `pi-mcp-adapter`, not by pi) |
+| pi | `~/.pi/agent/mcp.json` | JSONC (read by `pi-mcp-adapter`, not by pi) |
 
 Claude's config is keyed per-project under the repo's absolute path — the
 script writes only under the current repo's key, leaving other projects'

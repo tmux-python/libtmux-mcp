@@ -40,7 +40,8 @@ This script is best-effort and intentionally narrow:
   ``mcpServers`` — the shared-config file the CLI reads, sibling to the
   ``config.json`` it loads at startup),
   ``$XDG_CONFIG_HOME/opencode/opencode.jsonc`` (JSONC ``mcp``, comments
-  preserved) and ``~/.pi/agent/mcp.json``. Workspace / project-local
+  preserved) and ``~/.pi/agent/mcp.json`` (JSONC too -- the adapter that
+  reads it strips comments). Workspace / project-local
   configs (``$PWD/.cursor/mcp.json``, ``$PWD/.gemini/settings.json``,
   ``$PWD/opencode.json``, per-project ``projects.<abs>.mcpServers``
   entries inside ``~/.claude.json`` *are* recognised for Claude only)
