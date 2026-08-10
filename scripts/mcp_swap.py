@@ -690,9 +690,14 @@ def _jsonc_next_edit(
         member = by_key.get(key)
         if member is None:
             body = _jsonc_render(value, depth, ensure_ascii=ensure_ascii)
+            # Escape the key like any other value: written raw, a backslash
+            # or quote in a server name emits text that cannot be parsed
+            # back, so the member is never found and the merge re-inserts
+            # it until the pass ceiling, holding the swap lock throughout.
+            name = json.dumps(key, ensure_ascii=ensure_ascii)
             if members:
                 tail = members[-1].end
-                return tail, tail, f',\n{pad}"{key}": {body}'
+                return tail, tail, f",\n{pad}{name}: {body}"
             if blanked[obj_start + 1 : obj_end - 1].strip():
                 return None
             # Blanking hid any comment the object holds, so measure the
@@ -700,7 +705,7 @@ def _jsonc_next_edit(
             interior = text[obj_start + 1 : obj_end - 1]
             anchor = obj_start + 1 + len(interior.rstrip())
             closing = "  " * (depth - 1)
-            return anchor, obj_end - 1, f'\n{pad}"{key}": {body}\n{closing}'
+            return anchor, obj_end - 1, f"\n{pad}{name}: {body}\n{closing}"
         current = json.loads(
             _jsonc_blank_trailing_commas(blanked[member.value_start : member.value_end])
         )

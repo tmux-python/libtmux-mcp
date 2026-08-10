@@ -2465,6 +2465,24 @@ def test_jsonc_merge_removing_a_member_takes_exactly_one_comma(
     assert mcp_swap._jsonc_merge(body, data, ensure_ascii=False) == expected
 
 
+@pytest.mark.parametrize(
+    "name", ["back\\slash", 'quo"te', "new\nline", "tab\tbed", "unicode\u00e9"]
+)
+def test_jsonc_merge_escapes_an_inserted_key(name: str) -> None:
+    """Regression: an inserted key was written raw, so a swap could not converge.
+
+    ``--server`` takes an arbitrary string. Written unescaped, a backslash or
+    quote in it emitted text that would not parse back, so the member was
+    never found again and the merge re-inserted it until the pass ceiling --
+    spinning while holding the swap lock and then failing.
+    """
+    src = '{\n  "mcp": {}\n}\n'
+    data = mcp_swap._jsonc_loads(src)
+    data["mcp"][name] = {"type": "local"}
+    out = mcp_swap._jsonc_merge(src, data, ensure_ascii=False)
+    assert mcp_swap._jsonc_loads(out)["mcp"][name] == {"type": "local"}
+
+
 def test_jsonc_merge_removing_a_middle_member_stays_parseable() -> None:
     """The shape that surfaced it: an opencode entry losing optional fields."""
     src = (
