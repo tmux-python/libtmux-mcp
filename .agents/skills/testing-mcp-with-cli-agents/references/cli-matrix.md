@@ -75,8 +75,27 @@ below.
 | gemini | `gemini -p` | project `.gemini/settings.json` from cwd | `gemini mcp list` | `--approval-mode yolo` (`--skip-trust`) | no — `IneligibleTierError`, CLI unsupported for individuals |
 | grok | `grok -p` / `--single` | `GROK_HOME` **or** `mcp add --scope project` | `grok mcp doctor tmux --json` (real handshake) | `--permission-mode bypassPermissions` | yes |
 | agy | `agy -p` | hidden `--gemini_dir <path>` (**credentials do not follow it — copy the token in**) | none short of a model call | `--dangerously-skip-permissions` | yes |
+| opencode | not yet verified | not yet verified | not yet verified | not yet verified | not yet driven through this harness |
+| pi | n/a — no MCP client (see below) | n/a | n/a | n/a | n/a |
 
 ## Per-CLI detail
+
+### opencode and pi — registered in mcp_swap, not yet driven here
+
+`mcp_swap` writes both, but neither has been taken through the tmux harness, so
+the row above is blank rather than guessed. What is known from the source:
+
+- **opencode** stores MCP servers under a top-level `mcp` key in
+  `$XDG_CONFIG_HOME/opencode/opencode.jsonc`, as
+  `{"type": "local", "command": [argv...], "environment": {...}}`. `command` is
+  one array, not a command/args pair, and the env table is `environment` — an
+  `env` key is dropped in silence, while a scalar `command` fails the whole
+  config's decode and stops opencode starting. `opencode mcp add <name> -- <cmd>`
+  is non-interactive once both a name and a `--` command are given.
+- **pi** has no MCP client at all: its README says "No MCP", and the released
+  build contains no MCP code. `~/.pi/agent/mcp.json` is a convention of the
+  third-party `pi-mcp-adapter` extension. Until that package is installed,
+  nothing reads what a swap writes, and there is no agent behavior to drive.
 
 ### codex — two isolation styles, both verified
 - **Config-less (leanest):** a home dir containing only a **copy** of the real
