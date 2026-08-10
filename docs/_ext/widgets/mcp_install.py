@@ -170,6 +170,18 @@ _CURSOR_SCOPES: tuple[Scope, ...] = (
     ),
 )
 
+#: User scope only: `opencode mcp add` writes the global config whether or
+#: not a project one exists, so a Project panel would advertise a file the
+#: command it prints never touches.
+_OPENCODE_SCOPES: tuple[Scope, ...] = (
+    Scope(
+        id="user",
+        label="User",
+        config_file="~/.config/opencode/opencode.jsonc",
+        note=None,
+    ),
+)
+
 _GROK_SCOPES: tuple[Scope, ...] = (
     Scope(
         id="user",
@@ -237,6 +249,12 @@ CLIENTS: tuple[Client, ...] = (
         label="Antigravity",
         kind="json",
         scopes=_ANTIGRAVITY_SCOPES,
+    ),
+    Client(
+        id="opencode",
+        label="opencode",
+        kind="cli",
+        scopes=_OPENCODE_SCOPES,
     ),
 )
 
@@ -377,6 +395,14 @@ def _cli_body(client: Client, scope: Scope, method: Method, cooldown: Cooldown) 
     # ``--`` is handed to the server process verbatim.
     if client.id == "grok":
         return f"grok mcp add --scope {scope.id} tmux -- {tool_cmd}"
+    # opencode: ``opencode mcp add <name> -- <cmd>`` is non-interactive as
+    # soon as a name and a ``--`` command are both given, and it writes
+    # whichever config file is in scope for the current directory. The
+    # stored entry packs argv into a single ``command`` array rather than
+    # the command/args pair the JSON-kind clients use, which is why this
+    # is a CLI panel and not a paste-this-JSON one.
+    if client.id == "opencode":
+        return f"opencode mcp add tmux -- {tool_cmd}"
     # codex: CLI doesn't write project scope; the project-scope panel
     # uses the TOML body path (see ``_body_for``).
     return f"codex mcp add tmux -- {tool_cmd}"

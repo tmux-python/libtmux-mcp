@@ -119,7 +119,7 @@ watch-mypy:
 format-markdown:
     prettier --parser=markdown -w *.md docs/*.md docs/**/*.md CHANGES
 
-# Detect which CLI agents (claude/codex/cursor/gemini) exist on this machine
+# Detect which agent CLIs exist on this machine
 [group: 'mcp']
 mcp-detect:
     uv run scripts/mcp_swap.py detect
