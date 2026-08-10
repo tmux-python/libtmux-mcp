@@ -248,6 +248,20 @@ class CLIInfo:
     dialect: Dialect
 
 
+def _xdg_config_home() -> pathlib.Path:
+    """``$XDG_CONFIG_HOME`` when absolute, else ``~/.config``.
+
+    The spec requires these variables to be absolute and says to ignore
+    them otherwise. A relative value would resolve against the working
+    directory, so the swap would record a backup path that revert could
+    no longer find from anywhere else.
+    """
+    raw = os.environ.get("XDG_CONFIG_HOME")
+    if raw and pathlib.Path(raw).is_absolute():
+        return pathlib.Path(raw)
+    return pathlib.Path.home() / ".config"
+
+
 CLIS: dict[CLIName, CLIInfo] = {
     "claude": CLIInfo(
         name="claude",
@@ -304,13 +318,7 @@ CLIS: dict[CLIName, CLIInfo] = {
         # this directory and merges all three, with .jsonc winning. It writes
         # to the first that exists, defaulting to .jsonc — so that is the one
         # file a swap can own without being shadowed.
-        config_path=(
-            pathlib.Path(
-                os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config"
-            )
-            / "opencode"
-            / "opencode.jsonc"
-        ),
+        config_path=_xdg_config_home() / "opencode" / "opencode.jsonc",
         fmt="jsonc",
         container=("mcp",),
         dialect="opencode",

@@ -2030,6 +2030,29 @@ def test_fake_home_covers_every_registered_cli(fake_home: pathlib.Path) -> None:
     assert set(mcp_swap.CLIS) == set(mcp_swap.ALL_CLIS)
 
 
+@pytest.mark.parametrize("raw", ["relcfg", "", "  ", "./cfg"])
+def test_relative_xdg_config_home_is_ignored(
+    raw: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a relative XDG_CONFIG_HOME resolved against the cwd.
+
+    The spec requires these to be absolute and to be ignored otherwise.
+    Honouring a relative one made opencode's config -- and the backup path
+    recorded for it -- depend on where the swap was run from, so revert
+    from any other directory reported the backup missing for good.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", raw)
+    assert mcp_swap._xdg_config_home() == pathlib.Path.home() / ".config"
+
+
+def test_absolute_xdg_config_home_is_honoured(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Opencode resolves XDG the way its own loader does."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert mcp_swap._xdg_config_home() == tmp_path
+
+
 def test_opencode_and_pi_registered() -> None:
     """Both new CLIs are first-class ``--cli`` choices with their own shapes."""
     assert "opencode" in mcp_swap.ALL_CLIS
