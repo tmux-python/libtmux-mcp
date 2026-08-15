@@ -957,6 +957,8 @@ def test_readonly_retry_recovers_on_decorated_tool(
         libtmux_exc.NoWindowsExist,
         libtmux_exc.BadSessionName(reason="contains periods", session_name="a.b"),
         libtmux_exc.TmuxSessionExists("session exists"),
+        libtmux_exc.InvalidCaptureCursor("invalid capture_since cursor"),
+        libtmux_exc.PaneLifecycleChanged("pane %99 was respawned"),
     ],
     ids=lambda e: type(e).__name__ if isinstance(e, Exception) else e.__name__,
 )
@@ -966,9 +968,10 @@ def test_readonly_retry_skips_deterministic_failures(raised: Exception) -> None:
     Every one of these descends from ``LibTmuxException``, which is the retry
     trigger — so without :data:`NON_RETRYABLE_EXCEPTIONS` they would all be
     retried. None of them can succeed on the second look: a pane that is not
-    there will not appear during a backoff window, and an ambiguous match does
-    not become unambiguous. Retrying buys a second tmux round-trip and 100 ms
-    of latency in order to fail identically.
+    there will not appear during a backoff window, an ambiguous match does
+    not become unambiguous, and a capture cursor that does not describe its
+    pane will not start describing it. Retrying buys a second tmux round-trip
+    and 100 ms of latency in order to fail identically.
     """
     middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
     ctx = _retry_context(tags={TAG_READONLY})
