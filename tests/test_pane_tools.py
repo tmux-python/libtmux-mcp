@@ -1351,8 +1351,8 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
 
     Floods past ``history-limit`` then clears history to guarantee the
     cursor anchor is destroyed.  The flood alone is not deterministic —
-    tmux 3.6 retains enough of the original prompt that
-    ``_find_unique_cursor_match`` re-anchors on the surviving hash.
+    tmux 3.6 retains enough of the original prompt that libtmux's
+    fingerprint search re-anchors on the surviving hash.
     """
     import asyncio
 
@@ -1561,9 +1561,11 @@ def test_capture_since_marks_lines_missed_after_clear_history_with_resize(
 ) -> None:
     """clear-history + pane resize still detects anchor loss.
 
-    Regression: ``_cursor_anchor_lost`` used a ``pane_height`` guard
-    that returned False when the pane grew after ``clear-history``,
-    masking the complete history wipe.
+    Regression: libtmux's anchor-loss check uses a ``pane_height`` guard
+    to tell a resize-grow from a real trim, and an early version of it
+    returned False when the pane grew after ``clear-history``, masking
+    the complete history wipe. Kept here because this tool is what
+    surfaces that loss to an agent.
     """
     import asyncio
 

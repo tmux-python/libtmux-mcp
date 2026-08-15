@@ -6,9 +6,6 @@ import typing as t
 
 from libtmux_mcp._utils import ExpectedToolError
 
-if t.TYPE_CHECKING:
-    from libtmux.pane import Pane
-
 
 class _PaneState(t.NamedTuple):
     """Per-read snapshot of tmux pane grid and lifecycle state.
@@ -18,7 +15,7 @@ class _PaneState(t.NamedTuple):
     ``history_size + cursor_y`` gives the absolute tmux grid row of
     the current cursor.
 
-    Wire format parsed by :func:`_read_pane_state`::
+    Wire format parsed by :func:`_parse_pane_state`::
 
         #{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}
         |#{alternate_on}
@@ -45,9 +42,9 @@ class _PaneState(t.NamedTuple):
     alternate_on: bool = False
 
 
-#: tmux format string read by :func:`_read_pane_state`. Exposed as a
-#: constant because the wait tools re-issue the identical read through
-#: a timeout-bounded ``subprocess.run`` rather than libtmux (whose
+#: tmux format string whose single output line :func:`_parse_pane_state`
+#: decodes. Exposed as a constant because the wait tools issue this read
+#: through a timeout-bounded ``subprocess.run`` rather than libtmux (whose
 #: ``Popen.communicate()`` has no timeout and can wedge a worker
 #: thread). It is a fixed literal — no caller-supplied text is ever
 #: interpolated into a tmux format string, because tmux's format
@@ -83,19 +80,6 @@ def _parse_pane_state(raw: str) -> _PaneState:
     )
 
 
-def _read_pane_state(pane: Pane) -> _PaneState:
-    """Return a :class:`_PaneState` snapshot for ``pane``.
-
-    Combines the tmux state reads needed by wait and incremental
-    capture tools into a single ``display-message`` call. ``pane_pid``
-    and ``pane_dead`` surface respawn-pane and pane-death events that
-    invalidate cursor or baseline anchors.
-    """
-    stdout = pane.display_message(PANE_STATE_FORMAT, get_text=True)
-    raw = stdout[0] if stdout else "0|0|0||0"
-    return _parse_pane_state(raw)
-
-
 def _raise_if_pane_lifecycle_changed(
     pane_id: str | None, state: _PaneState, baseline_pid: str
 ) -> None:
@@ -116,18 +100,3 @@ def _raise_if_pane_lifecycle_changed(
             "cursor/baseline anchor is no longer valid"
         )
         raise ExpectedToolError(msg)
-
-
-def _read_history_limit(pane: Pane) -> int:
-    """Read the pane's ``history-limit`` once.
-
-    Fixed at pane creation — a retroactive ``set-option history-limit``
-    only takes effect in tmux 3.7+ (commit ``e7b1575``); older versions
-    require a new pane.  Safe to cache for the lifetime of a single
-    wait or capture operation.  Kept separate from :func:`_read_pane_state`
-    so per-tick reads do not pay for a value that never changes between
-    ticks.
-    """
-    stdout = pane.display_message(HISTORY_LIMIT_FORMAT, get_text=True)
-    raw = stdout[0] if stdout else "0"
-    return int(raw)

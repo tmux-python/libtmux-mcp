@@ -111,6 +111,12 @@ lint = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv.sources]
+# TEMPORARY: tracks the libtmux branch that adds Pane.capture_since().
+# Drop this block and the matching uv.lock entry once that lands in a
+# released libtmux. https://github.com/tmux-python/libtmux/pull/741
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", branch = "capture-since" }
+
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
 # fresh release blocking on the 3-day cooldown blocks every
