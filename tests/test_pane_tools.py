@@ -1658,17 +1658,26 @@ def test_capture_since_rejects_dead_pane_cursor(
 def test_capture_since_does_not_block_event_loop(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``capture_since`` runs blocking tmux captures off the event loop."""
+    """``capture_since`` runs blocking tmux captures off the event loop.
+
+    Slows ``Pane.cmd``, the one chokepoint every tmux round-trip in a
+    capture passes through, rather than a single wrapper method. Patching
+    a specific wrapper would silently stop injecting delay if libtmux
+    changed which wrapper the read is built on, and the test would then
+    pass without exercising anything.
+    """
     import asyncio
     import time as _time
 
     from libtmux.pane import Pane as _LibtmuxPane
 
-    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
-        _time.sleep(0.15)
-        return []
+    real_cmd = _LibtmuxPane.cmd
 
-    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
+    def _slow_cmd(self: _LibtmuxPane, *args: str) -> t.Any:
+        _time.sleep(0.05)
+        return real_cmd(self, *args)
+
+    monkeypatch.setattr(_LibtmuxPane, "cmd", _slow_cmd)
 
     async def _drive() -> int:
         ticks = 0
