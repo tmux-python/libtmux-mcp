@@ -1324,7 +1324,7 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.62.0"
-source = { git = "https://github.com/tmux-python/libtmux.git?branch=capture-since#aafd8cc59f215ce57949c0a5e2e9f4ec54398610" }
+source = { git = "https://github.com/tmux-python/libtmux.git?branch=capture-since#9c0137a873004230db13ba5355ba9d9ab01418ac" }
 
 [[package]]
 name = "libtmux-mcp"
