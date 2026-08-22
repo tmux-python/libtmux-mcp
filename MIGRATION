@@ -19,6 +19,37 @@ for the full release log.
    [tracker]: https://github.com/tmux-python/libtmux-mcp/discussions
 ```
 
+## libtmux-mcp 0.1.x (unreleased)
+
+### `wait_for_text` warnings arrive on stderr, not as MCP log notifications
+
+MCP deprecated the protocol-level Logging capability in [SEP-2577], effective
+with the `2026-07-28` revision, and names stderr as the migration path for
+stdio servers. `wait_for_text` was the only tool using it.
+
+Three warnings changed channel — an invalid regex, a wait that timed out, and
+polling inside tmux's history-limit trim-risk band. Wording and timing are
+unchanged; only the transport differs.
+
+#### Before
+
+An MCP `notifications/message` at level `warning`.
+
+#### After
+
+An ordinary `libtmux_mcp.tools.pane_tools.wait` log record on stderr. Under the
+stdio transport the client already captures that stream, so most log panels
+show them as before.
+
+If you read these through an MCP client's log handler, switch to the server
+process's stderr. If you drive the tools from Python, `caplog` or any handler
+on the `libtmux_mcp` logger sees them.
+
+This supersedes the 0.1.0a19 note below stating that the trim-risk signal is
+delivered only as an MCP warning notification.
+
+[SEP-2577]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2577
+
 ## libtmux-mcp 0.1.0a19 (2026-07-25)
 
 ### `wait_for_text` takes `patterns`, and `wait_for_content_change` is gone
