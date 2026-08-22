@@ -4,12 +4,15 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [tmux](ht
 
 [![Python Version](https://img.shields.io/pypi/pyversions/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
 [![PyPI Version](https://img.shields.io/pypi/v/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
-[![License](https://img.shields.io/github/license/tmux-python/libtmux-mcp.svg)](https://github.com/tmux-python/libtmux-mcp/blob/master/LICENSE)
+[![License](https://img.shields.io/github/license/tmux-python/libtmux-mcp.svg)](https://github.com/tmux-python/libtmux-mcp/blob/main/LICENSE)
 
 > [!WARNING]
-> **Pre-alpha.** APIs may change. Contributions and feedback welcome.
+> **Alpha.** Releases carry an `-alpha` prerelease tag. The API is not settled,
+> and any release may change or remove exported identifiers without a
+> deprecation period. Pin an exact version. Not recommended for production.
 
-Give your AI agent hands inside the terminal — create sessions, run commands, read output, orchestrate panes.
+Give your AI agent hands inside the terminal — create sessions, run
+commands, read output, orchestrate panes.
 
 ## Tools
 
@@ -27,30 +30,33 @@ Give your AI agent hands inside the terminal — create sessions, run commands, 
 
 ## Quickstart
 
-**Requirements:** Python 3.10+, tmux on `$PATH`.
+**Requirements:** Python 3.10+, tmux >= 3.2a on `$PATH`.
+
+The distribution is `libtmux-mcp`, the import is `libtmux_mcp`, and the
+installed executable is `libtmux-mcp`.
 
 Install and run:
 
-```bash
-uvx libtmux-mcp
+```console
+$ uvx libtmux-mcp
 ```
 
 ### Claude Code
 
-```bash
-claude mcp add tmux -- uvx libtmux-mcp
+```console
+$ claude mcp add tmux -- uvx libtmux-mcp
 ```
 
 ### Codex CLI
 
-```bash
-codex mcp add tmux -- uvx libtmux-mcp
+```console
+$ codex mcp add tmux -- uvx libtmux-mcp
 ```
 
 ### Gemini CLI
 
-```bash
-gemini mcp add tmux uvx -- libtmux-mcp
+```console
+$ gemini mcp add tmux uvx -- libtmux-mcp
 ```
 
 ### Claude Desktop
@@ -79,7 +85,8 @@ More clients and JSON config: [client setup docs](https://libtmux-mcp.git-pull.c
 > `test_auth.py::test_token_refresh` and `test_auth.py::test_expired_session`.
 > Want me to open those files?
 
-The agent manages tmux directly. No copy-pasting terminal output. No switching windows to check on long-running processes.
+The agent manages tmux directly. No copy-pasting terminal output. No
+switching windows to check on long-running processes.
 
 ## When the server earns its keep
 
@@ -139,29 +146,33 @@ Full docs, guides, and tool reference: **[libtmux-mcp.git-pull.com](https://libt
 
 Clone and install:
 
-```bash
-git clone https://github.com/tmux-python/libtmux-mcp.git
+```console
+$ git clone https://github.com/tmux-python/libtmux-mcp.git
 ```
 
-```bash
-cd libtmux-mcp
+```console
+$ cd libtmux-mcp
 ```
 
-```bash
-uv sync --dev
+```console
+$ uv sync --all-extras --dev
 ```
 
 Run the server locally:
 
-```bash
-uv run libtmux-mcp
+```console
+$ uv run libtmux-mcp
 ```
 
 Run tests:
 
-```bash
-uv run pytest
+```console
+$ uv run pytest
 ```
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for the gates, and
+[WRITING.md](.github/WRITING.md) for how this project writes prose,
+docstrings, and MCP tool descriptions.
 
 ## Related projects
 
