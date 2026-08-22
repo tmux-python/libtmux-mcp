@@ -16,10 +16,10 @@
 # name: test_highlight_filter_matches_sphinx_native[json-mcp-config-uvx][highlight_json-mcp-config-uvx]
   '''
   <div class="highlight-json notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
-  <span class="w">    </span><span class="nt">&quot;mcpServers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-  <span class="w">        </span><span class="nt">&quot;tmux&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-  <span class="w">            </span><span class="nt">&quot;command&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;uvx&quot;</span><span class="p">,</span>
-  <span class="w">            </span><span class="nt">&quot;args&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;libtmux-mcp&quot;</span><span class="p">]</span>
+  <span class="w">    </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+  <span class="w">        </span><span class="nt">"tmux"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+  <span class="w">            </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"uvx"</span><span class="p">,</span>
+  <span class="w">            </span><span class="nt">"args"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"libtmux-mcp"</span><span class="p">]</span>
   <span class="w">        </span><span class="p">}</span>
   <span class="w">    </span><span class="p">}</span>
   <span class="p">}</span>
