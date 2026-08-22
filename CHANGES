@@ -6,6 +6,22 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Development
+
+#### `capture_since` reads its cursor from libtmux
+
+The cursor machinery behind the `capture_since` tool — anchor arithmetic,
+history-trim re-anchoring, the stable double-read, and the serialized cursor
+format — now comes from libtmux's `Pane.capture_since()` instead of living
+here. The tool keeps the part that is an MCP concern: bounding a response with
+`max_lines` and `max_bytes` so one observation cannot blow an agent's context
+window.
+
+The cursor wire format is unchanged, so cursors issued by earlier versions
+still decode. A cursor that no longer describes its pane now raises libtmux's
+`CaptureCursorError` family, which maps to an agent-facing error advising a
+fresh cursor rather than the generic tmux-error wording.
+
 ### Documentation
 
 #### opencode joins the install picker
