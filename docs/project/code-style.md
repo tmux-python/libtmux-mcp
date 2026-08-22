@@ -2,32 +2,9 @@
 
 # Code style
 
-## Linting and formatting
+Linting, type-checking, and import conventions moved to
+[CONTRIBUTING.md's Coding conventions][cc] section. Docstring conventions
+moved to [WRITING.md's Docstrings][ds] section.
 
-libtmux-mcp uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting:
-
-```console
-$ uv run ruff check .
-```
-
-```console
-$ uv run ruff format .
-```
-
-## Type checking
-
-[mypy](https://mypy-lang.org/) with strict mode:
-
-```console
-$ uv run mypy
-```
-
-## Docstrings
-
-NumPy-style docstrings throughout.
-
-## Imports
-
-- `from __future__ import annotations` at the top of every file.
-- `import typing as t` and access via namespace.
-- Standard-library modules imported by namespace (`import pathlib`, not `from pathlib import Path`).
+[cc]: https://github.com/tmux-python/libtmux-mcp/blob/main/.github/CONTRIBUTING.md#coding-conventions
+[ds]: https://github.com/tmux-python/libtmux-mcp/blob/main/.github/WRITING.md#docstrings
