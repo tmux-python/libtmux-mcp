@@ -8,6 +8,7 @@ import typing as t
 import pytest
 from fastmcp.exceptions import ToolError
 from libtmux import exc
+from libtmux.session import Session
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
@@ -34,7 +35,6 @@ from libtmux_mcp._utils import (
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
-    from libtmux.session import Session
     from libtmux.window import Window
 
 
@@ -212,6 +212,36 @@ APPLY_FILTERS_FIXTURES: list[ApplyFiltersFixture] = [
         expect_error=True,
         error_match="Invalid filter operator",
     ),
+    # A typo'd FIELD used to return [] rather than erroring, so an empty
+    # result was indistinguishable from "nothing matched".
+    ApplyFiltersFixture(
+        test_id="unknown_field_with_valid_operator_errors",
+        filters={"nosuch_field__contains": "x"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Unknown filter field 'nosuch_field'",
+    ),
+    ApplyFiltersFixture(
+        test_id="unknown_field_without_operator_errors",
+        filters={"totally_bogus": "zzz"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Unknown filter field 'totally_bogus'",
+    ),
+    ApplyFiltersFixture(
+        test_id="near_miss_field_suggests_alternatives",
+        filters={"session_nme__contains": "x"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Did you mean: session_name",
+    ),
+    ApplyFiltersFixture(
+        test_id="nested_traversal_still_allowed",
+        filters={"active_window__window_name__contains": ""},
+        expected_count=None,
+        expect_error=False,
+        error_match=None,
+    ),
     ApplyFiltersFixture(
         test_id="contains_operator",
         filters={"session_name__contains": "<partial>"},
@@ -295,9 +325,9 @@ def test_apply_filters(
 
     if expect_error:
         with pytest.raises(ToolError, match=error_match):
-            _apply_filters(sessions, filters, _serialize_session)
+            _apply_filters(sessions, filters, _serialize_session, Session)
     else:
-        result = _apply_filters(sessions, filters, _serialize_session)
+        result = _apply_filters(sessions, filters, _serialize_session, Session)
         assert isinstance(result, list)
         if expected_count is not None:
             assert len(result) == expected_count

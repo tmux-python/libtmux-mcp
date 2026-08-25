@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing as t
 
 from libtmux.constants import WindowDirection
+from libtmux.window import Window
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -72,7 +73,7 @@ def list_windows(
         windows = session.windows
     else:
         windows = server.windows
-    return _apply_filters(windows, filters, _serialize_window)
+    return _apply_filters(windows, filters, _serialize_window, Window)
 
 
 # get_session_info completes the core-tmux-hierarchy symmetry alongside

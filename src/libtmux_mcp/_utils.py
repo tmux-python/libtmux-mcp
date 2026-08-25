@@ -7,6 +7,7 @@ for all MCP tool functions.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import functools
 import json
 import logging
@@ -841,10 +842,29 @@ def _coerce_dict_arg(
     return value
 
 
+@functools.cache
+def _filterable_fields(obj_type: type) -> frozenset[str]:
+    """Attribute names a filter key may begin with.
+
+    ``QueryList`` resolves a key by ``getattr`` traversal and treats a
+    miss as "no match", so an unknown field silently filters every row
+    out and an empty result is indistinguishable from a typo.
+
+    Deliberately permissive: it rejects names the type cannot have and
+    accepts everything else, because ``__`` traversal into a nested
+    object is legitimate and only the first segment is checkable here.
+    """
+    names = {name for name in dir(obj_type) if not name.startswith("_")}
+    if dataclasses.is_dataclass(obj_type):
+        names |= {field.name for field in dataclasses.fields(obj_type)}
+    return frozenset(names)
+
+
 def _apply_filters(
     items: t.Any,
     filters: dict[str, str] | str | None,
     serializer: t.Callable[..., M],
+    obj_type: type,
 ) -> list[M]:
     """Apply QueryList filters and serialize results.
 
@@ -858,6 +878,11 @@ def _apply_filters(
         If None or empty, all items are returned.
     serializer : callable
         Serializer function to convert each item to a model.
+    obj_type : type
+        libtmux class of the filtered items, used to validate filter
+        field names. Taken as a parameter rather than read off the
+        first item so an empty list still validates -- an empty result
+        is exactly when a typo most needs reporting.
 
     Returns
     -------
@@ -867,7 +892,8 @@ def _apply_filters(
     Raises
     ------
     ExpectedToolError
-        If a filter key uses an invalid lookup operator.
+        If a filter key uses an invalid lookup operator or names a
+        field the object cannot have.
     """
     coerced = _coerce_dict_arg("filters", filters)
     if not coerced:
@@ -875,15 +901,30 @@ def _apply_filters(
     filters = coerced
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
+    allowed_fields = _filterable_fields(obj_type)
     for key in filters:
+        field_path = key
         if "__" in key:
-            _field, op = key.rsplit("__", 1)
+            lhs, op = key.rsplit("__", 1)
             if op not in LOOKUP_NAME_MAP:
                 msg = (
                     f"Invalid filter operator '{op}' in '{key}'. "
                     f"Valid operators: {', '.join(valid_ops)}"
                 )
                 raise ExpectedToolError(msg)
+            field_path = lhs
+
+        # Only the leading segment is checkable; the rest may traverse
+        # into a nested object.
+        field = field_path.split("__", 1)[0]
+        if field not in allowed_fields:
+            msg = f"Unknown filter field '{field}' in '{key}'."
+            close = difflib.get_close_matches(field, sorted(allowed_fields), n=3)
+            if close:
+                msg += f" Did you mean: {', '.join(close)}?"
+            else:
+                msg += " Call this tool without filters to see available fields."
+            raise ExpectedToolError(msg)
 
     filtered = items.filter(**filters)
     return [serializer(item) for item in filtered]

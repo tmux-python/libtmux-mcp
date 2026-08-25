@@ -10,6 +10,7 @@ import socket
 import typing as t
 
 from fastmcp.exceptions import ToolError
+from libtmux.session import Session
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -63,7 +64,7 @@ def list_sessions(
     """
     server = _get_server(socket_name=socket_name)
     sessions = server.sessions
-    return _apply_filters(sessions, filters, _serialize_session)
+    return _apply_filters(sessions, filters, _serialize_session, Session)
 
 
 @handle_tool_errors

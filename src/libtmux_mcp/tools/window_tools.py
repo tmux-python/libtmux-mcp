@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing as t
 
 from libtmux.constants import PaneDirection
+from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -98,7 +99,7 @@ def list_panes(
         panes = session.panes
     else:
         panes = server.panes
-    return _apply_filters(panes, filters, _serialize_pane)
+    return _apply_filters(panes, filters, _serialize_pane, Pane)
 
 
 # get_window_info completes the core-tmux-hierarchy symmetry of get_*_info

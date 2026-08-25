@@ -8,6 +8,28 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A typo in a filter field is an error, not an empty list
+
+`list_sessions`, `list_windows` and `list_panes` validated the *operator*
+half of a Django-style filter key and never the *field* half, so
+`filters={"nosuch_field__contains": "x"}` returned `[]`. A key with no
+`__` at all, like `{"totally_bogus": "zzz"}`, was not checked by
+anything. libtmux's `QueryList` resolves a filter key by attribute
+traversal and treats a miss as "no match", so a misspelled field
+silently filtered every row out and the empty result was
+indistinguishable from a genuine one.
+
+Field names are now checked against the object being filtered, with
+near-misses suggested:
+
+```
+Unknown filter field 'session_nme' in 'session_nme__contains'.
+Did you mean: session_name, session_marked, session_id?
+```
+
+Validation covers only the leading segment of a key, so nested
+traversal such as `active_window__window_name__contains` keeps working.
+
 #### A pane that dies mid-wait reports the death, not a parse crash
 
 Killing a pane while `wait_for_text` was waiting on it surfaced
