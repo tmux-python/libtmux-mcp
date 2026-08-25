@@ -1526,6 +1526,69 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
         fresh_pane.kill()
 
 
+def test_capture_since_reports_overflow_without_clear_history(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Output lapping ``history-limit`` reports the loss on its own.
+
+    The sibling test above needs an explicit ``clear-history`` because
+    the flood alone used to be non-deterministic: the evicted anchor is
+    the shell prompt, a line that recurs verbatim after every command,
+    so its only surviving twin was the CURRENT prompt near the bottom.
+    One candidate passed the uniqueness guard, everything above it was
+    dropped as "already seen", and the read returned no lines while
+    reporting ``lines_missed=False``.
+
+    Rows are only evicted from the top, so a surviving anchor can only
+    move earlier than ``anchor_abs``; a match past it is rejected on
+    position. That makes the flood-only path -- the one real agents hit
+    while tailing a build -- deterministic, so it is tested here
+    without help.
+    """
+    import asyncio
+
+    mcp_pane.session.cmd("set-option", "-g", "history-limit", "20")
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    def _hlimit_locked() -> bool:
+        raw = fresh_pane.display_message("#{history_limit}", get_text=True)
+        return bool(raw) and int(raw[0]) == 20
+
+    try:
+        retry_until(_hlimit_locked, 5, raises=True)
+        _signal_after_shell_payload(
+            mcp_server,
+            fresh_pane,
+            "for i in $(seq 1 25); do printf 'OVF_PRE_%03d\\n' \"$i\"; done",
+        )
+        first = asyncio.run(
+            capture_since(
+                pane_id=fresh_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        _signal_after_shell_payload(
+            mcp_server,
+            fresh_pane,
+            "for i in $(seq 1 300); do printf 'OVF_%03d\\n' \"$i\"; done",
+        )
+        second = asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        # 300 lines through a 20-line history: rows were destroyed, and
+        # the read must say so rather than returning an empty success.
+        assert second.lines_missed is True
+        assert second.lines
+    finally:
+        fresh_pane.kill()
+
+
 def test_capture_since_reports_same_row_rewrite(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

@@ -182,8 +182,40 @@ def _history_limit_trim_risk(
     return cursor.history_size >= risk_floor or state.history_size >= risk_floor
 
 
-def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | None:
-    """Find one retained row sequence matching the cursor fingerprint."""
+def _find_unique_cursor_match(
+    rows: list[str],
+    cursor: _CaptureCursor,
+    state: _PaneState,
+    history_limit: int,
+) -> int | None:
+    """Find one retained row sequence matching the cursor fingerprint.
+
+    *rows* comes from ``capture-pane -S -``, so ``rows[i]`` is absolute
+    grid row ``i``. tmux evicts only from the TOP, so a surviving anchor
+    can only have moved EARLIER than ``cursor.anchor_abs``, never later.
+    Candidates past that row are therefore rejected on position alone,
+    however well they hash.
+
+    That bound is what makes this safe when the fingerprint degenerates
+    to a single hash (``below_hashes`` empty, i.e. the anchor was the
+    last row). The uniqueness rule below asks whether a candidate is
+    unique *in the current buffer*, not unique *in time* — and an agent
+    that starts tailing an idle pane anchors on the shell prompt, a line
+    that recurs verbatim after every command. Once enough output laps
+    the history limit, the evicted anchor's only surviving twin is the
+    CURRENT prompt near the bottom: exactly one candidate, so the
+    uniqueness guard passed and returned a false match far below the
+    real anchor. Everything above it was then dropped as "already seen"
+    and the read reported ``lines_missed=False`` having lost the lot.
+
+    Position alone is necessary but not sufficient: when the anchor was
+    taken near the bottom of an already-full history, its old row and
+    the current prompt's row overlap. So a single-hash fingerprint on a
+    full history additionally refuses to match inside the visible
+    region. Declining costs only a conservative ``lines_missed=True``,
+    which stays honest: a full history means rows above the anchor were
+    evicted whether or not the anchor itself survived.
+    """
     if cursor.anchor_hash is None:
         return None
 
@@ -191,8 +223,25 @@ def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | 
     if len(rows) < len(fingerprint):
         return None
 
+    # A one-row fingerprint carries no way to tell the anchor from any
+    # other line with the same text, and on a SATURATED history the twin
+    # that survives is the prompt currently on screen.
+    # ``index >= history_size`` means the candidate sits in the visible
+    # region rather than in scrollback, which is that signature exactly.
+    #
+    # Saturation is asked via ``_history_limit_trim_risk`` rather than
+    # ``history_size == history_limit``: measured on tmux 3.7c, a pane
+    # with ``history-limit 20`` pins at ``history_size 19``, so an exact
+    # comparison never fires on the very panes this guards.
+    blind = len(fingerprint) == 1 and _history_limit_trim_risk(
+        cursor, state, history_limit
+    )
+
     match_index: int | None = None
-    for index in range(len(rows) - len(fingerprint) + 1):
+    last_possible = min(len(rows) - len(fingerprint), cursor.anchor_abs)
+    for index in range(last_possible + 1):
+        if blind and index >= state.history_size:
+            continue
         candidate = rows[index : index + len(fingerprint)]
         candidate_hashes = tuple(_line_hash(line) for line in candidate)
         if candidate_hashes != fingerprint:
@@ -259,7 +308,9 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
         _raise_if_pane_lifecycle_changed(pane.pane_id, after, cursor.pane_pid)
         if _same_state(before, after):
             if trim_risk:
-                match_index = _find_unique_cursor_match(rows, cursor)
+                match_index = _find_unique_cursor_match(
+                    rows, cursor, before, history_limit
+                )
                 if match_index is None:
                     missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
                     return _PaneRead(

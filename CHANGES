@@ -8,6 +8,43 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `capture_since` no longer loses a flooded pane silently
+
+Output that laps a pane's `history-limit` returned **no lines** with
+`lines_missed=False`, while tmux still held dozens of them. The field
+built to report exactly this loss reported the opposite.
+
+Two defects compounded. `_cursor_anchor_lost` has no overflow case:
+`history_size` climbs to the limit and then stays pinned while rows are
+evicted off the top, so none of its three tests fire. And the cursor
+fingerprint degenerates to a single hash whenever the anchor was the
+last row — which is the normal case, because an agent starts tailing an
+idle pane and the anchor is the shell prompt. The uniqueness guard asks
+whether a candidate is unique *in the current buffer*, not unique *in
+time*, so once the flood evicted the anchor its one surviving twin was
+the prompt currently on screen: one candidate, guard satisfied, false
+match. Everything above it was dropped as "already seen".
+
+Matches are now rejected on position when they fall past `anchor_abs` —
+tmux evicts only from the top, so a surviving anchor can only move
+earlier. Where that is not enough (an anchor taken at the bottom of an
+already-saturated history, where the two positions overlap), a
+single-hash fingerprint additionally refuses to match inside the
+visible region. Declining costs a conservative `lines_missed=True`,
+which stays honest: a saturated history means rows were evicted whether
+or not the anchor survived. Panes not near their history limit are
+unaffected.
+
+Saturation is asked via the existing trim-risk heuristic rather than
+`history_size == history_limit`: measured on tmux 3.7c, a pane with
+`history-limit 20` pins at `history_size 19`, so an exact comparison
+never fires on the very panes this guards.
+
+The existing regression test worked around the defect rather than
+catching it — its docstring notes that "the flood alone is not
+deterministic" and adds a `clear-history` to force anchor destruction,
+so the flood-only path real agents hit was never covered. It is now.
+
 #### `list_servers` rows carry a complete identity
 
 The directory scan held each socket's full path and reported only its
