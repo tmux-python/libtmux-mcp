@@ -198,13 +198,17 @@ def show_hooks(
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
     raw: dict[str, t.Any] = obj.show_hooks(global_=global_, scope=opt_scope)
 
-    if scope == "server" and target is None:
+    if target is None and scope in (None, "server"):
         # Also consult the global-window options tree. tmux doesn't
         # unify ``-g`` listings across the session and window trees;
         # ``show-hooks -g`` alone misses pane/window-level globals.
         # Without this merge, ``show_hook(name)`` would find a hook
-        # that ``show_hooks()`` silently drops — the inconsistency
-        # guarded by ``test_show_hooks_surfaces_globally_set_pane_hook``.
+        # that ``show_hooks()`` silently drops.
+        #
+        # ``scope=None`` must be included: it is the DEFAULT, so the
+        # obvious call — ``show_hooks()`` — skipped the merge entirely
+        # and reproduced the very inconsistency this block exists to
+        # prevent. Only an explicit ``scope="server"`` got the fix.
         raw_window = obj.show_hooks(global_=True, scope=OptionScope.Window)
         for name, value in raw_window.items():
             raw.setdefault(name, value)

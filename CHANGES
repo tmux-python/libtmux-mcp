@@ -45,6 +45,20 @@ catching it — its docstring notes that "the flood alone is not
 deterministic" and adds a `clear-history` to force anchor destruction,
 so the flood-only path real agents hit was never covered. It is now.
 
+#### `show_hooks()` no longer drops hooks that `show_hook()` finds
+
+tmux does not unify `-g` listings across its session and window trees,
+so `show-hooks -g` omits pane-level hooks that `show-hooks -gw` holds.
+A merge existed to paper over that, and its own comment said what it
+was for — but it was gated on the caller passing `scope="server"`
+explicitly. The natural call, `show_hooks()`, left `scope` at its
+default and skipped the merge, so asking "what hooks are configured?"
+the obvious way returned an incomplete list with no sign anything was
+omitted, and `show_hook()` on a missing name then contradicted it.
+
+The test named for this behavior only exercised the explicit-scope
+path, so the default one was never covered.
+
 #### `list_servers` rows carry a complete identity
 
 The directory scan held each socket's full path and reported only its

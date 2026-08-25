@@ -125,6 +125,12 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
             scope="server",
             socket_name=mcp_server.socket_name,
         )
+        # The DEFAULT call shape, which is what an agent actually
+        # writes. The merge was gated on an explicit scope="server", so
+        # this path skipped it and reproduced the very inconsistency the
+        # merge exists to prevent -- and this test, named for that
+        # behavior, never exercised it.
+        defaulted = show_hooks(socket_name=mcp_server.socket_name)
 
         # Control: show_hook finds the -g-set pane hook.
         singular_names = {e.hook_name for e in singular.entries}
@@ -137,6 +143,12 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
         assert "pane-focus-in" in plural_names, (
             f"show_hooks(scope='server') returned {plural_names} "
             f"but show_hook found pane-focus-in — inconsistency."
+        )
+
+        defaulted_names = {e.hook_name for e in defaulted.entries}
+        assert "pane-focus-in" in defaulted_names, (
+            f"show_hooks() returned {defaulted_names} but show_hook found "
+            f"pane-focus-in — the default scope must merge both trees too."
         )
     finally:
         mcp_server.cmd("set-hook", "-g", "-u", "pane-focus-in")
