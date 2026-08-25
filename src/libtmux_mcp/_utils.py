@@ -586,22 +586,32 @@ def _get_server(
 
     cache_key = (socket_name, socket_path, tmux_bin)
     with _server_cache_lock:
-        if cache_key in _server_cache:
-            cached = _server_cache[cache_key]
-            if not cached.is_alive():
+        cached = _server_cache.get(cache_key)
+
+    # ``is_alive()`` is a tmux subprocess round trip. Holding the cache
+    # lock across it serialises every concurrent tool call in this
+    # process behind one another -- measured, it capped a 16-way
+    # parallel socket scan at about 2x instead of 8x.
+    if cached is not None:
+        if cached.is_alive():
+            return cached
+        with _server_cache_lock:
+            if _server_cache.get(cache_key) is cached:
                 del _server_cache[cache_key]
 
-        if cache_key not in _server_cache:
-            kwargs: dict[str, t.Any] = {}
-            if socket_name is not None:
-                kwargs["socket_name"] = socket_name
-            if socket_path is not None:
-                kwargs["socket_path"] = socket_path
-            if tmux_bin is not None:
-                kwargs["tmux_bin"] = tmux_bin
-            _server_cache[cache_key] = Server(**kwargs)
+    kwargs: dict[str, t.Any] = {}
+    if socket_name is not None:
+        kwargs["socket_name"] = socket_name
+    if socket_path is not None:
+        kwargs["socket_path"] = socket_path
+    if tmux_bin is not None:
+        kwargs["tmux_bin"] = tmux_bin
+    server = Server(**kwargs)
 
-        return _server_cache[cache_key]
+    # Two threads racing to fill the same key both build a valid handle;
+    # ``setdefault`` makes them agree on which one the cache keeps.
+    with _server_cache_lock:
+        return _server_cache.setdefault(cache_key, server)
 
 
 def _invalidate_server(

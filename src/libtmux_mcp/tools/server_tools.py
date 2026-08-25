@@ -8,6 +8,7 @@ import os
 import pathlib
 import socket
 import typing as t
+from concurrent.futures import ThreadPoolExecutor
 
 from fastmcp.exceptions import ToolError
 from libtmux.session import Session
@@ -331,6 +332,42 @@ SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
 )
 
 
+#: Concurrency for the socket scan. Each probe is an independent tmux
+#: subprocess round trip, so the ceiling is start-up latency, not CPU.
+#: Measured at 40 live servers: 536 ms serial, 176 ms at 4, 80 ms at 16,
+#: 76 ms at 32 -- so 16 takes the 6.7x and 32 buys nothing.
+_SCAN_WORKERS = 16
+
+
+def _probe_scanned_socket(entry: pathlib.Path) -> tuple[str, ServerInfo] | None:
+    """Identify one scanned socket, or ``None`` if it is not a live server."""
+    try:
+        if not entry.is_socket():
+            return None
+    except OSError:
+        return None
+    # Cheap liveness probe before the more expensive ``get_server_info``
+    # call. Stale sockets are the common case.
+    if not _is_tmux_socket_live(entry):
+        return None
+    info: ServerInfo | None
+    try:
+        info = get_server_info(socket_name=entry.name)
+    except ToolError:
+        # A name that does not round-trip through ``-L`` -- one holding
+        # a newline, say -- used to drop a live server from the listing
+        # silently. The path always works.
+        info = _probe_server_by_path(entry)
+    if info is None:
+        return None
+    # The scan holds the full path; reporting only the name left
+    # ``socket_path`` null on every scanned row, so no row carried a
+    # complete identity.
+    return _socket_key(entry), info.model_copy(
+        update={"socket_name": entry.name, "socket_path": str(entry)}
+    )
+
+
 @handle_tool_errors
 def list_servers(
     extra_socket_paths: list[str] | None = None,
@@ -376,32 +413,13 @@ def list_servers(
     # Insertion order preserves "scan results first, extras in order".
     found: dict[str, ServerInfo] = {}
     if uid_dir.is_dir():
-        for entry in sorted(uid_dir.iterdir()):
-            try:
-                if not entry.is_socket():
-                    continue
-            except OSError:
-                continue
-            # Cheap liveness probe before the more expensive
-            # ``get_server_info`` call. Stale sockets are the common case.
-            if not _is_tmux_socket_live(entry):
-                continue
-            info: ServerInfo | None
-            try:
-                info = get_server_info(socket_name=entry.name)
-            except ToolError:
-                # A name that does not round-trip through ``-L`` -- one
-                # holding a newline, say -- used to drop a live server
-                # from the listing silently. The path always works.
-                info = _probe_server_by_path(entry)
-            if info is None:
-                continue
-            # The scan holds the full path; reporting only the name left
-            # ``socket_path`` null on every scanned row, so no row
-            # carried a complete identity.
-            found[_socket_key(entry)] = info.model_copy(
-                update={"socket_name": entry.name, "socket_path": str(entry)}
-            )
+        # ``map`` keeps input order, so the listing stays sorted by
+        # socket name however the probes interleave.
+        entries = sorted(uid_dir.iterdir())
+        with ThreadPoolExecutor(max_workers=_SCAN_WORKERS) as pool:
+            for probed in pool.map(_probe_scanned_socket, entries):
+                if probed is not None:
+                    found[probed[0]] = probed[1]
     for raw_path in extra_socket_paths or []:
         path = pathlib.Path(raw_path)
         key = _socket_key(path)

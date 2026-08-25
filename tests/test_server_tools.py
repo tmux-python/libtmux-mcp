@@ -494,3 +494,25 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
         extra_socket_paths=[str(bogus), str(regular_file)],
     )
     assert results == []
+
+
+def test_list_servers_is_ordered_and_complete_under_concurrency(
+    TestServer: type[Server], monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """The scan probes sockets in parallel; order must not depend on timing.
+
+    ``ThreadPoolExecutor.map`` preserves input order, so the listing
+    stays sorted by socket name however the probes interleave.
+    """
+    tmpdir = tmp_path / "sockets"
+    tmpdir.mkdir()
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmpdir))
+
+    servers = [TestServer() for _ in range(4)]
+    for server in servers:
+        server.new_session(session_name="probe")
+
+    listed = list_servers()
+    names = [row.socket_name for row in listed if row.socket_name is not None]
+    assert names == sorted(names)
+    assert len(names) == len(servers)

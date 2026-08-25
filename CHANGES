@@ -8,6 +8,35 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `list_servers` is 6.7x faster, and concurrent calls stop queueing
+
+`list_servers` probed each live socket with its own tmux subprocess,
+serially. It is strictly linear in live servers -- about 12 ms each --
+so a box with 119 of them spent **1.5 seconds** in the tool the server
+instructions point at for discovery, which makes it the first call a
+client makes. Every other read-only tool measures 12-58 ms.
+
+The probes are independent, so they now run in a pool of 16.
+`ThreadPoolExecutor.map` preserves input order, so the listing stays
+sorted by socket name however the probes interleave.
+
+That alone only bought 2x, and the reason was somewhere else entirely.
+`_get_server` held the module's cache lock across `Server.is_alive()`
+-- a tmux subprocess round trip -- so every concurrent tool call in the
+process queued behind one another for the duration of a subprocess. The
+liveness check now happens outside the lock, and two threads racing to
+cache the same key agree via `setdefault`.
+
+That second fix is not about `list_servers`. Any concurrent use of this
+server was serialised at that lock: a `call_readonly_tools_batch`, two
+agents sharing a server, a wait in one pane while another is queried.
+
+Measured at 40 live servers, same box: 536 ms serial, 176 ms at 4
+workers, 80 ms at 16, 76 ms at 32. 16 takes the win and 32 buys
+nothing. Stale entries were never the problem and still are not: 200
+extra non-socket files cost about 8 ms total.
+
+
 #### `tmux://panes/{pane_id}` works past pane 9
 
 A tmux pane id starts with `%`, and the URI layer percent-decodes every
