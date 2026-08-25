@@ -164,7 +164,22 @@ def _raise_if_pane_is_busy(pane: Pane) -> None:
     general test was rejected.
     """
     occupant = _read_pane_current_command(pane)
-    if _read_pane_state(pane).alternate_on:
+    state = _read_pane_state(pane)
+    # Copy/view/clock mode owns the keyboard while alternate_on stays 0
+    # and pane_current_command still reads as the shell, so both other
+    # arms miss it. Measured with a client attached: the payload was
+    # consumed as copy-mode keystrokes, the command never ran, and the
+    # user's scroll position was destroyed in 7 of 8 trials -- while
+    # the result claimed command_may_still_run.
+    if state.in_mode:
+        msg = (
+            f"pane {pane.pane_id} is in a tmux mode (copy, view or clock), "
+            "so keys go to that mode rather than to a shell. Exit it with "
+            "exit_copy_mode first."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
+    if state.alternate_on:
         named = f" ({occupant})" if occupant else ""
         msg = (
             f"pane {pane.pane_id} is running a full-screen program{named}, "

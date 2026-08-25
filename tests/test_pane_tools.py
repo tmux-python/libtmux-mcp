@@ -239,10 +239,11 @@ class PaneStateParseFixture(t.NamedTuple):
 
 
 PANE_STATE_PARSE_FIXTURES: list[PaneStateParseFixture] = [
-    PaneStateParseFixture("live_pane", "6|0|11|3495270|0|0", False, 11),
-    PaneStateParseFixture("explicitly_dead", "6|0|11|3495270|1|0", True, 11),
+    # history_size|cursor_y|pane_height|pane_width|in_mode|pid|dead|alt
+    PaneStateParseFixture("live_pane", "6|0|11|80|0|3495270|0|0", False, 11),
+    PaneStateParseFixture("explicitly_dead", "6|0|11|80|0|3495270|1|0", True, 11),
     # tmux blanks every field for a pane that no longer exists.
-    PaneStateParseFixture("pane_gone_all_empty", "|||||", True, 0),
+    PaneStateParseFixture("pane_gone_all_empty", "|||||||", True, 0),
 ]
 
 
@@ -1681,6 +1682,80 @@ def test_capture_since_followup_returns_only_new_output(
     assert not any(old_marker in line for line in second.lines)
     assert third.lines == []
     assert second.pane_id == mcp_pane.pane_id
+
+
+def test_capture_since_reports_a_narrowed_pane_as_missed(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Narrowing rewraps history, so old row coordinates stop meaning anything.
+
+    Widening was already caught: rewrap makes history SHORTER and the
+    shrink branch fires. Narrowing makes it longer, which looks like
+    ordinary new output -- so ``start`` went negative by exactly the
+    rewrap growth and tmux returned that many rows of already-seen
+    scrollback as new, under ``lines_missed=False``.
+    """
+    import asyncio
+
+    pane = mcp_session.active_window.active_pane
+    assert pane is not None
+    socket = mcp_server.socket_name
+    filler = "for i in $(seq 1 40); do printf 'ROW%03d-%060d\\n' $i $i; done"
+    pane.send_keys(filler, enter=True)
+    retry_until(
+        lambda: any("ROW040" in line for line in pane.capture_pane()),
+        10,
+        raises=True,
+    )
+
+    first = asyncio.run(capture_since(pane_id=pane.pane_id, socket_name=socket))
+
+    # Control: no resize, so the cursor stays valid.
+    unchanged = asyncio.run(
+        capture_since(pane_id=pane.pane_id, cursor=first.cursor, socket_name=socket)
+    )
+    assert unchanged.lines_missed is False
+
+    mcp_session.cmd("resize-window", "-x", "40", "-y", "24")
+    retry_until(
+        lambda: pane.display_message("#{pane_width}", get_text=True)[0] == "40",
+        10,
+        raises=True,
+    )
+
+    after = asyncio.run(
+        capture_since(pane_id=pane.pane_id, cursor=unchanged.cursor, socket_name=socket)
+    )
+    assert after.lines_missed is True
+
+
+def test_run_command_refuses_a_pane_in_copy_mode(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Copy mode owns the keyboard while every other signal says idle shell.
+
+    ``alternate_on`` is 0 and ``pane_current_command`` is still the
+    shell, so both other arms of the guard miss it. Measured with a
+    client attached, the payload was consumed as copy-mode keystrokes,
+    the command never ran, and the scroll position was destroyed --
+    while the result claimed ``command_may_still_run``.
+    """
+    import asyncio
+
+    enter_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+    with pytest.raises(ToolError, match="is in a tmux mode"):
+        asyncio.run(
+            run_command(
+                command="echo COPYPROBE",
+                pane_id=mcp_pane.pane_id,
+                timeout=4.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+    # Refusing must not disturb what it refused to touch.
+    assert mcp_pane.display_message("#{pane_in_mode}", get_text=True) == ["1"]
 
 
 def test_capture_since_follows_anchor_into_retained_history(

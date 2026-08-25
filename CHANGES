@@ -8,6 +8,47 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `capture_since` no longer re-delivers scrollback when a pane narrows
+
+Narrowing a pane rewraps its history longer, and the cursor carried no
+width, so the anchor's row coordinates silently stopped meaning
+anything. `start` went negative by exactly the rewrap growth and
+`capture-pane -S` returned that many rows of already-seen scrollback as
+new output -- under `lines_missed=false`, asserting nothing had been
+missed. Measured: 160 to 40 columns re-delivered 189 stale lines, and
+**one** column of narrowing re-delivered three.
+
+Widening was already caught, which is what hid it: rewrap makes history
+*shorter*, so the existing shrink branch fired. Growth from a rewrap is
+indistinguishable from growth from real output, so no branch fired on
+the way down. The cursor now carries `pane_width` and a change
+invalidates it exactly as a `pane_pid` change does -- width being the
+precise discriminator, since history growing from real output must stay
+valid. A cursor minted before this field existed is treated as
+invalidated rather than trusted, which self-heals on the next call.
+
+The trigger is a user resizing their terminal.
+
+#### `run_command` refuses a pane in copy mode
+
+Copy, view and clock mode own the keyboard while `alternate_on` stays 0
+and `pane_current_command` still reads as the shell, so both existing
+arms of the busy-pane guard missed it. Measured with a client attached:
+across eight trials the command never ran, the payload was consumed as
+copy-mode keystrokes, and the user's scroll position was destroyed in
+seven of them -- while the result reported `command_may_still_run`,
+which would send an agent away from retrying a command that had never
+happened.
+
+`#{pane_in_mode}` rides in the `display-message` round trip the guard
+already makes. Refusing before sending is what preserves the scroll
+position; a probe would still have typed into it.
+
+Without an attached client the same call fails benignly with "no
+current client" and copy mode survives, so a test written on a detached
+fixture sees the mild version and misses this one.
+
+
 #### A caller string starting with `-` no longer runs a different command
 
 `set_environment(name="-u", value="VICTIM")` returned

@@ -20,8 +20,8 @@ class _PaneState(t.NamedTuple):
 
     Wire format parsed by :func:`_read_pane_state`::
 
-        #{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}
-        |#{alternate_on}
+        #{history_size}|#{cursor_y}|#{pane_height}|#{pane_width}
+        |#{pane_in_mode}|#{pane_pid}|#{pane_dead}|#{alternate_on}
 
     Fields are ``|``-separated: the first three are non-negative
     integers, ``pane_pid`` is a decimal PID string, and ``pane_dead``
@@ -40,6 +40,8 @@ class _PaneState(t.NamedTuple):
     history_size: int
     cursor_y: int
     pane_height: int
+    pane_width: int
+    in_mode: bool
     pane_pid: str
     pane_dead: bool
     alternate_on: bool = False
@@ -54,8 +56,8 @@ class _PaneState(t.NamedTuple):
 #: parser treats ``#`` and ``}`` structurally and a pattern containing
 #: either silently corrupts the surrounding fields.
 PANE_STATE_FORMAT = (
-    "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}"
-    "|#{alternate_on}"
+    "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_width}"
+    "|#{pane_in_mode}|#{pane_pid}|#{pane_dead}|#{alternate_on}"
 )
 
 #: ``history-limit`` read, split out for the same reason.
@@ -83,9 +85,9 @@ def _parse_pane_state(raw: str) -> _PaneState:
     # text rather than a value, so treat anything but ``"1"`` as off
     # instead of raising — this read is on the hot poll path and must
     # degrade, not fail, across the CI tmux version matrix.
-    parts = raw.split("|", 5)
-    hs, cy, sy, pid, dead = parts[:5]
-    alternate = parts[5] if len(parts) > 5 else "0"
+    parts = raw.split("|", 7)
+    hs, cy, sy, sx, in_mode, pid, dead = parts[:7]
+    alternate = parts[7] if len(parts) > 7 else "0"
     # A pane that no longer exists expands EVERY field to empty --
     # ``pane_dead`` included, so it reads as "0" and cannot report the
     # death itself. A live pane always has a pid, so an empty one is
@@ -95,6 +97,8 @@ def _parse_pane_state(raw: str) -> _PaneState:
         history_size=_int_or_zero(hs),
         cursor_y=_int_or_zero(cy),
         pane_height=_int_or_zero(sy),
+        pane_width=_int_or_zero(sx),
+        in_mode=in_mode == "1",
         pane_pid=pid,
         pane_dead=dead == "1" or not pid,
         alternate_on=alternate == "1",

@@ -46,6 +46,7 @@ class _CaptureCursor:
     pane_pid: str
     history_size: int
     pane_height: int
+    pane_width: int | None
     anchor_abs: int
     anchor_hash: str | None
     below_hashes: tuple[str, ...]
@@ -164,6 +165,21 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     # The ``pane_height`` guard distinguishes resize-grow (which pulls
     # rows from history back into the visible region without freeing
     # data) from actual trim (where row data is destroyed).
+    # A width change rewraps history, so row coordinates taken at the
+    # old width stop being comparable. Widening was already caught by
+    # the shrink branch below (rewrap makes history SHORTER); narrowing
+    # makes it longer, which is indistinguishable from ordinary new
+    # output -- so ``start`` went negative by exactly the rewrap growth
+    # and ``capture-pane -S`` returned that many rows of already-seen
+    # scrollback as new, with lines_missed=false. Measured at one
+    # column of narrowing, not just dramatic resizes.
+    #
+    # ``None`` means a cursor minted before this field existed: reflow
+    # cannot be ruled out, so treat it the same way rather than
+    # silently trusting it. Self-healing -- the caller gets a fresh
+    # cursor that carries the width.
+    if cursor.pane_width is None or state.pane_width != cursor.pane_width:
+        return True
     return state.history_size < cursor.history_size and (
         state.pane_height <= cursor.pane_height
     )
@@ -353,6 +369,7 @@ def _build_cursor(pane_id: str, state: _PaneState, cursor_rows: list[str]) -> st
         "pane_pid": state.pane_pid,
         "history_size": state.history_size,
         "pane_height": state.pane_height,
+        "pane_width": state.pane_width,
         "anchor_abs": state.history_size + state.cursor_y,
         "anchor_hash": _line_hash(cursor_rows[0]) if cursor_rows else None,
         "below_hashes": [_line_hash(line) for line in cursor_rows[1:]],
@@ -408,6 +425,11 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
         reason = "unsupported cursor version"
         _raise_invalid_cursor(reason)
 
+    width_value = payload.get("pane_width")
+    if width_value is not None and not isinstance(width_value, int):
+        reason = "invalid pane_width"
+        _raise_invalid_cursor(reason)
+
     anchor_hash_value = payload.get("anchor_hash")
     if anchor_hash_value is not None and not isinstance(anchor_hash_value, str):
         reason = "missing or invalid anchor_hash"
@@ -424,6 +446,7 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
         pane_pid=_cursor_str(payload, "pane_pid"),
         history_size=_cursor_int(payload, "history_size"),
         pane_height=_cursor_int(payload, "pane_height"),
+        pane_width=width_value,
         anchor_abs=_cursor_int(payload, "anchor_abs"),
         anchor_hash=anchor_hash_value,
         below_hashes=tuple(below_hashes_value),
