@@ -7,6 +7,15 @@ _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
 ### What's new
+#### `run_command` refuses a pane running `top`
+
+`top` owns the keyboard but repaints the primary screen, so
+`alternate_on` stays 0 for as long as it runs -- measured at 0 through
+8 seconds, not a startup race. It therefore passed both arms of the
+busy-pane guard and took this tool's exit-status wrapper as single-key
+commands. `htop` and `watch` reach the alternate screen and were
+already refused, which is what made the gap easy to miss.
+
 
 #### Filter by what a listing actually showed you
 

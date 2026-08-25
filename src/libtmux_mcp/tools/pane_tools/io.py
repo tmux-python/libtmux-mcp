@@ -111,7 +111,9 @@ def _raise_send_keys_error(exc: subprocess.CalledProcessError) -> t.NoReturn:
 #: commands, an editor puts it in the buffer where ``:``-prefixed
 #: fragments write files. Only ones that can own the pane while
 #: ``alternate_on`` is still 0 need naming here; anything that enters
-#: the alternate screen is already caught by the flag.
+#: the alternate screen is already caught by the flag. Measured:
+#: ``top`` repaints the primary screen and needs an entry, while
+#: ``htop`` and ``watch`` reach the alternate screen and do not.
 #:
 #: A DENY-list on purpose. The general signal -- "the foreground
 #: command is not the process tmux started" -- was measured and
@@ -130,6 +132,7 @@ _PANE_OWNING_PROGRAMS: frozenset[str] = frozenset(
         "nano",
         "nvim",
         "pico",
+        "top",
         "vi",
         "view",
         "vim",
