@@ -6,6 +6,55 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+#### A gated tool now says which tier it needs
+
+Calling a tool above the server's `LIBTMUX_SAFETY` tier reported
+`Unknown tool: 'kill_pane'` — the server denying that its own gated tool
+exists. An agent told a tool is absent reports the capability as missing
+rather than naming the setting that enables it.
+
+Off-tier calls now name both the tier the tool requires and the tier in
+force:
+
+```
+Tool 'kill_pane' requires safety level 'destructive', but this server is
+running at 'mutating'. Restart it with LIBTMUX_SAFETY=destructive to
+enable it.
+```
+
+The message previously hardcoded `LIBTMUX_SAFETY=destructive` for every
+denial, so a `readonly` server answered a `send_keys` call by advising
+the strongest tier — telling a user to grant `kill_server` rights in
+order to type into a pane. The tier named is now the one the tool
+actually needs.
+
+Two gates were always intended here, and only one of them worked.
+FastMCP's native `disable()` enforces the tier; `SafetyMiddleware` was
+meant to explain it. Because `get_tool()` answers `None` for a disabled
+tool, the middleware's `if tool and not allowed` guard never ran for the
+tools it was written for. Off-tier names now resolve against the full
+registry, which retains disabled tools and their tags.
+
+Denials also reach the audit log as denials again. The server's
+middleware ordering is built so that a tier denial raises inside
+`SafetyMiddleware` and is recorded by `AuditMiddleware` outside it;
+while the denial never fired, a blocked call was audited as an
+unknown-tool error instead.
+
+The batch wrappers carried the same defect through a second call path:
+`_get_allowed_tool_tier` also read `get_tool` and raised "Unknown tool"
+on `None`, so a gated tool and a misspelled one produced byte-identical
+rows. It now hands the operation on instead of duplicating the lookup —
+the nested call runs through the middleware, which names the tier for a
+gated tool while a real typo still gets FastMCP's own error.
+
+`SafetyMiddleware.on_call_tool` additionally fails closed when no
+FastMCP context is present. It previously fell through to the tool,
+which was fail-open in a gate whose top tier includes `kill_server`, and
+was masked only because the native gate made the dispatch fail anyway.
+
 ### Documentation
 
 #### opencode joins the install picker

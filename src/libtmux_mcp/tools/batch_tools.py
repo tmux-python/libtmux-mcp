@@ -125,8 +125,14 @@ async def _get_allowed_tool_tier(
 
     tool = await fastmcp.get_tool(operation.tool)
     if tool is None:
-        msg = f"Unknown tool: {operation.tool!r}"
-        raise ExpectedToolError(msg)
+        # None means nonexistent OR disabled by tier, so raising
+        # "Unknown tool" here denied that a gated tool exists. Hand it
+        # on instead: the nested call runs with ``run_middleware=True``,
+        # letting ``SafetyMiddleware`` name the tier and FastMCP still
+        # raise ``NotFoundError`` for a typo. Nothing is skipped --
+        # visibility follows tier tags, so an invisible tool is
+        # off-tier by construction and is denied before these checks.
+        return
 
     # ``max_tier`` is a CEILING, so a readonly tool is reachable through
     # every batch wrapper, not only the readonly one. The batch loop is

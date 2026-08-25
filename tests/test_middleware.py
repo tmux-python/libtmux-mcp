@@ -135,6 +135,181 @@ def test_safety_middleware_invalid_tier_falls_back() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SafetyMiddleware — off-tier denial messages.
+#
+# Fast unit coverage against fake registries; ``tests/test_server.py``
+# drives the same paths through a real server process.
+# ---------------------------------------------------------------------------
+
+
+def _fake_fastmcp(
+    *,
+    visible: dict[str, set[str]] | None = None,
+    registered: dict[str, set[str]] | None = None,
+    list_tools_error: Exception | None = None,
+) -> t.Any:
+    """Build a stand-in FastMCP exposing name -> tags for both lookups.
+
+    *visible* is what ``get_tool`` resolves (enabled tools only, matching
+    FastMCP's real behavior of returning None for a disabled tool).
+    *registered* is what ``_list_tools`` returns (every tool, disabled
+    included) — the asymmetry that the fix depends on.
+    """
+
+    class _Tool:
+        def __init__(self, name: str, tags: set[str]) -> None:
+            self.name = name
+            self.tags = tags
+
+    visible_tools = {n: _Tool(n, tags) for n, tags in (visible or {}).items()}
+    all_tools = [_Tool(n, tags) for n, tags in (registered or {}).items()]
+
+    class _FastMCP:
+        async def get_tool(self, name: str) -> t.Any:
+            return visible_tools.get(name)
+
+        async def _list_tools(self) -> list[t.Any]:
+            if list_tools_error is not None:
+                raise list_tools_error
+            return all_tools
+
+    return _FastMCP()
+
+
+def _call_context(tool_name: str, fastmcp: t.Any) -> t.Any:
+    """Build a MiddlewareContext-alike for ``on_call_tool``."""
+    fastmcp_ctx = type("_Ctx", (), {"fastmcp": fastmcp})()
+    return type(
+        "_MW",
+        (),
+        {
+            "message": CallToolRequestParams(name=tool_name, arguments={}),
+            "fastmcp_context": fastmcp_ctx,
+        },
+    )()
+
+
+async def _unreachable(_ctx: t.Any) -> t.Any:
+    """``call_next`` that fails the test if the gate lets a call through."""
+    msg = "call_next must not run for an off-tier tool"
+    raise AssertionError(msg)
+
+
+def test_safety_denial_names_required_and_current_tier() -> None:
+    """A gated tool reports the tier it needs and the tier in force.
+
+    The replaced message hardcoded ``destructive`` for every denial, so
+    a readonly server answered ``send_keys`` by advising kill_server
+    rights in order to type into a pane.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_READONLY)
+    fastmcp = _fake_fastmcp(
+        visible={},
+        registered={"send_keys": {TAG_MUTATING}},
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(mw.on_call_tool(_call_context("send_keys", fastmcp), _unreachable))
+
+    message = str(excinfo.value)
+    assert "'mutating'" in message
+    assert "'readonly'" in message
+    assert "LIBTMUX_SAFETY=mutating" in message
+    assert "destructive" not in message
+
+
+def test_safety_denial_reaches_disabled_tools() -> None:
+    """A tool hidden by the native gate still gets a tier explanation.
+
+    ``get_tool`` returns None for a disabled tool, so the denial must
+    come from the registry snapshot or the agent is told it is unknown.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_MUTATING)
+    fastmcp = _fake_fastmcp(
+        visible={"send_keys": {TAG_MUTATING}},
+        registered={"send_keys": {TAG_MUTATING}, "kill_pane": {TAG_DESTRUCTIVE}},
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(mw.on_call_tool(_call_context("kill_pane", fastmcp), _unreachable))
+
+    assert "requires safety level 'destructive'" in str(excinfo.value)
+
+
+def test_safety_passes_through_genuinely_unknown_tool() -> None:
+    """An unregistered name is a typo and keeps FastMCP's own error."""
+    mw = SafetyMiddleware(max_tier=TAG_MUTATING)
+    fastmcp = _fake_fastmcp(visible={}, registered={"send_keys": {TAG_MUTATING}})
+    reached = []
+
+    async def _call_next(_ctx: t.Any) -> str:
+        reached.append("yes")
+        return "dispatched"
+
+    result = asyncio.run(
+        mw.on_call_tool(_call_context("sned_keys", fastmcp), _call_next)
+    )
+
+    assert result == "dispatched"
+    assert reached == ["yes"]
+
+
+def test_safety_denies_when_context_is_missing() -> None:
+    """No FastMCP context means no way to prove the tier: deny.
+
+    The previous guard fell through to ``call_next``, fail-OPEN in a
+    gate whose top tier includes ``kill_server``.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_READONLY)
+    context = type(
+        "_MW",
+        (),
+        {
+            "message": CallToolRequestParams(name="kill_server", arguments={}),
+            "fastmcp_context": None,
+        },
+    )()
+
+    with pytest.raises(ToolError, match="safety tier cannot be verified"):
+        asyncio.run(mw.on_call_tool(context, _unreachable))
+
+
+def test_safety_snapshot_failure_degrades_to_passthrough(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken private API costs the explanation, never the server.
+
+    If a fastmcp bump removes ``_list_tools``, the denial degrades to
+    the stock error rather than raising on every call.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_READONLY)
+    fastmcp = _fake_fastmcp(
+        visible={},
+        list_tools_error=AttributeError("no attribute '_list_tools'"),
+    )
+
+    async def _call_next(_ctx: t.Any) -> str:
+        return "dispatched"
+
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(
+            mw.on_call_tool(_call_context("kill_pane", fastmcp), _call_next)
+        )
+
+    assert result == "dispatched"
+    assert "safety tier snapshot unavailable" in caplog.text
+
+
+def test_safety_denies_tool_with_no_tier_tag() -> None:
+    """An untagged but visible tool stays fail-closed, with a bug hint."""
+    mw = SafetyMiddleware(max_tier=TAG_DESTRUCTIVE)
+    fastmcp = _fake_fastmcp(visible={"mystery": set()}, registered={"mystery": set()})
+
+    with pytest.raises(ToolError, match="declares no safety tier"):
+        asyncio.run(mw.on_call_tool(_call_context("mystery", fastmcp), _unreachable))
+
+
+# ---------------------------------------------------------------------------
 # AuditMiddleware
 # ---------------------------------------------------------------------------
 

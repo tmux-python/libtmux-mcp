@@ -436,8 +436,11 @@ def _enable_allowed_tools() -> None:
     if _mcp_visibility_configured:
         return
 
-    # Use FastMCP's native visibility system as primary gate,
-    # with the SafetyMiddleware as a secondary layer for clear error messages.
+    # This is the ENFORCEMENT gate: it holds even for a call that skips
+    # the middleware chain (``call_tool`` accepts
+    # ``run_middleware=False``). ``SafetyMiddleware`` is the
+    # EXPLANATION gate -- disabling makes ``get_tool`` answer None, so
+    # FastMCP would otherwise report a gated tool as ``Unknown tool``.
     allowed_tags = {TAG_READONLY}
     if _safety_level in {TAG_MUTATING, TAG_DESTRUCTIVE}:
         allowed_tags.add(TAG_MUTATING)
