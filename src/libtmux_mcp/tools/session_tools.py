@@ -59,6 +59,8 @@ def list_windows(
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"window_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
+        Every field this tool returns is filterable; any libtmux
+        Window attribute works too.
 
     Returns
     -------
@@ -73,7 +75,7 @@ def list_windows(
         windows = session.windows
     else:
         windows = server.windows
-    return _apply_filters(windows, filters, _serialize_window, Window)
+    return _apply_filters(windows, filters, _serialize_window, Window, WindowInfo)
 
 
 # get_session_info completes the core-tmux-hierarchy symmetry alongside

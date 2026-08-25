@@ -31,6 +31,7 @@ from libtmux_mcp._utils import (
     _serialize_window,
     _server_cache,
 )
+from libtmux_mcp.models import SessionInfo
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -115,8 +116,6 @@ def test_resolve_pane_not_found(mcp_server: Server, mcp_session: Session) -> Non
 
 def test_serialize_session(mcp_session: Session) -> None:
     """_serialize_session produces a SessionInfo model."""
-    from libtmux_mcp.models import SessionInfo
-
     data = _serialize_session(mcp_session)
     assert isinstance(data, SessionInfo)
     assert data.session_id == mcp_session.session_id
@@ -284,6 +283,22 @@ APPLY_FILTERS_FIXTURES: list[ApplyFiltersFixture] = [
         expect_error=True,
         error_match="filters must be a JSON object",
     ),
+    # window_count is an output field with no tmux attribute of that
+    # name; it resolves through an alias.
+    ApplyFiltersFixture(
+        test_id="output_field_alias",
+        filters={"window_count": "1"},
+        expected_count=None,
+        expect_error=False,
+        error_match=None,
+    ),
+    ApplyFiltersFixture(
+        test_id="unknown_field_names_the_output_fields",
+        filters={"bogus_key": "x"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Every field this tool returns is filterable",
+    ),
 ]
 
 
@@ -325,9 +340,11 @@ def test_apply_filters(
 
     if expect_error:
         with pytest.raises(ToolError, match=error_match):
-            _apply_filters(sessions, filters, _serialize_session, Session)
+            _apply_filters(sessions, filters, _serialize_session, Session, SessionInfo)
     else:
-        result = _apply_filters(sessions, filters, _serialize_session, Session)
+        result = _apply_filters(
+            sessions, filters, _serialize_session, Session, SessionInfo
+        )
         assert isinstance(result, list)
         if expected_count is not None:
             assert len(result) == expected_count

@@ -76,6 +76,9 @@ def list_panes(
         Django-style filters as a dict
         (e.g. ``{"pane_current_command__contains": "vim"}``)
         or as a JSON string. Some MCP clients require the string form.
+        Every field this tool returns is filterable, including
+        is_caller -- filter ``{"is_caller": true}`` to answer
+        "which pane am I in?". Any libtmux Pane attribute works too.
 
     Returns
     -------
@@ -99,7 +102,7 @@ def list_panes(
         panes = session.panes
     else:
         panes = server.panes
-    return _apply_filters(panes, filters, _serialize_pane, Pane)
+    return _apply_filters(panes, filters, _serialize_pane, Pane, PaneInfo)
 
 
 # get_window_info completes the core-tmux-hierarchy symmetry of get_*_info

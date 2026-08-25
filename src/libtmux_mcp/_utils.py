@@ -18,13 +18,14 @@ import typing as t
 
 from fastmcp.exceptions import ToolError
 from libtmux import exc
-from libtmux._internal.query_list import LOOKUP_NAME_MAP
+from libtmux._internal.query_list import LOOKUP_NAME_MAP, QueryList
 from libtmux.server import Server
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.session import Session
     from libtmux.window import Window
+    from pydantic import BaseModel
 
     from libtmux_mcp.models import PaneInfo, SessionInfo, WindowInfo
 
@@ -860,11 +861,60 @@ def _filterable_fields(obj_type: type) -> frozenset[str]:
     return frozenset(names)
 
 
+_MODEL_FIELD_ALIASES: dict[str, str] = {
+    "window_count": "session_windows",
+    "pane_count": "window_panes",
+    "active_pane_id": "active_pane__pane_id",
+}
+"""Output fields tmux exposes under a different attribute name."""
+
+
+def _admits_bool(annotation: t.Any) -> bool:
+    """Whether a model field's annotation can hold a bool."""
+    return annotation is bool or bool in t.get_args(annotation)
+
+
+def _coerce_model_value(value: t.Any, annotation: t.Any) -> t.Any:
+    """Coerce a filter value to what the model field actually holds.
+
+    ``filters`` is typed ``dict[str, str]``, so a bool field is
+    addressed as ``"true"``; comparing that to ``True`` never matches.
+    """
+    if isinstance(value, str) and _admits_bool(annotation):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+    return value
+
+
+def _unknown_field_message(
+    key: str,
+    field: str,
+    allowed_fields: frozenset[str],
+    model_fields: t.Mapping[str, t.Any],
+    obj_type: type,
+) -> str:
+    """Build the error for a filter key naming no known field."""
+    msg = f"Unknown filter field '{field}' in '{key}'."
+    known = sorted(set(allowed_fields) | set(model_fields))
+    close = difflib.get_close_matches(field, known, n=3)
+    if close:
+        msg += f" Did you mean: {', '.join(close)}?"
+    return (
+        f"{msg} Every field this tool returns is filterable: "
+        f"{', '.join(sorted(model_fields))}. So is any of the "
+        f"{len(allowed_fields)} libtmux {obj_type.__name__} attributes."
+    )
+
+
 def _apply_filters(
     items: t.Any,
     filters: dict[str, str] | str | None,
     serializer: t.Callable[..., M],
     obj_type: type,
+    model_type: type[BaseModel],
 ) -> list[M]:
     """Apply QueryList filters and serialize results.
 
@@ -883,6 +933,9 @@ def _apply_filters(
         field names. Taken as a parameter rather than read off the
         first item so an empty list still validates -- an empty result
         is exactly when a typo most needs reporting.
+    model_type : type
+        Model ``serializer`` returns. Its fields are filterable too, so
+        that filtering by what a listing displayed always works.
 
     Returns
     -------
@@ -902,7 +955,11 @@ def _apply_filters(
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
     allowed_fields = _filterable_fields(obj_type)
-    for key in filters:
+    model_fields = model_type.model_fields
+    attr_filters: dict[str, t.Any] = {}
+    model_filters: dict[str, t.Any] = {}
+
+    for key, value in filters.items():
         field_path = key
         if "__" in key:
             lhs, op = key.rsplit("__", 1)
@@ -917,17 +974,27 @@ def _apply_filters(
         # Only the leading segment is checkable; the rest may traverse
         # into a nested object.
         field = field_path.split("__", 1)[0]
-        if field not in allowed_fields:
-            msg = f"Unknown filter field '{field}' in '{key}'."
-            close = difflib.get_close_matches(field, sorted(allowed_fields), n=3)
-            if close:
-                msg += f" Did you mean: {', '.join(close)}?"
-            else:
-                msg += " Call this tool without filters to see available fields."
-            raise ExpectedToolError(msg)
+        if field in allowed_fields:
+            attr_filters[key] = value
+        elif field in _MODEL_FIELD_ALIASES:
+            attr_filters[_MODEL_FIELD_ALIASES[field] + key[len(field) :]] = value
+        elif field in model_fields:
+            # Computed server-side, so it exists only after serializing.
+            model_filters[key] = _coerce_model_value(
+                value, model_fields[field].annotation
+            )
+        else:
+            raise ExpectedToolError(
+                _unknown_field_message(
+                    key, field, allowed_fields, model_fields, obj_type
+                )
+            )
 
-    filtered = items.filter(**filters)
-    return [serializer(item) for item in filtered]
+    filtered = items.filter(**attr_filters) if attr_filters else items
+    results = [serializer(item) for item in filtered]
+    if model_filters:
+        results = list(QueryList(results).filter(**model_filters))
+    return results
 
 
 def _serialize_session(session: Session) -> SessionInfo:

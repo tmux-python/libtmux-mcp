@@ -329,3 +329,33 @@ def test_kill_window(mcp_server: Server, mcp_session: Session) -> None:
         socket_name=mcp_server.socket_name,
     )
     assert "killed" in result.lower()
+
+
+def test_list_panes_filters_by_is_caller(
+    mcp_server: Server,
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filter by is_caller, the workflow the server instructions promise.
+
+    ``is_caller`` is computed during serialization rather than read off
+    tmux, so this only works because a tool's own output fields are
+    filterable. It is the only documented answer to "which pane am I
+    in?" -- there is no whoami tool.
+    """
+    from libtmux_mcp._utils import _effective_socket_path
+
+    pane = mcp_session.active_window.active_pane
+    assert pane is not None and pane.pane_id is not None
+    mcp_session.active_window.split()
+
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},1,{mcp_session.session_id or '$0'}")
+    monkeypatch.setenv("TMUX_PANE", pane.pane_id)
+
+    # Both forms: MCP clients that respect dict[str, str] send the string.
+    probes: list[dict[str, t.Any]] = [{"is_caller": True}, {"is_caller": "true"}]
+    for filters in probes:
+        result = list_panes(socket_name=mcp_server.socket_name, filters=filters)
+        assert [p.pane_id for p in result] == [pane.pane_id]

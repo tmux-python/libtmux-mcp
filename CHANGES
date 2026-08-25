@@ -8,6 +8,34 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Filter by what a listing actually showed you
+
+`list_panes(filters={"is_caller": true})` raised `Unknown filter field
+'is_caller'`. That call is not an edge case: it is the workflow the
+server's own instructions hand every client as the only way to answer
+"which pane am I in?", since there is no whoami tool.
+
+Filters went straight into libtmux's `QueryList`, which resolves keys by
+`getattr` on the tmux object. Two kinds of output field are invisible
+there -- ones the server computes while serializing (`is_caller`) and
+ones tmux exposes under a different name (`window_count`, `pane_count`,
+`active_pane_id`). So the documented workflow could not work, and
+neither could filtering a session list by the window count it had just
+displayed.
+
+The old error message compounded it. "Call this tool without filters to
+see available fields" pointed at a listing that shows 6 of a Session's
+230 filterable fields, two of which were themselves rejected as filters
+-- so following the advice returned a set that was both 97% incomplete
+and partly invalid.
+
+Every field a tool returns is now filterable. Computed fields are
+applied after serialization through the same `QueryList` operators, so
+`__contains` and friends behave identically; aliased ones rewrite to
+their attribute path. Because `filters` is typed `dict[str, str]`,
+`"true"` is accepted wherever `true` is. The error now names the output
+fields outright and counts the wider attribute set behind them.
+
 #### `respawn_pane` returns the new process, not the one it replaced
 
 `pane_pid` changes the instant `respawn-pane` returns, but

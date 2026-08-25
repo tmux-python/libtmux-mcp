@@ -57,6 +57,8 @@ def list_sessions(
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"session_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
+        Every field this tool returns is filterable; any libtmux
+        Session attribute works too.
 
     Returns
     -------
@@ -85,7 +87,7 @@ def list_sessions(
                     "set LIBTMUX_TMUX_BIN to the matching binary."
                 ),
             )
-    return _apply_filters(sessions, filters, _serialize_session, Session)
+    return _apply_filters(sessions, filters, _serialize_session, Session, SessionInfo)
 
 
 @handle_tool_errors
