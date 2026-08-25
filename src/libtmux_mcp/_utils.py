@@ -1069,6 +1069,17 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
             f"Pane not found: {e}",
             suggestion="Call list_panes to discover valid pane ids.",
         )
+    if isinstance(e, exc.CaptureCursorError):
+        # Not a tmux failure — the cursor the agent replayed no longer
+        # describes the pane it was taken from, so the generic "tmux
+        # error:" prefix would point at the wrong thing to fix.
+        return ExpectedToolError(
+            str(e),
+            suggestion=(
+                "Call capture_since without a cursor to start a fresh "
+                "observation of this pane."
+            ),
+        )
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")
     logger.exception("unexpected error in MCP tool %s", fn_name)

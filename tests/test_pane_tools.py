@@ -1351,8 +1351,8 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
 
     Floods past ``history-limit`` then clears history to guarantee the
     cursor anchor is destroyed.  The flood alone is not deterministic —
-    tmux 3.6 retains enough of the original prompt that
-    ``_find_unique_cursor_match`` re-anchors on the surviving hash.
+    tmux 3.6 retains enough of the original prompt that libtmux's
+    fingerprint search re-anchors on the surviving hash.
     """
     import asyncio
 
@@ -1561,9 +1561,11 @@ def test_capture_since_marks_lines_missed_after_clear_history_with_resize(
 ) -> None:
     """clear-history + pane resize still detects anchor loss.
 
-    Regression: ``_cursor_anchor_lost`` used a ``pane_height`` guard
-    that returned False when the pane grew after ``clear-history``,
-    masking the complete history wipe.
+    Regression: libtmux's anchor-loss check uses a ``pane_height`` guard
+    to tell a resize-grow from a real trim, and an early version of it
+    returned False when the pane grew after ``clear-history``, masking
+    the complete history wipe. Kept here because this tool is what
+    surfaces that loss to an agent.
     """
     import asyncio
 
@@ -1656,17 +1658,26 @@ def test_capture_since_rejects_dead_pane_cursor(
 def test_capture_since_does_not_block_event_loop(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``capture_since`` runs blocking tmux captures off the event loop."""
+    """``capture_since`` runs blocking tmux captures off the event loop.
+
+    Slows ``Pane.cmd``, the one chokepoint every tmux round-trip in a
+    capture passes through, rather than a single wrapper method. Patching
+    a specific wrapper would silently stop injecting delay if libtmux
+    changed which wrapper the read is built on, and the test would then
+    pass without exercising anything.
+    """
     import asyncio
     import time as _time
 
     from libtmux.pane import Pane as _LibtmuxPane
 
-    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
-        _time.sleep(0.15)
-        return []
+    real_cmd = _LibtmuxPane.cmd
 
-    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
+    def _slow_cmd(self: _LibtmuxPane, *args: str) -> t.Any:
+        _time.sleep(0.05)
+        return real_cmd(self, *args)
+
+    monkeypatch.setattr(_LibtmuxPane, "cmd", _slow_cmd)
 
     async def _drive() -> int:
         ticks = 0

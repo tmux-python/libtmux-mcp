@@ -692,6 +692,10 @@ NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     libtmux_exc.ObjectDoesNotExist,
     libtmux_exc.MultipleObjectsReturned,
     libtmux_exc.PaneNotFound,
+    # Covers InvalidCaptureCursor and PaneLifecycleChanged. A cursor that
+    # does not describe its pane describes it no better on a second look,
+    # and a respawned or dead pane does not un-respawn.
+    libtmux_exc.CaptureCursorError,
     libtmux_exc.NoWindowsExist,
     libtmux_exc.BadSessionName,
     libtmux_exc.TmuxSessionExists,
