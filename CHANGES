@@ -786,6 +786,24 @@ then asserts is echoed back verbatim, so widening it breaks the
 assertion. The sweep above caught it, which is the argument for
 sweeping rather than editing constants by hand.
 
+A follow-up pass caught the cost of getting that rule slightly wrong.
+Raising a budget is free only when the call returns as soon as its
+condition holds. Three sites are the opposite -- they spend the whole
+budget on purpose, to prove something does NOT happen -- and raising
+those turned a ceiling into a bill:
+
+| site | before | after |
+|---|---|---|
+| `wait_for_text` case `silent_pane_still_times_out` | 20.0 s | 1.0 s |
+| `pipe_pane` "the file must not grow" | 10.0 s | 1.0 s |
+| `wait_for_text` tail-cap (pattern never appears) | 6.0 s | 3.0 s |
+
+The `pipe_pane` one is the instructive shape: it is a
+`retry_until(..., raises=True)` *inside* `pytest.raises(WaitTimeout)`,
+so it reads as a positive wait and behaves as a negative one. Serial
+suite time went from 139 s to 117 s, and the slowest single test from
+20.0 s to 3.0 s.
+
 Measured before and after, `pytest -n auto --reruns 0`, same box:
 
 | | runs failing | failures per run | loadavg at start |

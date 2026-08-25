@@ -3764,18 +3764,21 @@ def test_wait_for_text_sees_the_entry_cursor_row(
     armed = _armed_after_baseline(monkeypatch)
 
     async def emit_after_baseline() -> None:
-        # The baseline is a couple of display-message round trips; 0.2 s
-        # is the same headroom the sibling after-baseline test uses.
         await armed.wait()
         if payload:
             await asyncio.to_thread(_write_to_pane_tty, mcp_pane, payload)
+
+    # A case that must NOT match spends its whole budget proving it, so
+    # that budget is the test's cost rather than a ceiling it never
+    # reaches. Only the matching cases get headroom.
+    budget = 20.0 if expected_found else 1.0
 
     async def run() -> WaitForTextResult:
         wait_task = asyncio.create_task(
             wait_for_text(
                 patterns=patterns,
                 pane_id=mcp_pane.pane_id,
-                timeout=20.0,
+                timeout=budget,
                 regex=True,
                 socket_name=mcp_server.socket_name,
             )
@@ -5209,7 +5212,10 @@ def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
             wait_for_text(
                 patterns=["NEVER_APPEARS_TAILCAP_j4"],
                 pane_id=mcp_pane.pane_id,
-                timeout=6.0,
+                # Runs to timeout by design (the pattern never appears),
+                # so this is spend, not headroom. The 200-line burst
+                # lands in ~0.3 s.
+                timeout=3.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -5791,7 +5797,7 @@ def test_pipe_pane_start_stop(
     with pytest.raises(libtmux_exc.WaitTimeout):
         retry_until(
             lambda: log_file.stat().st_size > size_after_stop,
-            10,
+            1,
             raises=True,
         )
     assert "POST_STOP_MARKER_99" not in log_file.read_text()
