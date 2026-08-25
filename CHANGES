@@ -8,6 +8,38 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `search_panes` says how much of each pane it read
+
+`search_panes` searches only the visible screen unless `content_start`
+is given, but reported `matches: []` alongside `truncated: false` — an
+active claim that nothing was left out, for a search that never looked
+at scrollback. Its docstring described "visible terminal scrollback
+content", which reads as scrollback.
+
+The result now carries `searched_scope` (`visible` / `scrollback`), and
+`truncated` is documented as describing the `limit` and per-pane line
+caps only. The default stays visible-only deliberately: the tool fans
+out across every pane on the server, so defaulting to scrollback would
+multiply cost by history depth times pane count and make identical
+calls take wildly different times depending on how long panes had been
+alive.
+
+#### `paste_text("")` is a no-op instead of an error
+
+tmux creates no buffer for empty content, so the follow-up
+`paste-buffer` failed with `no buffer libtmux_mcp_..._paste` — an error
+for a no-op, naming an internal buffer the caller never chose.
+
+#### `send_keys` documents its size ceiling
+
+tmux rejects a `send-keys` argument beyond roughly 16 KB with `command
+too long`. The docstring now names that limit and points at
+`paste_text`, which routes through a buffer rather than argv and takes
+far more. It also warns against verifying a write by string-comparing
+captured text: tmux renders combining marks and zero-width joiners as
+`<XXXX>` placeholders, so `école` and emoji sequences come back
+transformed even when the bytes were delivered correctly.
+
 #### An oversized response is truncated, not rejected by the client
 
 A capture large enough to hit the server's 1 MB backstop produced

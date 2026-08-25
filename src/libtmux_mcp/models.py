@@ -666,11 +666,24 @@ class SearchPanesResult(BaseModel):
         default_factory=list,
         description="PaneContentMatch entries for this page.",
     )
+    searched_scope: t.Literal["visible", "scrollback"] = Field(
+        default="visible",
+        description=(
+            "How much of each pane was read. ``visible`` is the default "
+            "and means ONLY the on-screen rows were searched, so a match "
+            "that has scrolled off is not reported and ``matches: []`` "
+            "does not mean the text is absent. Pass ``content_start`` "
+            "(e.g. -500) to search scrollback."
+        ),
+    )
     truncated: bool = Field(
         default=False,
         description=(
             "True when the result set was truncated by ``limit`` or "
-            "by ``max_matched_lines_per_pane`` on any pane."
+            "by ``max_matched_lines_per_pane`` on any pane. It describes "
+            "those caps ONLY -- it never reports rows left unread "
+            "because the search was scoped to the visible screen; read "
+            "``searched_scope`` for that."
         ),
     )
     truncated_panes: list[str] = Field(

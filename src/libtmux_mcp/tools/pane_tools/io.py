@@ -199,6 +199,16 @@ def send_keys(
     Do NOT call ``capture_pane`` immediately — both the read and the
     pattern-match paths race the pane's PTY draw.
 
+    **Size limit:** tmux rejects a ``send-keys`` argument beyond roughly
+    16 KB with ``command too long``. ``paste_text`` routes through a
+    buffer instead of argv and takes far more, so use it for large
+    payloads.
+
+    **Verifying a write:** do not string-compare captured text against
+    what you sent. tmux renders combining marks and zero-width joiners
+    as ``<XXXX>`` placeholders, so ``école`` and emoji sequences come
+    back transformed even though the bytes were delivered correctly.
+
     Parameters
     ----------
     keys : str
@@ -841,6 +851,13 @@ def paste_text(
         session_id=session_id,
         window_id=window_id,
     )
+
+    if not text:
+        # tmux creates no buffer for empty content, so the follow-up
+        # paste-buffer failed with "no buffer libtmux_mcp_..._paste" --
+        # an error for a no-op, naming an internal buffer the caller
+        # never chose. Pasting nothing succeeds and does nothing.
+        return f"Text pasted to pane {pane.pane_id}"
 
     # Use a unique named tmux buffer so we don't clobber the user's
     # unnamed paste buffer, and so we can reliably clean up on error

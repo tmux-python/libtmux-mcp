@@ -88,9 +88,18 @@ def search_panes(
     """Search visible terminal text across all tmux panes.
 
     Use when the user asks what panes 'contain', 'mention', or 'show' —
-    e.g. 'find the pane with the pytest failure'. Searches each pane's
-    visible terminal scrollback content (not editor or browser text)
-    and returns panes where the pattern is found, with matching lines.
+    e.g. 'find the pane with the pytest failure'. Returns panes where
+    the pattern is found, with matching lines (tmux panes only, not
+    editor or browser text).
+
+    **Scope: the visible screen only, by default.** Scrollback is NOT
+    searched unless ``content_start`` is given, so a match that has
+    already scrolled off returns ``matches: []`` — which does not mean
+    the text is absent. The result reports ``searched_scope`` so this is
+    visible at the call site; pass ``content_start=-500`` (or further)
+    to include scrollback. It stays opt-in because this tool fans out
+    across every pane on the server, and defaulting to scrollback would
+    multiply cost by history depth times pane count.
 
     Bounded output contract
     -----------------------
@@ -285,6 +294,11 @@ def search_panes(
 
     return SearchPanesResult(
         matches=page_matches,
+        searched_scope=(
+            "scrollback"
+            if (content_start is not None or content_end is not None)
+            else "visible"
+        ),
         truncated=per_pane_truncated or global_truncated,
         truncated_panes=skipped_panes,
         total_panes_matched=total_panes_matched,
