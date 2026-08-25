@@ -9,12 +9,17 @@ import typing as t
 
 import pydantic
 import pytest
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.server.middleware import MiddlewareContext
 from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
+from libtmux_mcp._utils import (
+    TAG_DESTRUCTIVE,
+    TAG_MUTATING,
+    TAG_READONLY,
+    ExpectedToolError,
+)
 from libtmux_mcp.middleware import (
     AuditMiddleware,
     ReadonlyRetryMiddleware,
@@ -799,6 +804,82 @@ def test_tail_preserving_passthrough_when_under_cap() -> None:
     result = mw._truncate_to_result(payload)
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == payload
+
+
+class ErrorTransformFixture(t.NamedTuple):
+    """Test fixture for the caller-caused vs internal error split."""
+
+    test_id: str
+    error: Exception
+    method: str
+    expected_code: int
+    expect_internal_prefix: bool
+
+
+ERROR_TRANSFORM_FIXTURES: list[ErrorTransformFixture] = [
+    ErrorTransformFixture(
+        "expected_on_resource",
+        ExpectedToolError("Session not found: x"),
+        "resources/read",
+        -32002,
+        False,
+    ),
+    ErrorTransformFixture(
+        "resource_error",
+        ResourceError("Window not found: 999"),
+        "resources/read",
+        -32002,
+        False,
+    ),
+    ErrorTransformFixture(
+        "expected_on_prompt",
+        ExpectedToolError("bad arg"),
+        "prompts/get",
+        -32602,
+        False,
+    ),
+    # The control: a real bug must still read as an internal error, or
+    # the fix would be hiding server faults rather than reclassifying
+    # caller mistakes.
+    ErrorTransformFixture(
+        "genuine_bug_stays_internal",
+        RuntimeError("real fault"),
+        "resources/read",
+        -32603,
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ErrorTransformFixture._fields,
+    ERROR_TRANSFORM_FIXTURES,
+    ids=[fixture.test_id for fixture in ERROR_TRANSFORM_FIXTURES],
+)
+def test_expected_failures_never_read_as_internal_errors(
+    test_id: str,
+    error: Exception,
+    method: str,
+    expected_code: int,
+    expect_internal_prefix: bool,
+) -> None:
+    """A caller's mistake is not a server fault, on any message kind.
+
+    fastmcp's transform funnels unrecognized exceptions into ``-32603
+    "Internal error: ..."``. Intercepting ``tools/call`` alone left
+    resources reporting a missing session that way -- the same defect
+    the middleware exists to remove, one fork over.
+    """
+    from libtmux_mcp.middleware import ToolErrorResultMiddleware
+
+    assert test_id
+    middleware = ToolErrorResultMiddleware(transform_errors=True)
+    context = t.cast("t.Any", type("_Ctx", (), {"method": method})())
+
+    transformed = middleware._transform_error(error, context)
+
+    assert transformed.error.code == expected_code  # type: ignore[attr-defined]
+    assert ("Internal error" in str(transformed)) is expect_internal_prefix
 
 
 def _limiter_context(tool_name: str) -> t.Any:

@@ -8,6 +8,7 @@ import typing as t
 
 import pytest
 from fastmcp import Client
+from mcp import McpError
 
 from libtmux_mcp.server import _register_all, mcp
 
@@ -117,3 +118,31 @@ def test_resource_read_via_client(
 
     if expect_contains is not None:
         assert expect_contains in text
+
+
+def test_missing_resource_target_is_not_an_internal_error(
+    _ensure_registered: None,
+    mcp_server: Server,
+    mcp_session: Session,
+) -> None:
+    """A caller naming a session that does not exist is not a server fault.
+
+    fastmcp's stock transform funnels every unrecognized exception into
+    ``-32603 "Internal error: ..."``. ``ToolErrorResultMiddleware``
+    intercepts ``tools/call`` to avoid that, but the transform serves
+    EVERY message kind, so resources kept reporting a caller's mistake
+    as an internal error -- the same defect the middleware exists to
+    remove, one fork over.
+    """
+    with pytest.raises(McpError) as excinfo:
+        _run(
+            _read(
+                f"tmux://sessions/nosuchsession-xyz"
+                f"?socket_name={mcp_server.socket_name}"
+            )
+        )
+
+    message = str(excinfo.value)
+    assert "Internal error" not in message
+    assert "nosuchsession-xyz" in message
+    assert mcp_session is not None

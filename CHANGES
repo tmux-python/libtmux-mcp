@@ -8,6 +8,41 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Resource URIs warn that a name must be percent-encoded
+
+A resource URI's path segment is percent-decoded before lookup, which
+is correct URI behavior — but nothing said so, and nothing round-trips
+a name into a URI safely. With two sessions named `pct name` and
+`pct%20name`, reading `tmux://sessions/pct%20name` returns **`pct
+name`**: the wrong session, silently, with no error. Only
+`tmux://sessions/pct%2520name` reaches the one whose name contains the
+literal `%`. A space needs no encoding, so the trap only springs on
+`%`.
+
+The resource docstrings now say this at the point an agent constructs a
+URI. Concatenating a `session_name` straight from `list_sessions` is
+the obvious construction and the one that breaks, so a ready-made
+`uri` field on the session/window/pane models remains the better fix
+and is recorded as follow-up rather than landed unverified.
+
+#### A missing resource is no longer an "Internal error"
+
+Reading `tmux://sessions/nosuchsession` answered `Internal error:
+Session not found: nosuchsession`. That is a caller naming something
+that does not exist, reported as a server fault.
+
+`ToolErrorResultMiddleware` exists to remove exactly that wrapper — its
+docstring says so — but it intercepted `tools/call` only, while
+fastmcp's transform it inherits from serves *every* message kind. So
+the defect survived one fork over, on resources.
+
+Fixed at the transform rather than by adding a resource hook: an error
+this server raised deliberately to describe a caller-caused failure now
+maps to `-32002` on a resource read and `-32602` elsewhere, with its own
+message intact. The property — an expected failure is never an internal
+error — now holds on every path that transform serves, instead of on
+the one path that was noticed.
+
 #### A non-MCP buffer name is described accurately
 
 `load_buffer`/`paste_buffer`/`show_buffer` answered a name like

@@ -32,6 +32,7 @@ import logging
 import time
 import typing as t
 
+from fastmcp.exceptions import PromptError, ResourceError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import (
     ErrorHandlingMiddleware,
@@ -40,7 +41,8 @@ from fastmcp.server.middleware.error_handling import (
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
-from mcp.types import CallToolRequestParams, TextContent
+from mcp import McpError
+from mcp.types import CallToolRequestParams, ErrorData, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
 from libtmux_mcp._utils import (
@@ -49,6 +51,18 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     TAG_SELF_BOUNDED,
     ExpectedToolError,
+)
+
+#: Errors this server raises deliberately to describe a CALLER-caused
+#: failure. They must never reach the ``-32603`` "Internal error" path,
+#: whichever message kind raised them: ``ExpectedToolError`` from tools,
+#: and fastmcp's ``ResourceError`` / ``PromptError`` from the resource
+#: and prompt handlers, which this package raises only for a bad target
+#: or a missing object.
+_CALLER_CAUSED_ERRORS: tuple[type[Exception], ...] = (
+    ExpectedToolError,
+    ResourceError,
+    PromptError,
 )
 
 logger = logging.getLogger(__name__)
@@ -526,6 +540,35 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
                 self.error_callback(error, context)
             except Exception:
                 self.logger.exception("Error in error callback")
+
+    def _transform_error(
+        self,
+        error: Exception,
+        context: MiddlewareContext,
+    ) -> Exception:
+        """Keep caller-caused failures out of the ``-32603`` catch-all.
+
+        The base transform funnels every unrecognized exception into
+        ``"Internal error: ..."``. That is right for a bug and wrong for
+        "that session does not exist". It also runs for EVERY message
+        kind, so intercepting only ``tools/call`` below left resources
+        reporting a caller's mistake as a server fault:
+        ``tmux://sessions/nosuchsession`` answered
+        ``Internal error: Session not found: nosuchsession``.
+
+        Fixed at the fork rather than by adding one resource hook. The
+        property is "an expected failure is never an internal error",
+        and it has to hold on every path this transform serves.
+        """
+        if self.transform_errors and isinstance(error, _CALLER_CAUSED_ERRORS):
+            # Mirror the base class's own convention: -32002 is the MCP
+            # code for a resource miss, -32602 says the caller's
+            # arguments were wrong. Neither prefixes the message, which
+            # already names the object that was not found.
+            method = context.method or ""
+            code = -32002 if method.startswith("resources/") else -32602
+            return McpError(ErrorData(code=code, message=str(error)))
+        return super()._transform_error(error, context)
 
     async def on_call_tool(
         self,

@@ -67,10 +67,20 @@ def register(mcp: FastMCP) -> None:
     ) -> str:
         """Get details of a specific tmux session.
 
+        .. warning::
+
+           Percent-encode the name when building this URI. The path
+           segment is percent-DECODED before lookup, so a session
+           literally named ``pct%20name`` is reached only as
+           ``tmux://sessions/pct%2520name`` — pasting the raw name
+           reads the session named ``pct name`` instead, silently and
+           with no error. A space needs no encoding, which is what
+           makes a literal ``%`` easy to miss.
+
         Parameters
         ----------
         session_name : str
-            The session name.
+            The session name, percent-encoded.
         socket_name : str, optional
             tmux socket name. Defaults to LIBTMUX_SOCKET env var.
 
@@ -100,6 +110,10 @@ def register(mcp: FastMCP) -> None:
         socket_name: str | None = None,
     ) -> str:
         """List all windows in a tmux session.
+
+        The session name is percent-decoded before lookup; see
+        :func:`get_session` for why a name containing ``%`` must be
+        encoded before it goes into this URI.
 
         Parameters
         ----------
