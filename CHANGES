@@ -735,6 +735,28 @@ unusual entry shape.
 
 ### Development
 
+**A killed test run leaked a tmux daemon forever**
+
+Fixture finalizers do not run when pytest is `SIGKILL`ed, so an
+interrupted run left a live tmux daemon and its socket behind
+permanently. They accumulate: 119 live `libtmux_test*` servers spanning
+three days were found on one development box.
+
+A clean run leaks none -- measured before and after, delta zero -- so
+this is specifically about interrupted runs, of which a session
+debugging flaky tests produces plenty.
+
+It is not only untidy. `list_servers` probes every live socket, so the
+debris was also what made that tool spectacular rather than merely slow:
+119 servers x ~12.7 ms is the 1517 ms measured there.
+
+`pytest_sessionstart` now reaps `libtmux_test*` sockets older than an
+hour. The age gate is the load-bearing part: pytest-xdist workers all
+start at once, so an unconditional reaper in one worker would kill the
+servers another worker had just created. An hour is far longer than the
+two-minute suite and far shorter than debris survives.
+
+
 **The suite is green in CI while two to five tests fail per parallel run**
 
 Measured, and it is the finding that supersedes several smaller ones in
