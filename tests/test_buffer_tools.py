@@ -46,7 +46,7 @@ def test_logical_name_rejects_invalid(name: str) -> None:
 
 def test_buffer_name_rejects_non_namespaced() -> None:
     """Names outside the MCP namespace are rejected."""
-    with pytest.raises(ToolError, match="Invalid buffer name"):
+    with pytest.raises(ToolError, match="is not an MCP-allocated buffer"):
         _validate_buffer_name("clipboard")
 
 
@@ -112,7 +112,7 @@ def test_paste_buffer_requires_mcp_namespace(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """``paste_buffer`` refuses to paste a non-MCP buffer."""
-    with pytest.raises(ToolError, match="Invalid buffer name"):
+    with pytest.raises(ToolError, match="is not an MCP-allocated buffer"):
         paste_buffer(
             buffer_name="clipboard",
             pane_id=mcp_pane.pane_id,

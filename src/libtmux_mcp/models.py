@@ -416,6 +416,18 @@ class RunCommandResult(BaseModel):
         description="Shell exit status, or None when the command timed out",
     )
     timed_out: bool = Field(description="True when the wait timed out")
+    command_may_still_run: bool = Field(
+        default=False,
+        description=(
+            "True when the wait timed out, meaning the command was SENT "
+            "but not observed to finish. It is not cancelled: the "
+            "keystrokes sit in the pane's input buffer and the shell "
+            "runs them whenever it next reads a line, which may be long "
+            "after this call returned. Do NOT retry a non-idempotent "
+            "command on this result -- that is how a `git push` or a "
+            "migration runs twice. Check the pane first."
+        ),
+    )
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
     output: list[str] = Field(
         default_factory=list,

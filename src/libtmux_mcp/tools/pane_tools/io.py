@@ -32,6 +32,7 @@ from libtmux_mcp.models import (
     SendKeysOperation,
     SendKeysOperationResult,
 )
+from libtmux_mcp.tools.pane_tools.state import _read_pane_state
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -96,6 +97,12 @@ def _raise_send_keys_error(exc: subprocess.CalledProcessError) -> t.NoReturn:
     stderr = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
     msg = f"send-keys failed: {stderr or exc}"
     raise ExpectedToolError(msg) from exc
+
+
+def _read_pane_current_command(pane: Pane) -> str | None:
+    """Return the pane's foreground command, or None if tmux won't say."""
+    stdout = pane.display_message("#{pane_current_command}", get_text=True)
+    return stdout[0] if stdout and stdout[0] else None
 
 
 def _run_send_keys_argv(argv: list[str]) -> None:
@@ -434,6 +441,19 @@ async def run_command(
     The command runs in a subshell, so ``cd``, ``export`` and other shell
     state changes do not persist to later calls.
 
+    **Requires a shell at a prompt.** A pane running a full-screen
+    program (``less``, ``vi``, ``htop``) owns the keyboard, so this
+    tool's exit-status wrapper would be typed into THAT program rather
+    than run; such a call is refused. Use ``send_keys`` for raw input to
+    a full-screen program.
+
+    **A timeout does not cancel the command.** The keystrokes are
+    already in the pane's input buffer, so a shell that is busy now runs
+    them whenever it next reads a line — possibly long after this
+    returns. ``command_may_still_run`` reports that. Do not retry a
+    non-idempotent command on a timed-out result without checking the
+    pane first.
+
     Parameters
     ----------
     command : str
@@ -489,6 +509,32 @@ async def run_command(
         session_id=session_id,
         window_id=window_id,
     )
+    # A full-screen program (less, vi, htop) owns the pane's keyboard,
+    # so the wrapper below is consumed as ITS keystrokes rather than by
+    # a shell: measured against `less`, `s=$?...` became less's
+    # save-to-file command and a fragment escaped to a shell. In `vi`
+    # the same payload lands in the buffer, where `:`-prefixed
+    # fragments are commands that edit and write files. This tool means
+    # "run a shell command and report its exit status", which requires
+    # a shell, so refuse rather than type into whatever is there.
+    entry_state = await asyncio.to_thread(_read_pane_state, pane)
+    if entry_state.alternate_on:
+        occupant = await asyncio.to_thread(_read_pane_current_command, pane)
+        named = f" ({occupant})" if occupant else ""
+        msg = (
+            f"pane {pane.pane_id} is running a full-screen program{named}, "
+            "so it has no shell prompt to accept a command. Sending one "
+            "would type this tool's exit-status wrapper into that program."
+        )
+        raise ExpectedToolError(
+            msg,
+            suggestion=(
+                "Use send_keys for raw input to a full-screen program, or "
+                "exit it first. snapshot_pane reports alternate_on and "
+                "pane_current_command if you need to check."
+            ),
+        )
+
     command_id = uuid.uuid4().hex[:10]
     channel = f"r_{command_id}"
     status_option = f"@s_{command_id}"
@@ -510,7 +556,14 @@ async def run_command(
     )
 
     started = time.monotonic()
-    await asyncio.to_thread(pane.send_keys, payload, enter=True, literal=True)
+    await asyncio.to_thread(
+        _run_send_keys,
+        pane,
+        payload,
+        enter=True,
+        literal=True,
+        suppress_history=False,
+    )
 
     timed_out = False
     wait_argv = _tmux_argv(server, "wait-for", channel)
@@ -564,6 +617,7 @@ async def run_command(
         pane_id=target_pane_id,
         exit_status=exit_status,
         timed_out=timed_out,
+        command_may_still_run=timed_out,
         elapsed_seconds=elapsed,
         output=kept_lines,
         output_truncated=truncated,

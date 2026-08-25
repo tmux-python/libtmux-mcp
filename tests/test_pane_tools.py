@@ -39,6 +39,7 @@ from libtmux_mcp.tools.pane_tools import (
     pipe_pane,
     resize_pane,
     respawn_pane,
+    run_command,
     search_panes,
     select_pane,
     send_keys,
@@ -289,6 +290,73 @@ def test_exit_copy_mode_reports_a_pane_that_is_not_in_a_mode(
     # Control: the real flow still works, so the guard is not blanket.
     enter_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
     exit_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+
+def test_run_command_refuses_a_full_screen_program(
+    monkeypatch: pytest.MonkeyPatch, mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A pane owned by less/vi has no prompt, so refuse rather than type.
+
+    The exit-status wrapper is consumed as the PROGRAM's keystrokes:
+    measured against ``less``, ``s=$?...`` became its save-to-file
+    command and a fragment escaped to a shell. In ``vi`` the same
+    payload lands in the buffer, where ``:``-prefixed fragments edit and
+    write files. ``alternate_on`` was already readable before the call.
+
+    The state is stubbed rather than driven with a real pager so the
+    test does not depend on which one CI has installed.
+    """
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools.state import _read_pane_state
+
+    state = _read_pane_state(mcp_pane)
+    monkeypatch.setattr(
+        "libtmux_mcp.tools.pane_tools.io._read_pane_state",
+        lambda _pane: state._replace(alternate_on=True),
+    )
+
+    with pytest.raises(ToolError, match="full-screen program"):
+        asyncio.run(
+            run_command(
+                command="echo SHOULD_NOT_BE_SENT",
+                pane_id=mcp_pane.pane_id,
+                timeout=5.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+    assert not any("SHOULD_NOT_BE_SENT" in line for line in mcp_pane.capture_pane())
+
+
+def test_run_command_timeout_flags_that_the_command_may_still_run(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A timed-out command is sent, not cancelled.
+
+    The keystrokes sit in the pane's input buffer and the shell runs
+    them whenever it next reads a line — verified: a command sent to a
+    pane blocked on ``sleep`` executed once the sleep returned. An agent
+    reading only ``timed_out`` concludes it did not run and retries,
+    which is how a non-idempotent command runs twice.
+    """
+    import asyncio
+
+    _park_pane(mcp_pane)
+    mcp_pane.send_keys("sleep 8", enter=True)
+
+    result = asyncio.run(
+        run_command(
+            command="echo DEFERRED_PAYLOAD",
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.timed_out is True
+    assert result.command_may_still_run is True
+    mcp_pane.send_keys("C-c", enter=False)
 
 
 class SearchPaginationFixture(t.NamedTuple):

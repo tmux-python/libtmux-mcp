@@ -8,6 +8,48 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A non-MCP buffer name is described accurately
+
+`load_buffer`/`paste_buffer`/`show_buffer` answered a name like
+`yanked` or tmux's own `buffer0` with `Invalid buffer name` — but those
+names are perfectly valid to tmux. What is true is that they were not
+allocated by this server, which only touches buffers it created because
+tmux buffers can hold OS clipboard history.
+
+The message now says that, and the suggestion states the consequence
+plainly: a buffer created outside this server — a copy-mode yank, or
+`buffer0` — is not reachable by design, and `load_buffer` is the way to
+stage content it can read back.
+
+#### `run_command` checks the pane has a shell to talk to
+
+`run_command` assumed a cooperative shell sitting at a prompt, and
+neither verified nor documented it. The assumption holds in tests and
+breaks in a live session, in two ways.
+
+**A full-screen program owns the keyboard.** Sent to a pane running
+`less`, this tool's exit-status wrapper was consumed as *less's*
+keystrokes — `s=$?` became its save-to-file command and a fragment
+escaped to a shell, leaving `Cannot write to "=$?; tmux ...` on screen.
+In `vi` the same payload lands in the buffer, where `:`-prefixed
+fragments are commands that edit and write files. `run_command` now
+reads `alternate_on` before sending and refuses, naming the program and
+pointing at `send_keys` for raw input. The signal was already there:
+`snapshot_pane` reports both `alternate_on` and `pane_current_command`.
+
+**A timed-out command is sent, not cancelled.** With the pane blocked on
+a foreground command, the keystrokes sit in the terminal's input buffer
+and the shell runs them whenever it next reads a line — verified: a
+command that reported `timed_out=True` executed once the blocking
+`sleep` returned, with no bound on when. An agent reading `timed_out`
+alone concludes the command did not run and retries, which is how a
+`git push`, a migration or a deploy runs twice, the second time when
+nothing is watching. The result now carries `command_may_still_run`,
+which says so.
+
+The wrapper is also sent through the checked send path, so a rejected
+send surfaces as an error rather than as a timeout.
+
 #### `show_option` can answer what is actually in force
 
 `show_option(option="history-limit", scope="session")` returned
