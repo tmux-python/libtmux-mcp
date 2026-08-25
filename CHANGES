@@ -536,9 +536,18 @@ B      6    4    1    -    -   failures
 A different set each time, well over a dozen distinct tests in the
 union. Most send keys to a real `zsh` and wait inside a fixed budget;
 under `-n auto` the tmux servers and shell startups compete and budgets
-tuned on an idle machine expire. The family spans at least
-`tests/test_pane_tools.py` and `tests/test_history.py`, so it is not
-one module's problem.
+tuned on an idle machine expire.
+
+**Scope the fix by the pattern, not by the filename.** Eleven sampled
+runs put all but one failure in `tests/test_pane_tools.py`, which
+invites narrowing the work to that module. Counting the at-risk pattern
+instead — drives a real shell *and* waits on output — finds it in
+several modules, with `test_pane_tools.py` holding 78-90% of the wait
+sites depending on how they are counted. Its dominance in every sample
+is a density effect, not exclusivity, and a thin tail elsewhere is
+exactly what a single observed failure in `tests/test_history.py`
+represents. Sampling reads a distribution's mode as its support; the
+density count settles in one pass what eleven runs could not.
 
 Run it in the default configuration and the same suite reports
 `968 passed, 6 skipped, **7 rerun**` — green. The rerun count is the
