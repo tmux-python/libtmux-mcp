@@ -359,6 +359,91 @@ def test_run_command_timeout_flags_that_the_command_may_still_run(
     mcp_pane.send_keys("C-c", enter=False)
 
 
+def test_pipe_pane_refuses_a_destination_it_cannot_write(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: pathlib.Path
+) -> None:
+    """Tmux reports success for a redirect that writes nothing.
+
+    ``pipe-pane`` hands its argument to a shell and returns success
+    whatever that shell does, so a missing parent directory produced
+    "Piping pane %N to ..." and no file ever appeared. Checked before
+    piping: ``#{pane_pipe}`` reads ``1`` immediately after a doomed
+    pipe, because the shell has been spawned and has not yet failed, so
+    reading it here would be a check that never fires.
+    """
+    missing = tmp_path / "no-such-dir" / "out.log"
+
+    with pytest.raises(ToolError, match="not an existing directory"):
+        pipe_pane(
+            pane_id=mcp_pane.pane_id,
+            output_path=str(missing),
+            socket_name=mcp_server.socket_name,
+        )
+
+    # Control: a writable destination still pipes.
+    good = tmp_path / "out.log"
+    pipe_pane(
+        pane_id=mcp_pane.pane_id,
+        output_path=str(good),
+        socket_name=mcp_server.socket_name,
+    )
+    pipe_pane(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+
+def test_respawn_pane_refuses_a_shell_that_cannot_run(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A mistyped shell destroys the pane; tmux still reports success.
+
+    tmux does not fail a respawn whose command cannot be executed -- the
+    new process dies immediately and takes the pane with it, along with
+    the window, session and server if it was the last one. Checked
+    before respawning, because catching it afterwards can only report
+    the loss, and even that races the dying process.
+    """
+    pane_id = mcp_pane.pane_id
+    assert pane_id is not None
+
+    with pytest.raises(ToolError, match="not an executable command"):
+        respawn_pane(
+            pane_id=pane_id,
+            kill=True,
+            shell="/no/such/shell-xyz",
+            socket_name=mcp_server.socket_name,
+        )
+
+    # The pane must still be there, which is the whole point.
+    survived = get_pane_info(pane_id=pane_id, socket_name=mcp_server.socket_name)
+    assert survived.pane_id == pane_id
+
+
+def test_paste_text_says_a_bracketed_newline_did_not_submit(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A bracketed trailing newline is reported as not submitted.
+
+    Bracketed paste holds the trailing newline in the shell's edit
+    buffer instead of submitting -- correct terminal behavior and a
+    safe default, but the text is not inert: it runs when Enter next
+    reaches the pane from any source, out of order with this call.
+    """
+    submitted = paste_text(
+        text="echo BRACKET_NOTE",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    held = paste_text(
+        text="echo BRACKET_NOTE\n",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert "NOT submitted" not in submitted
+    assert "NOT submitted" in held
+    assert "bracket=False" in held
+    mcp_pane.send_keys("C-u", enter=False)
+
+
 class SearchPaginationFixture(t.NamedTuple):
     """Test fixture for rejected search_panes pagination."""
 

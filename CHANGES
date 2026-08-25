@@ -8,6 +8,72 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `respawn_pane` returns the new process, not the one it replaced
+
+`pane_pid` changes the instant `respawn-pane` returns, but
+`pane_current_command` reports tmux's transient login shell for a few
+tens of milliseconds before the requested command execs over it —
+measured at roughly 50 ms on tmux 3.7c. The model was serialized from
+the first read, so a caller checking "did my shell take effect?" against
+the returned `PaneInfo` got the process that was about to be replaced.
+
+This was not cosmetic: `test_respawn_pane_replaces_shell` asserts on
+that field and has been failing intermittently since it was written,
+absorbed by the suite's `--reruns=2`. That existing test is the
+regression guard, and it is now deterministic.
+
+Three plausible predicates were measured and all three fail. Waiting for
+the pid to change is necessary but not sufficient — over 15 runs the
+command was still stale at pid-change 15 times. Waiting for the command
+to *change* never fires when a pane is respawned as itself. Waiting for
+two consecutive equal reads is the worst of the three: the pre-change
+value is itself stable for those ~14 ms, so a fast poll debounces onto
+the OLD value and returns it confidently — measured at 0/6 stale with a
+20 ms poll, 2/6 at 5 ms and 3/6 at 1 ms, i.e. correct only by accident
+of the interval.
+
+What ships instead matches the requested command's basename, which is
+interval-independent. Without a `shell` there is nothing to wait for, and that is structural:
+tmux's `spawn.c` guards its default-command fallback on
+`sc->argc == 0 && (~sc->flags & SPAWN_RESPAWN)`, so a commandless
+respawn skips it and reuses the pane's existing `argv`. The new command
+equals the old for any pane, including one running an editor rather
+than a shell. A wrapper command whose basename never appears falls
+through to a 250 ms cap, ten times the measured 26.4 ms worst case.
+
+#### Three tools now report what happened, not what was asked
+
+`pipe_pane`, `respawn_pane` and `paste_text` each returned success for
+an operation that did not do what the caller asked. In all three the
+confirming signal was already reachable and simply not consulted.
+
+**`pipe_pane` to an unwritable path.** tmux hands the pipe command to a
+shell and reports success whatever that shell then does, so a redirect
+into a missing directory produced `Piping pane %N to ...` and no file
+ever appeared — and a stale file already at that path would then read
+back as if it were live capture. The destination is now checked before
+piping. `#{pane_pipe}` looks like the obvious discriminator and is not:
+measured, it reads `1` immediately after a doomed pipe, because the
+shell has been spawned and has not yet failed on the redirect.
+
+**`respawn_pane` with a shell that cannot run.** tmux does not fail a
+respawn whose command cannot be executed: the new process dies at once
+and takes the pane with it — and its window, session and server, if it
+was the last one. Measured, a mistyped shell path destroyed the whole
+server while the tool returned a `PaneInfo` describing a pane that no
+longer existed. The program is now checked before respawning, since
+catching it afterwards can only report the loss and even that races the
+dying process. A respawn that still loses its pane raises rather than
+returning stale state.
+
+**`paste_text` with a trailing newline.** Bracketed paste — the default
+— holds the newline in the shell's edit buffer instead of submitting.
+That is correct terminal behavior and a safe default, but `Text pasted`
+reads as "your command ran", and the text is not inert: it executes
+when Enter next reaches that pane from any source, possibly long after
+the call and out of order with it. The result now says so and names
+both ways to submit.
+
 #### Resource URIs warn that a name must be percent-encoded
 
 A resource URI's path segment is percent-decoded before lookup, which

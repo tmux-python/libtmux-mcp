@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
 import re
 import shlex
 
@@ -70,6 +72,39 @@ def _escape_tmux_format(value: str) -> str:
         return run * 2
 
     return _TMUX_HASH_RUN.sub(_escape_run, value).replace("%", "%%")
+
+
+def _raise_if_unwritable(output_path: str) -> None:
+    """Refuse a destination the redirect cannot possibly write.
+
+    tmux hands the pipe command to a shell and reports success whatever
+    that shell then does, so a redirect into a missing directory or an
+    unwritable path fails silently and the caller is told its pane is
+    being captured to a file that will never appear. Worse, a stale file
+    already at that path then reads back as if it were live capture.
+
+    Checked BEFORE piping rather than after. ``#{pane_pipe}`` looks like
+    the obvious discriminator and is not: measured, it reads ``1``
+    immediately after a doomed pipe, because the shell has been spawned
+    and has not yet failed on the redirect. Only a later poll sees ``0``,
+    so reading it here would be a check that never fires.
+    """
+    target = pathlib.Path(output_path)
+    parent = target.parent
+    if not parent.is_dir():
+        msg = (
+            f"cannot pipe to {output_path!r}: {str(parent)!r} is not an "
+            "existing directory. tmux would report success and write "
+            "nothing."
+        )
+        raise ExpectedToolError(msg)
+    probe = target if target.exists() else parent
+    if not os.access(probe, os.W_OK):
+        msg = (
+            f"cannot pipe to {output_path!r}: no write permission. tmux "
+            "would report success and write nothing."
+        )
+        raise ExpectedToolError(msg)
 
 
 @handle_tool_errors
@@ -145,5 +180,6 @@ def pipe_pane(
     # Two layers rewrite this string, so it needs two escapes: tmux
     # expands its own formats first, then /bin/sh parses what is left.
     quoted = _escape_tmux_format(shlex.quote(output_path))
+    _raise_if_unwritable(output_path)
     pane.pipe(f"cat {redirect} {quoted}")
     return f"Piping pane {pane.pane_id} to {output_path}"

@@ -883,6 +883,11 @@ def paste_text(
         Whether to use bracketed paste mode. Default True.
         Bracketed paste wraps the text in escape sequences that tell
         the terminal "this is pasted text, not typed input".
+
+        **A trailing newline therefore does NOT run the command**: the
+        shell holds it in its edit buffer, where it executes when Enter
+        next reaches the pane from any source. Pass ``bracket=False``
+        to submit, or follow with ``send_keys(keys="Enter")``.
     session_name : str, optional
         Session name for pane resolution.
     session_id : str, optional
@@ -954,4 +959,19 @@ def paste_text(
         with contextlib.suppress(Exception):
             server.delete_buffer(buffer_name=buffer_name)
 
+    if bracket and text.endswith(("\n", "\r")):
+        # Bracketed paste tells the terminal "this is pasted text, not
+        # typed input", so the shell holds the trailing newline in its
+        # edit buffer instead of submitting. Correct terminal behavior
+        # and a safe default -- but an unqualified "Text pasted" reads
+        # as "your command ran", and the text is not inert: it executes
+        # the moment ANY Enter reaches this pane, from any source,
+        # possibly long after this call and out of order with it.
+        return (
+            f"Text pasted to pane {pane.pane_id}, but NOT submitted: with "
+            "bracket=True the trailing newline goes into the shell's edit "
+            "buffer, where it will run whenever Enter next reaches this "
+            "pane. Pass bracket=False, or follow with "
+            "send_keys(keys='Enter'), to run it now."
+        )
     return f"Text pasted to pane {pane.pane_id}"
