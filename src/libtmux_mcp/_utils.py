@@ -1070,6 +1070,27 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
+def _undouble(prefix: str, text: str) -> str:
+    """Drop *prefix* from *text* when the wrapper is about to add it back."""
+    return text.removeprefix(prefix)
+
+
+def _is_format_newline_parse_error(e: BaseException) -> bool:
+    """Detect libtmux failing to parse a format value containing a newline.
+
+    libtmux <= 0.62.0 splits ``-F`` output one line per object, so a
+    newline inside any value (a pane's current directory, most reachably)
+    splits that record and its strict ``zip`` raises. It surfaces as a
+    bare ``ValueError`` and would otherwise reach the agent as
+    "Unexpected error", logged at ERROR, naming nothing it can act on.
+
+    Matched on the message because the raise site is a stdlib ``zip``
+    with no dedicated exception type. Kept even once the floor moves
+    past the libtmux fix: the installed version is not ours to choose.
+    """
+    return isinstance(e, ValueError) and "zip()" in str(e)
+
+
 def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
     """Translate a libtmux / unexpected exception into a ``ToolError``.
 
@@ -1107,8 +1128,20 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
         )
     if isinstance(e, exc.PaneNotFound):
         return ExpectedToolError(
-            f"Pane not found: {e}",
+            f"Pane not found: {_undouble('Pane not found: ', str(e))}",
             suggestion="Call list_panes to discover valid pane ids.",
+        )
+    if _is_format_newline_parse_error(e):
+        return ExpectedToolError(
+            "tmux listing could not be parsed: a format value contains a "
+            "newline, almost always a pane whose current directory has one "
+            "in its name. Every pane on this server is affected, not just "
+            "that one, because pane lookup enumerates them all.",
+            suggestion=(
+                "Find it with: tmux list-panes -a -F "
+                "'#{pane_id} #{pane_current_path}' | cat -A — then move or "
+                "rename that directory. Upgrading libtmux also fixes it."
+            ),
         )
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")

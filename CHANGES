@@ -8,6 +8,28 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A newline in a directory name is diagnosed, not "Unexpected error"
+
+A pane whose current directory contains a newline makes libtmux fail to
+parse `-F` output, and because every pane lookup enumerates panes, the
+whole tmux server stops resolving — healthy panes included. It reached
+the agent as `Unexpected error: ValueError: zip() argument 2 is shorter
+than argument 1`, logged at ERROR, naming nothing it could act on. The
+agent also could not repair it through the MCP, since every tool that
+could move the pane needed the same enumeration.
+
+It is now an expected failure that names the cause and how to find the
+offending pane. The parse itself is fixed in libtmux
+([#752](https://github.com/tmux-python/libtmux/pull/752)); this
+diagnosis stays useful regardless, because the installed libtmux
+version is not this package's to choose.
+
+#### `Pane not found:` is no longer said twice
+
+`exc.PaneNotFound` prefixes its own message and the error mapper
+prefixed it again, so the most frequently hit error in the server read
+`Pane not found: Pane not found: %9999`.
+
 #### A typo in a filter field is an error, not an empty list
 
 `list_sessions`, `list_windows` and `list_panes` validated the *operator*
