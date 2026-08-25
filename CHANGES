@@ -8,6 +8,32 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `tmux://panes/{pane_id}` works past pane 9
+
+A tmux pane id starts with `%`, and the URI layer percent-decodes every
+captured template parameter before a handler sees it, so `%10` arrived
+as byte `0x10` and matched nothing. `%0` through `%9` survived only by
+accident -- one trailing hex digit is an *invalid* escape and passes
+through unchanged. So the resource surface worked right up until a
+server created its eleventh pane, while the tool surface answered
+correctly for the same pane. An agent got different answers depending
+on which surface it used.
+
+The obvious repair does not work and is worth recording so nobody
+reaches for it: re-encoding the decoded byte back to `%XX` handles
+`%10`-`%7f` and cannot handle `%80`-`%99`, which decode to bytes that
+are not valid UTF-8 and arrive as U+FFFD with the digits already gone.
+That fix passes every test written against low pane numbers and fails
+once a server reaches pane 128.
+
+A bare number needs no escaping at any pane number, so `tmux://panes/10`
+is now the spelling that always works; `%2510` keeps working for anyone
+who found that workaround. The not-found error also `repr()`s the id
+and says so when it is unprintable -- previously it read
+`"Pane not found: "` with an invisible control character, pointing at
+nothing.
+
+
 #### `capture_since` no longer re-delivers scrollback when a pane narrows
 
 Narrowing a pane rewraps its history longer, and the cursor carried no

@@ -31,6 +31,41 @@ _JSON_MIME = "application/json"
 _TEXT_MIME = "text/plain"
 
 
+def _normalize_pane_id(pane_id: str) -> str:
+    """Accept ``10`` as well as ``%10`` in a resource URI.
+
+    The URI layer percent-decodes every captured template parameter
+    (fastmcp ``resources/template.py``), and a tmux pane id starts with
+    ``%``. ``%10`` therefore arrives as the single byte ``0x10``.
+    ``%0``-``%9`` survive only because one trailing hex digit is an
+    INVALID escape and passes through, so the whole surface works right
+    up until a server has created its eleventh pane.
+
+    Re-encoding the decoded byte is not a fix: ``%80``-``%99`` decode to
+    bytes that are not valid UTF-8 and arrive as U+FFFD, so the digits
+    are already gone. That repair passes every test written against low
+    pane numbers and fails once a pane id reaches 128.
+
+    A bare number needs no escaping at any pane number, so that is the
+    spelling this accepts. ``%2510`` (a caller who pre-encoded the
+    percent) still decodes to ``%10`` and keeps working.
+    """
+    if pane_id and not pane_id.startswith("%"):
+        return f"%{pane_id}"
+    return pane_id
+
+
+def _raise_pane_not_found(pane_id: str) -> t.NoReturn:
+    """Report a missing pane, naming a mangled id rather than hiding it."""
+    msg = f"Pane not found: {pane_id!r}"
+    if not pane_id.isprintable():
+        msg += (
+            " -- the id was percent-decoded by the URI layer. Address the "
+            "pane by its bare number instead, e.g. 'tmux://panes/10'."
+        )
+    raise ResourceError(msg)
+
+
 def register(mcp: FastMCP) -> None:
     """Register hierarchy resources with the FastMCP instance."""
 
@@ -189,7 +224,9 @@ def register(mcp: FastMCP) -> None:
         Parameters
         ----------
         pane_id : str
-            The pane ID (e.g. '%1').
+            Pane number or id. Prefer the bare number ('10'):
+            a URI-escaped '%10' is decoded to a control character
+            before it reaches here.
         socket_name : str, optional
             tmux socket name. Defaults to LIBTMUX_SOCKET env var.
 
@@ -199,10 +236,10 @@ def register(mcp: FastMCP) -> None:
             JSON object of pane details (MIME: ``application/json``).
         """
         server = _get_server(socket_name=socket_name)
+        pane_id = _normalize_pane_id(pane_id)
         pane = server.panes.get(pane_id=pane_id, default=None)
         if pane is None:
-            msg = f"Pane not found: {pane_id}"
-            raise ResourceError(msg)
+            _raise_pane_not_found(pane_id)
 
         return json.dumps(_serialize_pane(pane).model_dump(), indent=2)
 
@@ -217,7 +254,9 @@ def register(mcp: FastMCP) -> None:
         Parameters
         ----------
         pane_id : str
-            The pane ID (e.g. '%1').
+            Pane number or id. Prefer the bare number ('10'):
+            a URI-escaped '%10' is decoded to a control character
+            before it reaches here.
         socket_name : str, optional
             tmux socket name. Defaults to LIBTMUX_SOCKET env var.
 
@@ -227,10 +266,10 @@ def register(mcp: FastMCP) -> None:
             Plain text captured pane content (MIME: ``text/plain``).
         """
         server = _get_server(socket_name=socket_name)
+        pane_id = _normalize_pane_id(pane_id)
         pane = server.panes.get(pane_id=pane_id, default=None)
         if pane is None:
-            msg = f"Pane not found: {pane_id}"
-            raise ResourceError(msg)
+            _raise_pane_not_found(pane_id)
 
         lines = pane.capture_pane()
         return "\n".join(lines)
