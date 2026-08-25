@@ -334,20 +334,21 @@ def test_run_command_timeout_flags_that_the_command_may_still_run(
 ) -> None:
     """A timed-out command is sent, not cancelled.
 
-    The keystrokes sit in the pane's input buffer and the shell runs
-    them whenever it next reads a line — verified: a command sent to a
-    pane blocked on ``sleep`` executed once the sleep returned. An agent
-    reading only ``timed_out`` concludes it did not run and retries,
-    which is how a non-idempotent command runs twice.
+    The command keeps running in the pane after the wait gives up, and
+    a shell that is busy when more input arrives runs it whenever it
+    next reads a line. An agent reading only ``timed_out`` concludes it
+    did not run and retries, which is how a non-idempotent command runs
+    twice.
     """
     import asyncio
 
     _park_pane(mcp_pane)
-    mcp_pane.send_keys("sleep 8", enter=True)
 
+    # The pane must be at a prompt or the busy guard refuses outright,
+    # so the command itself is what outlives the timeout.
     result = asyncio.run(
         run_command(
-            command="echo DEFERRED_PAYLOAD",
+            command="sleep 10",
             pane_id=mcp_pane.pane_id,
             timeout=2.0,
             socket_name=mcp_server.socket_name,
@@ -356,7 +357,6 @@ def test_run_command_timeout_flags_that_the_command_may_still_run(
 
     assert result.timed_out is True
     assert result.command_may_still_run is True
-    mcp_pane.send_keys("C-c", enter=False)
 
 
 def test_pipe_pane_refuses_a_destination_it_cannot_write(

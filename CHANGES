@@ -128,7 +128,7 @@ stage content it can read back.
 neither verified nor documented it. The assumption holds in tests and
 breaks in a live session, in two ways.
 
-**A full-screen program owns the keyboard.** Sent to a pane running
+**A program owns the keyboard.** Sent to a pane running
 `less`, this tool's exit-status wrapper was consumed as *less's*
 keystrokes — `s=$?` became its save-to-file command and a fragment
 escaped to a shell, leaving `Cannot write to "=$?; tmux ...` on screen.
@@ -137,6 +137,36 @@ fragments are commands that edit and write files. `run_command` now
 reads `alternate_on` before sending and refuses, naming the program and
 pointing at `send_keys` for raw input. The signal was already there:
 `snapshot_pane` reports both `alternate_on` and `pane_current_command`.
+
+`alternate_on` alone turned out to be necessary rather than sufficient,
+and the counterexample is reachable through this server's own tooling:
+`less` viewing a `pipe_pane` capture decides the file is binary and
+prompts *"may be a binary file. See it anyway?"* **before** entering the
+alternate screen, so it owns the keyboard with `alternate_on=0` and the
+wrapper ran to a clean `exit_status=0`. A small deny-list of pagers and
+editors covers that case.
+
+The obvious general test — "the foreground command is not the process
+tmux started" — was implemented, measured, and rejected. It separates a
+prompt from `less`, a `python` REPL and a running command cleanly, but
+it also refuses a pane where the user simply ran `bash` inside a `zsh`
+pane, and equally `sudo -s`, `ssh` or `nix-shell`, all of which have a
+perfectly good prompt. There is no reliable way to ask tmux "is there a
+prompt", so the guard errs toward letting calls through and names only
+what is known harmful. It is incomplete by construction: a program not
+on the list, and not yet on the alternate screen, still receives the
+wrapper.
+
+What that costs is worth stating, because "incomplete" reads as "the
+command does not run" and the real consequence is worse than that.
+Measured against a `python` REPL: the call is not refused, `timed_out`
+and `command_may_still_run` both fire correctly — so the agent is told
+the truth — but the REPL is left at a `...` continuation with an
+unterminated block, and the *next* input to that pane, from anyone, is
+appended to it rather than read as a fresh statement. The pane's own
+state survives; nothing is destroyed. That is the line the deny-list
+draws: destructive programs are refused, merely disruptive ones are
+carried by `command_may_still_run`.
 
 **A timed-out command is sent, not cancelled.** With the pane blocked on
 a foreground command, the keystrokes sit in the terminal's input buffer

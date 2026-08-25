@@ -56,6 +56,13 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
 #: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
 _SEND_KEYS_TIMEOUT_SECONDS = 5.0
 
+#: Shared recovery hint for a pane that cannot accept a shell command.
+_BUSY_PANE_SUGGESTION = (
+    "Use send_keys for raw input to a program that owns the pane, wait "
+    "for the running command to finish, or exit it first. snapshot_pane "
+    "reports alternate_on and pane_current_command if you need to check."
+)
+
 
 def _send_keys_argvs(
     pane: Pane,
@@ -97,6 +104,80 @@ def _raise_send_keys_error(exc: subprocess.CalledProcessError) -> t.NoReturn:
     stderr = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
     msg = f"send-keys failed: {stderr or exc}"
     raise ExpectedToolError(msg) from exc
+
+
+#: Programs that take over a pane's keyboard and for which typing a
+#: shell wrapper is actively destructive -- a pager consumes it as
+#: commands, an editor puts it in the buffer where ``:``-prefixed
+#: fragments write files. Only ones that can own the pane while
+#: ``alternate_on`` is still 0 need naming here; anything that enters
+#: the alternate screen is already caught by the flag.
+#:
+#: A DENY-list on purpose. The general signal -- "the foreground
+#: command is not the process tmux started" -- was measured and
+#: rejected: it refuses a pane where the user simply ran ``bash``
+#: inside a ``zsh`` pane, and equally ``sudo -s``, ``ssh`` or
+#: ``nix-shell``, all of which have a perfectly good prompt. There is
+#: no reliable way to ask tmux "is there a prompt", so this errs
+#: toward letting calls through and names only what is known harmful.
+_PANE_OWNING_PROGRAMS: frozenset[str] = frozenset(
+    {
+        "emacs",
+        "less",
+        "man",
+        "more",
+        "most",
+        "nano",
+        "nvim",
+        "pico",
+        "vi",
+        "view",
+        "vim",
+    }
+)
+
+
+def _raise_if_pane_is_busy(pane: Pane) -> None:
+    """Refuse when a program, not a shell, owns the pane's keyboard.
+
+    This tool means "run a shell command and report its exit status",
+    which needs a shell at a prompt. When a pager or editor owns the
+    pane the exit-status wrapper is consumed as ITS keystrokes:
+    measured against ``less``, ``s=$?...`` became its save-to-file
+    command and a fragment escaped to a shell; in ``vi`` the same
+    payload lands in the buffer, where ``:``-prefixed fragments write
+    files.
+
+    ``alternate_on`` is the primary signal but is necessary rather than
+    sufficient, and the counterexample is reachable through this
+    server's own tooling: ``less`` viewing a ``pipe_pane`` capture
+    decides the file is binary and prompts "may be a binary file. See
+    it anyway?" BEFORE entering the alternate screen, so it owns the
+    keyboard with ``alternate_on=0``. Hence the small deny-list above.
+
+    Incomplete by construction: a program not named there, and not yet
+    on the alternate screen, still gets the wrapper typed into it. That
+    is the deliberate trade -- see ``_PANE_OWNING_PROGRAMS`` for why a
+    general test was rejected.
+    """
+    occupant = _read_pane_current_command(pane)
+    if _read_pane_state(pane).alternate_on:
+        named = f" ({occupant})" if occupant else ""
+        msg = (
+            f"pane {pane.pane_id} is running a full-screen program{named}, "
+            "so it has no shell prompt to accept a command. Sending one "
+            "would type this tool's exit-status wrapper into that program."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
+    if occupant is not None and occupant.lstrip("-") in _PANE_OWNING_PROGRAMS:
+        msg = (
+            f"pane {pane.pane_id} is running {occupant!r}, which owns the "
+            "keyboard, so it has no shell prompt to accept a command. "
+            "Sending one would type this tool's exit-status wrapper into "
+            "that program."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
 
 
 def _read_pane_current_command(pane: Pane) -> str | None:
@@ -517,23 +598,7 @@ async def run_command(
     # fragments are commands that edit and write files. This tool means
     # "run a shell command and report its exit status", which requires
     # a shell, so refuse rather than type into whatever is there.
-    entry_state = await asyncio.to_thread(_read_pane_state, pane)
-    if entry_state.alternate_on:
-        occupant = await asyncio.to_thread(_read_pane_current_command, pane)
-        named = f" ({occupant})" if occupant else ""
-        msg = (
-            f"pane {pane.pane_id} is running a full-screen program{named}, "
-            "so it has no shell prompt to accept a command. Sending one "
-            "would type this tool's exit-status wrapper into that program."
-        )
-        raise ExpectedToolError(
-            msg,
-            suggestion=(
-                "Use send_keys for raw input to a full-screen program, or "
-                "exit it first. snapshot_pane reports alternate_on and "
-                "pane_current_command if you need to check."
-            ),
-        )
+    await asyncio.to_thread(_raise_if_pane_is_busy, pane)
 
     command_id = uuid.uuid4().hex[:10]
     channel = f"r_{command_id}"
