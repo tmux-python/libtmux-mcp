@@ -1501,9 +1501,17 @@ def test_capture_pane_untruncated_short_output(
 
 
 def test_capture_pane_truncates_tail_preserving(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server, mcp_session: Session
 ) -> None:
     """Long captures are truncated head-first; tail is preserved.
+
+    Runs in a window of its own. Sharing ``mcp_pane`` made this
+    intermittently fail for a reason that looked like timing and was
+    not: an earlier test splitting the shared window leaves the pane a
+    few rows tall, ``capture_pane`` then returns fewer lines than
+    ``max_lines``, nothing is truncated, and the header assertion fails.
+    Measured -- 24 rows gives 24 captured lines and a header; 3 rows
+    gives 2 lines and none.
 
     Prime the pane with >20 echo lines and confirm the last one is
     visible, then capture the visible pane with a tight ``max_lines=5``
@@ -1512,19 +1520,25 @@ def test_capture_pane_truncates_tail_preserving(
     total (the header + 5 kept lines), and (c) preserve the most
     recent ``scrollback_line_19`` line at the tail.
     """
-    for i in range(20):
-        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
-    retry_until(
-        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
-        raises=True,
-    )
+    window = mcp_session.new_window(window_name="capture-trunc", attach=False)
+    pane = window.active_pane
+    assert pane is not None
+    try:
+        for i in range(20):
+            pane.send_keys(f"echo scrollback_line_{i}", enter=True)
+        retry_until(
+            lambda: "scrollback_line_19" in "\n".join(pane.capture_pane()),
+            2,
+            raises=True,
+        )
 
-    result = capture_pane(
-        pane_id=mcp_pane.pane_id,
-        max_lines=5,
-        socket_name=mcp_server.socket_name,
-    )
+        result = capture_pane(
+            pane_id=pane.pane_id,
+            max_lines=5,
+            socket_name=mcp_server.socket_name,
+        )
+    finally:
+        window.kill()
     lines = result.split("\n")
     assert lines[0].startswith("[... truncated ")
     assert lines[0].endswith(" lines ...]")

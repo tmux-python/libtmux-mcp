@@ -489,6 +489,21 @@ unusual entry shape.
 
 ### Development
 
+**A flaky capture test was an isolation bug, not timing**
+
+`test_capture_pane_truncates_tail_preserving` failed intermittently in
+full-suite runs and passed in isolation. The cause was not timing: it
+borrowed the shared pane fixture, and an earlier test splitting that
+window left the pane a few rows tall. `capture_pane` then returned
+fewer lines than `max_lines`, nothing was truncated, and the header
+assertion failed. Measured — 24 rows gives 24 captured lines and a
+header; 3 rows gives 2 lines and none.
+
+Deterministic given the height, invisible in isolation, and it looked
+like a draw race only because the trigger was upstream in the run. The
+test now uses a window of its own, and the measurement is in its
+docstring so the next reader does not re-diagnose it as timing.
+
 **`mcp_swap.py` covers opencode and pi**
 
 `use-local`, `status`, `revert`, `doctor` and `detect` now reach two more agent
