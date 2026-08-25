@@ -8,6 +8,39 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A pane that dies mid-wait reports the death, not a parse crash
+
+Killing a pane while `wait_for_text` was waiting on it surfaced
+`Unexpected error: ValueError: invalid literal for int() with base 10:
+''`. tmux expands every field of a vanished pane to the empty string,
+and three `int()` calls on the poll path took it raw.
+
+Fixing only the `int()` calls would have replaced the crash with a wrong
+answer: `pane_dead` is one of the blanked fields, so it reads back as
+`"0"` and cannot report the death itself. A killed pane would then have
+failed the pid comparison instead and been reported as *respawned*. A
+live pane always has a `pane_pid`, so an empty one is the reliable
+signal that the pane is gone, and the wait now ends with `pane %N died;
+cursor/baseline anchor is no longer valid`.
+
+`_read_history_limit` had the same defect one call over — its guard
+covered an empty list but not an empty string — and now shares the
+helper.
+
+#### `send_keys` no longer drops text that starts with `-`
+
+`send_keys(keys="-X cancel", literal=True)` returned `Keys sent to pane
+%N` and sent nothing. tmux parsed the payload as flags and rejected the
+command; the wrapper discarded tmux's result and returned a hardcoded
+success string. Reachable with ordinary input — `--help` or `-v` typed
+into a REPL, a negative number, a pasted diff line.
+
+The `send-keys` argv now ends flag parsing with `--`, and a failed send
+raises with tmux's own stderr instead of reporting success. This covers
+`send_keys` and both `send_keys_batch` paths, which each built the argv
+separately; the timed batch path surfaced the error but still failed to
+deliver.
+
 #### A gated tool now says which tier it needs
 
 Calling a tool above the server's `LIBTMUX_SAFETY` tier reported

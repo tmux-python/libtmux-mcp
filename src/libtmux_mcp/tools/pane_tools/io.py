@@ -50,6 +50,89 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
     return remaining
 
 
+#: Bound on a single untimed ``send-keys``. libtmux runs tmux through
+#: ``Popen.communicate()`` with no timeout, so an unresponsive server
+#: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
+_SEND_KEYS_TIMEOUT_SECONDS = 5.0
+
+
+def _send_keys_argvs(
+    pane: Pane,
+    keys: str,
+    *,
+    enter: bool,
+    literal: bool,
+    suppress_history: bool,
+) -> list[list[str]]:
+    """Build the ``tmux send-keys`` argv(s) for one send.
+
+    ``--`` terminates flag parsing. Without it tmux reads a payload
+    beginning with ``-`` as flags and rejects the command, so `--help`,
+    a negative number, or a pasted diff line never reaches the pane.
+    ``Pane.send_keys`` omits it and discards tmux's result, which is why
+    that failure arrived as a success.
+
+    Enter is a separate call without ``-l`` so it stays a key name
+    rather than the literal text ``Enter``.
+    """
+    pane_id = pane.pane_id
+    if pane_id is None:
+        msg = "resolved pane has no pane_id"
+        raise ExpectedToolError(msg)
+
+    tmux_args = ["send-keys", "-t", pane_id]
+    if literal:
+        tmux_args.append("-l")
+    tmux_args.extend(("--", (" " if suppress_history else "") + keys))
+
+    argvs = [_tmux_argv(pane.server, *tmux_args)]
+    if enter:
+        argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
+    return argvs
+
+
+def _raise_send_keys_error(exc: subprocess.CalledProcessError) -> t.NoReturn:
+    """Re-raise a failed ``send-keys`` carrying tmux's own stderr."""
+    stderr = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
+    msg = f"send-keys failed: {stderr or exc}"
+    raise ExpectedToolError(msg) from exc
+
+
+def _run_send_keys_argv(argv: list[str]) -> None:
+    """Run one ``tmux send-keys`` argv under the untimed ceiling."""
+    try:
+        subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=_SEND_KEYS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        msg = f"send-keys timed out after {_SEND_KEYS_TIMEOUT_SECONDS}s"
+        raise ExpectedToolError(msg) from e
+    except subprocess.CalledProcessError as e:
+        _raise_send_keys_error(e)
+
+
+def _run_send_keys(
+    pane: Pane,
+    keys: str,
+    *,
+    enter: bool,
+    literal: bool,
+    suppress_history: bool,
+) -> None:
+    """Send keys to *pane*, raising if tmux rejected them."""
+    for argv in _send_keys_argvs(
+        pane,
+        keys,
+        enter=enter,
+        literal=literal,
+        suppress_history=suppress_history,
+    ):
+        _run_send_keys_argv(argv)
+
+
 def _run_timed_send_keys_argv(
     argv: list[str],
     *,
@@ -67,9 +150,7 @@ def _run_timed_send_keys_argv(
     except subprocess.TimeoutExpired as e:
         raise ExpectedToolError(_batch_timeout_error(timeout)) from e
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"send-keys failed: {stderr or e}"
-        raise ExpectedToolError(msg) from e
+        _raise_send_keys_error(e)
 
 
 def _run_timed_send_keys(
@@ -80,21 +161,13 @@ def _run_timed_send_keys(
     timeout: float,
 ) -> None:
     """Run ``tmux send-keys`` for one operation within the batch deadline."""
-    pane_id = pane.pane_id
-    if pane_id is None:
-        msg = "resolved pane has no pane_id"
-        raise ExpectedToolError(msg)
-
-    tmux_args = ["send-keys", "-t", pane_id]
-    if operation.literal:
-        tmux_args.append("-l")
-    tmux_args.append((" " if operation.suppress_history else "") + operation.keys)
-
-    send_argvs = [_tmux_argv(pane.server, *tmux_args)]
-    if operation.enter:
-        send_argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
-
-    for argv in send_argvs:
+    for argv in _send_keys_argvs(
+        pane,
+        operation.keys,
+        enter=operation.enter,
+        literal=operation.literal,
+        suppress_history=operation.suppress_history,
+    ):
         _run_timed_send_keys_argv(argv, deadline=deadline, timeout=timeout)
 
 
@@ -161,11 +234,12 @@ def send_keys(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.send_keys(
+    _run_send_keys(
+        pane,
         keys,
         enter=enter,
-        suppress_history=suppress_history,
         literal=literal,
+        suppress_history=suppress_history,
     )
     return f"Keys sent to pane {pane.pane_id}"
 
@@ -266,11 +340,12 @@ def send_keys_batch(
                     break
                 continue
             if deadline is None:
-                pane.send_keys(
+                _run_send_keys(
+                    pane,
                     operation.keys,
                     enter=operation.enter,
-                    suppress_history=operation.suppress_history,
                     literal=operation.literal,
+                    suppress_history=operation.suppress_history,
                 )
             else:
                 assert timeout is not None

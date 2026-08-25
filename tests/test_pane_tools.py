@@ -227,6 +227,110 @@ def test_send_keys(mcp_server: Server, mcp_pane: Pane) -> None:
     assert "sent" in result.lower()
 
 
+class PaneStateParseFixture(t.NamedTuple):
+    """Test fixture for :func:`_parse_pane_state`."""
+
+    test_id: str
+    raw: str
+    expected_dead: bool
+    expected_height: int
+
+
+PANE_STATE_PARSE_FIXTURES: list[PaneStateParseFixture] = [
+    PaneStateParseFixture("live_pane", "6|0|11|3495270|0|0", False, 11),
+    PaneStateParseFixture("explicitly_dead", "6|0|11|3495270|1|0", True, 11),
+    # tmux blanks every field for a pane that no longer exists.
+    PaneStateParseFixture("pane_gone_all_empty", "|||||", True, 0),
+]
+
+
+@pytest.mark.parametrize(
+    PaneStateParseFixture._fields,
+    PANE_STATE_PARSE_FIXTURES,
+    ids=[fixture.test_id for fixture in PANE_STATE_PARSE_FIXTURES],
+)
+def test_parse_pane_state_survives_a_vanished_pane(
+    test_id: str,
+    raw: str,
+    expected_dead: bool,
+    expected_height: int,
+) -> None:
+    """A vanished pane parses as dead instead of raising.
+
+    Killing a pane mid-wait made ``display-message`` expand every field
+    to empty, and the bare ``int()`` raised ``invalid literal for int()
+    with base 10: ''`` from the poll path. ``pane_dead`` reads empty
+    too, so the empty pid is what identifies the pane as gone.
+    """
+    from libtmux_mcp.tools.pane_tools.state import _parse_pane_state
+
+    assert test_id
+    state = _parse_pane_state(raw)
+
+    assert state.pane_dead is expected_dead
+    assert state.pane_height == expected_height
+
+
+class DashPayloadArgvFixture(t.NamedTuple):
+    """Test fixture for ``--`` placement in the send-keys argv."""
+
+    test_id: str
+    literal: bool
+    enter: bool
+    expected_flags: list[str]
+
+
+DASH_PAYLOAD_ARGV_FIXTURES: list[DashPayloadArgvFixture] = [
+    DashPayloadArgvFixture("literal_no_enter", True, False, ["-l"]),
+    DashPayloadArgvFixture("keyname_with_enter", False, True, []),
+]
+
+
+@pytest.mark.parametrize(
+    DashPayloadArgvFixture._fields,
+    DASH_PAYLOAD_ARGV_FIXTURES,
+    ids=[fixture.test_id for fixture in DASH_PAYLOAD_ARGV_FIXTURES],
+)
+def test_send_keys_argv_terminates_flags_before_the_payload(
+    test_id: str,
+    literal: bool,
+    enter: bool,
+    expected_flags: list[str],
+    mcp_pane: Pane,
+) -> None:
+    """``--`` must sit after the flags and immediately before the text.
+
+    Without it tmux reads a payload beginning with ``-`` as flags and
+    rejects the command, and because ``Pane.send_keys`` discarded the
+    result the tool reported ``Keys sent to pane %N`` for a send that
+    delivered nothing. Asserted on the argv rather than on pane
+    contents: whether un-submitted text echoes into the visible pane
+    depends on the shell and terminal, which varies across CI.
+    """
+    from libtmux_mcp.tools.pane_tools.io import _send_keys_argvs
+
+    assert test_id
+    payload = "-X cancel --help -v"
+    argvs = _send_keys_argvs(
+        mcp_pane,
+        payload,
+        enter=enter,
+        literal=literal,
+        suppress_history=False,
+    )
+
+    send = argvs[0]
+    assert send[-2:] == ["--", payload]
+    for flag in expected_flags:
+        assert flag in send
+    # Enter is a separate call without -l, so it stays a key name
+    # rather than the literal text "Enter".
+    assert len(argvs) == (2 if enter else 1)
+    if enter:
+        assert argvs[1][-1] == "Enter"
+        assert "-l" not in argvs[1]
+
+
 def test_send_keys_batch_sends_operations_in_order(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

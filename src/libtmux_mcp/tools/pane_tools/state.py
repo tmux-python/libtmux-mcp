@@ -62,6 +62,19 @@ PANE_STATE_FORMAT = (
 HISTORY_LIMIT_FORMAT = "#{history_limit}"
 
 
+def _int_or_zero(value: str) -> int:
+    """Parse a tmux numeric format field, treating a missing value as 0.
+
+    A dead pane makes ``display-message`` expand every field to the
+    empty string, so a bare ``int()`` raised
+    ``ValueError: invalid literal for int() with base 10: ''`` from the
+    hot poll path -- a wait whose pane died reported a raw parse crash
+    rather than ``pane_dead``. Same degrade-don't-fail rule the
+    ``alternate_on`` comment below states.
+    """
+    return int(value) if value else 0
+
+
 def _parse_pane_state(raw: str) -> _PaneState:
     """Parse one :data:`PANE_STATE_FORMAT` line into a :class:`_PaneState`."""
     # ``maxsplit`` is one below the field count so a pane_pid or a
@@ -73,12 +86,17 @@ def _parse_pane_state(raw: str) -> _PaneState:
     parts = raw.split("|", 5)
     hs, cy, sy, pid, dead = parts[:5]
     alternate = parts[5] if len(parts) > 5 else "0"
+    # A pane that no longer exists expands EVERY field to empty --
+    # ``pane_dead`` included, so it reads as "0" and cannot report the
+    # death itself. A live pane always has a pid, so an empty one is
+    # the reliable gone signal; without it the pid mismatch below
+    # reports a killed pane as "respawned".
     return _PaneState(
-        history_size=int(hs),
-        cursor_y=int(cy),
-        pane_height=int(sy),
+        history_size=_int_or_zero(hs),
+        cursor_y=_int_or_zero(cy),
+        pane_height=_int_or_zero(sy),
         pane_pid=pid,
-        pane_dead=dead == "1",
+        pane_dead=dead == "1" or not pid,
         alternate_on=alternate == "1",
     )
 
@@ -130,4 +148,4 @@ def _read_history_limit(pane: Pane) -> int:
     """
     stdout = pane.display_message(HISTORY_LIMIT_FORMAT, get_text=True)
     raw = stdout[0] if stdout else "0"
-    return int(raw)
+    return _int_or_zero(raw)
