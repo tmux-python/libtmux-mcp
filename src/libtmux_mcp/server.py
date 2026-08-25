@@ -108,7 +108,7 @@ _INSTR_WAIT_NOT_POLL = (
     "WAIT, DON'T POLL: run_command for authored commands needing "
     "status; wait_for_channel for custom tmux wait-for; capture_since "
     "for tailing; wait_for_text for output you don't author "
-    "(patterns=null=any output; stop=[] bails); "
+    "(patterns=null=any output; a stop hit returns at once); "
     "send_keys_batch for raw input."
 )
 

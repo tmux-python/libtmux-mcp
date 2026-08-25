@@ -308,6 +308,17 @@ class WaitForTextResult(BaseModel):
             "``alternate_screen``."
         ),
     )
+    stop_matched_at_entry: bool = Field(
+        default=False,
+        description=(
+            "True when a ``stop`` pattern was already on screen before the "
+            "wait began. The wait only stops on a FRESH stop hit, so this "
+            "does not end it -- but a failure marker left from an earlier "
+            "run is the usual reason a ``timeout`` outcome is misread as "
+            "'still running'. Read it as: check whether you are waiting on "
+            "a run that already failed."
+        ),
+    )
     matched_at_entry: bool = Field(
         default=False,
         description=(

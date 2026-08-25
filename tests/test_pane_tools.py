@@ -3491,6 +3491,42 @@ def test_wait_for_text_waits_for_a_fresh_occurrence(
     assert result.matched_at_entry is False
 
 
+def test_wait_for_text_reports_a_stop_marker_already_on_screen(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A failure marker predating the wait is surfaced, not hidden.
+
+    The entry scan covered ``patterns`` and not ``stop``, so a build
+    that had already failed produced a bare ``timeout`` — which an agent
+    re-running the build reads as "still running" when the honest answer
+    is "the previous run already failed".
+    """
+    import asyncio
+
+    marker = "STOP_ALREADY_THERE"
+    _park_pane(mcp_pane)
+    _write_to_pane_tty(mcp_pane, f"\n{marker}\n")
+    retry_until(
+        lambda: any(marker in line for line in mcp_pane.capture_pane()),
+        5,
+        raises=True,
+    )
+
+    result = asyncio.run(
+        wait_for_text(
+            patterns=["NEVER_APPEARS_ZZZ"],
+            stop=[marker],
+            pane_id=mcp_pane.pane_id,
+            timeout=2.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    # The stale stop marker must not END the wait -- only a fresh hit does.
+    assert result.outcome == "timeout"
+    assert result.stop_matched_at_entry is True
+
+
 def test_wait_for_text_ignores_stale_below_cursor(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

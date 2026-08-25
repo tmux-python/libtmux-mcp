@@ -653,6 +653,13 @@ async def wait_for_text(
     # single most common reason a wait "should have" matched instantly
     # and instead ran to the ceiling.
     stale_at_entry = _first_match(compiled_patterns, visible_rows) is not None
+    # Same rationale applied to ``stop``. A failure marker already on
+    # screen is the case where a bare "timeout" misleads most: an agent
+    # re-running a build reads it as "still running" when the honest
+    # answer is "the previous run already failed". Kept a separate field
+    # because "my success text predates the call" and "my failure text
+    # predates the call" call for opposite reactions.
+    stop_stale_at_entry = _first_match(compiled_stop, visible_rows) is not None
 
     matched_lines: list[str] = []
     outcome: _WaitOutcome = "timeout"
@@ -854,6 +861,7 @@ async def wait_for_text(
         matched_lines=limited_matches.lines,
         saw_new_output=saw_new_output,
         matched_at_entry=stale_at_entry and not found,
+        stop_matched_at_entry=stop_stale_at_entry,
         alternate_screen=saw_alternate_screen,
         tail=limited_tail.lines,
         pane_id=target,

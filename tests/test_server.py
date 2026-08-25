@@ -441,7 +441,9 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
     # tool; the instructions must still name it so agents know the
     # "wait for any new output" affordance exists.
     assert "patterns=null" in _BASE_INSTRUCTIONS
-    assert "stop=" in _BASE_INSTRUCTIONS
+    # Phrased as a stop *hit*, not "stop=[] bails" — two readers parsed
+    # the old wording as "the empty list bails", which it does not.
+    assert "stop hit" in _BASE_INSTRUCTIONS
     assert "send_keys_batch" in _BASE_INSTRUCTIONS
     assert _BASE_INSTRUCTIONS.index("run_command") < _BASE_INSTRUCTIONS.index(
         "wait_for_channel"

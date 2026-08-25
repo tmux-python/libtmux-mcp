@@ -8,6 +8,25 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `wait_for_text` reports a stop marker that was already on screen
+
+The entry scan covered `patterns` and not `stop`, so waiting on a pane
+that already showed a failure marker returned a bare `timeout` with no
+sign the marker had been there the whole time. The realistic shape: an
+agent runs a build, it fails, the agent waits for the next build without
+clearing, and reads `timeout` as "still running" when the honest answer
+is "the previous run already failed".
+
+`WaitForTextResult` gains `stop_matched_at_entry`, kept separate from
+`matched_at_entry` because a stale success marker and a stale failure
+marker call for opposite reactions. A stale stop hit still does not end
+the wait — only a fresh one does.
+
+The server instructions described this as `stop=[] bails`, which two
+independent readers parsed as "the empty list bails". `stop=[]` is
+accepted and behaves like `stop=null`; it is a stop *hit* that returns
+immediately, and the text now says so.
+
 #### A live server no longer reports as absent
 
 When the tmux binary running this server is older than the one that
