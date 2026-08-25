@@ -874,19 +874,49 @@ def _admits_bool(annotation: t.Any) -> bool:
     return annotation is bool or bool in t.get_args(annotation)
 
 
-def _coerce_model_value(value: t.Any, annotation: t.Any) -> t.Any:
+_BOOL_TRUE = frozenset({"true", "1", "yes"})
+_BOOL_FALSE = frozenset({"false", "0", "no"})
+
+#: Operators that mean anything against a bool. The rest are string or
+#: collection tests; libtmux's lookups fall through to ``return False``
+#: for a bool, so allowing them would answer every query with an empty
+#: list -- including contradictory pairs like ``__in``/``__nin``.
+_BOOL_OPERATORS = frozenset({"exact", "eq"})
+
+
+def _coerce_model_value(key: str, value: t.Any, annotation: t.Any) -> t.Any:
     """Coerce a filter value to what the model field actually holds.
 
     ``filters`` is typed ``dict[str, str]``, so a bool field is
     addressed as ``"true"``; comparing that to ``True`` never matches.
+    An unrecognised token is rejected rather than compared as a string,
+    which would report "nothing matched" for a typo.
     """
     if isinstance(value, str) and _admits_bool(annotation):
         lowered = value.strip().lower()
-        if lowered in {"true", "1", "yes"}:
+        if lowered in _BOOL_TRUE:
             return True
-        if lowered in {"false", "0", "no"}:
+        if lowered in _BOOL_FALSE:
             return False
+        msg = (
+            f"Filter '{key}' takes a boolean, got {value!r}. Use one of: "
+            f"{', '.join(sorted(_BOOL_TRUE | _BOOL_FALSE))}."
+        )
+        raise ExpectedToolError(msg)
     return value
+
+
+def _path_resolves(item: t.Any, path: str) -> bool:
+    """Whether ``path``'s ``__``-separated segments resolve on ``item``."""
+    current = item
+    for segment in path.split("__"):
+        try:
+            current = getattr(current, segment)
+        except Exception:  # noqa: BLE001 - any failure means "no such path"
+            return False
+        if current is None:
+            return False
+    return True
 
 
 def _unknown_field_message(
@@ -907,6 +937,36 @@ def _unknown_field_message(
         f"{', '.join(sorted(model_fields))}. So is any of the "
         f"{len(allowed_fields)} libtmux {obj_type.__name__} attributes."
     )
+
+
+def _raise_if_path_unresolvable(
+    items: t.Any, field_path: str, key: str, valid_ops: list[str]
+) -> None:
+    """Reject a multi-segment path no item can resolve.
+
+    Guards the traversal fallback: without this, a mistyped operator
+    (``session_name__containss``) reads as a path, resolves on nothing
+    and filters every row out -- the silent-empty answer this module
+    exists to prevent. Only provable when something is there to probe,
+    so an empty list is left alone.
+    """
+    if "__" not in field_path:
+        return
+    probe = list(items)
+    if not probe or any(_path_resolves(item, field_path) for item in probe):
+        return
+    trailing = field_path.rsplit("__", 1)[1]
+    close = difflib.get_close_matches(trailing, valid_ops, n=3)
+    hint = (
+        f" Did you mean the operator '{close[0]}'?"
+        if close
+        else f" Valid operators: {', '.join(valid_ops)}."
+    )
+    msg = (
+        f"Filter '{key}' names no attribute path on any item, and "
+        f"'{trailing}' is not a filter operator.{hint}"
+    )
+    raise ExpectedToolError(msg)
 
 
 def _apply_filters(
@@ -960,29 +1020,33 @@ def _apply_filters(
     model_filters: dict[str, t.Any] = {}
 
     for key, value in filters.items():
-        field_path = key
+        # A trailing segment that is not an operator is part of the
+        # attribute path, matching QueryList: it treats an unknown
+        # trailing segment as a path and defaults the operator to
+        # ``exact``, so ``active_pane__pane_id`` traverses.
+        field_path, op = key, ""
         if "__" in key:
-            lhs, op = key.rsplit("__", 1)
-            if op not in LOOKUP_NAME_MAP:
-                msg = (
-                    f"Invalid filter operator '{op}' in '{key}'. "
-                    f"Valid operators: {', '.join(valid_ops)}"
-                )
-                raise ExpectedToolError(msg)
-            field_path = lhs
+            lhs, trailing = key.rsplit("__", 1)
+            if trailing in LOOKUP_NAME_MAP:
+                field_path, op = lhs, trailing
 
-        # Only the leading segment is checkable; the rest may traverse
-        # into a nested object.
         field = field_path.split("__", 1)[0]
         if field in allowed_fields:
+            _raise_if_path_unresolvable(items, field_path, key, valid_ops)
             attr_filters[key] = value
         elif field in _MODEL_FIELD_ALIASES:
             attr_filters[_MODEL_FIELD_ALIASES[field] + key[len(field) :]] = value
         elif field in model_fields:
+            annotation = model_fields[field].annotation
+            if _admits_bool(annotation) and op and op not in _BOOL_OPERATORS:
+                msg = (
+                    f"Operator '{op}' does not apply to boolean field "
+                    f"'{field}'. Use {' or '.join(sorted(_BOOL_OPERATORS))}, "
+                    "or omit the operator."
+                )
+                raise ExpectedToolError(msg)
             # Computed server-side, so it exists only after serializing.
-            model_filters[key] = _coerce_model_value(
-                value, model_fields[field].annotation
-            )
+            model_filters[key] = _coerce_model_value(key, value, annotation)
         else:
             raise ExpectedToolError(
                 _unknown_field_message(

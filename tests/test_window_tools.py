@@ -237,7 +237,7 @@ def test_list_panes_with_filters(
         kwargs["session_name"] = mcp_session.session_name
 
     if expect_error:
-        with pytest.raises(ToolError, match="Invalid filter operator"):
+        with pytest.raises(ToolError, match="is not a filter operator"):
             list_panes(**kwargs)
     else:
         result = list_panes(**kwargs)
@@ -359,3 +359,13 @@ def test_list_panes_filters_by_is_caller(
     for filters in probes:
         result = list_panes(socket_name=mcp_server.socket_name, filters=filters)
         assert [p.pane_id for p in result] == [pane.pane_id]
+
+    # A substring or collection operator on a bool answers every query
+    # with an empty list upstream, so it is refused rather than run.
+    with pytest.raises(ToolError, match="does not apply to boolean field"):
+        list_panes(
+            socket_name=mcp_server.socket_name,
+            filters={"is_caller__contains": "true"},
+        )
+    with pytest.raises(ToolError, match="takes a boolean"):
+        list_panes(socket_name=mcp_server.socket_name, filters={"is_caller": "ture"})

@@ -251,7 +251,7 @@ LIST_SESSIONS_FILTER_FIXTURES: list[ListSessionsFilterFixture] = [
         filters={"session_name__badop": "test"},
         expected_count=None,
         expect_error=True,
-        error_match="Invalid filter operator",
+        error_match="is not a filter operator",
     ),
     ListSessionsFilterFixture(
         test_id="multiple_filters",

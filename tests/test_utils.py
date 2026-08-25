@@ -209,7 +209,7 @@ APPLY_FILTERS_FIXTURES: list[ApplyFiltersFixture] = [
         filters={"session_name__badop": "test"},
         expected_count=None,
         expect_error=True,
-        error_match="Invalid filter operator",
+        error_match="is not a filter operator",
     ),
     # A typo'd FIELD used to return [] rather than erroring, so an empty
     # result was indistinguishable from "nothing matched".
@@ -299,6 +299,23 @@ APPLY_FILTERS_FIXTURES: list[ApplyFiltersFixture] = [
         expect_error=True,
         error_match="Every field this tool returns is filterable",
     ),
+    # A trailing segment that is not an operator is part of the path.
+    ApplyFiltersFixture(
+        test_id="traversal_without_trailing_operator",
+        filters={"active_pane__pane_id": "<active_pane_id>"},
+        expected_count=1,
+        expect_error=False,
+        error_match=None,
+    ),
+    # ...which must not let a mistyped operator read as a path and
+    # filter everything out silently.
+    ApplyFiltersFixture(
+        test_id="mistyped_operator_still_errors",
+        filters={"session_name__containss": "<partial>"},
+        expected_count=None,
+        expect_error=True,
+        error_match="is not a filter operator",
+    ),
 ]
 
 
@@ -332,6 +349,11 @@ def test_apply_filters(
                 resolved[k] = session_name
             elif v == "<partial>":
                 resolved[k] = session_name[:4]
+            elif v == "<active_pane_id>":
+                active_pane = mcp_session.active_window.active_pane
+                assert active_pane is not None
+                assert active_pane.pane_id is not None
+                resolved[k] = active_pane.pane_id
             else:
                 resolved[k] = v
         filters = resolved

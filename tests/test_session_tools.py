@@ -217,7 +217,7 @@ def test_list_windows_with_filters(
         kwargs["session_name"] = mcp_session.session_name
 
     if expect_error:
-        with pytest.raises(ToolError, match="Invalid filter operator"):
+        with pytest.raises(ToolError, match="is not a filter operator"):
             list_windows(**kwargs)
     else:
         result = list_windows(**kwargs)

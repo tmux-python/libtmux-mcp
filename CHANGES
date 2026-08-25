@@ -7,6 +7,40 @@ _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
 ### What's new
+#### Filters answer, or say why not -- three silent-empty paths closed
+
+Follow-ups on the filtering work above, all found by driving the server
+as a client rather than by reading the code.
+
+**Operators that cannot apply to a boolean are refused.** `is_caller__in`
+and `is_caller__nin` both returned zero rows against the same set --
+every row is either in or not in, so one of those answers was false
+whichever way you read it -- and `is_caller__regex: ".*"` matched
+nothing. Upstream, `lookup_in`, `lookup_nin` and `lookup_regex` all
+guard on `isinstance(data, (str, list))` and fall off the end to
+`return False` for a bool. That is not fixable from here, so the
+operator is now checked against the field's declared type and refused
+with a message instead of run.
+
+**An unparseable boolean is refused.** `is_caller: "ture"` compared a
+string to `True`, matched nothing and reported no error -- the typo
+bug this branch fixed for field names, one position to the right. The
+accepted tokens are in the message.
+
+**A traversal path with no trailing operator now works.**
+`active_pane__pane_id` raised "Invalid filter operator 'pane_id'"
+because the last segment was taken as an operator unconditionally.
+libtmux gets this right (`OpNotFound` subclasses `ValueError`, so
+`QueryList` catches its own raise and defaults to `exact`), which made
+the server stricter than the engine beneath it -- and it rejected from
+callers the exact key form its own alias generates internally.
+
+The fallback is not free: read naively, a mistyped operator like
+`session_name__containss` reads as an attribute path, resolves on
+nothing, and filters every row out silently -- reintroducing the bug
+one line below the fix. A multi-segment path that no item can resolve
+is therefore an error, which the operator message is folded into.
+
 #### `run_command` refuses a pane running `top`
 
 `top` owns the keyboard but repaints the primary screen, so
