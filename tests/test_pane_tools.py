@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import pathlib
@@ -185,7 +186,7 @@ SEND_KEYS_BATCH_TIMEOUT_FIXTURES: list[SendKeysBatchTimeoutFixture] = [
             {"keys": "echo 1"},
             {"keys": "echo 2"},
         ],
-        timeout=0.05,
+        timeout=5.0,
         expected_succeeded=1,
         expected_failed=1,
         expected_error_snippet="timeout",
@@ -321,7 +322,7 @@ def test_run_command_refuses_a_full_screen_program(
             run_command(
                 command="echo SHOULD_NOT_BE_SENT",
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -844,7 +845,7 @@ def test_run_command_reports_exit_status(
         run_command(
             command=command,
             pane_id=mcp_pane.pane_id,
-            timeout=5.0,
+            timeout=20.0,
             socket_name=mcp_server.socket_name,
         )
     )
@@ -879,7 +880,7 @@ def test_run_command_timeout_reports_without_killing_shell(
 
     retry_until(
         lambda: any(marker in line for line in mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -896,6 +897,8 @@ def test_run_command_reports_unclamped_timeout(
         run_command(
             command="true",
             pane_id=mcp_pane.pane_id,
+            # The timeout IS the subject here -- it is echoed back on
+            # effective_timeout, so this one must not be widened.
             timeout=5.0,
             socket_name=mcp_server.socket_name,
         )
@@ -935,6 +938,34 @@ def test_run_command_clamps_oversized_timeout(
     assert result.timed_out is True
     assert result.effective_timeout == 0.3
     assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+
+
+def _armed_after_baseline(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    """Event set once ``wait_for_text`` holds its entry baseline.
+
+    Sleeping instead is not slow but wrong: output emitted before the
+    baseline lands in ``entry_below_cursor``, which filters by content,
+    so it can never match afterwards and the wait runs to its ceiling.
+
+    Set on the *second* ``_bounded_capture``. The first IS the entry
+    capture; the second is issued after its rows have been stored, so
+    arming is complete by then.
+    """
+    from libtmux_mcp.tools.pane_tools import wait as wait_module
+
+    event = asyncio.Event()
+    original = wait_module._bounded_capture
+    calls = 0
+
+    async def _capture(*args: t.Any, **kwargs: t.Any) -> list[str]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            event.set()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(wait_module, "_bounded_capture", _capture)
+    return event
 
 
 def _run_command_wait_pids(socket_name: str) -> list[int]:
@@ -1057,7 +1088,9 @@ def test_run_command_reports_status_after_shell_state_change(
         run_command(
             command=command,
             pane_id=mcp_pane.pane_id,
-            timeout=2.0,
+            # Generous on purpose: the subject is the reported status,
+            # not the latency. A 2 s budget lost the race under load.
+            timeout=10.0,
             socket_name=mcp_server.socket_name,
         )
     )
@@ -1096,7 +1129,7 @@ def test_run_command_status_option_targets_resolved_pane(
     target_pane.send_keys("exec env -u TMUX_PANE bash --noprofile --norc", enter=True)
     retry_until(
         lambda: any("bash-" in line for line in target_pane.capture_pane()),
-        3,
+        10,
         raises=True,
     )
 
@@ -1106,7 +1139,7 @@ def test_run_command_status_option_targets_resolved_pane(
             run_command(
                 command=command,
                 pane_id=target_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -1144,7 +1177,7 @@ def test_run_command_suppress_history(
     mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
     retry_until(
         lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -1196,7 +1229,7 @@ def test_run_command_tail_preserves_output(mcp_server: Server, mcp_pane: Pane) -
                 "for i in $(seq 1 6); do printf 'RUN_COMMAND_TRUNC_%s\\n' \"$i\"; done"
             ),
             pane_id=mcp_pane.pane_id,
-            timeout=5.0,
+            timeout=20.0,
             max_lines=2,
             socket_name=mcp_server.socket_name,
         )
@@ -1221,13 +1254,13 @@ def test_run_command_tail_preserves_output_with_wrapped_private_prompt(
     mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
     retry_until(
         lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
     mcp_pane.send_keys(f"PS1={shlex.quote(long_prompt)}", enter=True)
     retry_until(
         lambda: any(long_prompt.rstrip() in line for line in mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -1237,7 +1270,7 @@ def test_run_command_tail_preserves_output_with_wrapped_private_prompt(
                 "for i in $(seq 1 6); do printf 'RUN_COMMAND_WRAP_%s\\n' \"$i\"; done"
             ),
             pane_id=mcp_pane.pane_id,
-            timeout=5.0,
+            timeout=20.0,
             max_lines=2,
             socket_name=mcp_server.socket_name,
         )
@@ -1528,7 +1561,7 @@ def test_capture_pane_truncates_tail_preserving(
         mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
     retry_until(
         lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -1554,7 +1587,7 @@ def test_capture_pane_max_lines_none_disables_truncation(
         mcp_pane.send_keys(f"echo untrunc_line_{i}", enter=True)
     retry_until(
         lambda: "untrunc_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -1584,7 +1617,7 @@ def _signal_after_shell_payload(mcp_server: Server, pane: Pane, payload: str) ->
     asyncio.run(
         wait_for_channel(
             channel=channel,
-            timeout=5.0,
+            timeout=20.0,
             socket_name=mcp_server.socket_name,
         )
     )
@@ -1699,7 +1732,7 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
         return bool(raw) and int(raw[0]) == 20
 
     try:
-        retry_until(_hlimit_locked, 5, raises=True)
+        retry_until(_hlimit_locked, 10, raises=True)
         # Build scrollback so the cursor has history_size > 0.
         _signal_after_shell_payload(
             mcp_server,
@@ -1766,7 +1799,7 @@ def test_capture_since_reports_overflow_without_clear_history(
         return bool(raw) and int(raw[0]) == 20
 
     try:
-        retry_until(_hlimit_locked, 5, raises=True)
+        retry_until(_hlimit_locked, 10, raises=True)
         _signal_after_shell_payload(
             mcp_server,
             fresh_pane,
@@ -1816,7 +1849,7 @@ def test_capture_since_reports_same_row_rewrite(
         lambda: any(
             "OLD_REWRITE_CAPTURE_SINCE" in line for line in mcp_pane.capture_pane()
         ),
-        5,
+        10,
         raises=True,
     )
     first = asyncio.run(
@@ -1831,7 +1864,7 @@ def test_capture_since_reports_same_row_rewrite(
         lambda: any(
             "NEW_REWRITE_CAPTURE_SINCE" in line for line in mcp_pane.capture_pane()
         ),
-        5,
+        10,
         raises=True,
     )
     second = asyncio.run(
@@ -2038,7 +2071,7 @@ def test_capture_since_rejects_dead_pane_cursor(
             out = mcp_pane.cmd("display-message", "-p", "#{pane_dead}").stdout
             return bool(out) and out[0].strip() == "1"
 
-        retry_until(_is_dead, 5, raises=True)
+        retry_until(_is_dead, 10, raises=True)
         with pytest.raises(ToolError, match="died"):
             asyncio.run(
                 capture_since(
@@ -2206,7 +2239,7 @@ def test_clear_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     mcp_pane.send_keys(f"echo {marker}", enter=True)
     retry_until(
         lambda: marker in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -2219,7 +2252,7 @@ def test_clear_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     # After reset + clear-history, the marker should be gone from scrollback
     retry_until(
         lambda: marker not in "\n".join(mcp_pane.capture_pane(start=-200, end=-1)),
-        2,
+        10,
         raises=True,
     )
 
@@ -2610,7 +2643,7 @@ def test_search_panes(
     mcp_pane.send_keys(command, enter=True)
     retry_until(
         lambda: echo_marker in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -2643,7 +2676,7 @@ def test_search_panes_basic(mcp_server: Server, mcp_pane: Pane) -> None:
     mcp_pane.send_keys("echo SMOKE_TEST_MARKER_abc123", enter=True)
     retry_until(
         lambda: "SMOKE_TEST_MARKER_abc123" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -2663,7 +2696,7 @@ def test_search_panes_returns_pane_content_match_model(
     mcp_pane.send_keys("echo MODEL_TYPE_CHECK_xyz", enter=True)
     retry_until(
         lambda: "MODEL_TYPE_CHECK_xyz" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -2683,7 +2716,7 @@ def test_search_panes_includes_window_and_session_names(
     mcp_pane.send_keys("echo CONTEXT_FIELDS_CHECK_789", enter=True)
     retry_until(
         lambda: "CONTEXT_FIELDS_CHECK_789" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -2738,7 +2771,7 @@ def test_search_panes_pagination_limit_and_offset(
         return _ready
 
     for pane in all_panes:
-        retry_until(_waiter(pane), 2, raises=True)
+        retry_until(_waiter(pane), 10, raises=True)
 
     first = search_panes(
         pattern=marker,
@@ -2795,7 +2828,7 @@ def test_search_panes_literal_input_skips_slow_path_probe(
     mcp_pane.send_keys(f"echo {marker}", enter=True)
     retry_until(
         lambda: marker in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
     result = search_panes(
@@ -2894,7 +2927,7 @@ def test_search_panes_tmux_format_injection_is_neutralized(
 
     retry_until(
         lambda: marker in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -2927,7 +2960,7 @@ def test_search_panes_nested_format_variable_is_neutralized(
     mcp_pane.send_keys(f"echo {marker!r}", enter=True)
     retry_until(
         lambda: "NEST" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -3002,7 +3035,7 @@ def test_search_panes_numeric_pane_id_ordering(
     def _ready() -> bool:
         return all(marker in "\n".join(p.capture_pane()) for p in panes)
 
-    retry_until(_ready, 5, raises=True)
+    retry_until(_ready, 10, raises=True)
 
     result = search_panes(
         pattern=marker,
@@ -3161,7 +3194,7 @@ def test_search_panes_is_caller(
     mcp_pane.send_keys(f"echo {marker}", enter=True)
     retry_until(
         lambda: marker in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -3421,7 +3454,7 @@ def test_wait_for_text(
             last_state = state
             return settled
 
-        retry_until(_stale_settled, 5, raises=True)
+        retry_until(_stale_settled, 10, raises=True)
 
     result = asyncio.run(
         wait_for_text(
@@ -3454,12 +3487,12 @@ def test_wait_for_text(
 #:
 #: 1 s buys roughly an order of magnitude of headroom for a fraction of
 #: a second per test. There is no event to wait on instead: the baseline
-#: read is internal to the tool and not observable from here.
-_EMIT_AFTER_BASELINE_SECONDS = 1.0
 
 
 def test_wait_for_text_matches_new_output_after_baseline(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """wait_for_text finds output written AFTER its baseline snapshot.
 
@@ -3476,11 +3509,13 @@ def test_wait_for_text_matches_new_output_after_baseline(
     """
     import asyncio
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def emit_after_baseline() -> None:
         # The baseline read is a single display-message round trip
         # (<5 ms in practice); 0.2 s gives wait_for_text plenty of
         # headroom to lock the baseline before the marker fires.
-        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
+        await armed.wait()
         await asyncio.to_thread(mcp_pane.send_keys, "echo WAIT_MARKER_after", True)
 
     async def run() -> WaitForTextResult:
@@ -3536,7 +3571,7 @@ def _park_pane(pane: Pane) -> None:
         raw = pane.cmd("display-message", "-p", "#{cursor_y}").stdout
         return bool(raw) and raw[0] == "0"
 
-    retry_until(_parked, 5, raises=True)
+    retry_until(_parked, 10, raises=True)
 
 
 def _write_to_pane_tty(pane: Pane, payload: str) -> None:
@@ -3633,6 +3668,7 @@ def test_wait_for_text_sees_the_entry_cursor_row(
     payload: str,
     patterns: list[str],
     expected_found: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Content arriving on the entry cursor row must be matchable.
 
@@ -3650,10 +3686,12 @@ def test_wait_for_text_sees_the_entry_cursor_row(
     # lands. See :func:`_park_pane`.
     _park_pane(mcp_pane)
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def emit_after_baseline() -> None:
         # The baseline is a couple of display-message round trips; 0.2 s
         # is the same headroom the sibling after-baseline test uses.
-        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
+        await armed.wait()
         if payload:
             await asyncio.to_thread(_write_to_pane_tty, mcp_pane, payload)
 
@@ -3662,7 +3700,7 @@ def test_wait_for_text_sees_the_entry_cursor_row(
             wait_for_text(
                 patterns=patterns,
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 regex=True,
                 socket_name=mcp_server.socket_name,
             )
@@ -3711,7 +3749,9 @@ def test_wait_for_text_does_not_match_the_prompt_on_the_entry_row(
 
 
 def test_wait_for_text_waits_for_a_fresh_occurrence(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A stale match on screen must not short-circuit the wait.
 
@@ -3732,8 +3772,10 @@ def test_wait_for_text_waits_for_a_fresh_occurrence(
     marker = "RERUN_MARKER"
     _park_pane(mcp_pane)
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def emit_after_baseline() -> None:
-        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
+        await armed.wait()
         await asyncio.to_thread(_write_to_pane_tty, mcp_pane, f"{marker}\n")
 
     async def run() -> WaitForTextResult:
@@ -3741,7 +3783,7 @@ def test_wait_for_text_waits_for_a_fresh_occurrence(
             wait_for_text(
                 patterns=[marker],
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -3755,7 +3797,7 @@ def test_wait_for_text_waits_for_a_fresh_occurrence(
     def _stale_marker_visible() -> bool:
         return any(marker in line for line in mcp_pane.capture_pane())
 
-    retry_until(_stale_marker_visible, 5, raises=True)
+    retry_until(_stale_marker_visible, 10, raises=True)
 
     result = asyncio.run(run())
     assert result.found is True
@@ -3781,7 +3823,7 @@ def test_wait_for_text_reports_a_stop_marker_already_on_screen(
     _write_to_pane_tty(mcp_pane, f"\n{marker}\n")
     retry_until(
         lambda: any(marker in line for line in mcp_pane.capture_pane()),
-        5,
+        10,
         raises=True,
     )
 
@@ -3833,7 +3875,7 @@ def test_wait_for_text_ignores_stale_below_cursor(
     def _staged() -> bool:
         return any("STALE_BELOW" in line for line in mcp_pane.capture_pane())
 
-    retry_until(_staged, 5, raises=True)
+    retry_until(_staged, 10, raises=True)
 
     result = asyncio.run(
         wait_for_text(
@@ -3890,7 +3932,7 @@ def test_wait_for_text_does_not_match_bottom_row_clip(
             return False
         return any("STALE_BOTTOM_MARKER" in line for line in mcp_pane.capture_pane())
 
-    retry_until(_bottom_row_ready, 5, raises=True)
+    retry_until(_bottom_row_ready, 10, raises=True)
 
     result = asyncio.run(
         wait_for_text(
@@ -3962,7 +4004,9 @@ def test_wait_for_text_rejects_tiny_interval(
 
 
 def test_wait_for_text_raises_on_pane_respawn(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Respawning the pane mid-wait invalidates the baseline anchor.
 
@@ -3975,10 +4019,12 @@ def test_wait_for_text_raises_on_pane_respawn(
     """
     import asyncio
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def respawn_after_delay() -> None:
         # Let wait_for_text capture its baseline first, then swap
         # the pane process so pane_pid changes.
-        await asyncio.sleep(0.1)
+        await armed.wait()
         await asyncio.to_thread(mcp_pane.respawn, kill=True, shell="sleep 30")
 
     async def run() -> WaitForTextResult:
@@ -3986,7 +4032,7 @@ def test_wait_for_text_raises_on_pane_respawn(
             wait_for_text(
                 patterns=["NEVER_APPEARS_xyz"],
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -4014,7 +4060,7 @@ def test_wait_for_text_raises_on_pane_death(mcp_server: Server, mcp_pane: Pane) 
         flag = mcp_pane.display_message("#{pane_dead}", get_text=True)
         return bool(flag) and flag[0] == "1"
 
-    retry_until(_is_dead, 3, raises=True)
+    retry_until(_is_dead, 10, raises=True)
 
     with pytest.raises(ToolError, match="died"):
         asyncio.run(
@@ -4051,7 +4097,9 @@ def test_wait_for_text_rejects_non_positive_timeout(
 
 
 def test_wait_for_text_raises_when_history_is_cleared(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``clear-history`` during a wait drops ``hsize`` to 0, tripping the guard.
 
@@ -4068,12 +4116,14 @@ def test_wait_for_text_raises_when_history_is_cleared(
         hs = mcp_pane.display_message("#{history_size}", get_text=True)
         return bool(hs) and int(hs[0]) >= 50
 
-    retry_until(_prefilled, 5, raises=True)
+    retry_until(_prefilled, 10, raises=True)
+
+    armed = _armed_after_baseline(monkeypatch)
 
     async def clear_after_delay() -> None:
         # Let wait_for_text snapshot the baseline first, then drop
         # hsize to 0 with clear-history.
-        await asyncio.sleep(0.1)
+        await armed.wait()
         await asyncio.to_thread(mcp_pane.cmd, "clear-history")
 
     async def run() -> WaitForTextResult:
@@ -4081,7 +4131,7 @@ def test_wait_for_text_raises_when_history_is_cleared(
             wait_for_text(
                 patterns=["NEVER_APPEARS_rollover"],
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -4093,7 +4143,9 @@ def test_wait_for_text_raises_when_history_is_cleared(
 
 
 def test_wait_for_text_succeeds_when_history_grows_normally(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Monotonic history growth without trim does NOT trip the rollover guard.
 
@@ -4104,8 +4156,10 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
     """
     import asyncio
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def emit_after_baseline() -> None:
-        await asyncio.sleep(0.1)
+        await armed.wait()
         cmd = "for i in $(seq 1 50); do echo line$i; done; echo WAIT_MARKER_grows_ok"
         await asyncio.to_thread(mcp_pane.send_keys, cmd, True)
 
@@ -4114,7 +4168,7 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
             wait_for_text(
                 patterns=["WAIT_MARKER_grows_ok"],
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -4126,7 +4180,9 @@ def test_wait_for_text_succeeds_when_history_grows_normally(
 
 
 def test_wait_for_text_survives_resize_grow_with_scrolled_history(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resize-grow that pulls lines from history must NOT trip the rollover guard.
 
@@ -4149,7 +4205,7 @@ def test_wait_for_text_survives_resize_grow_with_scrolled_history(
         hs = mcp_pane.display_message("#{history_size}", get_text=True)
         return bool(hs) and int(hs[0]) >= 50
 
-    retry_until(_prefilled, 5, raises=True)
+    retry_until(_prefilled, 10, raises=True)
 
     # Read current pane height; we'll grow past it during the wait.
     height_raw = mcp_pane.display_message("#{pane_height}", get_text=True)
@@ -4157,11 +4213,13 @@ def test_wait_for_text_survives_resize_grow_with_scrolled_history(
     current_height = int(height_raw[0])
     target_height = current_height + 3
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def grow_after_delay() -> None:
         # Let wait_for_text snapshot the baseline first, then grow
         # the window vertically. screen_resize_y pulls rows from
         # history back into view, decrementing hsize.
-        await asyncio.sleep(0.1)
+        await armed.wait()
         await asyncio.to_thread(
             mcp_pane.window.cmd,
             "resize-window",
@@ -4187,7 +4245,9 @@ def test_wait_for_text_survives_resize_grow_with_scrolled_history(
 
 
 def test_wait_for_text_handles_resize_during_wait(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Mid-wait resize keys the bottom-row clip to the LIVE pane height.
 
@@ -4211,10 +4271,12 @@ def test_wait_for_text_handles_resize_during_wait(
     def _ready() -> bool:
         return any("STALE_RESIZE_MARKER" in line for line in mcp_pane.capture_pane())
 
-    retry_until(_ready, 5, raises=True)
+    retry_until(_ready, 10, raises=True)
+
+    armed = _armed_after_baseline(monkeypatch)
 
     async def resize_after_delay() -> None:
-        await asyncio.sleep(0.1)
+        await armed.wait()
         await asyncio.to_thread(mcp_pane.cmd, "resize-pane", "-y", "5")
 
     async def run() -> WaitForTextResult:
@@ -4234,7 +4296,9 @@ def test_wait_for_text_handles_resize_during_wait(
 
 
 def test_wait_for_text_matches_pattern_across_wrap(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A pattern that spans tmux's visual wrap matches via ``-J``.
 
@@ -4261,8 +4325,10 @@ def test_wait_for_text_matches_pattern_across_wrap(
     )
     marker = "WRAPPED_MARKER_xyz"
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def emit_after_baseline() -> None:
-        await asyncio.sleep(_EMIT_AFTER_BASELINE_SECONDS)
+        await armed.wait()
         await asyncio.to_thread(mcp_pane.send_keys, payload, True)
 
     async def run() -> WaitForTextResult:
@@ -4270,7 +4336,7 @@ def test_wait_for_text_matches_pattern_across_wrap(
             wait_for_text(
                 patterns=[marker],
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -4551,7 +4617,7 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
         hl = fresh_pane.display_message("#{history_limit}", get_text=True)
         return bool(hl) and int(hl[0]) == 50
 
-    retry_until(_hlimit_locked, 5, raises=True)
+    retry_until(_hlimit_locked, 10, raises=True)
 
     log_calls: list[tuple[str, str]] = []
 
@@ -4567,17 +4633,21 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
         async def warning(self, message: str) -> None:
             log_calls.append(("warning", message))
 
-    async def burst_after_delay() -> None:
-        await asyncio.sleep(0.1)
-        await asyncio.to_thread(
-            fresh_pane.send_keys,
-            "for i in $(seq 1 200); do echo burst$i; done",
-            True,
-        )
+    # Fill history INTO the band before the wait starts rather than
+    # racing to fill it during one. Bursting mid-wait made the warning
+    # depend on how fast a real shell produced 200 lines inside the
+    # budget, which under parallel load it sometimes did not.
+    fresh_pane.send_keys("for i in $(seq 1 200); do echo burst$i; done", enter=True)
+
+    def _in_risk_band() -> bool:
+        hs = fresh_pane.display_message("#{history_size}", get_text=True)
+        return bool(hs) and int(hs[0]) >= 45
+
+    retry_until(_in_risk_band, 10, raises=True)
 
     async def run() -> None:
-        wait_task = asyncio.create_task(
-            wait_for_text(
+        try:
+            await wait_for_text(
                 patterns=["WILL_NEVER_MATCH_riskband_qZ9"],
                 pane_id=fresh_pane.pane_id,
                 timeout=2.0,
@@ -4585,10 +4655,6 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
                 socket_name=mcp_server.socket_name,
                 ctx=t.cast("t.Any", _RecordingContext()),
             )
-        )
-        await burst_after_delay()
-        try:
-            await wait_task
         except ToolError:
             # The strict-shrink guard may or may not fire depending on
             # whether the dip is observable between polls. Either way,
@@ -4623,7 +4689,7 @@ def test_wait_for_text_warns_when_already_in_risk_band(
         hl = fresh_pane.display_message("#{history_limit}", get_text=True)
         return bool(hl) and int(hl[0]) == 50
 
-    retry_until(_hlimit_locked, 5, raises=True)
+    retry_until(_hlimit_locked, 10, raises=True)
 
     # history-limit is 50. Risk floor (top 10%) is 45.
     # Print 100 lines to ensure hsize reaches the cap (50).
@@ -4667,7 +4733,9 @@ def test_wait_for_text_warns_when_already_in_risk_band(
 
 
 def test_wait_for_text_propagates_cancellation(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``wait_for_text`` raises ``CancelledError`` (not ``ToolError``).
 
@@ -4685,6 +4753,8 @@ def test_wait_for_text_propagates_cancellation(
     """
     import asyncio
 
+    armed = _armed_after_baseline(monkeypatch)
+
     async def _runner() -> None:
         task = asyncio.create_task(
             wait_for_text(
@@ -4695,7 +4765,7 @@ def test_wait_for_text_propagates_cancellation(
                 socket_name=mcp_server.socket_name,
             )
         )
-        await asyncio.sleep(0.1)  # let the poll loop start
+        await armed.wait()
         task.cancel()
         await task
 
@@ -4784,12 +4854,11 @@ def test_wait_tools_do_not_block_event_loop(
 # ---------------------------------------------------------------------------
 
 
-def _emit_after_baseline(pane: Pane, payload: str, delay: float = 0.2) -> t.Any:
+def _emit_after_baseline(pane: Pane, payload: str, armed: asyncio.Event) -> t.Any:
     """Return a coroutine that sends ``payload`` once the wait has armed."""
-    import asyncio
 
     async def _emit() -> None:
-        await asyncio.sleep(delay)
+        await armed.wait()
         await asyncio.to_thread(pane.send_keys, payload, True)
 
     return _emit()
@@ -4851,7 +4920,9 @@ def test_wait_for_text_reports_unclamped_timeout(
 
 
 def test_wait_for_text_stop_pattern_returns_early(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``stop`` hit ends the wait immediately and names which one fired.
 
@@ -4860,6 +4931,8 @@ def test_wait_for_text_stop_pattern_returns_early(
     without any state-inspection heuristic.
     """
     import asyncio
+
+    armed = _armed_after_baseline(monkeypatch)
 
     async def run() -> WaitForTextResult:
         task = asyncio.create_task(
@@ -4871,7 +4944,7 @@ def test_wait_for_text_stop_pattern_returns_early(
                 socket_name=mcp_server.socket_name,
             )
         )
-        await _emit_after_baseline(mcp_pane, "echo BUILD_FAILED_marker_z1")
+        await _emit_after_baseline(mcp_pane, "echo BUILD_FAILED_marker_z1", armed)
         return await task
 
     result = asyncio.run(run())
@@ -4884,10 +4957,14 @@ def test_wait_for_text_stop_pattern_returns_early(
 
 
 def test_wait_for_text_pattern_hit_reports_its_index(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``patterns`` hit reports source ``patterns`` and the entry index."""
     import asyncio
+
+    armed = _armed_after_baseline(monkeypatch)
 
     async def run() -> WaitForTextResult:
         task = asyncio.create_task(
@@ -4898,7 +4975,7 @@ def test_wait_for_text_pattern_hit_reports_its_index(
                 socket_name=mcp_server.socket_name,
             )
         )
-        await _emit_after_baseline(mcp_pane, "echo DONE_marker_y2")
+        await _emit_after_baseline(mcp_pane, "echo DONE_marker_y2", armed)
         return await task
 
     result = asyncio.run(run())
@@ -4909,7 +4986,9 @@ def test_wait_for_text_pattern_hit_reports_its_index(
 
 
 def test_wait_for_text_none_patterns_waits_for_any_new_output(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``patterns=None`` is the any-new-output catch-all.
 
@@ -4917,6 +4996,8 @@ def test_wait_for_text_none_patterns_waits_for_any_new_output(
     matching, works for any shell and any program.
     """
     import asyncio
+
+    armed = _armed_after_baseline(monkeypatch)
 
     async def run() -> WaitForTextResult:
         task = asyncio.create_task(
@@ -4926,7 +5007,7 @@ def test_wait_for_text_none_patterns_waits_for_any_new_output(
                 socket_name=mcp_server.socket_name,
             )
         )
-        await _emit_after_baseline(mcp_pane, "echo ANY_OUTPUT_marker_c3")
+        await _emit_after_baseline(mcp_pane, "echo ANY_OUTPUT_marker_c3", armed)
         return await task
 
     result = asyncio.run(run())
@@ -4950,7 +5031,7 @@ def test_wait_for_text_none_patterns_times_out_on_silent_pane(
         state = mcp_pane.display_message("#{pane_current_command}", get_text=True)
         return bool(state) and state[0] in {"sh", "sleep"}
 
-    retry_until(_parked, 5, raises=True)
+    retry_until(_parked, 10, raises=True)
 
     result = asyncio.run(
         wait_for_text(
@@ -5016,7 +5097,7 @@ def test_wait_for_text_reports_stale_match_and_tail(
     def _staged() -> bool:
         return any("STALE_TAIL_MARKER" in line for line in mcp_pane.capture_pane())
 
-    retry_until(_staged, 5, raises=True)
+    retry_until(_staged, 10, raises=True)
 
     result = asyncio.run(
         wait_for_text(
@@ -5033,7 +5114,9 @@ def test_wait_for_text_reports_stale_match_and_tail(
 
 
 def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``tail`` is capped on both axes.
 
@@ -5043,6 +5126,8 @@ def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
     import asyncio
 
     from libtmux_mcp.tools.pane_tools.wait import _TAIL_MAX_BYTES, _TAIL_MAX_LINES
+
+    armed = _armed_after_baseline(monkeypatch)
 
     async def run() -> WaitForTextResult:
         task = asyncio.create_task(
@@ -5054,7 +5139,9 @@ def test_wait_for_text_tail_is_bounded_by_lines_and_bytes(
             )
         )
         await _emit_after_baseline(
-            mcp_pane, "for i in $(seq 1 200); do echo tailcap_line_$i; done"
+            mcp_pane,
+            "for i in $(seq 1 200); do echo tailcap_line_$i; done",
+            armed,
         )
         return await task
 
@@ -5415,7 +5502,7 @@ def test_snapshot_pane_cursor_moves(mcp_server: Server, mcp_pane: Pane) -> None:
     mcp_pane.send_keys("echo hello_snapshot", enter=True)
     retry_until(
         lambda: "hello_snapshot" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 
@@ -5612,7 +5699,7 @@ def test_pipe_pane_start_stop(
     mcp_pane.send_keys("echo START_MARKER_42", enter=True)
     retry_until(
         lambda: log_file.exists() and "START_MARKER_42" in log_file.read_text(),
-        2,
+        10,
         raises=True,
     )
 
@@ -5629,7 +5716,7 @@ def test_pipe_pane_start_stop(
     with pytest.raises(libtmux_exc.WaitTimeout):
         retry_until(
             lambda: log_file.stat().st_size > size_after_stop,
-            1,
+            10,
             raises=True,
         )
     assert "POST_STOP_MARKER_99" not in log_file.read_text()
@@ -5658,7 +5745,7 @@ def test_pipe_pane_quotes_path_with_spaces(
         mcp_pane.send_keys(f"echo {marker}", enter=True)
         retry_until(
             lambda: log_file.exists() and marker in log_file.read_text(),
-            2,
+            10,
             raises=True,
         )
     finally:
@@ -5715,7 +5802,7 @@ def test_pipe_pane_writes_the_exact_path_requested(
         mcp_pane.send_keys(f"echo {marker}", enter=True)
         retry_until(
             lambda: log_file.exists() and marker in log_file.read_text(),
-            2,
+            10,
             raises=True,
         )
         # Nothing else may appear: an expanded path would create a sibling.
@@ -5823,7 +5910,7 @@ def test_enter_copy_mode_with_scroll(mcp_server: Server, mcp_pane: Pane) -> None
         mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
     retry_until(
         lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
+        10,
         raises=True,
     )
 

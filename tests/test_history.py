@@ -517,7 +517,8 @@ def test_mcp_run_command_uses_effective_default_and_resists_batching(
     mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
     retry_until(
         lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
-        2,
+        # Waiting on a real shell exec; 2 s lost the race under load.
+        10,
         raises=True,
     )
     setup = (
@@ -525,7 +526,7 @@ def test_mcp_run_command_uses_effective_default_and_resists_batching(
         "HISTCONTROL=ignorespace; set -o history; history -c; history -w"
     )
     mcp_pane.send_keys(setup, enter=True)
-    retry_until(histfile.exists, 2, raises=True)
+    retry_until(histfile.exists, 10, raises=True)
 
     omitted = f"MCP_OMITTED_{test_id}"
     explicit_true = f"MCP_TRUE_{test_id}"

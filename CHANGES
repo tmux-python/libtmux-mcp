@@ -7,6 +7,7 @@ _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
 ### What's new
+
 #### Filters answer, or say why not -- three silent-empty paths closed
 
 Follow-ups on the filtering work above, all found by driving the server
@@ -642,11 +643,72 @@ reruns on, random-order with reruns off but serial, and CI's parallel
 with reruns on are all blind to it. Only parallel-with-reruns-off
 shows it.
 
-Nothing is changed here beyond recording it — the fix is a review of
-the affected budgets, which is a larger piece of work than this branch
-should absorb. One earlier change in this branch that moved a test to
-its own window on the strength of the shared-pane theory has been
-reverted, since it addressed a mechanism that cannot occur.
+One earlier change in this branch that moved a test to its own window
+on the strength of the shared-pane theory has been reverted, since it
+addressed a mechanism that cannot occur.
+
+**Fixed, and mostly not by adjusting budgets**
+
+A fresh six-run sample confirmed the scoping criterion above: the union
+now reaches `tests/test_history.py`, so the work is scoped by the
+pattern — drives a real shell AND waits — and not by the file that
+happens to hold most of it.
+
+The dominant cause is not a budget. Twelve test helpers slept and
+claimed to synchronise: `_emit_after_baseline`'s docstring said "once
+the wait has armed" and its body was `await asyncio.sleep(0.2)`. Five
+more said "let wait_for_text capture its baseline first" above a
+`sleep(0.1)`. Losing that race is not a slow pass, it is a permanent
+failure: `wait_for_text` filters each poll against the row content
+captured at entry, so a marker emitted before the baseline is inside
+that set and can never match afterwards. One such failure burned a
+**20 second** budget — no budget would have saved it, which is exactly
+what made "raise the timeouts" the wrong first instinct.
+
+Those twelve sites now await an event set on the wait's *second*
+`_bounded_capture`. The first of those calls IS the entry capture, and
+the second is issued only after its rows have been stored, so arming is
+complete by the time the event fires. The helper docstrings became
+true rather than aspirational.
+
+One test resisted that fix and needed restructuring instead: the
+history-limit risk-band test raced a 200-line burst against a 2 s wait
+to push `history_size` into the top 10% of `history-limit`. It now
+fills history into the band *before* the wait starts, so the warning
+fires on the first poll.
+
+The genuinely time-based ones were then raised together. Every
+`retry_until` in the suite is `raises=True` — a positive wait — and for
+those a larger budget costs nothing when the test passes, because the
+call returns as soon as its condition holds. It only lengthens
+time-to-fail. So all 56 sites under 10 s went to 10 s at once rather
+than one per sampled run. `run_command`'s status-after-shell-state
+test went from 2 s to 10 s for the same reason: its subject is the
+reported status, not the latency.
+
+`send_keys_batch`'s timeout fixture was a third thing again. Its sends
+are monkeypatched to return instantly, so the 0.05 s budget bounded
+nothing but Python overhead — and under load that overhead pre-empted
+the injected `TimeoutExpired` the test exists to exercise, so the test
+failed while measuring the wrong mechanism.
+One budget is deliberately left small and now says so in the code:
+`test_run_command_reports_unclamped_timeout` passes a timeout that it
+then asserts is echoed back verbatim, so widening it breaks the
+assertion. The sweep above caught it, which is the argument for
+sweeping rather than editing constants by hand.
+
+Measured before and after, `pytest -n auto --reruns 0`, same box:
+
+| | runs failing | failures per run | loadavg at start |
+|---|---|---|---|
+| before | 6 of 6 | 3, 2, 2, 1, 1, 5 | 13 - 33 |
+| after | 1 of 3 | 0, 2, 0 | 25 - 45 |
+
+The after runs are the less favourable comparison, not the more: they
+ran at roughly double the load, on a box shared with a second agent
+driving tmux continuously. The two failures in that run were the same
+pure-budget shape at a `timeout=5.0` the first sweep had not covered,
+and are fixed by the same rule.
 
 **`mcp_swap.py` covers opencode and pi**
 

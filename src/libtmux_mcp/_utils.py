@@ -907,16 +907,47 @@ def _coerce_model_value(key: str, value: t.Any, annotation: t.Any) -> t.Any:
 
 
 def _path_resolves(item: t.Any, path: str) -> bool:
-    """Whether ``path``'s ``__``-separated segments resolve on ``item``."""
+    """Whether ``path``'s ``__``-separated segments resolve on ``item``.
+
+    ``None`` ends the walk only at an INTERMEDIATE segment, where there
+    is genuinely nothing to traverse into. On the terminal segment it is
+    an ordinary value -- tmux leaves many format fields empty, so
+    ``active_pane__pane_start_command`` is None on every shell pane --
+    and treating that as unresolvable turns a true empty result into a
+    false error.
+    """
     current = item
-    for segment in path.split("__"):
+    segments = path.split("__")
+    last = len(segments) - 1
+    for i, segment in enumerate(segments):
         try:
             current = getattr(current, segment)
         except Exception:  # noqa: BLE001 - any failure means "no such path"
             return False
         if current is None:
-            return False
+            return i == last
     return True
+
+
+def _attribute_access_error(probe: list[t.Any], field: str) -> str | None:
+    """Message if ``field`` raises on every probed item, else ``None``.
+
+    libtmux keeps removed properties around so they raise a message
+    naming the replacement. ``dir()`` still lists them, so they reach
+    callers as filterable; ``QueryList`` swallows the raise and answers
+    an empty list. Surfacing libtmux's own message is what makes the
+    refusal useful.
+
+    One item settles it: the raise comes from the class, so it cannot
+    differ per instance.
+    """
+    if not probe:
+        return None
+    try:
+        getattr(probe[0], field)
+    except Exception as exc:  # noqa: BLE001 - reported, not handled
+        return str(exc)
+    return None
 
 
 def _unknown_field_message(
@@ -934,13 +965,19 @@ def _unknown_field_message(
         msg += f" Did you mean: {', '.join(close)}?"
     return (
         f"{msg} Every field this tool returns is filterable: "
-        f"{', '.join(sorted(model_fields))}. So is any of the "
-        f"{len(allowed_fields)} libtmux {obj_type.__name__} attributes."
+        f"{', '.join(sorted(model_fields))}. libtmux "
+        f"{obj_type.__name__} attributes are accepted too, though tmux "
+        "leaves many of them empty."
     )
 
 
 def _raise_if_path_unresolvable(
-    items: t.Any, field_path: str, key: str, valid_ops: list[str]
+    probe: list[t.Any],
+    field_path: str,
+    key: str,
+    valid_ops: list[str],
+    *,
+    operator_parsed: bool,
 ) -> None:
     """Reject a multi-segment path no item can resolve.
 
@@ -952,20 +989,20 @@ def _raise_if_path_unresolvable(
     """
     if "__" not in field_path:
         return
-    probe = list(items)
     if not probe or any(_path_resolves(item, field_path) for item in probe):
         return
-    trailing = field_path.rsplit("__", 1)[1]
-    close = difflib.get_close_matches(trailing, valid_ops, n=3)
-    hint = (
-        f" Did you mean the operator '{close[0]}'?"
-        if close
-        else f" Valid operators: {', '.join(valid_ops)}."
-    )
-    msg = (
-        f"Filter '{key}' names no attribute path on any item, and "
-        f"'{trailing}' is not a filter operator.{hint}"
-    )
+    msg = f"Filter '{key}' names no attribute path on any item."
+    if not operator_parsed:
+        # Only a key with no operator can be a mistyped one. When an
+        # operator WAS parsed off, blaming the last path segment for
+        # not being one denies the operator the caller supplied.
+        trailing = field_path.rsplit("__", 1)[1]
+        close = difflib.get_close_matches(trailing, valid_ops, n=3)
+        msg += (
+            f" '{trailing}' is not a filter operator either; did you mean '{close[0]}'?"
+            if close
+            else f" '{trailing}' is not a filter operator either."
+        )
     raise ExpectedToolError(msg)
 
 
@@ -1018,6 +1055,7 @@ def _apply_filters(
     model_fields = model_type.model_fields
     attr_filters: dict[str, t.Any] = {}
     model_filters: dict[str, t.Any] = {}
+    probe = list(items)
 
     for key, value in filters.items():
         # A trailing segment that is not an operator is part of the
@@ -1032,7 +1070,13 @@ def _apply_filters(
 
         field = field_path.split("__", 1)[0]
         if field in allowed_fields:
-            _raise_if_path_unresolvable(items, field_path, key, valid_ops)
+            removed = _attribute_access_error(probe, field)
+            if removed is not None:
+                msg = f"Filter field '{field}' cannot be read: {removed}"
+                raise ExpectedToolError(msg)
+            _raise_if_path_unresolvable(
+                probe, field_path, key, valid_ops, operator_parsed=bool(op)
+            )
             attr_filters[key] = value
         elif field in _MODEL_FIELD_ALIASES:
             attr_filters[_MODEL_FIELD_ALIASES[field] + key[len(field) :]] = value
