@@ -944,6 +944,73 @@ def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
     assert mapped.log_level == logging.ERROR
 
 
+class LivenessProbeFixture(t.NamedTuple):
+    """Test fixture for :func:`_probe_liveness`."""
+
+    test_id: str
+    returncode: int
+    stderr: list[str]
+    expected_alive: bool
+    expected_unreachable: str | None
+
+
+LIVENESS_PROBE_FIXTURES: list[LivenessProbeFixture] = [
+    LivenessProbeFixture("running", 0, [], True, None),
+    LivenessProbeFixture(
+        "no_daemon", 1, ["no server running on /tmp/tmux-1000/x"], False, None
+    ),
+    LivenessProbeFixture("missing_socket", 1, ["error connecting to /x"], False, None),
+    # A live server this tmux binary cannot speak to. Reporting it the
+    # same as "no server" tells the agent the user's work is gone.
+    LivenessProbeFixture(
+        "protocol_mismatch",
+        1,
+        ["server exited unexpectedly"],
+        False,
+        "server exited unexpectedly",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    LivenessProbeFixture._fields,
+    LIVENESS_PROBE_FIXTURES,
+    ids=[fixture.test_id for fixture in LIVENESS_PROBE_FIXTURES],
+)
+def test_probe_liveness_separates_absent_from_unreachable(
+    test_id: str,
+    returncode: int,
+    stderr: list[str],
+    expected_alive: bool,
+    expected_unreachable: str | None,
+) -> None:
+    """Absent and unreachable are different answers.
+
+    ``Server.is_alive()`` collapses both to False and ``Server.sessions``
+    degrades to ``[]`` for both, so an ordinary tmux upgrade -- sockets
+    outlive the binary that made them -- made a live server report as
+    absent with no error. Driven off a fake result rather than a second
+    tmux binary so the assertion does not depend on the CI tmux version.
+    """
+    from libtmux_mcp._utils import _probe_liveness
+
+    assert test_id
+
+    class _Result:
+        def __init__(self) -> None:
+            self.returncode = returncode
+            self.stderr = stderr
+
+    class _Server:
+        def cmd(self, *args: str) -> _Result:
+            return _Result()
+
+    alive, unreachable = _probe_liveness(t.cast("t.Any", _Server()))
+
+    assert alive is expected_alive
+    assert unreachable == expected_unreachable
+
+
 def test_map_exception_explains_a_newline_in_a_format_value() -> None:
     """The newline-in-a-path parse failure becomes actionable.
 

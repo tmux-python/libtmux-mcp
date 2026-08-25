@@ -8,6 +8,39 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A live server no longer reports as absent
+
+When the tmux binary running this server is older than the one that
+created a socket, `get_server_info` returned `is_alive=False,
+session_count=0` and `list_sessions` returned `[]` — both without error.
+An agent reads that as "the user's work is gone". `list_panes` did error,
+so two of four calls answered with a confident falsehood.
+
+`Server.is_alive()` answers `False` both for a socket with no daemon and
+for a live server this binary cannot speak to, and `Server.sessions`
+degrades to `[]` in both cases. libtmux's own docstring points at
+`is_alive` to tell the two apart, but it cannot — they collapse to the
+same `False`. tmux itself distinguishes them on stderr, so that is read
+instead of the boolean.
+
+`list_sessions` now raises rather than claiming a server it could not
+query is empty, and names the likely cause. `ServerInfo` gains
+`unreachable_reason`: when it is set, `is_alive=False` means "could not
+ask", not "not running", and `session_count=0` carries no information.
+
+The trigger is an ordinary tmux upgrade — sockets outlive the binary
+that made them. The boundary is between tmux 3.5 and 3.6, and only in
+the old-client-to-new-server direction; a newer binary reads an older
+server correctly.
+
+#### A rejected copy-mode command is no longer reported as success
+
+`exit_copy_mode` on a pane that was not in a mode returned a full
+`PaneInfo`, which reads as confirmation the pane left copy mode. tmux
+says `not in a mode` and exits 1. `Pane.send_keys(copy_mode_cmd=...)`
+discards that result, the same way the ordinary send path did.
+`enter_copy_mode(scroll_up=...)` used the same unchecked call.
+
 #### A newline in a directory name is diagnosed, not "Unexpected error"
 
 A pane whose current directory contains a newline makes libtmux fail to

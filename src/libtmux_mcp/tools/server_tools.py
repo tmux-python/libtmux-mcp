@@ -26,6 +26,7 @@ from libtmux_mcp._utils import (
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _probe_liveness,
     _serialize_session,
     handle_tool_errors,
 )
@@ -64,6 +65,26 @@ def list_sessions(
     """
     server = _get_server(socket_name=socket_name)
     sessions = server.sessions
+    # ``Server.sessions`` degrades to [] for a server it could not reach
+    # as well as for one with no sessions, so an empty answer is the only
+    # ambiguous one. Probe only then: a server that listed anything
+    # cannot be unreachable, and this is the most-called discovery tool.
+    if not sessions:
+        _, unreachable = _probe_liveness(server)
+        if unreachable is not None:
+            msg = (
+                f"tmux server exists but could not be queried: {unreachable}. "
+                "Reporting no sessions would claim it is empty."
+            )
+            raise ExpectedToolError(
+                msg,
+                suggestion=(
+                    "Most often this tmux binary is older than the one that "
+                    "started the server; sockets outlive the binary that made "
+                    "them. Compare `tmux -V` with the server's own version and "
+                    "set LIBTMUX_TMUX_BIN to the matching binary."
+                ),
+            )
     return _apply_filters(sessions, filters, _serialize_session, Session)
 
 
@@ -194,7 +215,7 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
         Server information.
     """
     server = _get_server(socket_name=socket_name)
-    alive = server.is_alive()
+    alive, unreachable = _probe_liveness(server)
     version: str | None = None
     try:
         result = server.cmd("display-message", "-p", "#{version}")
@@ -212,6 +233,7 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
         socket_path=str(server.socket_path) if server.socket_path else None,
         session_count=len(server.sessions) if alive else 0,
         version=version,
+        unreachable_reason=unreachable,
     )
 
 
@@ -261,9 +283,9 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
         return None
     server = _get_server(socket_path=str(socket_path))
     try:
-        alive = server.is_alive()
+        alive, unreachable = _probe_liveness(server)
     except Exception as err:
-        logger.debug("probe %s: is_alive raised %s", socket_path, err)
+        logger.debug("probe %s: liveness probe raised %s", socket_path, err)
         return None
     version: str | None = None
     try:
@@ -277,6 +299,7 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
         socket_path=str(socket_path),
         session_count=len(server.sessions) if alive else 0,
         version=version,
+        unreachable_reason=unreachable,
     )
 
 

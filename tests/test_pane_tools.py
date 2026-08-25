@@ -271,6 +271,26 @@ def test_parse_pane_state_survives_a_vanished_pane(
     assert state.pane_height == expected_height
 
 
+def test_exit_copy_mode_reports_a_pane_that_is_not_in_a_mode(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A copy-mode command tmux rejected must not read as success.
+
+    ``Pane.send_keys(copy_mode_cmd=...)`` discards tmux's result, so
+    cancelling a pane that is not in a mode returned a full ``PaneInfo``
+    that looked like confirmation the pane had left copy mode. tmux says
+    ``not in a mode`` and exits 1.
+    """
+    from libtmux_mcp.tools.pane_tools.copy_mode import enter_copy_mode, exit_copy_mode
+
+    with pytest.raises(ToolError, match="not in a mode"):
+        exit_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+    # Control: the real flow still works, so the guard is not blanket.
+    enter_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+    exit_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+
 class DashPayloadArgvFixture(t.NamedTuple):
     """Test fixture for ``--`` placement in the send-keys argv."""
 

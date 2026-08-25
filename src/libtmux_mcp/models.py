@@ -200,6 +200,15 @@ class ServerInfo(BaseModel):
     socket_path: str | None = Field(default=None, description="Socket path")
     session_count: int = Field(description="Number of sessions")
     version: str | None = Field(default=None, description="tmux version")
+    unreachable_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why a server that exists could not be queried, e.g. this tmux "
+            "binary being older than the one that created the socket. When "
+            "set, is_alive=False means 'could not ask', NOT 'not running', "
+            "and session_count=0 carries no information."
+        ),
+    )
 
 
 class OptionResult(BaseModel):

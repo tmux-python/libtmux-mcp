@@ -1070,6 +1070,48 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
+#: tmux stderr fragments that mean the socket genuinely has no daemon
+#: behind it. Anything else on a failed ``list-sessions`` -- a protocol
+#: mismatch, a permission error -- means a server that exists and cannot
+#: be talked to, which is a different answer.
+_NO_SERVER_MARKERS = (
+    "no server running",
+    "no such file or directory",
+    "error connecting to",
+)
+
+
+def _probe_liveness(server: Server) -> tuple[bool, str | None]:
+    """Return ``(alive, unreachable_reason)`` for *server*.
+
+    ``Server.is_alive()`` answers False for a socket with no daemon AND
+    for a live server this tmux binary cannot speak to, and
+    ``Server.sessions`` degrades to ``[]`` in both cases. libtmux's own
+    docstring points at ``is_alive`` to tell those apart, but it cannot:
+    both collapse to the same False.
+
+    The difference matters because they warrant opposite reactions. "No
+    server" is a fact an agent can act on; "cannot reach the server" over
+    a socket whose daemon is running -- an ordinary tmux upgrade leaves
+    sockets older than the binary -- reported as False tells the agent
+    the user's work is gone. tmux distinguishes them on stderr, so read
+    it rather than the boolean.
+    """
+    try:
+        result = server.cmd("list-sessions")
+    except Exception as err:  # noqa: BLE001 - probe must not raise
+        return False, str(err)
+
+    if result.returncode == 0:
+        return True, None
+
+    detail = " ".join(result.stderr).strip() if result.stderr else ""
+    lowered = detail.lower()
+    if any(marker in lowered for marker in _NO_SERVER_MARKERS):
+        return False, None
+    return False, detail or f"tmux exited with status {result.returncode}"
+
+
 def _undouble(prefix: str, text: str) -> str:
     """Drop *prefix* from *text* when the wrapper is about to add it back."""
     return text.removeprefix(prefix)
