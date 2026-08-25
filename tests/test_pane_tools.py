@@ -1501,44 +1501,42 @@ def test_capture_pane_untruncated_short_output(
 
 
 def test_capture_pane_truncates_tail_preserving(
-    mcp_server: Server, mcp_session: Session
+    mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """Long captures are truncated head-first; tail is preserved.
 
-    Runs in a window of its own. Sharing ``mcp_pane`` made this
-    intermittently fail for a reason that looked like timing and was
-    not: an earlier test splitting the shared window leaves the pane a
-    few rows tall, ``capture_pane`` then returns fewer lines than
-    ``max_lines``, nothing is truncated, and the header assertion fails.
-    Measured -- 24 rows gives 24 captured lines and a header; 3 rows
-    gives 2 lines and none.
+    This test fails intermittently in full-suite runs, and the cause is
+    NOT established. An earlier revision moved it to a dedicated window
+    on the theory that a shared pane had been shrunk by another test's
+    split; that mechanism is impossible -- libtmux's ``server`` and
+    ``session`` fixtures are function-scoped, measured as two tests
+    landing on different sockets with both panes at 24 rows -- so the
+    move was reverted rather than left in as a fix that fixes nothing.
+
+    Ruled out by measurement: the retry budget (the marker appears in
+    0.13 s idle and 0.24 s under eightfold parallel load, against the
+    2 s budget below) and ordering alone. Under ``pytest -n`` the suite
+    loses two to five DIFFERENT contention-sensitive tests per run, so
+    this is one member of a suite-wide family rather than a defect in
+    this assertion. ``--reruns=2`` absorbs all of it.
 
     Prime the pane with >20 echo lines and confirm the last one is
     visible, then capture the visible pane with a tight ``max_lines=5``
-    ceiling. The capture must (a) start with a single
-    ``[... truncated K lines ...]`` header, (b) have exactly 6 lines
-    total (the header + 5 kept lines), and (c) preserve the most
-    recent ``scrollback_line_19`` line at the tail.
+    ceiling.
     """
-    window = mcp_session.new_window(window_name="capture-trunc", attach=False)
-    pane = window.active_pane
-    assert pane is not None
-    try:
-        for i in range(20):
-            pane.send_keys(f"echo scrollback_line_{i}", enter=True)
-        retry_until(
-            lambda: "scrollback_line_19" in "\n".join(pane.capture_pane()),
-            2,
-            raises=True,
-        )
+    for i in range(20):
+        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
+    retry_until(
+        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
 
-        result = capture_pane(
-            pane_id=pane.pane_id,
-            max_lines=5,
-            socket_name=mcp_server.socket_name,
-        )
-    finally:
-        window.kill()
+    result = capture_pane(
+        pane_id=mcp_pane.pane_id,
+        max_lines=5,
+        socket_name=mcp_server.socket_name,
+    )
     lines = result.split("\n")
     assert lines[0].startswith("[... truncated ")
     assert lines[0].endswith(" lines ...]")

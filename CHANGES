@@ -519,20 +519,50 @@ unusual entry shape.
 
 ### Development
 
-**A flaky capture test was an isolation bug, not timing**
+**The suite is green in CI while two to five tests fail per parallel run**
 
-`test_capture_pane_truncates_tail_preserving` failed intermittently in
-full-suite runs and passed in isolation. The cause was not timing: it
-borrowed the shared pane fixture, and an earlier test splitting that
-window left the pane a few rows tall. `capture_pane` then returned
-fewer lines than `max_lines`, nothing was truncated, and the header
-assertion failed. Measured — 24 rows gives 24 captured lines and a
-header; 3 rows gives 2 lines and none.
+Measured, and it is the finding that supersedes several smaller ones in
+this branch's history.
 
-Deterministic given the height, invisible in isolation, and it looked
-like a draw race only because the trigger was upstream in the run. The
-test now uses a window of its own, and the measurement is in its
-docstring so the next reader does not re-diagnose it as timing.
+Run the suite as CI does — `pytest -n auto` — but with `--reruns` off,
+and **every run fails**. Two independent sets of runs agree:
+
+```
+run    1    2    3    4    5
+A      1    5    2    3    3   failures
+B      6    4    1    -    -   failures
+```
+
+A different set each time, well over a dozen distinct tests in the
+union. Most send keys to a real `zsh` and wait inside a fixed budget;
+under `-n auto` the tmux servers and shell startups compete and budgets
+tuned on an idle machine expire. The family spans at least
+`tests/test_pane_tools.py` and `tests/test_history.py`, so it is not
+one module's problem.
+
+Run it in the default configuration and the same suite reports
+`968 passed, 6 skipped, **7 rerun**` — green. The rerun count is the
+only visible trace, and it is easy to read past.
+
+Three separate per-test explanations were proposed and measured away
+during this branch before the shape became clear: a shared pane shrunk
+by another test's split (impossible — the fixtures are function-scoped),
+a retry budget too tight in the abstract (the marker needs 0.24 s
+against 2 s), and test ordering (survives randomization in isolation).
+Each was a local explanation for a global property, and each looked
+plausible because a single failing test is exactly what a global
+property looks like from inside one test.
+
+The configurations are why it took so long to see: fixed-order with
+reruns on, random-order with reruns off but serial, and CI's parallel
+with reruns on are all blind to it. Only parallel-with-reruns-off
+shows it.
+
+Nothing is changed here beyond recording it — the fix is a review of
+the affected budgets, which is a larger piece of work than this branch
+should absorb. One earlier change in this branch that moved a test to
+its own window on the strength of the shared-pane theory has been
+reverted, since it addressed a mechanism that cannot occur.
 
 **`mcp_swap.py` covers opencode and pi**
 
