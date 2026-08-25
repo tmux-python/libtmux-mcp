@@ -542,8 +542,12 @@ tuned on an idle machine expire.
 runs put all but one failure in `tests/test_pane_tools.py`, which
 invites narrowing the work to that module. Counting the at-risk pattern
 instead — drives a real shell *and* waits on output — finds it in
-several modules, with `test_pane_tools.py` holding 78-90% of the wait
-sites depending on how they are counted. Its dominance in every sample
+several modules, with `test_pane_tools.py` holding roughly 75-85% of
+the wait sites. The spread is itself instructive: a pattern that counts
+`wait_for_text` calls inflates that module, because `wait_for_text` is
+the tool *under test* there, so the metric measures something adjacent
+to the claim in precisely the place the adjacency is greatest.
+`retry_until` alone is the cleaner proxy. Its dominance in every sample
 is a density effect, not exclusivity, and a thin tail elsewhere is
 exactly what a single observed failure in `tests/test_history.py`
 represents. Sampling reads a distribution's mode as its support; the
