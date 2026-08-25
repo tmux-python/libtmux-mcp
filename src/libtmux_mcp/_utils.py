@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 import typing as t
 
@@ -470,6 +471,40 @@ ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+
+
+#: POSIX portable environment variable name.
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _raise_if_flag_like(label: str, value: str) -> None:
+    """Refuse a caller string tmux would parse as a flag.
+
+    tmux reads flags before quoting can protect anything, and libtmux
+    emits ``[name, value]`` with no ``--`` terminator. So a leading
+    ``-`` substitutes one command for another silently: measured,
+    ``set_environment(name="-u", value="VICTIM")`` UNSET ``VICTIM`` and
+    reported ``status="set"``, and ``set_option(option="-g", value="x")``
+    turned off ``xterm-keys`` because tmux prefix-matched ``x``.
+    """
+    if value.startswith("-"):
+        msg = (
+            f"{label} may not begin with '-': tmux parses it as a flag, so "
+            f"the call would run a different command than the one requested "
+            f"(got {value!r})."
+        )
+        raise ExpectedToolError(msg)
+
+
+def _raise_if_not_env_name(name: str) -> None:
+    """Refuse an environment variable name tmux or POSIX cannot hold."""
+    if not _ENV_NAME_RE.match(name):
+        msg = (
+            f"Environment variable name must match [A-Za-z_][A-Za-z0-9_]* "
+            f"(got {name!r}). tmux stores anything else verbatim as an "
+            "unusable name, and a leading '-' is read as a flag."
+        )
+        raise ExpectedToolError(msg)
 
 
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:

@@ -8,6 +8,54 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A caller string starting with `-` no longer runs a different command
+
+`set_environment(name="-u", value="VICTIM")` returned
+`{"name": "-u", "value": "VICTIM", "status": "set"}`. What actually ran
+was `tmux set-environment -u VICTIM`, which **deleted** a pre-existing
+variable. Nothing was set, something was destroyed, and the result said
+the opposite.
+
+`set_option` had it twice, and the second is worse because two
+mechanisms stack. `set_option(option="-g", value="x")` let tmux eat
+`-g` as the global flag, leaving `x` as the option name -- which tmux
+then prefix-matched to `xterm-keys` and turned off. A caller who named
+neither `xterm-keys` nor anything resembling it silently changed it and
+was told `status="set"` for the option they did name.
+
+tmux parses flags before quoting can protect anything, and libtmux
+emits `[name, value]` with no `--` terminator. Quoting itself is sound:
+`A;kill-server` and `CANARY_TWO -u` were both stored verbatim as absurd
+but literal names, killing nothing and unsetting nothing. The hole is
+specifically a *first character* of `-` that happens to name a flag the
+target command accepts -- `set_option(option="-U")` was already refused
+by tmux as an invalid flag, which is what makes `-u` and `-g` the
+dangerous cases rather than the obvious ones.
+
+Environment names are now validated against POSIX
+`[A-Za-z_][A-Za-z0-9_]*`, which rejects every flag-shaped name by
+construction along with the junk above; option names must not begin
+with `-`, the looser rule that `@user-options` require. `display_message`
+takes the third form: a format legitimately may start with `-`, so it
+gets tmux's `--` terminator instead of a refusal. Previously
+`format_string="-p"` was eaten as tmux's own print flag and tmux
+answered with its DEFAULT message -- a plausible string answering a
+question nobody asked.
+
+This is the `send_keys` flag bug, fixed earlier in this branch with
+`--`, reappearing in three more tools. There it dropped a keystroke;
+here it destroys state.
+
+#### `unset_environment`
+
+There was no way to remove a tmux environment variable. `value=""` sets
+an empty string, which new panes still inherit as set-but-empty, and
+`EnvironmentResult.removed` described a state no tool in the server
+could produce. The only route to an unset was the flag bug above, so
+closing that without this would have removed a capability rather than
+a hazard.
+
+
 #### Filters answer, or say why not -- three silent-empty paths closed
 
 Follow-ups on the filtering work above, all found by driving the server

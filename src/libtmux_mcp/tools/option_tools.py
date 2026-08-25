@@ -13,6 +13,7 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     ExpectedToolError,
     _get_server,
+    _raise_if_flag_like,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -156,6 +157,7 @@ def set_option(
         Confirmation with option name, value, and status.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
+    _raise_if_flag_like("Option name", option)
     obj.set_option(option, value, global_=global_, scope=opt_scope)
     return OptionSetResult(option=option, value=value, status="set")
 

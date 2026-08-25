@@ -266,8 +266,11 @@ class EnvironmentSetResult(BaseModel):
     """Result of a set_environment call."""
 
     name: str = Field(description="Variable name")
-    value: str = Field(description="Value that was set")
-    status: str = Field(description="Operation status")
+    value: str | None = Field(
+        default=None,
+        description="Value that was set; null when the variable was unset",
+    )
+    status: str = Field(description="Operation status: 'set' or 'unset'")
 
 
 class WaitForTextResult(BaseModel):

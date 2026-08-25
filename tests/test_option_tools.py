@@ -93,3 +93,30 @@ def test_show_option_resolves_inherited_values(
     assert inherited.value is not None
     assert int(str(inherited.value)) > 0
     assert inherited.include_inherited is True
+
+
+def test_set_option_refuses_a_flag_shaped_name(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """An option name tmux would read as a flag must not reach tmux.
+
+    ``set_option(option="-g", value="x")`` had ``-g`` eaten as the
+    global flag, leaving ``x`` as the option name -- which tmux
+    prefix-matched to ``xterm-keys`` and turned off, while the result
+    reported ``status="set"`` for an option the caller never named.
+    """
+    import pytest
+    from fastmcp.exceptions import ToolError
+
+    before = show_option(
+        option="xterm-keys", scope="server", socket_name=mcp_server.socket_name
+    ).value
+
+    for name in ("-g", "-u"):
+        with pytest.raises(ToolError, match="may not begin with"):
+            set_option(option=name, value="x", socket_name=mcp_server.socket_name)
+
+    after = show_option(
+        option="xterm-keys", scope="server", socket_name=mcp_server.socket_name
+    ).value
+    assert after == before

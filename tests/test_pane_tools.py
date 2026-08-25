@@ -5859,6 +5859,33 @@ def test_display_message_zoomed_flag(mcp_server: Server, mcp_session: Session) -
     assert result in ("0", "1")
 
 
+def test_display_message_passes_a_dash_leading_format(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A format starting with '-' reaches tmux instead of being a flag.
+
+    ``format_string="-p"`` was consumed as tmux's own print flag, so no
+    format reached tmux and it answered with its DEFAULT message -- a
+    plausible string answering a question nobody asked.
+    """
+    assert (
+        display_message(
+            format_string="-p",
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+        == "-p"
+    )
+    assert (
+        display_message(
+            format_string="-> #{pane_id}",
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+        == f"-> {mcp_pane.pane_id}"
+    )
+
+
 def test_display_message_rejects_format_jobs(
     mcp_server: Server, mcp_pane: Pane, tmp_path: pathlib.Path
 ) -> None:
