@@ -32,6 +32,7 @@ import logging
 import time
 import typing as t
 
+from fastmcp.exceptions import PromptError, ResourceError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import (
     ErrorHandlingMiddleware,
@@ -40,7 +41,8 @@ from fastmcp.server.middleware.error_handling import (
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
-from mcp.types import CallToolRequestParams, TextContent
+from mcp import McpError
+from mcp.types import CallToolRequestParams, ErrorData, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
 from libtmux_mcp._utils import (
@@ -51,25 +53,65 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
 )
 
+#: Errors this server raises deliberately to describe a CALLER-caused
+#: failure. They must never reach the ``-32603`` "Internal error" path,
+#: whichever message kind raised them: ``ExpectedToolError`` from tools,
+#: and fastmcp's ``ResourceError`` / ``PromptError`` from the resource
+#: and prompt handlers, which this package raises only for a bad target
+#: or a missing object.
+_CALLER_CAUSED_ERRORS: tuple[type[Exception], ...] = (
+    ExpectedToolError,
+    ResourceError,
+    PromptError,
+)
+
+logger = logging.getLogger(__name__)
+
 _TIER_LEVELS: dict[str, int] = {
     TAG_READONLY: 0,
     TAG_MUTATING: 1,
     TAG_DESTRUCTIVE: 2,
 }
 
+#: Reverse of :data:`_TIER_LEVELS`, so a middleware configured with an
+#: unrecognized tier can still *name* the tier it fell back to.
+_LEVEL_TIERS: dict[int, str] = {level: tier for tier, level in _TIER_LEVELS.items()}
+
+
+def _highest_tier(tags: t.Collection[str]) -> str | None:
+    """Return the highest safety tier named in *tags*, or None if untagged."""
+    found = [tier for tier in _TIER_LEVELS if tier in tags]
+    if not found:
+        return None
+    return max(found, key=lambda tier: _TIER_LEVELS[tier])
+
 
 class SafetyMiddleware(Middleware):
-    """Gate tools by safety tier.
+    """Explain tier denials that ``_enable_allowed_tools`` enforces.
+
+    FastMCP's native ``disable()`` is the enforcement gate and holds
+    even for a call that skips the middleware chain. It also makes
+    ``get_tool()`` answer **None**, so FastMCP reports an off-tier call
+    as ``Unknown tool`` -- the server denying its own gated tool exists.
+    This gate names the required tier instead, resolving such names
+    against :meth:`_tier_snapshot` (the registry keeps disabled tools).
+
+    Denials must raise *here* so :class:`AuditMiddleware`, which sits
+    outside, records them as denials rather than unknown-tool errors.
 
     Parameters
     ----------
     max_tier : str
-        Maximum allowed tier. One of ``TAG_READONLY``, ``TAG_MUTATING``,
-        or ``TAG_DESTRUCTIVE``.
+        Maximum allowed tier. Unrecognized values fall back to
+        ``TAG_READONLY``.
     """
 
     def __init__(self, max_tier: str = TAG_MUTATING) -> None:
         self.max_level = _TIER_LEVELS.get(max_tier, 0)
+        #: Normalized tier name, so a denial reports where the server
+        #: stands rather than echoing an unrecognized env value back.
+        self.max_tier = _LEVEL_TIERS[self.max_level]
+        self._tier_by_tool: dict[str, str] | None = None
 
     def _is_allowed(self, tags: set[str]) -> bool:
         """Return True if the tool's tags fall within the allowed tier.
@@ -83,6 +125,55 @@ class SafetyMiddleware(Middleware):
                 if level > self.max_level:
                     return False
         return found_tier
+
+    def _denial_message(self, tool_name: str, required_tier: str | None) -> str:
+        """Name the required tier and the active one.
+
+        The message this replaced hardcoded ``destructive`` for every
+        denial, so a readonly server answered ``send_keys`` by advising
+        kill_server rights in order to type into a pane.
+        """
+        if required_tier is None:
+            return (
+                f"Tool {tool_name!r} declares no safety tier and is blocked. "
+                "This is a bug in the server, not a configuration problem; "
+                "please report it."
+            )
+        return (
+            f"Tool {tool_name!r} requires safety level {required_tier!r}, but "
+            f"this server is running at {self.max_tier!r}. Restart it with "
+            f"LIBTMUX_SAFETY={required_tier} to enable it."
+        )
+
+    async def _tier_snapshot(self, fastmcp: t.Any) -> dict[str, str]:
+        """Map every registered tool name to its tier, disabled included.
+
+        Built once. ``_list_tools()`` is FastMCP-private, so a failure
+        degrades to an empty map: the call then falls through to the
+        stock ``NotFoundError``, losing the explanation but nothing
+        else. ``tests/test_server.py`` pins the behavior so a fastmcp
+        bump fails in CI rather than silently reverting this gate.
+        """
+        if self._tier_by_tool is not None:
+            return self._tier_by_tool
+
+        snapshot: dict[str, str] = {}
+        try:
+            registered = await fastmcp._list_tools()
+        except Exception:
+            logger.warning(
+                "safety tier snapshot unavailable; off-tier calls will "
+                "report 'unknown tool'",
+                exc_info=True,
+            )
+        else:
+            for tool in registered:
+                tier = _highest_tier(tool.tags)
+                if tier is not None:
+                    snapshot[tool.name] = tier
+
+        self._tier_by_tool = snapshot
+        return snapshot
 
     async def on_list_tools(
         self,
@@ -98,16 +189,36 @@ class SafetyMiddleware(Middleware):
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Block execution of tools above the safety tier."""
-        if context.fastmcp_context:
-            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and not self._is_allowed(tool.tags):
-                msg = (
-                    f"Tool '{context.message.name}' is not available at the "
-                    f"current safety level. Set LIBTMUX_SAFETY=destructive "
-                    f"to enable destructive tools."
+        """Block execution of tools above the safety tier.
+
+        Fail-closed except for a name the registry has never heard of,
+        which is a typo and deserves FastMCP's own ``NotFoundError``.
+        """
+        tool_name = context.message.name
+
+        if context.fastmcp_context is None:
+            # No registry to consult: deny, since the top tier includes
+            # kill_server.
+            msg = (
+                f"Tool {tool_name!r} was called without a FastMCP context, so "
+                "its safety tier cannot be verified. Call it through MCP."
+            )
+            raise ExpectedToolError(msg)
+
+        fastmcp = context.fastmcp_context.fastmcp
+
+        tool = await fastmcp.get_tool(tool_name)
+        if tool is not None:
+            if not self._is_allowed(tool.tags):
+                raise ExpectedToolError(
+                    self._denial_message(tool_name, _highest_tier(tool.tags))
                 )
-                raise ExpectedToolError(msg)
+            return await call_next(context)
+
+        # Invisible to ``get_tool``: gated by tier, or nonexistent.
+        gated_tier = (await self._tier_snapshot(fastmcp)).get(tool_name)
+        if gated_tier is not None:
+            raise ExpectedToolError(self._denial_message(tool_name, gated_tier))
         return await call_next(context)
 
 
@@ -429,6 +540,35 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
                 self.error_callback(error, context)
             except Exception:
                 self.logger.exception("Error in error callback")
+
+    def _transform_error(
+        self,
+        error: Exception,
+        context: MiddlewareContext,
+    ) -> Exception:
+        """Keep caller-caused failures out of the ``-32603`` catch-all.
+
+        The base transform funnels every unrecognized exception into
+        ``"Internal error: ..."``. That is right for a bug and wrong for
+        "that session does not exist". It also runs for EVERY message
+        kind, so intercepting only ``tools/call`` below left resources
+        reporting a caller's mistake as a server fault:
+        ``tmux://sessions/nosuchsession`` answered
+        ``Internal error: Session not found: nosuchsession``.
+
+        Fixed at the fork rather than by adding one resource hook. The
+        property is "an expected failure is never an internal error",
+        and it has to hold on every path this transform serves.
+        """
+        if self.transform_errors and isinstance(error, _CALLER_CAUSED_ERRORS):
+            # Mirror the base class's own convention: -32002 is the MCP
+            # code for a resource miss, -32602 says the caller's
+            # arguments were wrong. Neither prefixes the message, which
+            # already names the object that was not found.
+            method = context.method or ""
+            code = -32002 if method.startswith("resources/") else -32602
+            return McpError(ErrorData(code=code, message=str(error)))
+        return super()._transform_error(error, context)
 
     async def on_call_tool(
         self,
@@ -812,6 +952,34 @@ class ReadonlyRetryMiddleware(Middleware):
 _TRUNCATION_HEADER_TEMPLATE = "[... truncated {dropped} bytes ...]\n"
 
 
+def _restructure_truncated(
+    original: dict[str, t.Any],
+    truncated: ToolResult,
+) -> ToolResult | None:
+    """Re-attach structured content to a truncated success result.
+
+    Only the single-string result shape is rebuildable: fastmcp wraps a
+    ``-> str`` tool as ``{"result": "..."}``, so swapping in the
+    truncated text keeps the payload schema-valid. Model- and
+    list-shaped results carry the oversize inside their own fields and
+    cannot be trimmed from the flattened text, so they return None and
+    the caller reports a tool error instead of an invalid response.
+    """
+    if set(original) != {"result"} or not isinstance(original["result"], str):
+        return None
+    text = next(
+        (block.text for block in truncated.content if isinstance(block, TextContent)),
+        None,
+    )
+    if text is None:
+        return None
+    return ToolResult(
+        content=truncated.content,
+        structured_content={"result": text},
+        meta=truncated.meta,
+    )
+
+
 class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     """Response-limiter that keeps the tail of oversized output.
 
@@ -860,15 +1028,42 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
             return t.cast("ToolResult", inner)
 
         result = await super().on_call_tool(context, _capture)
-        if result is not inner and isinstance(inner, ToolResult) and inner.is_error:
-            # The base class truncated and rebuilt the result; restore
-            # the error flag it dropped.
+        if result is inner or not isinstance(inner, ToolResult):
+            return result
+
+        # The base class truncated and rebuilt the result, dropping both
+        # ``is_error`` and ``structured_content``.
+        if inner.is_error:
             return ToolResult(
                 content=result.content,
                 meta=result.meta,
                 is_error=True,
             )
-        return result
+        if inner.structured_content is None:
+            return result
+
+        # A SUCCESSFUL oversized response is the other half of the same
+        # defect: the tool declares an output schema, the rebuilt result
+        # carries no structured content, and a spec-compliant client
+        # raises a transport-level error instead of delivering truncated
+        # data. That is worse than the truncation this middleware exists
+        # to perform, and worse than having no middleware at all.
+        rebuilt = _restructure_truncated(inner.structured_content, result)
+        if rebuilt is not None:
+            return rebuilt
+        # Shape we cannot rebuild: say so as a tool error the agent can
+        # act on, rather than emitting a response its client will reject.
+        msg = (
+            "Response exceeded the server's size limit and could not be "
+            "truncated while satisfying this tool's output schema. Re-run "
+            "with a narrower range (for example a smaller max_lines, or a "
+            "less negative start)."
+        )
+        return ToolResult(
+            content=[TextContent(type="text", text=msg)],
+            meta=result.meta,
+            is_error=True,
+        )
 
     def _truncate_to_result(
         self,

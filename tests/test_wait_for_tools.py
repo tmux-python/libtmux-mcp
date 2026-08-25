@@ -91,7 +91,7 @@ def test_wait_for_channel_returns_when_signalled(mcp_server: Server) -> None:
         result = asyncio.run(
             wait_for_channel(
                 channel=channel,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )

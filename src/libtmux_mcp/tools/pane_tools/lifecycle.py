@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import pathlib
+import shlex
+import shutil
+import time
 import typing as t
+
+from libtmux import exc
+
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -62,6 +72,105 @@ def kill_pane(
     pid = pane.pane_id
     pane.kill()
     return f"Pane killed: {pid}"
+
+
+#: Bound on waiting for a respawned pane to report its new command.
+#: Measured on tmux 3.7c over 15 runs, ``pane_current_command`` reaches
+#: its new value by 26.4 ms worst case, so this is generous by an order
+#: of magnitude while keeping a pane that never matches to a fixed cost.
+_RESPAWN_SETTLE_SECONDS = 0.25
+_RESPAWN_SETTLE_INTERVAL = 0.005
+
+
+def _expected_command(shell: str | None) -> str | None:
+    """Basename tmux will report for *shell*, if it can be predicted."""
+    if not shell:
+        return None
+    try:
+        program = shlex.split(shell)[0]
+    except (ValueError, IndexError):
+        return None
+    return pathlib.PurePath(program).name or None
+
+
+def _settle_respawned_pane(pane: Pane, shell: str | None) -> None:
+    """Wait until tmux reports the respawned pane's NEW command.
+
+    ``pane_pid`` changes the instant ``respawn-pane`` returns, but
+    ``pane_current_command`` lags it by a median of 14 ms while tmux's
+    login shell is replaced. Serializing the first read describes the
+    process about to be replaced -- which is why this project's own
+    ``test_respawn_pane_replaces_shell`` has been failing intermittently
+    since it was written, absorbed by ``--reruns=2``.
+
+    Three plausible predicates were measured and all three fail:
+
+    * **Wait for the pid to change.** Necessary but not sufficient --
+      over 15 runs the command was still stale at pid-change 15 times.
+    * **Wait for the command to change.** Never fires when a shell is
+      respawned as itself, so it spins to the cap on the commonest
+      respawn of all.
+    * **Wait for two consecutive equal reads.** The worst of the three:
+      the pre-change value is *stable* for those 14 ms, so a fast poll
+      debounces onto the OLD value and returns it confidently. Measured
+      against this very function: 0/6 stale at a 20 ms poll, 2/6 at
+      5 ms, 3/6 at 1 ms -- correct only by accident of the interval.
+
+    So: match the requested command's basename, which is the only
+    predicate the data supports. Without a ``shell`` there is nothing to
+    wait for, and that is structural rather than merely observed:
+    ``spawn.c`` guards its default-command fallback on
+    ``sc->argc == 0 && (~sc->flags & SPAWN_RESPAWN)``, so a commandless
+    RESPAWN skips it and reuses the pane's existing ``argv``. The new
+    command therefore equals the old one for any pane, including one
+    running ``vim`` rather than a shell, and the immediate read is
+    already right. A requested command whose basename never appears
+    (a wrapper like ``env FOO=1 sleep 5`` reports ``sleep``, not ``env``)
+    falls through to the cap, which still exceeds the measured settle
+    time tenfold. Waiting is always safe; guessing is not.
+    """
+    expected = _expected_command(shell)
+    if expected is None:
+        return
+    deadline = time.monotonic() + _RESPAWN_SETTLE_SECONDS
+    while time.monotonic() < deadline:
+        stdout = pane.display_message("#{pane_current_command}", get_text=True)
+        if stdout and stdout[0] == expected:
+            return
+        time.sleep(_RESPAWN_SETTLE_INTERVAL)
+
+
+def _raise_if_shell_unrunnable(shell: str | None) -> None:
+    """Refuse a respawn command whose program is not executable.
+
+    Checked BEFORE respawning because the failure is destructive rather
+    than merely wrong: tmux reports success, the new process dies, and
+    the pane goes with it. Catching it afterwards can only report the
+    loss, and even that races -- ``refresh()`` often runs before the
+    doomed process has exited.
+
+    Only the program is checked, not its arguments. A relative name is
+    resolved through ``PATH`` the way a shell would; anything that
+    resolves is left to tmux, since a command can fail for reasons no
+    pre-flight can see.
+    """
+    if not shell:
+        return
+    try:
+        program = shlex.split(shell)[0]
+    except (ValueError, IndexError):
+        return
+    if "/" in program:
+        if os.access(program, os.X_OK):
+            return
+    elif shutil.which(program) is not None:
+        return
+    msg = (
+        f"{program!r} is not an executable command. Respawning with it "
+        "would kill the pane: tmux reports success, the new process "
+        "exits immediately, and the pane goes with it."
+    )
+    raise ExpectedToolError(msg)
 
 
 @handle_tool_errors
@@ -163,6 +272,7 @@ def respawn_pane(
             "Use a manual tmux command if intended."
         )
         raise ExpectedToolError(msg)
+    _raise_if_shell_unrunnable(shell)
     pane.respawn(
         kill=kill,
         start_directory=start_directory,
@@ -171,7 +281,22 @@ def respawn_pane(
     )
     # Pick up fresh pane_pid and any command/path updates; tmux does
     # not invalidate the underlying object on respawn.
-    pane.refresh()
+    try:
+        _settle_respawned_pane(pane, shell)
+        pane.refresh()
+    except exc.TmuxObjectDoesNotExist as err:
+        # tmux does not fail a respawn whose command cannot be executed:
+        # the new process dies immediately and takes the pane with it --
+        # and the window, session and server too, if it was the last
+        # one. Returning the stale object would describe a pane that no
+        # longer exists, which is how a mistyped shell reported success
+        # while destroying its own subject.
+        msg = (
+            f"pane {pane_id} did not survive the respawn: its new command "
+            "exited immediately. The pane is gone, along with its window "
+            "and session if it was the last one."
+        )
+        raise ExpectedToolError(msg) from err
     return _serialize_pane(pane)
 
 

@@ -88,9 +88,18 @@ def search_panes(
     """Search visible terminal text across all tmux panes.
 
     Use when the user asks what panes 'contain', 'mention', or 'show' —
-    e.g. 'find the pane with the pytest failure'. Searches each pane's
-    visible terminal scrollback content (not editor or browser text)
-    and returns panes where the pattern is found, with matching lines.
+    e.g. 'find the pane with the pytest failure'. Returns panes where
+    the pattern is found, with matching lines (tmux panes only, not
+    editor or browser text).
+
+    **Scope: the visible screen only, by default.** Scrollback is NOT
+    searched unless ``content_start`` is given, so a match that has
+    already scrolled off returns ``matches: []`` — which does not mean
+    the text is absent. The result reports ``searched_scope`` so this is
+    visible at the call site; pass ``content_start=-500`` (or further)
+    to include scrollback. It stays opt-in because this tool fans out
+    across every pane on the server, and defaulting to scrollback would
+    multiply cost by history depth times pane count.
 
     Bounded output contract
     -----------------------
@@ -150,6 +159,18 @@ def search_panes(
     except re.error as e:
         msg = f"Invalid regex pattern: {e}"
         raise ExpectedToolError(msg) from e
+
+    # Reject nonsense pagination rather than answering with an empty
+    # page: ``limit=0`` returned ``matches: []``, which an agent cannot
+    # tell from a genuine miss, and a negative ``offset`` was clamped
+    # to 0 and echoed back unchanged, so the result silently did not
+    # match the request.
+    if offset < 0:
+        msg = f"offset must be zero or greater (received {offset})"
+        raise ExpectedToolError(msg)
+    if limit is not None and limit < 1:
+        msg = f"limit must be at least 1, or null for no limit (received {limit})"
+        raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)
 
@@ -276,8 +297,8 @@ def search_panes(
     all_matches.sort(key=_pane_id_sort_key)
     total_panes_matched = len(all_matches)
 
-    page_start = max(0, offset)
-    page_end: int | None = None if limit is None else page_start + max(0, limit)
+    page_start = offset
+    page_end: int | None = None if limit is None else page_start + limit
     page_matches = all_matches[page_start:page_end]
 
     skipped_panes = [m.pane_id for m in all_matches[page_start:][len(page_matches) :]]
@@ -285,6 +306,11 @@ def search_panes(
 
     return SearchPanesResult(
         matches=page_matches,
+        searched_scope=(
+            "scrollback"
+            if (content_start is not None or content_end is not None)
+            else "visible"
+        ),
         truncated=per_pane_truncated or global_truncated,
         truncated_panes=skipped_panes,
         total_panes_matched=total_panes_matched,

@@ -10,6 +10,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     _get_server,
+    _raise_if_not_env_name,
     _resolve_session,
     handle_tool_errors,
 )
@@ -55,7 +56,21 @@ def show_environment(
     else:
         env_dict = server.show_environment()
 
-    return EnvironmentResult(variables=env_dict)
+    # tmux prints a variable marked REMOVED as ``-NAME``
+    # (cmd-show-environment.c). libtmux keeps the dash in the key and
+    # gives it the value True, so the removal was encoded in the key --
+    # ``variables["KRB5CCNAME"]`` raised KeyError while
+    # ``variables["-KRB5CCNAME"]`` answered True, reading as "set to
+    # true" for a variable that is explicitly unset. Split the two
+    # apart instead, so a value is always a value.
+    variables: dict[str, str] = {}
+    removed: list[str] = []
+    for name, value in env_dict.items():
+        if name.startswith("-"):
+            removed.append(name[1:])
+        elif isinstance(value, str):
+            variables[name] = value
+    return EnvironmentResult(variables=variables, removed=sorted(removed))
 
 
 @handle_tool_errors
@@ -102,6 +117,7 @@ def set_environment(
     EnvironmentSetResult
         Confirmation with variable name, value, and status.
     """
+    _raise_if_not_env_name(name)
     server = _get_server(socket_name=socket_name)
 
     if session_name is not None or session_id is not None:
@@ -117,6 +133,52 @@ def set_environment(
     return EnvironmentSetResult(name=name, value=value, status="set")
 
 
+@handle_tool_errors
+def unset_environment(
+    name: str,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    socket_name: str | None = None,
+) -> EnvironmentSetResult:
+    """Remove a tmux environment variable.
+
+    The counterpart to :func:`set_environment`. Setting a variable to
+    the empty string is not the same thing: tmux keeps the name with an
+    empty value, and new panes still inherit it as set-but-empty.
+
+    Parameters
+    ----------
+    name : str
+        Environment variable name to remove.
+    session_name : str, optional
+        Session name to remove the variable from.
+    session_id : str, optional
+        Session ID to remove the variable from.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    EnvironmentSetResult
+        Confirmation with the variable name and ``status="unset"``.
+        ``value`` is null: the variable no longer has one.
+    """
+    _raise_if_not_env_name(name)
+    server = _get_server(socket_name=socket_name)
+
+    if session_name is not None or session_id is not None:
+        session = _resolve_session(
+            server,
+            session_name=session_name,
+            session_id=session_id,
+        )
+        session.unset_environment(name)
+    else:
+        server.unset_environment(name)
+
+    return EnvironmentSetResult(name=name, value=None, status="unset")
+
+
 def register(mcp: FastMCP) -> None:
     """Register environment tools with the MCP instance."""
     mcp.tool(
@@ -129,3 +191,8 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_MUTATING,
         tags={TAG_MUTATING},
     )(set_environment)
+    mcp.tool(
+        title="Unset tmux Environment",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
+    )(unset_environment)

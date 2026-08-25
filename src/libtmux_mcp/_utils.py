@@ -7,23 +7,26 @@ for all MCP tool functions.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import functools
 import json
 import logging
 import os
 import pathlib
+import re
 import threading
 import typing as t
 
 from fastmcp.exceptions import ToolError
 from libtmux import exc
-from libtmux._internal.query_list import LOOKUP_NAME_MAP
+from libtmux._internal.query_list import LOOKUP_NAME_MAP, QueryList
 from libtmux.server import Server
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.session import Session
     from libtmux.window import Window
+    from pydantic import BaseModel
 
     from libtmux_mcp.models import PaneInfo, SessionInfo, WindowInfo
 
@@ -470,6 +473,40 @@ ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
 }
 
 
+#: POSIX portable environment variable name.
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _raise_if_flag_like(label: str, value: str) -> None:
+    """Refuse a caller string tmux would parse as a flag.
+
+    tmux reads flags before quoting can protect anything, and libtmux
+    emits ``[name, value]`` with no ``--`` terminator. So a leading
+    ``-`` substitutes one command for another silently: measured,
+    ``set_environment(name="-u", value="VICTIM")`` UNSET ``VICTIM`` and
+    reported ``status="set"``, and ``set_option(option="-g", value="x")``
+    turned off ``xterm-keys`` because tmux prefix-matched ``x``.
+    """
+    if value.startswith("-"):
+        msg = (
+            f"{label} may not begin with '-': tmux parses it as a flag, so "
+            f"the call would run a different command than the one requested "
+            f"(got {value!r})."
+        )
+        raise ExpectedToolError(msg)
+
+
+def _raise_if_not_env_name(name: str) -> None:
+    """Refuse an environment variable name tmux or POSIX cannot hold."""
+    if not _ENV_NAME_RE.match(name):
+        msg = (
+            f"Environment variable name must match [A-Za-z_][A-Za-z0-9_]* "
+            f"(got {name!r}). tmux stores anything else verbatim as an "
+            "unusable name, and a leading '-' is read as a flag."
+        )
+        raise ExpectedToolError(msg)
+
+
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
     """Build a full tmux argv list honouring ``socket_name`` and ``socket_path``.
 
@@ -549,22 +586,32 @@ def _get_server(
 
     cache_key = (socket_name, socket_path, tmux_bin)
     with _server_cache_lock:
-        if cache_key in _server_cache:
-            cached = _server_cache[cache_key]
-            if not cached.is_alive():
+        cached = _server_cache.get(cache_key)
+
+    # ``is_alive()`` is a tmux subprocess round trip. Holding the cache
+    # lock across it serialises every concurrent tool call in this
+    # process behind one another -- measured, it capped a 16-way
+    # parallel socket scan at about 2x instead of 8x.
+    if cached is not None:
+        if cached.is_alive():
+            return cached
+        with _server_cache_lock:
+            if _server_cache.get(cache_key) is cached:
                 del _server_cache[cache_key]
 
-        if cache_key not in _server_cache:
-            kwargs: dict[str, t.Any] = {}
-            if socket_name is not None:
-                kwargs["socket_name"] = socket_name
-            if socket_path is not None:
-                kwargs["socket_path"] = socket_path
-            if tmux_bin is not None:
-                kwargs["tmux_bin"] = tmux_bin
-            _server_cache[cache_key] = Server(**kwargs)
+    kwargs: dict[str, t.Any] = {}
+    if socket_name is not None:
+        kwargs["socket_name"] = socket_name
+    if socket_path is not None:
+        kwargs["socket_path"] = socket_path
+    if tmux_bin is not None:
+        kwargs["tmux_bin"] = tmux_bin
+    server = Server(**kwargs)
 
-        return _server_cache[cache_key]
+    # Two threads racing to fill the same key both build a valid handle;
+    # ``setdefault`` makes them agree on which one the cache keeps.
+    with _server_cache_lock:
+        return _server_cache.setdefault(cache_key, server)
 
 
 def _invalidate_server(
@@ -841,10 +888,175 @@ def _coerce_dict_arg(
     return value
 
 
+@functools.cache
+def _filterable_fields(obj_type: type) -> frozenset[str]:
+    """Attribute names a filter key may begin with.
+
+    ``QueryList`` resolves a key by ``getattr`` traversal and treats a
+    miss as "no match", so an unknown field silently filters every row
+    out and an empty result is indistinguishable from a typo.
+
+    Deliberately permissive: it rejects names the type cannot have and
+    accepts everything else, because ``__`` traversal into a nested
+    object is legitimate and only the first segment is checkable here.
+    """
+    names = {name for name in dir(obj_type) if not name.startswith("_")}
+    if dataclasses.is_dataclass(obj_type):
+        names |= {field.name for field in dataclasses.fields(obj_type)}
+    return frozenset(names)
+
+
+_MODEL_FIELD_ALIASES: dict[str, str] = {
+    "window_count": "session_windows",
+    "pane_count": "window_panes",
+    "active_pane_id": "active_pane__pane_id",
+}
+"""Output fields tmux exposes under a different attribute name."""
+
+
+def _admits_bool(annotation: t.Any) -> bool:
+    """Whether a model field's annotation can hold a bool."""
+    return annotation is bool or bool in t.get_args(annotation)
+
+
+_BOOL_TRUE = frozenset({"true", "1", "yes"})
+_BOOL_FALSE = frozenset({"false", "0", "no"})
+
+#: Operators that mean anything against a bool. The rest are string or
+#: collection tests; libtmux's lookups fall through to ``return False``
+#: for a bool, so allowing them would answer every query with an empty
+#: list -- including contradictory pairs like ``__in``/``__nin``.
+_BOOL_OPERATORS = frozenset({"exact", "eq"})
+
+
+def _coerce_model_value(key: str, value: t.Any, annotation: t.Any) -> t.Any:
+    """Coerce a filter value to what the model field actually holds.
+
+    ``filters`` is typed ``dict[str, str]``, so a bool field is
+    addressed as ``"true"``; comparing that to ``True`` never matches.
+    An unrecognised token is rejected rather than compared as a string,
+    which would report "nothing matched" for a typo.
+    """
+    if isinstance(value, str) and _admits_bool(annotation):
+        lowered = value.strip().lower()
+        if lowered in _BOOL_TRUE:
+            return True
+        if lowered in _BOOL_FALSE:
+            return False
+        msg = (
+            f"Filter '{key}' takes a boolean, got {value!r}. Use one of: "
+            f"{', '.join(sorted(_BOOL_TRUE | _BOOL_FALSE))}."
+        )
+        raise ExpectedToolError(msg)
+    return value
+
+
+def _path_resolves(item: t.Any, path: str) -> bool:
+    """Whether ``path``'s ``__``-separated segments resolve on ``item``.
+
+    ``None`` ends the walk only at an INTERMEDIATE segment, where there
+    is genuinely nothing to traverse into. On the terminal segment it is
+    an ordinary value -- tmux leaves many format fields empty, so
+    ``active_pane__pane_start_command`` is None on every shell pane --
+    and treating that as unresolvable turns a true empty result into a
+    false error.
+    """
+    current = item
+    segments = path.split("__")
+    last = len(segments) - 1
+    for i, segment in enumerate(segments):
+        try:
+            current = getattr(current, segment)
+        except Exception:  # noqa: BLE001 - any failure means "no such path"
+            return False
+        if current is None:
+            return i == last
+    return True
+
+
+def _attribute_access_error(probe: list[t.Any], field: str) -> str | None:
+    """Message if ``field`` raises on every probed item, else ``None``.
+
+    libtmux keeps removed properties around so they raise a message
+    naming the replacement. ``dir()`` still lists them, so they reach
+    callers as filterable; ``QueryList`` swallows the raise and answers
+    an empty list. Surfacing libtmux's own message is what makes the
+    refusal useful.
+
+    One item settles it: the raise comes from the class, so it cannot
+    differ per instance.
+    """
+    if not probe:
+        return None
+    try:
+        getattr(probe[0], field)
+    except Exception as exc:  # noqa: BLE001 - reported, not handled
+        return str(exc)
+    return None
+
+
+def _unknown_field_message(
+    key: str,
+    field: str,
+    allowed_fields: frozenset[str],
+    model_fields: t.Mapping[str, t.Any],
+    obj_type: type,
+) -> str:
+    """Build the error for a filter key naming no known field."""
+    msg = f"Unknown filter field '{field}' in '{key}'."
+    known = sorted(set(allowed_fields) | set(model_fields))
+    close = difflib.get_close_matches(field, known, n=3)
+    if close:
+        msg += f" Did you mean: {', '.join(close)}?"
+    return (
+        f"{msg} Every field this tool returns is filterable: "
+        f"{', '.join(sorted(model_fields))}. libtmux "
+        f"{obj_type.__name__} attributes are accepted too, though tmux "
+        "leaves many of them empty."
+    )
+
+
+def _raise_if_path_unresolvable(
+    probe: list[t.Any],
+    field_path: str,
+    key: str,
+    valid_ops: list[str],
+    *,
+    operator_parsed: bool,
+) -> None:
+    """Reject a multi-segment path no item can resolve.
+
+    Guards the traversal fallback: without this, a mistyped operator
+    (``session_name__containss``) reads as a path, resolves on nothing
+    and filters every row out -- the silent-empty answer this module
+    exists to prevent. Only provable when something is there to probe,
+    so an empty list is left alone.
+    """
+    if "__" not in field_path:
+        return
+    if not probe or any(_path_resolves(item, field_path) for item in probe):
+        return
+    msg = f"Filter '{key}' names no attribute path on any item."
+    if not operator_parsed:
+        # Only a key with no operator can be a mistyped one. When an
+        # operator WAS parsed off, blaming the last path segment for
+        # not being one denies the operator the caller supplied.
+        trailing = field_path.rsplit("__", 1)[1]
+        close = difflib.get_close_matches(trailing, valid_ops, n=3)
+        msg += (
+            f" '{trailing}' is not a filter operator either; did you mean '{close[0]}'?"
+            if close
+            else f" '{trailing}' is not a filter operator either."
+        )
+    raise ExpectedToolError(msg)
+
+
 def _apply_filters(
     items: t.Any,
     filters: dict[str, str] | str | None,
     serializer: t.Callable[..., M],
+    obj_type: type,
+    model_type: type[BaseModel],
 ) -> list[M]:
     """Apply QueryList filters and serialize results.
 
@@ -858,6 +1070,14 @@ def _apply_filters(
         If None or empty, all items are returned.
     serializer : callable
         Serializer function to convert each item to a model.
+    obj_type : type
+        libtmux class of the filtered items, used to validate filter
+        field names. Taken as a parameter rather than read off the
+        first item so an empty list still validates -- an empty result
+        is exactly when a typo most needs reporting.
+    model_type : type
+        Model ``serializer`` returns. Its fields are filterable too, so
+        that filtering by what a listing displayed always works.
 
     Returns
     -------
@@ -867,7 +1087,8 @@ def _apply_filters(
     Raises
     ------
     ExpectedToolError
-        If a filter key uses an invalid lookup operator.
+        If a filter key uses an invalid lookup operator or names a
+        field the object cannot have.
     """
     coerced = _coerce_dict_arg("filters", filters)
     if not coerced:
@@ -875,18 +1096,58 @@ def _apply_filters(
     filters = coerced
 
     valid_ops = sorted(LOOKUP_NAME_MAP.keys())
-    for key in filters:
+    allowed_fields = _filterable_fields(obj_type)
+    model_fields = model_type.model_fields
+    attr_filters: dict[str, t.Any] = {}
+    model_filters: dict[str, t.Any] = {}
+    probe = list(items)
+
+    for key, value in filters.items():
+        # A trailing segment that is not an operator is part of the
+        # attribute path, matching QueryList: it treats an unknown
+        # trailing segment as a path and defaults the operator to
+        # ``exact``, so ``active_pane__pane_id`` traverses.
+        field_path, op = key, ""
         if "__" in key:
-            _field, op = key.rsplit("__", 1)
-            if op not in LOOKUP_NAME_MAP:
+            lhs, trailing = key.rsplit("__", 1)
+            if trailing in LOOKUP_NAME_MAP:
+                field_path, op = lhs, trailing
+
+        field = field_path.split("__", 1)[0]
+        if field in allowed_fields:
+            removed = _attribute_access_error(probe, field)
+            if removed is not None:
+                msg = f"Filter field '{field}' cannot be read: {removed}"
+                raise ExpectedToolError(msg)
+            _raise_if_path_unresolvable(
+                probe, field_path, key, valid_ops, operator_parsed=bool(op)
+            )
+            attr_filters[key] = value
+        elif field in _MODEL_FIELD_ALIASES:
+            attr_filters[_MODEL_FIELD_ALIASES[field] + key[len(field) :]] = value
+        elif field in model_fields:
+            annotation = model_fields[field].annotation
+            if _admits_bool(annotation) and op and op not in _BOOL_OPERATORS:
                 msg = (
-                    f"Invalid filter operator '{op}' in '{key}'. "
-                    f"Valid operators: {', '.join(valid_ops)}"
+                    f"Operator '{op}' does not apply to boolean field "
+                    f"'{field}'. Use {' or '.join(sorted(_BOOL_OPERATORS))}, "
+                    "or omit the operator."
                 )
                 raise ExpectedToolError(msg)
+            # Computed server-side, so it exists only after serializing.
+            model_filters[key] = _coerce_model_value(key, value, annotation)
+        else:
+            raise ExpectedToolError(
+                _unknown_field_message(
+                    key, field, allowed_fields, model_fields, obj_type
+                )
+            )
 
-    filtered = items.filter(**filters)
-    return [serializer(item) for item in filtered]
+    filtered = items.filter(**attr_filters) if attr_filters else items
+    results = [serializer(item) for item in filtered]
+    if model_filters:
+        results = list(QueryList(results).filter(**model_filters))
+    return results
 
 
 def _serialize_session(session: Session) -> SessionInfo:
@@ -1029,6 +1290,69 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
+#: tmux stderr fragments that mean the socket genuinely has no daemon
+#: behind it. Anything else on a failed ``list-sessions`` -- a protocol
+#: mismatch, a permission error -- means a server that exists and cannot
+#: be talked to, which is a different answer.
+_NO_SERVER_MARKERS = (
+    "no server running",
+    "no such file or directory",
+    "error connecting to",
+)
+
+
+def _probe_liveness(server: Server) -> tuple[bool, str | None]:
+    """Return ``(alive, unreachable_reason)`` for *server*.
+
+    ``Server.is_alive()`` answers False for a socket with no daemon AND
+    for a live server this tmux binary cannot speak to, and
+    ``Server.sessions`` degrades to ``[]`` in both cases. libtmux's own
+    docstring points at ``is_alive`` to tell those apart, but it cannot:
+    both collapse to the same False.
+
+    The difference matters because they warrant opposite reactions. "No
+    server" is a fact an agent can act on; "cannot reach the server" over
+    a socket whose daemon is running -- an ordinary tmux upgrade leaves
+    sockets older than the binary -- reported as False tells the agent
+    the user's work is gone. tmux distinguishes them on stderr, so read
+    it rather than the boolean.
+    """
+    try:
+        result = server.cmd("list-sessions")
+    except Exception as err:  # noqa: BLE001 - probe must not raise
+        return False, str(err)
+
+    if result.returncode == 0:
+        return True, None
+
+    detail = " ".join(result.stderr).strip() if result.stderr else ""
+    lowered = detail.lower()
+    if any(marker in lowered for marker in _NO_SERVER_MARKERS):
+        return False, None
+    return False, detail or f"tmux exited with status {result.returncode}"
+
+
+def _undouble(prefix: str, text: str) -> str:
+    """Drop *prefix* from *text* when the wrapper is about to add it back."""
+    return text.removeprefix(prefix)
+
+
+def _is_format_newline_parse_error(e: BaseException) -> bool:
+    """Detect libtmux failing to parse a format value containing a newline.
+
+    libtmux <= 0.62.0 splits ``-F`` output one line per object, so a
+    newline inside any value (a pane's current directory, most reachably)
+    splits that record and its strict ``zip`` raises. It surfaces as a
+    bare ``ValueError`` and would otherwise reach the agent as
+    "Unexpected error", logged at ERROR, naming nothing it can act on.
+
+    Matched on the message because the raise site is a stdlib ``zip``
+    with no dedicated exception type. Kept even once the floor moves
+    past the libtmux fix: the installed version is not ours to choose.
+    """
+    return isinstance(e, ValueError) and "zip()" in str(e)
+
+
 def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
     """Translate a libtmux / unexpected exception into a ``ToolError``.
 
@@ -1066,8 +1390,20 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
         )
     if isinstance(e, exc.PaneNotFound):
         return ExpectedToolError(
-            f"Pane not found: {e}",
+            f"Pane not found: {_undouble('Pane not found: ', str(e))}",
             suggestion="Call list_panes to discover valid pane ids.",
+        )
+    if _is_format_newline_parse_error(e):
+        return ExpectedToolError(
+            "tmux listing could not be parsed: a format value contains a "
+            "newline, almost always a pane whose current directory has one "
+            "in its name. Every pane on this server is affected, not just "
+            "that one, because pane lookup enumerates them all.",
+            suggestion=(
+                "Find it with: tmux list-panes -a -F "
+                "'#{pane_id} #{pane_current_path}' | cat -A — then move or "
+                "rename that directory. Upgrading libtmux also fixes it."
+            ),
         )
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")

@@ -68,8 +68,18 @@ def display_message(
         session_id=session_id,
         window_id=window_id,
     )
-    stdout = pane.display_message(format_string, get_text=True)
-    return "\n".join(stdout) if stdout else ""
+    # ``--`` terminates flag parsing so a format that begins with a
+    # dash reaches tmux as a format. Without it, format_string="-p" was
+    # eaten as tmux's own print flag and tmux answered with its DEFAULT
+    # message -- a plausible string answering a question nobody asked.
+    # libtmux's display_message() cannot pass the terminator, hence the
+    # direct cmd().
+    result = pane.cmd("display-message", "-p", "--", format_string)
+    if result.stderr:
+        detail = "; ".join(result.stderr)
+        msg = f"display-message failed: {detail}"
+        raise ExpectedToolError(msg)
+    return "\n".join(result.stdout) if result.stdout else ""
 
 
 @handle_tool_errors

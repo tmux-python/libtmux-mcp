@@ -125,15 +125,29 @@ def _validate_buffer_name(name: str) -> str:
     >>> _validate_buffer_name("clipboard")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid buffer name: 'clipboard'
+    libtmux_mcp._utils.ExpectedToolError: 'clipboard' is not an MCP-allocated buffer
     >>> _validate_buffer_name("libtmux_mcp_shortuuid_buf")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid buffer name: 'libtmux_mcp_...'
+    libtmux_mcp._utils.ExpectedToolError: 'libtmux_mcp_...' is not an MCP-...
     """
     if not _BUFFER_NAME_RE.fullmatch(name):
-        msg = f"Invalid buffer name: {name!r}"
-        raise ExpectedToolError(msg)
+        # Not "invalid": tmux accepts any of these names happily. It is
+        # this server that only touches buffers it allocated, because
+        # tmux buffers can hold OS clipboard history and a tool that
+        # reads arbitrary ones is a clipboard reader.
+        msg = f"{name!r} is not an MCP-allocated buffer"
+        raise ExpectedToolError(
+            msg,
+            suggestion=(
+                "This server only reads and writes buffers it created "
+                "(libtmux_mcp_<32-hex>_<label>), because tmux buffers may "
+                "contain clipboard history. Stage content with load_buffer "
+                "and pass the BufferRef it returns. A buffer created "
+                "outside this server -- a copy-mode yank, or tmux's own "
+                "buffer0 -- is not reachable by design."
+            ),
+        )
     return name
 
 

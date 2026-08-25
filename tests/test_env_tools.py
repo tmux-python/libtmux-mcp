@@ -5,7 +5,11 @@ from __future__ import annotations
 import typing as t
 
 from libtmux_mcp.models import EnvironmentResult
-from libtmux_mcp.tools.env_tools import set_environment, show_environment
+from libtmux_mcp.tools.env_tools import (
+    set_environment,
+    show_environment,
+    unset_environment,
+)
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
@@ -49,3 +53,68 @@ def test_show_environment_session(mcp_server: Server, mcp_session: Session) -> N
     )
     assert isinstance(result, EnvironmentResult)
     assert isinstance(result.variables, dict)
+
+
+def test_show_environment_separates_removed_from_set(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A removed variable is a name, not a value of ``True``.
+
+    tmux prints a variable marked removed as ``-NAME``. Keeping the
+    dash in the key put the removal in the key -- so a lookup by the
+    real name raised KeyError -- and giving it ``True`` read as "set to
+    true" for a variable that is explicitly unset.
+    """
+    mcp_session.cmd("set-environment", "MCP_ENV_KEPT", "yes")
+    mcp_session.cmd("set-environment", "-r", "MCP_ENV_GONE")
+
+    result = show_environment(
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.variables["MCP_ENV_KEPT"] == "yes"
+    assert "MCP_ENV_GONE" in result.removed
+    assert "MCP_ENV_GONE" not in result.variables
+    assert not any(name.startswith("-") for name in result.variables)
+
+
+def test_set_environment_refuses_a_flag_shaped_name(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A name tmux would read as a flag must not reach tmux.
+
+    ``set_environment(name="-u", value="VICTIM")`` ran
+    ``set-environment -u VICTIM``, which DELETED VICTIM, and reported
+    ``status="set"``. libtmux emits ``[name, value]`` with no ``--``.
+    """
+    import pytest
+    from fastmcp.exceptions import ToolError
+
+    set_environment(name="VICTIM", value="precious", socket_name=mcp_server.socket_name)
+
+    for name in ("-u", "-r", "A;kill-server"):
+        with pytest.raises(ToolError, match="Environment variable name must match"):
+            set_environment(
+                name=name, value="VICTIM", socket_name=mcp_server.socket_name
+            )
+
+    survivors = show_environment(socket_name=mcp_server.socket_name).variables
+    assert survivors.get("VICTIM") == "precious"
+
+
+def test_unset_environment_removes_a_variable(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Unset is reachable through the API, not only through the flag bug."""
+    socket = mcp_server.socket_name
+    set_environment(name="KEEPME", value="v1", socket_name=socket)
+    set_environment(name="DROPME", value="v2", socket_name=socket)
+
+    result = unset_environment(name="DROPME", socket_name=socket)
+    assert result.status == "unset"
+    assert result.value is None
+
+    variables = show_environment(socket_name=socket).variables
+    assert "DROPME" not in variables
+    assert variables.get("KEEPME") == "v1"

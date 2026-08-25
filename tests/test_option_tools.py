@@ -59,3 +59,64 @@ def test_set_option(mcp_server: Server, mcp_session: Session) -> None:
     )
     assert result.status == "set"
     assert result.option == "display-time"
+
+
+def test_show_option_resolves_inherited_values(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``include_inherited`` answers what is in force, not what is set here.
+
+    A bare session-scope read of an inherited option returns ``None``,
+    which reads as "unset" when the value really is in effect. tmux has
+    ``-A`` for this; it was not exposed, so an agent could ask "is it
+    set at this exact scope?" but never "what is in force?" -- and the
+    latter is what a question like "is mouse mode on?" means.
+    """
+    plain = show_option(
+        option="history-limit",
+        scope="session",
+        target=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    inherited = show_option(
+        option="history-limit",
+        scope="session",
+        target=mcp_session.session_name,
+        include_inherited=True,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert plain.value is None
+    assert plain.scope_queried == "session"
+    assert plain.include_inherited is False
+    # The value actually in force is reachable now.
+    assert inherited.value is not None
+    assert int(str(inherited.value)) > 0
+    assert inherited.include_inherited is True
+
+
+def test_set_option_refuses_a_flag_shaped_name(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """An option name tmux would read as a flag must not reach tmux.
+
+    ``set_option(option="-g", value="x")`` had ``-g`` eaten as the
+    global flag, leaving ``x`` as the option name -- which tmux
+    prefix-matched to ``xterm-keys`` and turned off, while the result
+    reported ``status="set"`` for an option the caller never named.
+    """
+    import pytest
+    from fastmcp.exceptions import ToolError
+
+    before = show_option(
+        option="xterm-keys", scope="server", socket_name=mcp_server.socket_name
+    ).value
+
+    for name in ("-g", "-u"):
+        with pytest.raises(ToolError, match="may not begin with"):
+            set_option(option=name, value="x", socket_name=mcp_server.socket_name)
+
+    after = show_option(
+        option="xterm-keys", scope="server", socket_name=mcp_server.socket_name
+    ).value
+    assert after == before

@@ -200,13 +200,41 @@ class ServerInfo(BaseModel):
     socket_path: str | None = Field(default=None, description="Socket path")
     session_count: int = Field(description="Number of sessions")
     version: str | None = Field(default=None, description="tmux version")
+    unreachable_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why a server that exists could not be queried, e.g. this tmux "
+            "binary being older than the one that created the socket. When "
+            "set, is_alive=False means 'could not ask', NOT 'not running', "
+            "and session_count=0 carries no information."
+        ),
+    )
 
 
 class OptionResult(BaseModel):
     """Result of a show_option call."""
 
     option: str = Field(description="Option name")
-    value: t.Any = Field(description="Option value")
+    value: t.Any = Field(
+        description=(
+            "Option value. ``null`` means NOT SET AT THE SCOPE QUERIED, "
+            "which is not the same as not set: an option inherited from "
+            "a wider scope reads as null unless ``include_inherited`` "
+            "was passed."
+        )
+    )
+    scope_queried: str = Field(
+        default="server",
+        description="Scope this answer describes, so null is readable.",
+    )
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "True when inherited values were resolved (tmux ``-A``), so "
+            "the value is the one in force rather than only one set at "
+            "this scope."
+        ),
+    )
 
 
 class OptionSetResult(BaseModel):
@@ -220,15 +248,29 @@ class OptionSetResult(BaseModel):
 class EnvironmentResult(BaseModel):
     """Result of a show_environment call."""
 
-    variables: dict[str, str | bool] = Field(description="Environment variable mapping")
+    variables: dict[str, str] = Field(
+        description="Variables that are SET, mapped to their values."
+    )
+    removed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names tmux marks as explicitly REMOVED from the environment "
+            "(it prints them as ``-NAME``). These are not in ``variables``. "
+            "Distinct from a name that simply never appears, which tmux "
+            "does not report at all."
+        ),
+    )
 
 
 class EnvironmentSetResult(BaseModel):
     """Result of a set_environment call."""
 
     name: str = Field(description="Variable name")
-    value: str = Field(description="Value that was set")
-    status: str = Field(description="Operation status")
+    value: str | None = Field(
+        default=None,
+        description="Value that was set; null when the variable was unset",
+    )
+    status: str = Field(description="Operation status: 'set' or 'unset'")
 
 
 class WaitForTextResult(BaseModel):
@@ -299,6 +341,17 @@ class WaitForTextResult(BaseModel):
             "``alternate_screen``."
         ),
     )
+    stop_matched_at_entry: bool = Field(
+        default=False,
+        description=(
+            "True when a ``stop`` pattern was already on screen before the "
+            "wait began. The wait only stops on a FRESH stop hit, so this "
+            "does not end it -- but a failure marker left from an earlier "
+            "run is the usual reason a ``timeout`` outcome is misread as "
+            "'still running'. Read it as: check whether you are waiting on "
+            "a run that already failed."
+        ),
+    )
     matched_at_entry: bool = Field(
         default=False,
         description=(
@@ -366,6 +419,18 @@ class RunCommandResult(BaseModel):
         description="Shell exit status, or None when the command timed out",
     )
     timed_out: bool = Field(description="True when the wait timed out")
+    command_may_still_run: bool = Field(
+        default=False,
+        description=(
+            "True when the wait timed out, meaning the command was SENT "
+            "but not observed to finish. It is not cancelled: the "
+            "keystrokes sit in the pane's input buffer and the shell "
+            "runs them whenever it next reads a line, which may be long "
+            "after this call returned. Do NOT retry a non-idempotent "
+            "command on this result -- that is how a `git push` or a "
+            "migration runs twice. Check the pane first."
+        ),
+    )
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
     output: list[str] = Field(
         default_factory=list,
@@ -646,11 +711,24 @@ class SearchPanesResult(BaseModel):
         default_factory=list,
         description="PaneContentMatch entries for this page.",
     )
+    searched_scope: t.Literal["visible", "scrollback"] = Field(
+        default="visible",
+        description=(
+            "How much of each pane was read. ``visible`` is the default "
+            "and means ONLY the on-screen rows were searched, so a match "
+            "that has scrolled off is not reported and ``matches: []`` "
+            "does not mean the text is absent. Pass ``content_start`` "
+            "(e.g. -500) to search scrollback."
+        ),
+    )
     truncated: bool = Field(
         default=False,
         description=(
             "True when the result set was truncated by ``limit`` or "
-            "by ``max_matched_lines_per_pane`` on any pane."
+            "by ``max_matched_lines_per_pane`` on any pane. It describes "
+            "those caps ONLY -- it never reports rows left unread "
+            "because the search was scoped to the visible screen; read "
+            "``searched_scope`` for that."
         ),
     )
     truncated_panes: list[str] = Field(

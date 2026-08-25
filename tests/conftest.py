@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import pathlib
+import time
 import typing as t
 
 import pytest
+from libtmux.server import Server as _Server
 
 from libtmux_mcp._utils import _server_cache
 
@@ -13,6 +18,43 @@ if t.TYPE_CHECKING:
     from libtmux.server import Server
     from libtmux.session import Session
     from libtmux.window import Window
+
+#: A socket this old cannot belong to a run that is still going: the
+#: whole suite takes about two minutes. Age-gating matters because
+#: pytest-xdist workers all start at once, and an unconditional reaper
+#: in one worker would kill the servers another worker just created.
+_ABANDONED_SOCKET_AGE_SECONDS = 3600
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Reap tmux daemons left behind by runs that were killed.
+
+    Fixture finalizers do not run when pytest is SIGKILLed or the
+    machine goes down, so an interrupted run leaks a live tmux daemon
+    and its socket permanently, and they accumulate: measured 119 live
+    servers spanning three days on one development box. A clean run
+    leaks none -- verified before/after -- so this is purely about
+    interrupted ones.
+
+    It is not only untidy. ``list_servers`` probes every live socket, so
+    the debris makes that tool slower on every call for as long as it
+    sits there.
+    """
+    tmpdir = pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
+    uid_dir = tmpdir / f"tmux-{os.geteuid()}"
+    if not uid_dir.is_dir():
+        return
+    cutoff = time.time() - _ABANDONED_SOCKET_AGE_SECONDS
+    for entry in uid_dir.glob("libtmux_test*"):
+        try:
+            if not entry.is_socket() or entry.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        with contextlib.suppress(Exception):
+            _Server(socket_name=entry.name).kill()
+        with contextlib.suppress(OSError):
+            entry.unlink()
 
 
 @pytest.fixture(autouse=True)

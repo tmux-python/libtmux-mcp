@@ -6,6 +6,724 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+#### `list_servers` is 6.7x faster, and concurrent calls stop queueing
+
+`list_servers` probed each live socket with its own tmux subprocess,
+serially. It is strictly linear in live servers -- about 12 ms each --
+so a box with 119 of them spent **1.5 seconds** in the tool the server
+instructions point at for discovery, which makes it the first call a
+client makes. Every other read-only tool measures 12-58 ms.
+
+The probes are independent, so they now run in a pool of 16.
+`ThreadPoolExecutor.map` preserves input order, so the listing stays
+sorted by socket name however the probes interleave.
+
+That alone only bought 2x, and the reason was somewhere else entirely.
+`_get_server` held the module's cache lock across `Server.is_alive()`
+-- a tmux subprocess round trip -- so every concurrent tool call in the
+process queued behind one another for the duration of a subprocess. The
+liveness check now happens outside the lock, and two threads racing to
+cache the same key agree via `setdefault`.
+
+That second fix is not about `list_servers`. Any concurrent use of this
+server was serialised at that lock: a `call_readonly_tools_batch`, two
+agents sharing a server, a wait in one pane while another is queried.
+
+Measured at 40 live servers, same box: 536 ms serial, 176 ms at 4
+workers, 80 ms at 16, 76 ms at 32. 16 takes the win and 32 buys
+nothing. Stale entries were never the problem and still are not: 200
+extra non-socket files cost about 8 ms total.
+
+
+#### `tmux://panes/{pane_id}` works past pane 9
+
+A tmux pane id starts with `%`, and the URI layer percent-decodes every
+captured template parameter before a handler sees it, so `%10` arrived
+as byte `0x10` and matched nothing. `%0` through `%9` survived only by
+accident -- one trailing hex digit is an *invalid* escape and passes
+through unchanged. So the resource surface worked right up until a
+server created its eleventh pane, while the tool surface answered
+correctly for the same pane. An agent got different answers depending
+on which surface it used.
+
+The obvious repair does not work and is worth recording so nobody
+reaches for it: re-encoding the decoded byte back to `%XX` handles
+`%10`-`%7f` and cannot handle `%80`-`%99`, which decode to bytes that
+are not valid UTF-8 and arrive as U+FFFD with the digits already gone.
+That fix passes every test written against low pane numbers and fails
+once a server reaches pane 128.
+
+A bare number needs no escaping at any pane number, so `tmux://panes/10`
+is now the spelling that always works; `%2510` keeps working for anyone
+who found that workaround. The not-found error also `repr()`s the id
+and says so when it is unprintable -- previously it read
+`"Pane not found: "` with an invisible control character, pointing at
+nothing.
+
+
+#### `capture_since` no longer re-delivers scrollback when a pane narrows
+
+Narrowing a pane rewraps its history longer, and the cursor carried no
+width, so the anchor's row coordinates silently stopped meaning
+anything. `start` went negative by exactly the rewrap growth and
+`capture-pane -S` returned that many rows of already-seen scrollback as
+new output -- under `lines_missed=false`, asserting nothing had been
+missed. Measured: 160 to 40 columns re-delivered 189 stale lines, and
+**one** column of narrowing re-delivered three.
+
+Widening was already caught, which is what hid it: rewrap makes history
+*shorter*, so the existing shrink branch fired. Growth from a rewrap is
+indistinguishable from growth from real output, so no branch fired on
+the way down. The cursor now carries `pane_width` and a change
+invalidates it exactly as a `pane_pid` change does -- width being the
+precise discriminator, since history growing from real output must stay
+valid. A cursor minted before this field existed is treated as
+invalidated rather than trusted, which self-heals on the next call.
+
+The trigger is a user resizing their terminal.
+
+#### `run_command` refuses a pane in copy mode
+
+Copy, view and clock mode own the keyboard while `alternate_on` stays 0
+and `pane_current_command` still reads as the shell, so both existing
+arms of the busy-pane guard missed it. Measured with a client attached:
+across eight trials the command never ran, the payload was consumed as
+copy-mode keystrokes, and the user's scroll position was destroyed in
+seven of them -- while the result reported `command_may_still_run`,
+which would send an agent away from retrying a command that had never
+happened.
+
+`#{pane_in_mode}` rides in the `display-message` round trip the guard
+already makes. Refusing before sending is what preserves the scroll
+position; a probe would still have typed into it.
+
+Without an attached client the same call fails benignly with "no
+current client" and copy mode survives, so a test written on a detached
+fixture sees the mild version and misses this one.
+
+
+#### A caller string starting with `-` no longer runs a different command
+
+`set_environment(name="-u", value="VICTIM")` returned
+`{"name": "-u", "value": "VICTIM", "status": "set"}`. What actually ran
+was `tmux set-environment -u VICTIM`, which **deleted** a pre-existing
+variable. Nothing was set, something was destroyed, and the result said
+the opposite.
+
+`set_option` had it twice, and the second is worse because two
+mechanisms stack. `set_option(option="-g", value="x")` let tmux eat
+`-g` as the global flag, leaving `x` as the option name -- which tmux
+then prefix-matched to `xterm-keys` and turned off. A caller who named
+neither `xterm-keys` nor anything resembling it silently changed it and
+was told `status="set"` for the option they did name.
+
+tmux parses flags before quoting can protect anything, and libtmux
+emits `[name, value]` with no `--` terminator. Quoting itself is sound:
+`A;kill-server` and `CANARY_TWO -u` were both stored verbatim as absurd
+but literal names, killing nothing and unsetting nothing. The hole is
+specifically a *first character* of `-` that happens to name a flag the
+target command accepts -- `set_option(option="-U")` was already refused
+by tmux as an invalid flag, which is what makes `-u` and `-g` the
+dangerous cases rather than the obvious ones.
+
+Environment names are now validated against POSIX
+`[A-Za-z_][A-Za-z0-9_]*`, which rejects every flag-shaped name by
+construction along with the junk above; option names must not begin
+with `-`, the looser rule that `@user-options` require. `display_message`
+takes the third form: a format legitimately may start with `-`, so it
+gets tmux's `--` terminator instead of a refusal. Previously
+`format_string="-p"` was eaten as tmux's own print flag and tmux
+answered with its DEFAULT message -- a plausible string answering a
+question nobody asked.
+
+This is the `send_keys` flag bug, fixed earlier in this branch with
+`--`, reappearing in three more tools. There it dropped a keystroke;
+here it destroys state.
+
+#### `unset_environment`
+
+There was no way to remove a tmux environment variable. `value=""` sets
+an empty string, which new panes still inherit as set-but-empty, and
+`EnvironmentResult.removed` described a state no tool in the server
+could produce. The only route to an unset was the flag bug above, so
+closing that without this would have removed a capability rather than
+a hazard.
+
+
+#### Filters answer, or say why not -- three silent-empty paths closed
+
+Follow-ups on the filtering work above, all found by driving the server
+as a client rather than by reading the code.
+
+**Operators that cannot apply to a boolean are refused.** `is_caller__in`
+and `is_caller__nin` both returned zero rows against the same set --
+every row is either in or not in, so one of those answers was false
+whichever way you read it -- and `is_caller__regex: ".*"` matched
+nothing. Upstream, `lookup_in`, `lookup_nin` and `lookup_regex` all
+guard on `isinstance(data, (str, list))` and fall off the end to
+`return False` for a bool. That is not fixable from here, so the
+operator is now checked against the field's declared type and refused
+with a message instead of run.
+
+**An unparseable boolean is refused.** `is_caller: "ture"` compared a
+string to `True`, matched nothing and reported no error -- the typo
+bug this branch fixed for field names, one position to the right. The
+accepted tokens are in the message.
+
+**A traversal path with no trailing operator now works.**
+`active_pane__pane_id` raised "Invalid filter operator 'pane_id'"
+because the last segment was taken as an operator unconditionally.
+libtmux gets this right (`OpNotFound` subclasses `ValueError`, so
+`QueryList` catches its own raise and defaults to `exact`), which made
+the server stricter than the engine beneath it -- and it rejected from
+callers the exact key form its own alias generates internally.
+
+The fallback is not free: read naively, a mistyped operator like
+`session_name__containss` reads as an attribute path, resolves on
+nothing, and filters every row out silently -- reintroducing the bug
+one line below the fix. A multi-segment path that no item can resolve
+is therefore an error, which the operator message is folded into.
+
+#### `run_command` refuses a pane running `top`
+
+`top` owns the keyboard but repaints the primary screen, so
+`alternate_on` stays 0 for as long as it runs -- measured at 0 through
+8 seconds, not a startup race. It therefore passed both arms of the
+busy-pane guard and took this tool's exit-status wrapper as single-key
+commands. `htop` and `watch` reach the alternate screen and were
+already refused, which is what made the gap easy to miss.
+
+
+#### Filter by what a listing actually showed you
+
+`list_panes(filters={"is_caller": true})` raised `Unknown filter field
+'is_caller'`. That call is not an edge case: it is the workflow the
+server's own instructions hand every client as the only way to answer
+"which pane am I in?", since there is no whoami tool.
+
+Filters went straight into libtmux's `QueryList`, which resolves keys by
+`getattr` on the tmux object. Two kinds of output field are invisible
+there -- ones the server computes while serializing (`is_caller`) and
+ones tmux exposes under a different name (`window_count`, `pane_count`,
+`active_pane_id`). So the documented workflow could not work, and
+neither could filtering a session list by the window count it had just
+displayed.
+
+The old error message compounded it. "Call this tool without filters to
+see available fields" pointed at a listing that shows 6 of a Session's
+230 filterable fields, two of which were themselves rejected as filters
+-- so following the advice returned a set that was both 97% incomplete
+and partly invalid.
+
+Every field a tool returns is now filterable. Computed fields are
+applied after serialization through the same `QueryList` operators, so
+`__contains` and friends behave identically; aliased ones rewrite to
+their attribute path. Because `filters` is typed `dict[str, str]`,
+`"true"` is accepted wherever `true` is. The error now names the output
+fields outright and counts the wider attribute set behind them.
+
+#### `respawn_pane` returns the new process, not the one it replaced
+
+`pane_pid` changes the instant `respawn-pane` returns, but
+`pane_current_command` reports tmux's transient login shell for a few
+tens of milliseconds before the requested command execs over it —
+measured at roughly 50 ms on tmux 3.7c. The model was serialized from
+the first read, so a caller checking "did my shell take effect?" against
+the returned `PaneInfo` got the process that was about to be replaced.
+
+This was not cosmetic: `test_respawn_pane_replaces_shell` asserts on
+that field and has been failing intermittently since it was written,
+absorbed by the suite's `--reruns=2`. That existing test is the
+regression guard, and it is now deterministic.
+
+Three plausible predicates were measured and all three fail. Waiting for
+the pid to change is necessary but not sufficient — over 15 runs the
+command was still stale at pid-change 15 times. Waiting for the command
+to *change* never fires when a pane is respawned as itself. Waiting for
+two consecutive equal reads is the worst of the three: the pre-change
+value is itself stable for those ~14 ms, so a fast poll debounces onto
+the OLD value and returns it confidently — measured at 0/6 stale with a
+20 ms poll, 2/6 at 5 ms and 3/6 at 1 ms, i.e. correct only by accident
+of the interval.
+
+What ships instead matches the requested command's basename, which is
+interval-independent. Without a `shell` there is nothing to wait for, and that is structural:
+tmux's `spawn.c` guards its default-command fallback on
+`sc->argc == 0 && (~sc->flags & SPAWN_RESPAWN)`, so a commandless
+respawn skips it and reuses the pane's existing `argv`. The new command
+equals the old for any pane, including one running an editor rather
+than a shell. A wrapper command whose basename never appears falls
+through to a 250 ms cap, ten times the measured 26.4 ms worst case.
+
+#### Three tools now report what happened, not what was asked
+
+`pipe_pane`, `respawn_pane` and `paste_text` each returned success for
+an operation that did not do what the caller asked. In all three the
+confirming signal was already reachable and simply not consulted.
+
+**`pipe_pane` to an unwritable path.** tmux hands the pipe command to a
+shell and reports success whatever that shell then does, so a redirect
+into a missing directory produced `Piping pane %N to ...` and no file
+ever appeared — and a stale file already at that path would then read
+back as if it were live capture. The destination is now checked before
+piping. `#{pane_pipe}` looks like the obvious discriminator and is not:
+measured, it reads `1` immediately after a doomed pipe, because the
+shell has been spawned and has not yet failed on the redirect.
+
+**`respawn_pane` with a shell that cannot run.** tmux does not fail a
+respawn whose command cannot be executed: the new process dies at once
+and takes the pane with it — and its window, session and server, if it
+was the last one. Measured, a mistyped shell path destroyed the whole
+server while the tool returned a `PaneInfo` describing a pane that no
+longer existed. The program is now checked before respawning, since
+catching it afterwards can only report the loss and even that races the
+dying process. A respawn that still loses its pane raises rather than
+returning stale state.
+
+**`paste_text` with a trailing newline.** Bracketed paste — the default
+— holds the newline in the shell's edit buffer instead of submitting.
+That is correct terminal behavior and a safe default, but `Text pasted`
+reads as "your command ran", and the text is not inert: it executes
+when Enter next reaches that pane from any source, possibly long after
+the call and out of order with it. The result now says so and names
+both ways to submit.
+
+#### Resource URIs warn that a name must be percent-encoded
+
+A resource URI's path segment is percent-decoded before lookup, which
+is correct URI behavior — but nothing said so, and nothing round-trips
+a name into a URI safely. With two sessions named `pct name` and
+`pct%20name`, reading `tmux://sessions/pct%20name` returns **`pct
+name`**: the wrong session, silently, with no error. Only
+`tmux://sessions/pct%2520name` reaches the one whose name contains the
+literal `%`. A space needs no encoding, so the trap only springs on
+`%`.
+
+The resource docstrings now say this at the point an agent constructs a
+URI. Concatenating a `session_name` straight from `list_sessions` is
+the obvious construction and the one that breaks, so a ready-made
+`uri` field on the session/window/pane models remains the better fix
+and is recorded as follow-up rather than landed unverified.
+
+#### A missing resource is no longer an "Internal error"
+
+Reading `tmux://sessions/nosuchsession` answered `Internal error:
+Session not found: nosuchsession`. That is a caller naming something
+that does not exist, reported as a server fault.
+
+`ToolErrorResultMiddleware` exists to remove exactly that wrapper — its
+docstring says so — but it intercepted `tools/call` only, while
+fastmcp's transform it inherits from serves *every* message kind. So
+the defect survived one fork over, on resources.
+
+Fixed at the transform rather than by adding a resource hook: an error
+this server raised deliberately to describe a caller-caused failure now
+maps to `-32002` on a resource read and `-32602` elsewhere, with its own
+message intact. The property — an expected failure is never an internal
+error — now holds on every path that transform serves, instead of on
+the one path that was noticed.
+
+#### A non-MCP buffer name is described accurately
+
+`load_buffer`/`paste_buffer`/`show_buffer` answered a name like
+`yanked` or tmux's own `buffer0` with `Invalid buffer name` — but those
+names are perfectly valid to tmux. What is true is that they were not
+allocated by this server, which only touches buffers it created because
+tmux buffers can hold OS clipboard history.
+
+The message now says that, and the suggestion states the consequence
+plainly: a buffer created outside this server — a copy-mode yank, or
+`buffer0` — is not reachable by design, and `load_buffer` is the way to
+stage content it can read back.
+
+#### `run_command` checks the pane has a shell to talk to
+
+`run_command` assumed a cooperative shell sitting at a prompt, and
+neither verified nor documented it. The assumption holds in tests and
+breaks in a live session, in two ways.
+
+**A program owns the keyboard.** Sent to a pane running
+`less`, this tool's exit-status wrapper was consumed as *less's*
+keystrokes — `s=$?` became its save-to-file command and a fragment
+escaped to a shell, leaving `Cannot write to "=$?; tmux ...` on screen.
+In `vi` the same payload lands in the buffer, where `:`-prefixed
+fragments are commands that edit and write files. `run_command` now
+reads `alternate_on` before sending and refuses, naming the program and
+pointing at `send_keys` for raw input. The signal was already there:
+`snapshot_pane` reports both `alternate_on` and `pane_current_command`.
+
+`alternate_on` alone turned out to be necessary rather than sufficient,
+and the counterexample is reachable through this server's own tooling:
+`less` viewing a `pipe_pane` capture decides the file is binary and
+prompts *"may be a binary file. See it anyway?"* **before** entering the
+alternate screen, so it owns the keyboard with `alternate_on=0` and the
+wrapper ran to a clean `exit_status=0`. A small deny-list of pagers and
+editors covers that case.
+
+The obvious general test — "the foreground command is not the process
+tmux started" — was implemented, measured, and rejected. It separates a
+prompt from `less`, a `python` REPL and a running command cleanly, but
+it also refuses a pane where the user simply ran `bash` inside a `zsh`
+pane, and equally `sudo -s`, `ssh` or `nix-shell`, all of which have a
+perfectly good prompt. There is no reliable way to ask tmux "is there a
+prompt", so the guard errs toward letting calls through and names only
+what is known harmful. It is incomplete by construction: a program not
+on the list, and not yet on the alternate screen, still receives the
+wrapper.
+
+What that costs is worth stating, because "incomplete" reads as "the
+command does not run" and the real consequence is worse than that.
+Measured against a `python` REPL: the call is not refused, `timed_out`
+and `command_may_still_run` both fire correctly — so the agent is told
+the truth — but the REPL is left at a `...` continuation with an
+unterminated block, and the *next* input to that pane, from anyone, is
+appended to it rather than read as a fresh statement. The pane's own
+state survives; nothing is destroyed. That is the line the deny-list
+draws: destructive programs are refused, merely disruptive ones are
+carried by `command_may_still_run`.
+
+**A timed-out command is sent, not cancelled.** With the pane blocked on
+a foreground command, the keystrokes sit in the terminal's input buffer
+and the shell runs them whenever it next reads a line — verified: a
+command that reported `timed_out=True` executed once the blocking
+`sleep` returned, with no bound on when. An agent reading `timed_out`
+alone concludes the command did not run and retries, which is how a
+`git push`, a migration or a deploy runs twice, the second time when
+nothing is watching. The result now carries `command_may_still_run`,
+which says so.
+
+The wrapper is also sent through the checked send path, so a rejected
+send surfaces as an error rather than as a timeout.
+
+#### `show_option` can answer what is actually in force
+
+`show_option(option="history-limit", scope="session")` returned
+`value: null` while 50000 was in effect. tmux resolves inherited values
+with `-A` and libtmux has always accepted `include_inherited`, but the
+tool never exposed it — so an agent could ask "is this set at this
+exact scope?" and never "what is in force here?", which is what a
+question like "is mouse mode on?" actually means.
+
+`include_inherited` is now a parameter, and the result carries
+`scope_queried` so a `null` is readable rather than being mistaken for
+"not set anywhere".
+
+#### `show_environment` no longer encodes removal in the key
+
+tmux prints a variable it has marked removed as `-NAME`. The dash was
+kept in the key and the value set to boolean `true`, so
+`variables["KRB5CCNAME"]` raised `KeyError` while
+`variables["-KRB5CCNAME"]` answered `true` — reading as "set to true"
+for a variable that is explicitly unset, and forcing every consumer to
+type-check a `str | bool` mapping.
+
+`variables` now holds only names that are set, mapped to their values,
+and removed names are listed separately under `removed`.
+
+#### `search_panes` rejects pagination it cannot honour
+
+`limit=0` returned `matches: []`, indistinguishable from a genuine
+miss, and a negative `offset` was clamped to zero while being echoed
+back unchanged, so the result silently did not describe the request.
+Both now raise.
+
+#### `search_panes` says how much of each pane it read
+
+`search_panes` searches only the visible screen unless `content_start`
+is given, but reported `matches: []` alongside `truncated: false` — an
+active claim that nothing was left out, for a search that never looked
+at scrollback. Its docstring described "visible terminal scrollback
+content", which reads as scrollback.
+
+The result now carries `searched_scope` (`visible` / `scrollback`), and
+`truncated` is documented as describing the `limit` and per-pane line
+caps only. The default stays visible-only deliberately: the tool fans
+out across every pane on the server, so defaulting to scrollback would
+multiply cost by history depth times pane count and make identical
+calls take wildly different times depending on how long panes had been
+alive.
+
+#### `paste_text("")` is a no-op instead of an error
+
+tmux creates no buffer for empty content, so the follow-up
+`paste-buffer` failed with `no buffer libtmux_mcp_..._paste` — an error
+for a no-op, naming an internal buffer the caller never chose.
+
+#### `send_keys` documents its size ceiling
+
+tmux rejects a `send-keys` argument beyond roughly 16 KB with `command
+too long`. The docstring now names that limit and points at
+`paste_text`, which routes through a buffer rather than argv and takes
+far more. It also warns against verifying a write by string-comparing
+captured text: tmux renders combining marks and zero-width joiners as
+`<XXXX>` placeholders, so `école` and emoji sequences come back
+transformed even when the bytes were delivered correctly.
+
+#### An oversized response is truncated, not rejected by the client
+
+A capture large enough to hit the server's 1 MB backstop produced
+`RuntimeError: Tool capture_pane has an output schema but did not return
+structured content` — a transport-level failure delivering **no data at
+all**, which is worse than the truncation the limiter exists to perform.
+`capture_pane`'s own docstring advertises `max_lines=None` for a
+complete capture, so the documented way to ask for everything was the
+way to break it. It is size-driven, not `None`-driven: a large explicit
+`max_lines` fails identically.
+
+The limiter rebuilds the result when it truncates, and that rebuild
+dropped `structured_content` alongside `is_error`. The `is_error` half
+had already been fixed and documented; the successful-response half was
+left standing. Truncated successes now carry structured content again.
+
+Where the payload's shape cannot be trimmed while staying schema-valid,
+the call returns an actionable tool error telling the agent to narrow
+its range, rather than a response its client will reject outright.
+
+Tail preservation itself was correct throughout — the head is dropped,
+the newest output kept, and the number of dropped lines reported.
+
+#### `capture_since` no longer loses a flooded pane silently
+
+Output that laps a pane's `history-limit` returned **no lines** with
+`lines_missed=False`, while tmux still held dozens of them. The field
+built to report exactly this loss reported the opposite.
+
+Two defects compounded. `_cursor_anchor_lost` has no overflow case:
+`history_size` climbs to the limit and then stays pinned while rows are
+evicted off the top, so none of its three tests fire. And the cursor
+fingerprint degenerates to a single hash whenever the anchor was the
+last row — which is the normal case, because an agent starts tailing an
+idle pane and the anchor is the shell prompt. The uniqueness guard asks
+whether a candidate is unique *in the current buffer*, not unique *in
+time*, so once the flood evicted the anchor its one surviving twin was
+the prompt currently on screen: one candidate, guard satisfied, false
+match. Everything above it was dropped as "already seen".
+
+Matches are now rejected on position when they fall past `anchor_abs` —
+tmux evicts only from the top, so a surviving anchor can only move
+earlier. Where that is not enough (an anchor taken at the bottom of an
+already-saturated history, where the two positions overlap), a
+single-hash fingerprint additionally refuses to match inside the
+visible region. Declining costs a conservative `lines_missed=True`,
+which stays honest: a saturated history means rows were evicted whether
+or not the anchor survived. Panes not near their history limit are
+unaffected.
+
+Saturation is asked via the existing trim-risk heuristic rather than
+`history_size == history_limit`: measured on tmux 3.7c, a pane with
+`history-limit 20` pins at `history_size 19`, so an exact comparison
+never fires on the very panes this guards.
+
+The existing regression test worked around the defect rather than
+catching it — its docstring notes that "the flood alone is not
+deterministic" and adds a `clear-history` to force anchor destruction,
+so the flood-only path real agents hit was never covered. It is now.
+
+#### `show_hooks()` no longer drops hooks that `show_hook()` finds
+
+tmux does not unify `-g` listings across its session and window trees,
+so `show-hooks -g` omits pane-level hooks that `show-hooks -gw` holds.
+A merge existed to paper over that, and its own comment said what it
+was for — but it was gated on the caller passing `scope="server"`
+explicitly. The natural call, `show_hooks()`, left `scope` at its
+default and skipped the merge, so asking "what hooks are configured?"
+the obvious way returned an incomplete list with no sign anything was
+omitted, and `show_hook()` on a missing name then contradicted it.
+
+The test named for this behavior only exercised the explicit-scope
+path, so the default one was never covered.
+
+#### `list_servers` rows carry a complete identity
+
+The directory scan held each socket's full path and reported only its
+name, so `socket_path` was null on every scanned row. Passing that same
+socket through `extra_socket_paths` then listed it a second time
+carrying the opposite half of its identity, with nothing to tie the two
+rows together — an agent could not tell they were one server.
+
+Scanned rows now carry both fields, and extras are deduplicated against
+the scan by resolved path. A socket whose name does not round-trip
+through `tmux -L` — one containing a newline, say — is listed by path
+instead of being dropped from the results without a word.
+
+#### `wait_for_text` reports a stop marker that was already on screen
+
+The entry scan covered `patterns` and not `stop`, so waiting on a pane
+that already showed a failure marker returned a bare `timeout` with no
+sign the marker had been there the whole time. The realistic shape: an
+agent runs a build, it fails, the agent waits for the next build without
+clearing, and reads `timeout` as "still running" when the honest answer
+is "the previous run already failed".
+
+`WaitForTextResult` gains `stop_matched_at_entry`, kept separate from
+`matched_at_entry` because a stale success marker and a stale failure
+marker call for opposite reactions. A stale stop hit still does not end
+the wait — only a fresh one does.
+
+The server instructions described this as `stop=[] bails`, which two
+independent readers parsed as "the empty list bails". `stop=[]` is
+accepted and behaves like `stop=null`; it is a stop *hit* that returns
+immediately, and the text now says so.
+
+#### A live server no longer reports as absent
+
+When the tmux binary running this server is older than the one that
+created a socket, `get_server_info` returned `is_alive=False,
+session_count=0` and `list_sessions` returned `[]` — both without error.
+An agent reads that as "the user's work is gone". `list_panes` did error,
+so two of four calls answered with a confident falsehood.
+
+`Server.is_alive()` answers `False` both for a socket with no daemon and
+for a live server this binary cannot speak to, and `Server.sessions`
+degrades to `[]` in both cases. libtmux's own docstring points at
+`is_alive` to tell the two apart, but it cannot — they collapse to the
+same `False`. tmux itself distinguishes them on stderr, so that is read
+instead of the boolean.
+
+`list_sessions` now raises rather than claiming a server it could not
+query is empty, and names the likely cause. `ServerInfo` gains
+`unreachable_reason`: when it is set, `is_alive=False` means "could not
+ask", not "not running", and `session_count=0` carries no information.
+
+The trigger is an ordinary tmux upgrade — sockets outlive the binary
+that made them. The boundary is between tmux 3.5 and 3.6, and only in
+the old-client-to-new-server direction; a newer binary reads an older
+server correctly.
+
+#### A rejected copy-mode command is no longer reported as success
+
+`exit_copy_mode` on a pane that was not in a mode returned a full
+`PaneInfo`, which reads as confirmation the pane left copy mode. tmux
+says `not in a mode` and exits 1. `Pane.send_keys(copy_mode_cmd=...)`
+discards that result, the same way the ordinary send path did.
+`enter_copy_mode(scroll_up=...)` used the same unchecked call.
+
+#### A newline in a directory name is diagnosed, not "Unexpected error"
+
+A pane whose current directory contains a newline makes libtmux fail to
+parse `-F` output, and because every pane lookup enumerates panes, the
+whole tmux server stops resolving — healthy panes included. It reached
+the agent as `Unexpected error: ValueError: zip() argument 2 is shorter
+than argument 1`, logged at ERROR, naming nothing it could act on. The
+agent also could not repair it through the MCP, since every tool that
+could move the pane needed the same enumeration.
+
+It is now an expected failure that names the cause and how to find the
+offending pane. The parse itself is fixed in libtmux
+([#752](https://github.com/tmux-python/libtmux/pull/752)); this
+diagnosis stays useful regardless, because the installed libtmux
+version is not this package's to choose.
+
+#### `Pane not found:` is no longer said twice
+
+`exc.PaneNotFound` prefixes its own message and the error mapper
+prefixed it again, so the most frequently hit error in the server read
+`Pane not found: Pane not found: %9999`.
+
+#### A typo in a filter field is an error, not an empty list
+
+`list_sessions`, `list_windows` and `list_panes` validated the *operator*
+half of a Django-style filter key and never the *field* half, so
+`filters={"nosuch_field__contains": "x"}` returned `[]`. A key with no
+`__` at all, like `{"totally_bogus": "zzz"}`, was not checked by
+anything. libtmux's `QueryList` resolves a filter key by attribute
+traversal and treats a miss as "no match", so a misspelled field
+silently filtered every row out and the empty result was
+indistinguishable from a genuine one.
+
+Field names are now checked against the object being filtered, with
+near-misses suggested:
+
+```
+Unknown filter field 'session_nme' in 'session_nme__contains'.
+Did you mean: session_name, session_marked, session_id?
+```
+
+Validation covers only the leading segment of a key, so nested
+traversal such as `active_window__window_name__contains` keeps working.
+
+#### A pane that dies mid-wait reports the death, not a parse crash
+
+Killing a pane while `wait_for_text` was waiting on it surfaced
+`Unexpected error: ValueError: invalid literal for int() with base 10:
+''`. tmux expands every field of a vanished pane to the empty string,
+and three `int()` calls on the poll path took it raw.
+
+Fixing only the `int()` calls would have replaced the crash with a wrong
+answer: `pane_dead` is one of the blanked fields, so it reads back as
+`"0"` and cannot report the death itself. A killed pane would then have
+failed the pid comparison instead and been reported as *respawned*. A
+live pane always has a `pane_pid`, so an empty one is the reliable
+signal that the pane is gone, and the wait now ends with `pane %N died;
+cursor/baseline anchor is no longer valid`.
+
+`_read_history_limit` had the same defect one call over — its guard
+covered an empty list but not an empty string — and now shares the
+helper.
+
+#### `send_keys` no longer drops text that starts with `-`
+
+`send_keys(keys="-X cancel", literal=True)` returned `Keys sent to pane
+%N` and sent nothing. tmux parsed the payload as flags and rejected the
+command; the wrapper discarded tmux's result and returned a hardcoded
+success string. Reachable with ordinary input — `--help` or `-v` typed
+into a REPL, a negative number, a pasted diff line.
+
+The `send-keys` argv now ends flag parsing with `--`, and a failed send
+raises with tmux's own stderr instead of reporting success. This covers
+`send_keys` and both `send_keys_batch` paths, which each built the argv
+separately; the timed batch path surfaced the error but still failed to
+deliver.
+
+#### A gated tool now says which tier it needs
+
+Calling a tool above the server's `LIBTMUX_SAFETY` tier reported
+`Unknown tool: 'kill_pane'` — the server denying that its own gated tool
+exists. An agent told a tool is absent reports the capability as missing
+rather than naming the setting that enables it.
+
+Off-tier calls now name both the tier the tool requires and the tier in
+force:
+
+```
+Tool 'kill_pane' requires safety level 'destructive', but this server is
+running at 'mutating'. Restart it with LIBTMUX_SAFETY=destructive to
+enable it.
+```
+
+The message previously hardcoded `LIBTMUX_SAFETY=destructive` for every
+denial, so a `readonly` server answered a `send_keys` call by advising
+the strongest tier — telling a user to grant `kill_server` rights in
+order to type into a pane. The tier named is now the one the tool
+actually needs.
+
+Two gates were always intended here, and only one of them worked.
+FastMCP's native `disable()` enforces the tier; `SafetyMiddleware` was
+meant to explain it. Because `get_tool()` answers `None` for a disabled
+tool, the middleware's `if tool and not allowed` guard never ran for the
+tools it was written for. Off-tier names now resolve against the full
+registry, which retains disabled tools and their tags.
+
+Denials also reach the audit log as denials again. The server's
+middleware ordering is built so that a tier denial raises inside
+`SafetyMiddleware` and is recorded by `AuditMiddleware` outside it;
+while the denial never fired, a blocked call was audited as an
+unknown-tool error instead.
+
+The batch wrappers carried the same defect through a second call path:
+`_get_allowed_tool_tier` also read `get_tool` and raised "Unknown tool"
+on `None`, so a gated tool and a misspelled one produced byte-identical
+rows. It now hands the operation on instead of duplicating the lookup —
+the nested call runs through the middleware, which names the tier for a
+gated tool while a real typo still gets FastMCP's own error.
+
+`SafetyMiddleware.on_call_tool` additionally fails closed when no
+FastMCP context is present. It previously fell through to the tool,
+which was fail-open in a gate whose top tier includes `kill_server`, and
+was masked only because the native gate made the dispatch fail anyway.
+
 ### Documentation
 
 #### opencode joins the install picker
@@ -16,6 +734,165 @@ panel rather than a paste-this-JSON one — which also sidesteps opencode's
 unusual entry shape.
 
 ### Development
+
+**A killed test run leaked a tmux daemon forever**
+
+Fixture finalizers do not run when pytest is `SIGKILL`ed, so an
+interrupted run left a live tmux daemon and its socket behind
+permanently. They accumulate: 119 live `libtmux_test*` servers spanning
+three days were found on one development box.
+
+A clean run leaks none -- measured before and after, delta zero -- so
+this is specifically about interrupted runs, of which a session
+debugging flaky tests produces plenty.
+
+It is not only untidy. `list_servers` probes every live socket, so the
+debris was also what made that tool spectacular rather than merely slow:
+119 servers x ~12.7 ms is the 1517 ms measured there.
+
+`pytest_sessionstart` now reaps `libtmux_test*` sockets older than an
+hour. The age gate is the load-bearing part: pytest-xdist workers all
+start at once, so an unconditional reaper in one worker would kill the
+servers another worker had just created. An hour is far longer than the
+two-minute suite and far shorter than debris survives.
+
+
+**The suite is green in CI while two to five tests fail per parallel run**
+
+Measured, and it is the finding that supersedes several smaller ones in
+this branch's history.
+
+Run the suite as CI does — `pytest -n auto` — but with `--reruns` off,
+and **every run fails**. Two independent sets of runs agree:
+
+```
+run    1    2    3    4    5
+A      1    5    2    3    3   failures
+B      6    4    1    -    -   failures
+```
+
+A different set each time, well over a dozen distinct tests in the
+union. Most send keys to a real `zsh` and wait inside a fixed budget;
+under `-n auto` the tmux servers and shell startups compete and budgets
+tuned on an idle machine expire.
+
+**Scope the fix by the pattern, not by the filename.** Eleven sampled
+runs put all but one failure in `tests/test_pane_tools.py`, which
+invites narrowing the work to that module. Counting the at-risk pattern
+instead — drives a real shell *and* waits on output — finds it in
+several modules, with `test_pane_tools.py` holding roughly 75-85% of
+the wait sites. The spread is itself instructive: a pattern that counts
+`wait_for_text` calls inflates that module, because `wait_for_text` is
+the tool *under test* there, so the metric measures something adjacent
+to the claim in precisely the place the adjacency is greatest.
+`retry_until` alone is the cleaner proxy. Its dominance in every sample
+is a density effect, not exclusivity, and a thin tail elsewhere is
+exactly what a single observed failure in `tests/test_history.py`
+represents. Sampling reads a distribution's mode as its support; the
+density count settles in one pass what eleven runs could not.
+
+Run it in the default configuration and the same suite reports
+`968 passed, 6 skipped, **7 rerun**` — green. The rerun count is the
+only visible trace, and it is easy to read past.
+
+Three separate per-test explanations were proposed and measured away
+during this branch before the shape became clear: a shared pane shrunk
+by another test's split (impossible — the fixtures are function-scoped),
+a retry budget too tight in the abstract (the marker needs 0.24 s
+against 2 s), and test ordering (survives randomization in isolation).
+Each was a local explanation for a global property, and each looked
+plausible because a single failing test is exactly what a global
+property looks like from inside one test.
+
+The configurations are why it took so long to see: fixed-order with
+reruns on, random-order with reruns off but serial, and CI's parallel
+with reruns on are all blind to it. Only parallel-with-reruns-off
+shows it.
+
+One earlier change in this branch that moved a test to its own window
+on the strength of the shared-pane theory has been reverted, since it
+addressed a mechanism that cannot occur.
+
+**Fixed, and mostly not by adjusting budgets**
+
+A fresh six-run sample confirmed the scoping criterion above: the union
+now reaches `tests/test_history.py`, so the work is scoped by the
+pattern — drives a real shell AND waits — and not by the file that
+happens to hold most of it.
+
+The dominant cause is not a budget. Twelve test helpers slept and
+claimed to synchronise: `_emit_after_baseline`'s docstring said "once
+the wait has armed" and its body was `await asyncio.sleep(0.2)`. Five
+more said "let wait_for_text capture its baseline first" above a
+`sleep(0.1)`. Losing that race is not a slow pass, it is a permanent
+failure: `wait_for_text` filters each poll against the row content
+captured at entry, so a marker emitted before the baseline is inside
+that set and can never match afterwards. One such failure burned a
+**20 second** budget — no budget would have saved it, which is exactly
+what made "raise the timeouts" the wrong first instinct.
+
+Those twelve sites now await an event set on the wait's *second*
+`_bounded_capture`. The first of those calls IS the entry capture, and
+the second is issued only after its rows have been stored, so arming is
+complete by the time the event fires. The helper docstrings became
+true rather than aspirational.
+
+One test resisted that fix and needed restructuring instead: the
+history-limit risk-band test raced a 200-line burst against a 2 s wait
+to push `history_size` into the top 10% of `history-limit`. It now
+fills history into the band *before* the wait starts, so the warning
+fires on the first poll.
+
+The genuinely time-based ones were then raised together. Every
+`retry_until` in the suite is `raises=True` — a positive wait — and for
+those a larger budget costs nothing when the test passes, because the
+call returns as soon as its condition holds. It only lengthens
+time-to-fail. So all 56 sites under 10 s went to 10 s at once rather
+than one per sampled run. `run_command`'s status-after-shell-state
+test went from 2 s to 10 s for the same reason: its subject is the
+reported status, not the latency.
+
+`send_keys_batch`'s timeout fixture was a third thing again. Its sends
+are monkeypatched to return instantly, so the 0.05 s budget bounded
+nothing but Python overhead — and under load that overhead pre-empted
+the injected `TimeoutExpired` the test exists to exercise, so the test
+failed while measuring the wrong mechanism.
+One budget is deliberately left small and now says so in the code:
+`test_run_command_reports_unclamped_timeout` passes a timeout that it
+then asserts is echoed back verbatim, so widening it breaks the
+assertion. The sweep above caught it, which is the argument for
+sweeping rather than editing constants by hand.
+
+A follow-up pass caught the cost of getting that rule slightly wrong.
+Raising a budget is free only when the call returns as soon as its
+condition holds. Three sites are the opposite -- they spend the whole
+budget on purpose, to prove something does NOT happen -- and raising
+those turned a ceiling into a bill:
+
+| site | before | after |
+|---|---|---|
+| `wait_for_text` case `silent_pane_still_times_out` | 20.0 s | 1.0 s |
+| `pipe_pane` "the file must not grow" | 10.0 s | 1.0 s |
+| `wait_for_text` tail-cap (pattern never appears) | 6.0 s | 3.0 s |
+
+The `pipe_pane` one is the instructive shape: it is a
+`retry_until(..., raises=True)` *inside* `pytest.raises(WaitTimeout)`,
+so it reads as a positive wait and behaves as a negative one. Serial
+suite time went from 139 s to 117 s, and the slowest single test from
+20.0 s to 3.0 s.
+
+Measured before and after, `pytest -n auto --reruns 0`, same box:
+
+| | runs failing | failures per run | loadavg at start |
+|---|---|---|---|
+| before | 6 of 6 | 3, 2, 2, 1, 1, 5 | 13 - 33 |
+| after | 1 of 3 | 0, 2, 0 | 25 - 45 |
+
+The after runs are the less favourable comparison, not the more: they
+ran at roughly double the load, on a box shared with a second agent
+driving tmux continuously. The two failures in that run were the same
+pure-budget shape at a `timeout=5.0` the first sweep had not covered,
+and are fixed by the same rule.
 
 **`mcp_swap.py` covers opencode and pi**
 

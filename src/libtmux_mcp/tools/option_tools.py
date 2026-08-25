@@ -13,6 +13,7 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     ExpectedToolError,
     _get_server,
+    _raise_if_flag_like,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -66,12 +67,20 @@ def show_option(
     scope: t.Literal["server", "session", "window", "pane"] | None = None,
     target: str | None = None,
     global_: bool = False,
+    include_inherited: bool = False,
     socket_name: str | None = None,
 ) -> OptionResult:
     """Show a tmux option value.
 
     Use to check tmux configuration values such as history-limit,
     mouse support, or status bar settings.
+
+    **``value: null`` means "not set AT THIS SCOPE", not "not set".**
+    An option inherited from a wider scope reads as null here, so
+    ``show_option("history-limit", scope="session")`` answers null while
+    50000 is in force. Pass ``include_inherited=True`` (tmux's ``-A``)
+    to ask what is actually in effect, which is what most questions —
+    "is mouse mode on?" — really mean.
 
     Parameters
     ----------
@@ -85,17 +94,30 @@ def show_option(
         For pane scope: pane ID (e.g. '%1'). Requires scope.
     global_ : bool
         Whether to query the global option.
+    include_inherited : bool
+        Resolve inherited values (tmux ``-A``) so the answer is the
+        value in force at this scope rather than only one set on it.
     socket_name : str, optional
         tmux socket name.
 
     Returns
     -------
     OptionResult
-        Option name and its value.
+        Option name, its value, and the scope that was queried.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
-    value = obj.show_option(option, global_=global_, scope=opt_scope)
-    return OptionResult(option=option, value=value)
+    value = obj.show_option(
+        option,
+        global_=global_,
+        scope=opt_scope,
+        include_inherited=include_inherited or None,
+    )
+    return OptionResult(
+        option=option,
+        value=value,
+        scope_queried=scope or ("global" if global_ else "server"),
+        include_inherited=include_inherited,
+    )
 
 
 @handle_tool_errors
@@ -135,6 +157,7 @@ def set_option(
         Confirmation with option name, value, and status.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
+    _raise_if_flag_like("Option name", option)
     obj.set_option(option, value, global_=global_, scope=opt_scope)
     return OptionSetResult(option=option, value=value, status="set")
 

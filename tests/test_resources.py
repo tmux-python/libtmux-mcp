@@ -6,6 +6,7 @@ import json
 import typing as t
 
 import pytest
+from fastmcp.exceptions import ResourceError
 
 from libtmux_mcp.resources.hierarchy import register
 
@@ -184,3 +185,37 @@ def test_hierarchy_resources_advertise_mime_type(uri: str, expected_mime: str) -
     candidate = by_uri.get(uri)
     assert candidate is not None, f"resource {uri!r} not registered"
     assert candidate.mime_type == expected_mime
+
+
+def test_pane_resource_accepts_a_bare_pane_number(
+    resource_functions: dict[str, t.Any], mcp_session: Session
+) -> None:
+    """A pane id above %9 is only addressable as a bare number.
+
+    The URI layer percent-decodes every captured template parameter, and
+    a tmux pane id starts with '%', so '%10' arrives as byte 0x10.
+    '%0'-'%9' survive only because one trailing hex digit is an invalid
+    escape -- the surface works until a server creates its 11th pane.
+    """
+    fn = resource_functions["tmux://panes/{pane_id}{?socket_name}"]
+    for _ in range(11):
+        mcp_session.new_window()
+
+    pane_ids = sorted(
+        (p.pane_id for p in mcp_session.server.panes if p.pane_id),
+        key=lambda value: int(value[1:]),
+    )
+    assert int(pane_ids[-1][1:]) >= 10, "need a two-digit pane id to exercise this"
+
+    for pane_id in (pane_ids[0], pane_ids[-1]):
+        data = json.loads(fn(pane_id.lstrip("%")))
+        assert data["pane_id"] == pane_id
+
+
+def test_pane_resource_names_a_percent_decoded_id(
+    resource_functions: dict[str, t.Any], mcp_session: Session
+) -> None:
+    """A mangled id must say so, not read as an empty 'not found'."""
+    fn = resource_functions["tmux://panes/{pane_id}{?socket_name}"]
+    with pytest.raises(ResourceError, match="percent-decoded by the URI layer"):
+        fn("\x10")

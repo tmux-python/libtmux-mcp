@@ -8,6 +8,7 @@ import typing as t
 import pytest
 from fastmcp.exceptions import ToolError
 from libtmux import exc
+from libtmux.session import Session
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
@@ -30,11 +31,11 @@ from libtmux_mcp._utils import (
     _serialize_window,
     _server_cache,
 )
+from libtmux_mcp.models import SessionInfo
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
-    from libtmux.session import Session
     from libtmux.window import Window
 
 
@@ -115,8 +116,6 @@ def test_resolve_pane_not_found(mcp_server: Server, mcp_session: Session) -> Non
 
 def test_serialize_session(mcp_session: Session) -> None:
     """_serialize_session produces a SessionInfo model."""
-    from libtmux_mcp.models import SessionInfo
-
     data = _serialize_session(mcp_session)
     assert isinstance(data, SessionInfo)
     assert data.session_id == mcp_session.session_id
@@ -210,7 +209,37 @@ APPLY_FILTERS_FIXTURES: list[ApplyFiltersFixture] = [
         filters={"session_name__badop": "test"},
         expected_count=None,
         expect_error=True,
-        error_match="Invalid filter operator",
+        error_match="is not a filter operator",
+    ),
+    # A typo'd FIELD used to return [] rather than erroring, so an empty
+    # result was indistinguishable from "nothing matched".
+    ApplyFiltersFixture(
+        test_id="unknown_field_with_valid_operator_errors",
+        filters={"nosuch_field__contains": "x"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Unknown filter field 'nosuch_field'",
+    ),
+    ApplyFiltersFixture(
+        test_id="unknown_field_without_operator_errors",
+        filters={"totally_bogus": "zzz"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Unknown filter field 'totally_bogus'",
+    ),
+    ApplyFiltersFixture(
+        test_id="near_miss_field_suggests_alternatives",
+        filters={"session_nme__contains": "x"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Did you mean: session_name",
+    ),
+    ApplyFiltersFixture(
+        test_id="nested_traversal_still_allowed",
+        filters={"active_window__window_name__contains": ""},
+        expected_count=None,
+        expect_error=False,
+        error_match=None,
     ),
     ApplyFiltersFixture(
         test_id="contains_operator",
@@ -254,6 +283,39 @@ APPLY_FILTERS_FIXTURES: list[ApplyFiltersFixture] = [
         expect_error=True,
         error_match="filters must be a JSON object",
     ),
+    # window_count is an output field with no tmux attribute of that
+    # name; it resolves through an alias.
+    ApplyFiltersFixture(
+        test_id="output_field_alias",
+        filters={"window_count": "1"},
+        expected_count=None,
+        expect_error=False,
+        error_match=None,
+    ),
+    ApplyFiltersFixture(
+        test_id="unknown_field_names_the_output_fields",
+        filters={"bogus_key": "x"},
+        expected_count=None,
+        expect_error=True,
+        error_match="Every field this tool returns is filterable",
+    ),
+    # A trailing segment that is not an operator is part of the path.
+    ApplyFiltersFixture(
+        test_id="traversal_without_trailing_operator",
+        filters={"active_pane__pane_id": "<active_pane_id>"},
+        expected_count=1,
+        expect_error=False,
+        error_match=None,
+    ),
+    # ...which must not let a mistyped operator read as a path and
+    # filter everything out silently.
+    ApplyFiltersFixture(
+        test_id="mistyped_operator_still_errors",
+        filters={"session_name__containss": "<partial>"},
+        expected_count=None,
+        expect_error=True,
+        error_match="is not a filter operator",
+    ),
 ]
 
 
@@ -287,6 +349,11 @@ def test_apply_filters(
                 resolved[k] = session_name
             elif v == "<partial>":
                 resolved[k] = session_name[:4]
+            elif v == "<active_pane_id>":
+                active_pane = mcp_session.active_window.active_pane
+                assert active_pane is not None
+                assert active_pane.pane_id is not None
+                resolved[k] = active_pane.pane_id
             else:
                 resolved[k] = v
         filters = resolved
@@ -295,9 +362,11 @@ def test_apply_filters(
 
     if expect_error:
         with pytest.raises(ToolError, match=error_match):
-            _apply_filters(sessions, filters, _serialize_session)
+            _apply_filters(sessions, filters, _serialize_session, Session, SessionInfo)
     else:
-        result = _apply_filters(sessions, filters, _serialize_session)
+        result = _apply_filters(
+            sessions, filters, _serialize_session, Session, SessionInfo
+        )
         assert isinstance(result, list)
         if expected_count is not None:
             assert len(result) == expected_count
@@ -912,6 +981,110 @@ def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
     mapped = _map_exception_to_tool_error("some_tool", raised)
     assert not isinstance(mapped, ExpectedToolError)
     assert mapped.log_level == logging.ERROR
+
+
+class LivenessProbeFixture(t.NamedTuple):
+    """Test fixture for :func:`_probe_liveness`."""
+
+    test_id: str
+    returncode: int
+    stderr: list[str]
+    expected_alive: bool
+    expected_unreachable: str | None
+
+
+LIVENESS_PROBE_FIXTURES: list[LivenessProbeFixture] = [
+    LivenessProbeFixture("running", 0, [], True, None),
+    LivenessProbeFixture(
+        "no_daemon", 1, ["no server running on /tmp/tmux-1000/x"], False, None
+    ),
+    LivenessProbeFixture("missing_socket", 1, ["error connecting to /x"], False, None),
+    # A live server this tmux binary cannot speak to. Reporting it the
+    # same as "no server" tells the agent the user's work is gone.
+    LivenessProbeFixture(
+        "protocol_mismatch",
+        1,
+        ["server exited unexpectedly"],
+        False,
+        "server exited unexpectedly",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    LivenessProbeFixture._fields,
+    LIVENESS_PROBE_FIXTURES,
+    ids=[fixture.test_id for fixture in LIVENESS_PROBE_FIXTURES],
+)
+def test_probe_liveness_separates_absent_from_unreachable(
+    test_id: str,
+    returncode: int,
+    stderr: list[str],
+    expected_alive: bool,
+    expected_unreachable: str | None,
+) -> None:
+    """Absent and unreachable are different answers.
+
+    ``Server.is_alive()`` collapses both to False and ``Server.sessions``
+    degrades to ``[]`` for both, so an ordinary tmux upgrade -- sockets
+    outlive the binary that made them -- made a live server report as
+    absent with no error. Driven off a fake result rather than a second
+    tmux binary so the assertion does not depend on the CI tmux version.
+    """
+    from libtmux_mcp._utils import _probe_liveness
+
+    assert test_id
+
+    class _Result:
+        def __init__(self) -> None:
+            self.returncode = returncode
+            self.stderr = stderr
+
+    class _Server:
+        def cmd(self, *args: str) -> _Result:
+            return _Result()
+
+    alive, unreachable = _probe_liveness(t.cast("t.Any", _Server()))
+
+    assert alive is expected_alive
+    assert unreachable == expected_unreachable
+
+
+def test_map_exception_explains_a_newline_in_a_format_value() -> None:
+    """The newline-in-a-path parse failure becomes actionable.
+
+    libtmux <= 0.62.0 splits ``-F`` output one line per object, so a
+    newline inside a value breaks its strict ``zip`` and every pane on
+    that server stops resolving. It arrives as a bare ``ValueError`` and
+    previously reached the agent as "Unexpected error", at ERROR,
+    naming nothing it could act on.
+    """
+    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+
+    raised = ValueError("zip() argument 2 is shorter than argument 1")
+    mapped = _map_exception_to_tool_error("list_panes", raised)
+
+    assert isinstance(mapped, ExpectedToolError)
+    assert "newline" in str(mapped)
+    assert mapped.suggestion is not None
+    assert "pane_current_path" in mapped.suggestion
+
+
+def test_map_exception_does_not_double_the_pane_prefix() -> None:
+    """``Pane not found: Pane not found: %9`` said it twice.
+
+    ``exc.PaneNotFound`` already prefixes its own message, and the
+    mapper prefixed it again — visible on the most frequently hit error
+    in the server.
+    """
+    from libtmux_mcp._utils import _map_exception_to_tool_error
+
+    raised = exc.PaneNotFound("%9999")
+    assert str(raised) == "Pane not found: %9999"
+
+    mapped = _map_exception_to_tool_error("get_pane_info", raised)
+
+    assert str(mapped) == "Pane not found: %9999"
 
 
 def test_expected_tool_error_logs_warning_through_server(

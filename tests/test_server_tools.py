@@ -251,7 +251,7 @@ LIST_SESSIONS_FILTER_FIXTURES: list[ListSessionsFilterFixture] = [
         filters={"session_name__badop": "test"},
         expected_count=None,
         expect_error=True,
-        error_match="Invalid filter operator",
+        error_match="is not a filter operator",
     ),
     ListSessionsFilterFixture(
         test_id="multiple_filters",
@@ -387,6 +387,41 @@ def test_list_servers_finds_live_socket(mcp_server: Server) -> None:
     assert found.is_alive is True
 
 
+def test_list_servers_reports_a_complete_identity_and_dedups(
+    mcp_server: Server,
+    mcp_session: Session,
+) -> None:
+    """Each row carries both identity fields, and extras do not duplicate.
+
+    The scan holds the full path in the directory entry but reported
+    only the name, so ``socket_path`` was null on every scanned row.
+    Passing the same socket via ``extra_socket_paths`` then listed it a
+    second time with the opposite half of its identity, and nothing tied
+    the two rows together.
+    """
+    import os
+    import pathlib as _pathlib
+
+    assert mcp_session is not None  # forces the tmux server to exist
+    socket_path = (
+        _pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
+        / f"tmux-{os.geteuid()}"
+        / str(mcp_server.socket_name)
+    )
+
+    scanned = [r for r in list_servers() if r.socket_name == mcp_server.socket_name]
+    assert len(scanned) == 1
+    assert scanned[0].socket_path == str(socket_path)
+
+    both = list_servers(extra_socket_paths=[str(socket_path)])
+    same_server = [
+        r
+        for r in both
+        if r.socket_name == mcp_server.socket_name or r.socket_path == str(socket_path)
+    ]
+    assert len(same_server) == 1
+
+
 def test_list_servers_missing_tmpdir_returns_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -459,3 +494,25 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
         extra_socket_paths=[str(bogus), str(regular_file)],
     )
     assert results == []
+
+
+def test_list_servers_is_ordered_and_complete_under_concurrency(
+    TestServer: type[Server], monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """The scan probes sockets in parallel; order must not depend on timing.
+
+    ``ThreadPoolExecutor.map`` preserves input order, so the listing
+    stays sorted by socket name however the probes interleave.
+    """
+    tmpdir = tmp_path / "sockets"
+    tmpdir.mkdir()
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmpdir))
+
+    servers = [TestServer() for _ in range(4)]
+    for server in servers:
+        server.new_session(session_name="probe")
+
+    listed = list_servers()
+    names = [row.socket_name for row in listed if row.socket_name is not None]
+    assert names == sorted(names)
+    assert len(names) == len(servers)

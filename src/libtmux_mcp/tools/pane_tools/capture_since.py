@@ -46,6 +46,7 @@ class _CaptureCursor:
     pane_pid: str
     history_size: int
     pane_height: int
+    pane_width: int | None
     anchor_abs: int
     anchor_hash: str | None
     below_hashes: tuple[str, ...]
@@ -164,6 +165,21 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     # The ``pane_height`` guard distinguishes resize-grow (which pulls
     # rows from history back into the visible region without freeing
     # data) from actual trim (where row data is destroyed).
+    # A width change rewraps history, so row coordinates taken at the
+    # old width stop being comparable. Widening was already caught by
+    # the shrink branch below (rewrap makes history SHORTER); narrowing
+    # makes it longer, which is indistinguishable from ordinary new
+    # output -- so ``start`` went negative by exactly the rewrap growth
+    # and ``capture-pane -S`` returned that many rows of already-seen
+    # scrollback as new, with lines_missed=false. Measured at one
+    # column of narrowing, not just dramatic resizes.
+    #
+    # ``None`` means a cursor minted before this field existed: reflow
+    # cannot be ruled out, so treat it the same way rather than
+    # silently trusting it. Self-healing -- the caller gets a fresh
+    # cursor that carries the width.
+    if cursor.pane_width is None or state.pane_width != cursor.pane_width:
+        return True
     return state.history_size < cursor.history_size and (
         state.pane_height <= cursor.pane_height
     )
@@ -182,8 +198,40 @@ def _history_limit_trim_risk(
     return cursor.history_size >= risk_floor or state.history_size >= risk_floor
 
 
-def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | None:
-    """Find one retained row sequence matching the cursor fingerprint."""
+def _find_unique_cursor_match(
+    rows: list[str],
+    cursor: _CaptureCursor,
+    state: _PaneState,
+    history_limit: int,
+) -> int | None:
+    """Find one retained row sequence matching the cursor fingerprint.
+
+    *rows* comes from ``capture-pane -S -``, so ``rows[i]`` is absolute
+    grid row ``i``. tmux evicts only from the TOP, so a surviving anchor
+    can only have moved EARLIER than ``cursor.anchor_abs``, never later.
+    Candidates past that row are therefore rejected on position alone,
+    however well they hash.
+
+    That bound is what makes this safe when the fingerprint degenerates
+    to a single hash (``below_hashes`` empty, i.e. the anchor was the
+    last row). The uniqueness rule below asks whether a candidate is
+    unique *in the current buffer*, not unique *in time* — and an agent
+    that starts tailing an idle pane anchors on the shell prompt, a line
+    that recurs verbatim after every command. Once enough output laps
+    the history limit, the evicted anchor's only surviving twin is the
+    CURRENT prompt near the bottom: exactly one candidate, so the
+    uniqueness guard passed and returned a false match far below the
+    real anchor. Everything above it was then dropped as "already seen"
+    and the read reported ``lines_missed=False`` having lost the lot.
+
+    Position alone is necessary but not sufficient: when the anchor was
+    taken near the bottom of an already-full history, its old row and
+    the current prompt's row overlap. So a single-hash fingerprint on a
+    full history additionally refuses to match inside the visible
+    region. Declining costs only a conservative ``lines_missed=True``,
+    which stays honest: a full history means rows above the anchor were
+    evicted whether or not the anchor itself survived.
+    """
     if cursor.anchor_hash is None:
         return None
 
@@ -191,8 +239,34 @@ def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | 
     if len(rows) < len(fingerprint):
         return None
 
+    # A one-row fingerprint carries no way to tell the anchor from any
+    # other line with the same text, and on a SATURATED history the twin
+    # that survives is the prompt currently on screen.
+    # ``index >= history_size`` means the candidate sits in the visible
+    # region rather than in scrollback, which is that signature exactly.
+    #
+    # Saturation is asked via ``_history_limit_trim_risk`` rather than
+    # ``history_size == history_limit``: measured on tmux 3.7c, a pane
+    # with ``history-limit 20`` pins at ``history_size 19``, so an exact
+    # comparison never fires on the very panes this guards.
+    #
+    # The cost is a measured false-positive band: on a 50000-line limit
+    # this reports a loss from roughly 92% full, where trim risk is on
+    # but tmux has not evicted yet (clean at 0/10/50/80/88%). Erring
+    # there costs a pessimistic flag and a full visible read, never
+    # silence. Growth in ``history_size`` between cursor and read would
+    # narrow it -- history still growing means nothing was dropped --
+    # but a burst that saturates midway grows AND evicts, so trusting
+    # growth would reopen the silent loss this closes.
+    blind = len(fingerprint) == 1 and _history_limit_trim_risk(
+        cursor, state, history_limit
+    )
+
     match_index: int | None = None
-    for index in range(len(rows) - len(fingerprint) + 1):
+    last_possible = min(len(rows) - len(fingerprint), cursor.anchor_abs)
+    for index in range(last_possible + 1):
+        if blind and index >= state.history_size:
+            continue
         candidate = rows[index : index + len(fingerprint)]
         candidate_hashes = tuple(_line_hash(line) for line in candidate)
         if candidate_hashes != fingerprint:
@@ -259,7 +333,9 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
         _raise_if_pane_lifecycle_changed(pane.pane_id, after, cursor.pane_pid)
         if _same_state(before, after):
             if trim_risk:
-                match_index = _find_unique_cursor_match(rows, cursor)
+                match_index = _find_unique_cursor_match(
+                    rows, cursor, before, history_limit
+                )
                 if match_index is None:
                     missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
                     return _PaneRead(
@@ -293,6 +369,7 @@ def _build_cursor(pane_id: str, state: _PaneState, cursor_rows: list[str]) -> st
         "pane_pid": state.pane_pid,
         "history_size": state.history_size,
         "pane_height": state.pane_height,
+        "pane_width": state.pane_width,
         "anchor_abs": state.history_size + state.cursor_y,
         "anchor_hash": _line_hash(cursor_rows[0]) if cursor_rows else None,
         "below_hashes": [_line_hash(line) for line in cursor_rows[1:]],
@@ -348,6 +425,11 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
         reason = "unsupported cursor version"
         _raise_invalid_cursor(reason)
 
+    width_value = payload.get("pane_width")
+    if width_value is not None and not isinstance(width_value, int):
+        reason = "invalid pane_width"
+        _raise_invalid_cursor(reason)
+
     anchor_hash_value = payload.get("anchor_hash")
     if anchor_hash_value is not None and not isinstance(anchor_hash_value, str):
         reason = "missing or invalid anchor_hash"
@@ -364,6 +446,7 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
         pane_pid=_cursor_str(payload, "pane_pid"),
         history_size=_cursor_int(payload, "history_size"),
         pane_height=_cursor_int(payload, "pane_height"),
+        pane_width=width_value,
         anchor_abs=_cursor_int(payload, "anchor_abs"),
         anchor_hash=anchor_hash_value,
         below_hashes=tuple(below_hashes_value),

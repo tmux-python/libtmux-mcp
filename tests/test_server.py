@@ -208,6 +208,188 @@ def test_invalid_safety_env_hides_mutating_tools() -> None:
     }
 
 
+class GatedToolFixture(t.NamedTuple):
+    """Test fixture for off-tier tool calls against a real server."""
+
+    test_id: str
+    safety: str
+    tool: str
+    required_tier: str
+
+
+GATED_TOOL_FIXTURES: list[GatedToolFixture] = [
+    GatedToolFixture(
+        test_id="readonly_denies_send_keys_as_mutating",
+        safety="readonly",
+        tool="send_keys",
+        required_tier="mutating",
+    ),
+    GatedToolFixture(
+        test_id="readonly_denies_kill_pane_as_destructive",
+        safety="readonly",
+        tool="kill_pane",
+        required_tier="destructive",
+    ),
+    GatedToolFixture(
+        test_id="mutating_denies_kill_pane_as_destructive",
+        safety="mutating",
+        tool="kill_pane",
+        required_tier="destructive",
+    ),
+    GatedToolFixture(
+        test_id="mutating_denies_destructive_batch",
+        safety="mutating",
+        tool="call_destructive_tools_batch",
+        required_tier="destructive",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    GatedToolFixture._fields,
+    GATED_TOOL_FIXTURES,
+    ids=[fixture.test_id for fixture in GATED_TOOL_FIXTURES],
+)
+def test_gated_tool_call_explains_the_tier(
+    test_id: str,
+    safety: str,
+    tool: str,
+    required_tier: str,
+) -> None:
+    """Calling an off-tier tool names the tier, not "unknown tool".
+
+    ``disable()`` makes ``get_tool`` answer None, so the guard reading
+    ``if tool and not allowed`` never fired and the agent was told a
+    gated tool does not exist. Runs in a subprocess because the tier is
+    resolved once at server import.
+    """
+    assert test_id
+
+    code = textwrap.dedent(
+        f"""
+        import asyncio
+        import json
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                try:
+                    await client.call_tool({tool!r}, {{}})
+                except Exception as exc:
+                    print(json.dumps({{"error": str(exc)}}))
+                else:
+                    print(json.dumps({{"error": None}}))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": safety}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    error = json.loads(proc.stdout)["error"]
+
+    assert error is not None, f"{tool} should be denied at {safety}"
+    assert "Unknown tool" not in error
+    assert f"requires safety level {required_tier!r}" in error
+    assert f"running at {safety!r}" in error
+    assert f"LIBTMUX_SAFETY={required_tier}" in error
+
+
+def test_batch_distinguishes_gated_tool_from_unknown_tool() -> None:
+    """The batch wrapper must not deny a gated tool's existence either.
+
+    It raised "Unknown tool" on ``get_tool`` returning None, so a gated
+    tool and a misspelled one produced byte-identical rows.
+    """
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                out = {}
+                for label, tool in (("gated", "kill_pane"), ("typo", "sned_keys")):
+                    result = await client.call_tool(
+                        "call_mutating_tools_batch",
+                        {"operations": [{"tool": tool, "arguments": {}}]},
+                    )
+                    out[label] = result.structured_content["results"][0]["error"]
+                print(json.dumps(out))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": "mutating"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    result = json.loads(proc.stdout)
+
+    assert "requires safety level 'destructive'" in result["gated"]
+    assert "Unknown tool" not in result["gated"]
+    # A genuine misspelling must keep the unknown-tool error, or the fix
+    # would trade one misdescription for another.
+    assert "Unknown tool" in result["typo"]
+
+
+def test_disabled_tools_stay_in_the_registry_with_tags() -> None:
+    """Pin the FastMCP behavior the tier explanation depends on.
+
+    ``_list_tools()`` is private and must keep returning disabled tools
+    with their tags, or the explanation silently reverts.
+    """
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            mcp = build_mcp_server()
+            registered = {t.name: sorted(t.tags) for t in await mcp._list_tools()}
+            visible = {t.name for t in await mcp.list_tools()}
+            print(json.dumps({
+                "kill_pane_registered": registered.get("kill_pane"),
+                "kill_pane_visible": "kill_pane" in visible,
+                "registered_exceeds_visible": len(registered) > len(visible),
+            }))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": "mutating"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    result = json.loads(proc.stdout)
+
+    assert result["kill_pane_registered"] == ["destructive"]
+    assert result["kill_pane_visible"] is False
+    assert result["registered_exceeds_visible"] is True
+
+
 def test_run_server_pins_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     """run_server passes an explicit stdio transport to FastMCP."""
     from libtmux_mcp import server as server_mod
@@ -259,7 +441,9 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
     # tool; the instructions must still name it so agents know the
     # "wait for any new output" affordance exists.
     assert "patterns=null" in _BASE_INSTRUCTIONS
-    assert "stop=" in _BASE_INSTRUCTIONS
+    # Phrased as a stop *hit*, not "stop=[] bails" — two readers parsed
+    # the old wording as "the empty list bails", which it does not.
+    assert "stop hit" in _BASE_INSTRUCTIONS
     assert "send_keys_batch" in _BASE_INSTRUCTIONS
     assert _BASE_INSTRUCTIONS.index("run_command") < _BASE_INSTRUCTIONS.index(
         "wait_for_channel"

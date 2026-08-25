@@ -32,6 +32,7 @@ from libtmux_mcp.models import (
     SendKeysOperation,
     SendKeysOperationResult,
 )
+from libtmux_mcp.tools.pane_tools.state import _read_pane_state
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -48,6 +49,194 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
     if remaining <= 0:
         raise ExpectedToolError(_batch_timeout_error(timeout))
     return remaining
+
+
+#: Bound on a single untimed ``send-keys``. libtmux runs tmux through
+#: ``Popen.communicate()`` with no timeout, so an unresponsive server
+#: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
+_SEND_KEYS_TIMEOUT_SECONDS = 5.0
+
+#: Shared recovery hint for a pane that cannot accept a shell command.
+_BUSY_PANE_SUGGESTION = (
+    "Use send_keys for raw input to a program that owns the pane, wait "
+    "for the running command to finish, or exit it first. snapshot_pane "
+    "reports alternate_on and pane_current_command if you need to check."
+)
+
+
+def _send_keys_argvs(
+    pane: Pane,
+    keys: str,
+    *,
+    enter: bool,
+    literal: bool,
+    suppress_history: bool,
+) -> list[list[str]]:
+    """Build the ``tmux send-keys`` argv(s) for one send.
+
+    ``--`` terminates flag parsing. Without it tmux reads a payload
+    beginning with ``-`` as flags and rejects the command, so `--help`,
+    a negative number, or a pasted diff line never reaches the pane.
+    ``Pane.send_keys`` omits it and discards tmux's result, which is why
+    that failure arrived as a success.
+
+    Enter is a separate call without ``-l`` so it stays a key name
+    rather than the literal text ``Enter``.
+    """
+    pane_id = pane.pane_id
+    if pane_id is None:
+        msg = "resolved pane has no pane_id"
+        raise ExpectedToolError(msg)
+
+    tmux_args = ["send-keys", "-t", pane_id]
+    if literal:
+        tmux_args.append("-l")
+    tmux_args.extend(("--", (" " if suppress_history else "") + keys))
+
+    argvs = [_tmux_argv(pane.server, *tmux_args)]
+    if enter:
+        argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
+    return argvs
+
+
+def _raise_send_keys_error(exc: subprocess.CalledProcessError) -> t.NoReturn:
+    """Re-raise a failed ``send-keys`` carrying tmux's own stderr."""
+    stderr = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
+    msg = f"send-keys failed: {stderr or exc}"
+    raise ExpectedToolError(msg) from exc
+
+
+#: Programs that take over a pane's keyboard and for which typing a
+#: shell wrapper is actively destructive -- a pager consumes it as
+#: commands, an editor puts it in the buffer where ``:``-prefixed
+#: fragments write files. Only ones that can own the pane while
+#: ``alternate_on`` is still 0 need naming here; anything that enters
+#: the alternate screen is already caught by the flag. Measured:
+#: ``top`` repaints the primary screen and needs an entry, while
+#: ``htop`` and ``watch`` reach the alternate screen and do not.
+#:
+#: A DENY-list on purpose. The general signal -- "the foreground
+#: command is not the process tmux started" -- was measured and
+#: rejected: it refuses a pane where the user simply ran ``bash``
+#: inside a ``zsh`` pane, and equally ``sudo -s``, ``ssh`` or
+#: ``nix-shell``, all of which have a perfectly good prompt. There is
+#: no reliable way to ask tmux "is there a prompt", so this errs
+#: toward letting calls through and names only what is known harmful.
+_PANE_OWNING_PROGRAMS: frozenset[str] = frozenset(
+    {
+        "emacs",
+        "less",
+        "man",
+        "more",
+        "most",
+        "nano",
+        "nvim",
+        "pico",
+        "top",
+        "vi",
+        "view",
+        "vim",
+    }
+)
+
+
+def _raise_if_pane_is_busy(pane: Pane) -> None:
+    """Refuse when a program, not a shell, owns the pane's keyboard.
+
+    This tool means "run a shell command and report its exit status",
+    which needs a shell at a prompt. When a pager or editor owns the
+    pane the exit-status wrapper is consumed as ITS keystrokes:
+    measured against ``less``, ``s=$?...`` became its save-to-file
+    command and a fragment escaped to a shell; in ``vi`` the same
+    payload lands in the buffer, where ``:``-prefixed fragments write
+    files.
+
+    ``alternate_on`` is the primary signal but is necessary rather than
+    sufficient, and the counterexample is reachable through this
+    server's own tooling: ``less`` viewing a ``pipe_pane`` capture
+    decides the file is binary and prompts "may be a binary file. See
+    it anyway?" BEFORE entering the alternate screen, so it owns the
+    keyboard with ``alternate_on=0``. Hence the small deny-list above.
+
+    Incomplete by construction: a program not named there, and not yet
+    on the alternate screen, still gets the wrapper typed into it. That
+    is the deliberate trade -- see ``_PANE_OWNING_PROGRAMS`` for why a
+    general test was rejected.
+    """
+    occupant = _read_pane_current_command(pane)
+    state = _read_pane_state(pane)
+    # Copy/view/clock mode owns the keyboard while alternate_on stays 0
+    # and pane_current_command still reads as the shell, so both other
+    # arms miss it. Measured with a client attached: the payload was
+    # consumed as copy-mode keystrokes, the command never ran, and the
+    # user's scroll position was destroyed in 7 of 8 trials -- while
+    # the result claimed command_may_still_run.
+    if state.in_mode:
+        msg = (
+            f"pane {pane.pane_id} is in a tmux mode (copy, view or clock), "
+            "so keys go to that mode rather than to a shell. Exit it with "
+            "exit_copy_mode first."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
+    if state.alternate_on:
+        named = f" ({occupant})" if occupant else ""
+        msg = (
+            f"pane {pane.pane_id} is running a full-screen program{named}, "
+            "so it has no shell prompt to accept a command. Sending one "
+            "would type this tool's exit-status wrapper into that program."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
+    if occupant is not None and occupant.lstrip("-") in _PANE_OWNING_PROGRAMS:
+        msg = (
+            f"pane {pane.pane_id} is running {occupant!r}, which owns the "
+            "keyboard, so it has no shell prompt to accept a command. "
+            "Sending one would type this tool's exit-status wrapper into "
+            "that program."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
+
+def _read_pane_current_command(pane: Pane) -> str | None:
+    """Return the pane's foreground command, or None if tmux won't say."""
+    stdout = pane.display_message("#{pane_current_command}", get_text=True)
+    return stdout[0] if stdout and stdout[0] else None
+
+
+def _run_send_keys_argv(argv: list[str]) -> None:
+    """Run one ``tmux send-keys`` argv under the untimed ceiling."""
+    try:
+        subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=_SEND_KEYS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        msg = f"send-keys timed out after {_SEND_KEYS_TIMEOUT_SECONDS}s"
+        raise ExpectedToolError(msg) from e
+    except subprocess.CalledProcessError as e:
+        _raise_send_keys_error(e)
+
+
+def _run_send_keys(
+    pane: Pane,
+    keys: str,
+    *,
+    enter: bool,
+    literal: bool,
+    suppress_history: bool,
+) -> None:
+    """Send keys to *pane*, raising if tmux rejected them."""
+    for argv in _send_keys_argvs(
+        pane,
+        keys,
+        enter=enter,
+        literal=literal,
+        suppress_history=suppress_history,
+    ):
+        _run_send_keys_argv(argv)
 
 
 def _run_timed_send_keys_argv(
@@ -67,9 +256,7 @@ def _run_timed_send_keys_argv(
     except subprocess.TimeoutExpired as e:
         raise ExpectedToolError(_batch_timeout_error(timeout)) from e
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"send-keys failed: {stderr or e}"
-        raise ExpectedToolError(msg) from e
+        _raise_send_keys_error(e)
 
 
 def _run_timed_send_keys(
@@ -80,21 +267,13 @@ def _run_timed_send_keys(
     timeout: float,
 ) -> None:
     """Run ``tmux send-keys`` for one operation within the batch deadline."""
-    pane_id = pane.pane_id
-    if pane_id is None:
-        msg = "resolved pane has no pane_id"
-        raise ExpectedToolError(msg)
-
-    tmux_args = ["send-keys", "-t", pane_id]
-    if operation.literal:
-        tmux_args.append("-l")
-    tmux_args.append((" " if operation.suppress_history else "") + operation.keys)
-
-    send_argvs = [_tmux_argv(pane.server, *tmux_args)]
-    if operation.enter:
-        send_argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
-
-    for argv in send_argvs:
+    for argv in _send_keys_argvs(
+        pane,
+        operation.keys,
+        enter=operation.enter,
+        literal=operation.literal,
+        suppress_history=operation.suppress_history,
+    ):
         _run_timed_send_keys_argv(argv, deadline=deadline, timeout=timeout)
 
 
@@ -125,6 +304,16 @@ def send_keys(
 
     Do NOT call ``capture_pane`` immediately — both the read and the
     pattern-match paths race the pane's PTY draw.
+
+    **Size limit:** tmux rejects a ``send-keys`` argument beyond roughly
+    16 KB with ``command too long``. ``paste_text`` routes through a
+    buffer instead of argv and takes far more, so use it for large
+    payloads.
+
+    **Verifying a write:** do not string-compare captured text against
+    what you sent. tmux renders combining marks and zero-width joiners
+    as ``<XXXX>`` placeholders, so ``école`` and emoji sequences come
+    back transformed even though the bytes were delivered correctly.
 
     Parameters
     ----------
@@ -161,11 +350,12 @@ def send_keys(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.send_keys(
+    _run_send_keys(
+        pane,
         keys,
         enter=enter,
-        suppress_history=suppress_history,
         literal=literal,
+        suppress_history=suppress_history,
     )
     return f"Keys sent to pane {pane.pane_id}"
 
@@ -266,11 +456,12 @@ def send_keys_batch(
                     break
                 continue
             if deadline is None:
-                pane.send_keys(
+                _run_send_keys(
+                    pane,
                     operation.keys,
                     enter=operation.enter,
-                    suppress_history=operation.suppress_history,
                     literal=operation.literal,
+                    suppress_history=operation.suppress_history,
                 )
             else:
                 assert timeout is not None
@@ -349,6 +540,19 @@ async def run_command(
     The command runs in a subshell, so ``cd``, ``export`` and other shell
     state changes do not persist to later calls.
 
+    **Requires a shell at a prompt.** A pane running a full-screen
+    program (``less``, ``vi``, ``htop``) owns the keyboard, so this
+    tool's exit-status wrapper would be typed into THAT program rather
+    than run; such a call is refused. Use ``send_keys`` for raw input to
+    a full-screen program.
+
+    **A timeout does not cancel the command.** The keystrokes are
+    already in the pane's input buffer, so a shell that is busy now runs
+    them whenever it next reads a line — possibly long after this
+    returns. ``command_may_still_run`` reports that. Do not retry a
+    non-idempotent command on a timed-out result without checking the
+    pane first.
+
     Parameters
     ----------
     command : str
@@ -404,6 +608,16 @@ async def run_command(
         session_id=session_id,
         window_id=window_id,
     )
+    # A full-screen program (less, vi, htop) owns the pane's keyboard,
+    # so the wrapper below is consumed as ITS keystrokes rather than by
+    # a shell: measured against `less`, `s=$?...` became less's
+    # save-to-file command and a fragment escaped to a shell. In `vi`
+    # the same payload lands in the buffer, where `:`-prefixed
+    # fragments are commands that edit and write files. This tool means
+    # "run a shell command and report its exit status", which requires
+    # a shell, so refuse rather than type into whatever is there.
+    await asyncio.to_thread(_raise_if_pane_is_busy, pane)
+
     command_id = uuid.uuid4().hex[:10]
     channel = f"r_{command_id}"
     status_option = f"@s_{command_id}"
@@ -425,7 +639,14 @@ async def run_command(
     )
 
     started = time.monotonic()
-    await asyncio.to_thread(pane.send_keys, payload, enter=True, literal=True)
+    await asyncio.to_thread(
+        _run_send_keys,
+        pane,
+        payload,
+        enter=True,
+        literal=True,
+        suppress_history=False,
+    )
 
     timed_out = False
     wait_argv = _tmux_argv(server, "wait-for", channel)
@@ -479,6 +700,7 @@ async def run_command(
         pane_id=target_pane_id,
         exit_status=exit_status,
         timed_out=timed_out,
+        command_may_still_run=timed_out,
         elapsed_seconds=elapsed,
         output=kept_lines,
         output_truncated=truncated,
@@ -744,6 +966,11 @@ def paste_text(
         Whether to use bracketed paste mode. Default True.
         Bracketed paste wraps the text in escape sequences that tell
         the terminal "this is pasted text, not typed input".
+
+        **A trailing newline therefore does NOT run the command**: the
+        shell holds it in its edit buffer, where it executes when Enter
+        next reaches the pane from any source. Pass ``bracket=False``
+        to submit, or follow with ``send_keys(keys="Enter")``.
     session_name : str, optional
         Session name for pane resolution.
     session_id : str, optional
@@ -766,6 +993,13 @@ def paste_text(
         session_id=session_id,
         window_id=window_id,
     )
+
+    if not text:
+        # tmux creates no buffer for empty content, so the follow-up
+        # paste-buffer failed with "no buffer libtmux_mcp_..._paste" --
+        # an error for a no-op, naming an internal buffer the caller
+        # never chose. Pasting nothing succeeds and does nothing.
+        return f"Text pasted to pane {pane.pane_id}"
 
     # Use a unique named tmux buffer so we don't clobber the user's
     # unnamed paste buffer, and so we can reliably clean up on error
@@ -808,4 +1042,19 @@ def paste_text(
         with contextlib.suppress(Exception):
             server.delete_buffer(buffer_name=buffer_name)
 
+    if bracket and text.endswith(("\n", "\r")):
+        # Bracketed paste tells the terminal "this is pasted text, not
+        # typed input", so the shell holds the trailing newline in its
+        # edit buffer instead of submitting. Correct terminal behavior
+        # and a safe default -- but an unqualified "Text pasted" reads
+        # as "your command ran", and the text is not inert: it executes
+        # the moment ANY Enter reaches this pane, from any source,
+        # possibly long after this call and out of order with it.
+        return (
+            f"Text pasted to pane {pane.pane_id}, but NOT submitted: with "
+            "bracket=True the trailing newline goes into the shell's edit "
+            "buffer, where it will run whenever Enter next reaches this "
+            "pane. Pass bracket=False, or follow with "
+            "send_keys(keys='Enter'), to run it now."
+        )
     return f"Text pasted to pane {pane.pane_id}"
