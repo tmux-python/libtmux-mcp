@@ -160,6 +160,18 @@ def search_panes(
         msg = f"Invalid regex pattern: {e}"
         raise ExpectedToolError(msg) from e
 
+    # Reject nonsense pagination rather than answering with an empty
+    # page: ``limit=0`` returned ``matches: []``, which an agent cannot
+    # tell from a genuine miss, and a negative ``offset`` was clamped
+    # to 0 and echoed back unchanged, so the result silently did not
+    # match the request.
+    if offset < 0:
+        msg = f"offset must be zero or greater (received {offset})"
+        raise ExpectedToolError(msg)
+    if limit is not None and limit < 1:
+        msg = f"limit must be at least 1, or null for no limit (received {limit})"
+        raise ExpectedToolError(msg)
+
     server = _get_server(socket_name=socket_name)
 
     uses_scrollback = content_start is not None or content_end is not None
@@ -285,8 +297,8 @@ def search_panes(
     all_matches.sort(key=_pane_id_sort_key)
     total_panes_matched = len(all_matches)
 
-    page_start = max(0, offset)
-    page_end: int | None = None if limit is None else page_start + max(0, limit)
+    page_start = offset
+    page_end: int | None = None if limit is None else page_start + limit
     page_matches = all_matches[page_start:page_end]
 
     skipped_panes = [m.pane_id for m in all_matches[page_start:][len(page_matches) :]]

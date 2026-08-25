@@ -215,7 +215,26 @@ class OptionResult(BaseModel):
     """Result of a show_option call."""
 
     option: str = Field(description="Option name")
-    value: t.Any = Field(description="Option value")
+    value: t.Any = Field(
+        description=(
+            "Option value. ``null`` means NOT SET AT THE SCOPE QUERIED, "
+            "which is not the same as not set: an option inherited from "
+            "a wider scope reads as null unless ``include_inherited`` "
+            "was passed."
+        )
+    )
+    scope_queried: str = Field(
+        default="server",
+        description="Scope this answer describes, so null is readable.",
+    )
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "True when inherited values were resolved (tmux ``-A``), so "
+            "the value is the one in force rather than only one set at "
+            "this scope."
+        ),
+    )
 
 
 class OptionSetResult(BaseModel):
@@ -229,7 +248,18 @@ class OptionSetResult(BaseModel):
 class EnvironmentResult(BaseModel):
     """Result of a show_environment call."""
 
-    variables: dict[str, str | bool] = Field(description="Environment variable mapping")
+    variables: dict[str, str] = Field(
+        description="Variables that are SET, mapped to their values."
+    )
+    removed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names tmux marks as explicitly REMOVED from the environment "
+            "(it prints them as ``-NAME``). These are not in ``variables``. "
+            "Distinct from a name that simply never appears, which tmux "
+            "does not report at all."
+        ),
+    )
 
 
 class EnvironmentSetResult(BaseModel):

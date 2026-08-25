@@ -233,6 +233,15 @@ def _find_unique_cursor_match(
     # ``history_size == history_limit``: measured on tmux 3.7c, a pane
     # with ``history-limit 20`` pins at ``history_size 19``, so an exact
     # comparison never fires on the very panes this guards.
+    #
+    # The cost is a measured false-positive band: on a 50000-line limit
+    # this reports a loss from roughly 92% full, where trim risk is on
+    # but tmux has not evicted yet (clean at 0/10/50/80/88%). Erring
+    # there costs a pessimistic flag and a full visible read, never
+    # silence. Growth in ``history_size`` between cursor and read would
+    # narrow it -- history still growing means nothing was dropped --
+    # but a burst that saturates midway grows AND evicts, so trusting
+    # growth would reopen the silent loss this closes.
     blind = len(fingerprint) == 1 and _history_limit_trim_risk(
         cursor, state, history_limit
     )

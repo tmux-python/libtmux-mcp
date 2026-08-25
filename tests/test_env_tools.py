@@ -49,3 +49,27 @@ def test_show_environment_session(mcp_server: Server, mcp_session: Session) -> N
     )
     assert isinstance(result, EnvironmentResult)
     assert isinstance(result.variables, dict)
+
+
+def test_show_environment_separates_removed_from_set(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A removed variable is a name, not a value of ``True``.
+
+    tmux prints a variable marked removed as ``-NAME``. Keeping the
+    dash in the key put the removal in the key -- so a lookup by the
+    real name raised KeyError -- and giving it ``True`` read as "set to
+    true" for a variable that is explicitly unset.
+    """
+    mcp_session.cmd("set-environment", "MCP_ENV_KEPT", "yes")
+    mcp_session.cmd("set-environment", "-r", "MCP_ENV_GONE")
+
+    result = show_environment(
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result.variables["MCP_ENV_KEPT"] == "yes"
+    assert "MCP_ENV_GONE" in result.removed
+    assert "MCP_ENV_GONE" not in result.variables
+    assert not any(name.startswith("-") for name in result.variables)

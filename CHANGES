@@ -8,6 +8,38 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `show_option` can answer what is actually in force
+
+`show_option(option="history-limit", scope="session")` returned
+`value: null` while 50000 was in effect. tmux resolves inherited values
+with `-A` and libtmux has always accepted `include_inherited`, but the
+tool never exposed it — so an agent could ask "is this set at this
+exact scope?" and never "what is in force here?", which is what a
+question like "is mouse mode on?" actually means.
+
+`include_inherited` is now a parameter, and the result carries
+`scope_queried` so a `null` is readable rather than being mistaken for
+"not set anywhere".
+
+#### `show_environment` no longer encodes removal in the key
+
+tmux prints a variable it has marked removed as `-NAME`. The dash was
+kept in the key and the value set to boolean `true`, so
+`variables["KRB5CCNAME"]` raised `KeyError` while
+`variables["-KRB5CCNAME"]` answered `true` — reading as "set to true"
+for a variable that is explicitly unset, and forcing every consumer to
+type-check a `str | bool` mapping.
+
+`variables` now holds only names that are set, mapped to their values,
+and removed names are listed separately under `removed`.
+
+#### `search_panes` rejects pagination it cannot honour
+
+`limit=0` returned `matches: []`, indistinguishable from a genuine
+miss, and a negative `offset` was clamped to zero while being echoed
+back unchanged, so the result silently did not describe the request.
+Both now raise.
+
 #### `search_panes` says how much of each pane it read
 
 `search_panes` searches only the visible screen unless `content_start`

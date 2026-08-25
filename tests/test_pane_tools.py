@@ -291,6 +291,51 @@ def test_exit_copy_mode_reports_a_pane_that_is_not_in_a_mode(
     exit_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
 
 
+class SearchPaginationFixture(t.NamedTuple):
+    """Test fixture for rejected search_panes pagination."""
+
+    test_id: str
+    offset: int
+    limit: int | None
+    error_match: str
+
+
+SEARCH_PAGINATION_FIXTURES: list[SearchPaginationFixture] = [
+    SearchPaginationFixture("negative_offset", -1, None, "offset must be zero"),
+    SearchPaginationFixture("zero_limit", 0, 0, "limit must be at least 1"),
+]
+
+
+@pytest.mark.parametrize(
+    SearchPaginationFixture._fields,
+    SEARCH_PAGINATION_FIXTURES,
+    ids=[fixture.test_id for fixture in SEARCH_PAGINATION_FIXTURES],
+)
+def test_search_panes_rejects_nonsense_pagination(
+    test_id: str,
+    offset: int,
+    limit: int | None,
+    error_match: str,
+    mcp_server: Server,
+) -> None:
+    """Bad pagination errors instead of answering with an empty page.
+
+    ``limit=0`` returned ``matches: []``, which an agent cannot tell
+    from a genuine miss, and a negative ``offset`` was clamped to 0 and
+    echoed back unchanged, so the result silently did not describe the
+    request.
+    """
+    assert test_id
+
+    with pytest.raises(ToolError, match=error_match):
+        search_panes(
+            pattern="anything",
+            offset=offset,
+            limit=limit,
+            socket_name=mcp_server.socket_name,
+        )
+
+
 class DashPayloadArgvFixture(t.NamedTuple):
     """Test fixture for ``--`` placement in the send-keys argv."""
 
