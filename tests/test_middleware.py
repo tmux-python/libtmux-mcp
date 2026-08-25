@@ -801,6 +801,77 @@ def test_tail_preserving_passthrough_when_under_cap() -> None:
     assert result.content[0].text == payload
 
 
+def _limiter_context(tool_name: str) -> t.Any:
+    """Minimal MiddlewareContext naming the tool the limiter should cap."""
+    return MiddlewareContext(
+        message=CallToolRequestParams(name=tool_name, arguments={}),
+        fastmcp_context=None,
+    )
+
+
+def test_tail_preserving_keeps_structured_content_on_success() -> None:
+    """A truncated SUCCESS must still satisfy the tool's output schema.
+
+    The rebuilt result carried ``content`` only. For a tool declaring an
+    output schema, a spec-compliant client then raises "has an output
+    schema but did not return structured content" and the agent gets no
+    data at all — worse than the truncation this middleware exists to
+    perform. The error branch had already been fixed; the success branch
+    had not.
+    """
+    from fastmcp.tools.base import ToolResult
+    from mcp.types import TextContent
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    payload = ("HEAD_OLDER\n" * 500) + "TAIL_PROMPT $"
+    mw = TailPreservingResponseLimitingMiddleware(max_size=400, tools=["cap"])
+
+    async def _call_next(_ctx: t.Any) -> ToolResult:
+        return ToolResult(
+            content=[TextContent(type="text", text=payload)],
+            structured_content={"result": payload},
+        )
+
+    ctx = _limiter_context("cap")
+    result = asyncio.run(mw.on_call_tool(ctx, _call_next))
+
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {"result"}
+    text = result.structured_content["result"]
+    # Structured payload matches the truncated text, tail preserved.
+    assert text == result.content[0].text
+    assert "TAIL_PROMPT $" in text
+    assert result.is_error is False
+
+
+def test_tail_preserving_reports_an_unrebuildable_shape_as_a_tool_error() -> None:
+    """A shape that cannot be trimmed becomes an actionable tool error.
+
+    Better than emitting a response the client will reject outright: the
+    agent learns to narrow its request.
+    """
+    from fastmcp.tools.base import ToolResult
+    from mcp.types import TextContent
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    payload = "x" * 5000
+    mw = TailPreservingResponseLimitingMiddleware(max_size=400, tools=["cap"])
+
+    async def _call_next(_ctx: t.Any) -> ToolResult:
+        return ToolResult(
+            content=[TextContent(type="text", text=payload)],
+            structured_content={"lines": [payload], "truncated": False},
+        )
+
+    ctx = _limiter_context("cap")
+    result = asyncio.run(mw.on_call_tool(ctx, _call_next))
+
+    assert result.is_error is True
+    assert "narrower range" in result.content[0].text
+
+
 # ---------------------------------------------------------------------------
 # Middleware stack composition tests
 # ---------------------------------------------------------------------------

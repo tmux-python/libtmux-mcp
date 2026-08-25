@@ -909,6 +909,34 @@ class ReadonlyRetryMiddleware(Middleware):
 _TRUNCATION_HEADER_TEMPLATE = "[... truncated {dropped} bytes ...]\n"
 
 
+def _restructure_truncated(
+    original: dict[str, t.Any],
+    truncated: ToolResult,
+) -> ToolResult | None:
+    """Re-attach structured content to a truncated success result.
+
+    Only the single-string result shape is rebuildable: fastmcp wraps a
+    ``-> str`` tool as ``{"result": "..."}``, so swapping in the
+    truncated text keeps the payload schema-valid. Model- and
+    list-shaped results carry the oversize inside their own fields and
+    cannot be trimmed from the flattened text, so they return None and
+    the caller reports a tool error instead of an invalid response.
+    """
+    if set(original) != {"result"} or not isinstance(original["result"], str):
+        return None
+    text = next(
+        (block.text for block in truncated.content if isinstance(block, TextContent)),
+        None,
+    )
+    if text is None:
+        return None
+    return ToolResult(
+        content=truncated.content,
+        structured_content={"result": text},
+        meta=truncated.meta,
+    )
+
+
 class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     """Response-limiter that keeps the tail of oversized output.
 
@@ -957,15 +985,42 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
             return t.cast("ToolResult", inner)
 
         result = await super().on_call_tool(context, _capture)
-        if result is not inner and isinstance(inner, ToolResult) and inner.is_error:
-            # The base class truncated and rebuilt the result; restore
-            # the error flag it dropped.
+        if result is inner or not isinstance(inner, ToolResult):
+            return result
+
+        # The base class truncated and rebuilt the result, dropping both
+        # ``is_error`` and ``structured_content``.
+        if inner.is_error:
             return ToolResult(
                 content=result.content,
                 meta=result.meta,
                 is_error=True,
             )
-        return result
+        if inner.structured_content is None:
+            return result
+
+        # A SUCCESSFUL oversized response is the other half of the same
+        # defect: the tool declares an output schema, the rebuilt result
+        # carries no structured content, and a spec-compliant client
+        # raises a transport-level error instead of delivering truncated
+        # data. That is worse than the truncation this middleware exists
+        # to perform, and worse than having no middleware at all.
+        rebuilt = _restructure_truncated(inner.structured_content, result)
+        if rebuilt is not None:
+            return rebuilt
+        # Shape we cannot rebuild: say so as a tool error the agent can
+        # act on, rather than emitting a response its client will reject.
+        msg = (
+            "Response exceeded the server's size limit and could not be "
+            "truncated while satisfying this tool's output schema. Re-run "
+            "with a narrower range (for example a smaller max_lines, or a "
+            "less negative start)."
+        )
+        return ToolResult(
+            content=[TextContent(type="text", text=msg)],
+            meta=result.meta,
+            is_error=True,
+        )
 
     def _truncate_to_result(
         self,

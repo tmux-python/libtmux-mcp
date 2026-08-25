@@ -8,6 +8,29 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### An oversized response is truncated, not rejected by the client
+
+A capture large enough to hit the server's 1 MB backstop produced
+`RuntimeError: Tool capture_pane has an output schema but did not return
+structured content` — a transport-level failure delivering **no data at
+all**, which is worse than the truncation the limiter exists to perform.
+`capture_pane`'s own docstring advertises `max_lines=None` for a
+complete capture, so the documented way to ask for everything was the
+way to break it. It is size-driven, not `None`-driven: a large explicit
+`max_lines` fails identically.
+
+The limiter rebuilds the result when it truncates, and that rebuild
+dropped `structured_content` alongside `is_error`. The `is_error` half
+had already been fixed and documented; the successful-response half was
+left standing. Truncated successes now carry structured content again.
+
+Where the payload's shape cannot be trimmed while staying schema-valid,
+the call returns an actionable tool error telling the agent to narrow
+its range, rather than a response its client will reject outright.
+
+Tail preservation itself was correct throughout — the head is dropped,
+the newest output kept, and the number of dropped lines reported.
+
 #### `capture_since` no longer loses a flooded pane silently
 
 Output that laps a pane's `history-limit` returned **no lines** with
