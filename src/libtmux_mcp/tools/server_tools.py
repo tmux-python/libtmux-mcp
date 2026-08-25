@@ -262,6 +262,14 @@ def _is_tmux_socket_live(path: pathlib.Path) -> bool:
             s.close()
 
 
+def _socket_key(path: pathlib.Path) -> str:
+    """Identity for a socket, stable across symlinks and relative paths."""
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
 def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     """Return a :class:`ServerInfo` for a live socket at ``socket_path``.
 
@@ -360,7 +368,11 @@ def list_servers(
     """
     tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
     uid_dir = pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}"
-    results: list[ServerInfo] = []
+    # Keyed by resolved socket path so an extra that names a socket the
+    # scan already found is recognized as the same server rather than
+    # listed a second time with a disjoint half of its identity.
+    # Insertion order preserves "scan results first, extras in order".
+    found: dict[str, ServerInfo] = {}
     if uid_dir.is_dir():
         for entry in sorted(uid_dir.iterdir()):
             try:
@@ -372,16 +384,31 @@ def list_servers(
             # ``get_server_info`` call. Stale sockets are the common case.
             if not _is_tmux_socket_live(entry):
                 continue
+            info: ServerInfo | None
             try:
                 info = get_server_info(socket_name=entry.name)
             except ToolError:
+                # A name that does not round-trip through ``-L`` -- one
+                # holding a newline, say -- used to drop a live server
+                # from the listing silently. The path always works.
+                info = _probe_server_by_path(entry)
+            if info is None:
                 continue
-            results.append(info)
+            # The scan holds the full path; reporting only the name left
+            # ``socket_path`` null on every scanned row, so no row
+            # carried a complete identity.
+            found[_socket_key(entry)] = info.model_copy(
+                update={"socket_name": entry.name, "socket_path": str(entry)}
+            )
     for raw_path in extra_socket_paths or []:
-        extra = _probe_server_by_path(pathlib.Path(raw_path))
+        path = pathlib.Path(raw_path)
+        key = _socket_key(path)
+        if key in found:
+            continue
+        extra = _probe_server_by_path(path)
         if extra is not None:
-            results.append(extra)
-    return results
+            found[key] = extra
+    return list(found.values())
 
 
 def register(mcp: FastMCP) -> None:

@@ -8,6 +8,19 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `list_servers` rows carry a complete identity
+
+The directory scan held each socket's full path and reported only its
+name, so `socket_path` was null on every scanned row. Passing that same
+socket through `extra_socket_paths` then listed it a second time
+carrying the opposite half of its identity, with nothing to tie the two
+rows together — an agent could not tell they were one server.
+
+Scanned rows now carry both fields, and extras are deduplicated against
+the scan by resolved path. A socket whose name does not round-trip
+through `tmux -L` — one containing a newline, say — is listed by path
+instead of being dropped from the results without a word.
+
 #### `wait_for_text` reports a stop marker that was already on screen
 
 The entry scan covered `patterns` and not `stop`, so waiting on a pane
