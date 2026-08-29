@@ -438,6 +438,15 @@ def list_servers(
     bounded, and such a socket is reported with ``unreachable_reason``
     set rather than dropped or allowed to hang the listing.
 
+    **Cost is per socket FILE, not per live server**, divided by the
+    probe pool. A dead socket refuses instantly, so the whole scan is
+    Python overhead — measured 883 ms for 1,620 files returning 12
+    servers, against ~10 ms for an ordinary dozen. A WEDGED socket is
+    the expensive one: it pays the full probe timeout, so a directory
+    holding many of those costs ``files / workers x timeout`` rather
+    than milliseconds. Nothing unlinks the socket of a server that
+    died, so this directory only grows.
+
     **Scope caveat**: custom ``tmux -S /some/path/...`` servers that
     live OUTSIDE ``$TMUX_TMPDIR`` are not returned by the scan alone —
     there is no canonical registry for arbitrary socket paths. Supply

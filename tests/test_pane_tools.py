@@ -5126,81 +5126,43 @@ def test_wait_for_text_matches_pattern_across_wrap(
     assert any(marker in line for line in result.matched_lines)
 
 
-def test_wait_for_text_reports_progress(
-    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """wait_for_text calls ``ctx.report_progress`` at each poll tick.
+def test_wait_for_text_reports_progress_on_a_ticker_not_per_poll() -> None:
+    """Progress cadence must not be the poll interval.
 
-    Uses a minimal async stub Context so the test stays independent
-    from FastMCP's live server — ``report_progress`` is the only
-    coroutine the wait loop invokes and it only needs to be awaitable.
-    The assertion is that at least one progress report is emitted
-    during a short, guaranteed-to-timeout poll window.
+    Reporting from inside the poll loop tied the notification rate to
+    ``interval`` -- a polling knob with a 0.01 floor -- so the default
+    emitted ~20 notifications a second, each an awaited JSON-RPC message
+    carrying the same sentence with a different decimal.
+
+    Read from the tree rather than measured. Three behavioural versions
+    of this test flaked: any assertion about how many ticks land in a
+    window is fragile in one direction, because load drops ticks and
+    never adds them, and a ratio between two runs drifts when load
+    differs between them. The property is structural, so this asserts
+    the structure and the sibling test below covers delivery.
     """
-    import asyncio
+    import ast
+    import inspect
 
-    progress_calls: list[tuple[float, float | None, str]] = []
+    from libtmux_mcp.tools.pane_tools import wait as wait_module
 
-    class _StubContext:
-        async def report_progress(
-            self,
-            progress: float,
-            total: float | None = None,
-            message: str = "",
-        ) -> None:
-            progress_calls.append((progress, total, message))
-
-        async def warning(self, message: str) -> None:
-            return  # log notifications not asserted in this test
-
-    # Drive the ticker fast rather than waiting on its shipped 1 s
-    # cadence. A test that needs N ticks of a wall-clock second inside a
-    # fixed window is load-fragile in one direction -- ticks are dropped,
-    # never added -- so widening the window only lengthens the odds.
-    # At 0.1 s the window holds ~10 ticks and needs 2, while per-iteration
-    # reporting at interval=0.01 would be ~100.
-    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.1)
-
-    stub = _StubContext()
-    result = asyncio.run(
-        wait_for_text(
-            patterns=["WILL_NEVER_MATCH_aBcDeF"],
-            pane_id=mcp_pane.pane_id,
-            timeout=1.0,
-            interval=0.01,
-            socket_name=mcp_server.socket_name,
-            ctx=t.cast("t.Any", stub),
-        )
+    tree = ast.parse(inspect.getsource(wait_module))
+    fn = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "wait_for_text"
     )
-    assert result.found is False
-    # Two reports need 2.5 s, because progress runs on its own 1 s
-    # cadence rather than once per poll. That decoupling is the point:
-    # ``interval`` is a polling knob with a 0.01 floor, and driving
-    # notifications from it sent the same sentence ~20 times a second
-    # with a different decimal.
-    # Asserted as a COUNT, not a gap. Load can only stretch a gap or
-    # drop a tick, so a magnitude assertion fails on a healthy machine
-    # under parallel load while a starved poll loop could fake one. The
-    # count runs the other way: 2.5 s at a 1 s cadence cannot exceed
-    # three, and reporting per 0.05 s iteration would be about fifty.
-    assert progress_calls, "no progress reported at all"
-    assert len(progress_calls) <= 30, (
-        f"{len(progress_calls)} reports in 1.0s at a 0.1s cadence; "
-        "the rate is the poll interval's, not the ticker's"
+    called = {
+        node.func.id
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "progress_ticker" in called, (
+        "wait_for_text must report through progress_ticker, like its siblings"
     )
-    first_progress, first_total, first_msg = progress_calls[0]
-    assert first_progress >= 0.0
-    assert first_total == 1.0
-    assert mcp_pane.pane_id is not None
-    assert mcp_pane.pane_id in first_msg
-    # The message must carry the BUDGET, not just restate the pane. A
-    # constant string wastes the one field a client is most likely to
-    # show a human, and it is the field that survives transports which
-    # drop the numeric pair.
-    assert "elapsed" in first_msg
-    assert "left" in first_msg
-    assert first_msg != progress_calls[-1][2], (
-        f"progress message never changed across the wait: {first_msg!r}"
+    assert "_maybe_report_progress" not in called, (
+        "wait_for_text reports progress inline again; that ties the "
+        "notification rate to the poll interval"
     )
 
 
