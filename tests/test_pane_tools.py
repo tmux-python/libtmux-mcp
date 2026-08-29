@@ -5198,17 +5198,23 @@ def test_wait_for_text_propagates_unexpected_progress_error(
     # point of this regression guard is that the error reaches the
     # error handler at all — previously the broad ``suppress`` ate it.
     # The faulty context is only reached when the ticker fires, so this
-    # needs at least one tick inside the window. Driven fast rather than
-    # sized to the shipped 1 s cadence: ~10 chances instead of one, and
-    # a fifth of the wall clock.
-    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.05)
+    # needs at least one tick. Margin on both axes, because the failure
+    # is one-directional -- load removes ticks, never adds them:
+    #
+    #   cadence 0.001s, so a tick lands as soon as the loop is scheduled
+    #   timeout 1.5s, because pane resolution and the entry capture run
+    #   BEFORE the ticker starts, and a short budget can be spent
+    #   entirely on them, leaving the ticker no window at all
+    #
+    # At 0.05s/0.5s this flaked 2 runs in 10 under `-n auto`.
+    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.001)
 
     with pytest.raises(ToolError, match="synthetic bug"):
         asyncio.run(
             wait_for_text(
                 patterns=["WILL_NEVER_MATCH_PROPAGATE_q2rj"],
                 pane_id=mcp_pane.pane_id,
-                timeout=0.5,
+                timeout=1.5,
                 interval=0.05,
                 socket_name=mcp_server.socket_name,
                 ctx=t.cast("t.Any", _FaultyContext()),
