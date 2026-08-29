@@ -16,7 +16,7 @@ from libtmux_mcp._patterns import compile_pattern
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     ExpectedToolError,
-    _get_server,
+    _get_server_async,
     _tmux_argv,
     handle_tool_errors_async,
     tmux_id_sort_key,
@@ -598,7 +598,7 @@ async def wait_for_text(
         ctx=ctx,
     )
 
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
 
     # Anchor ``start_time`` before pane resolution: that call reaches
     # tmux too, so leaving it outside the clock hid it from

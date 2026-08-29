@@ -1052,7 +1052,7 @@ def test_probe_liveness_separates_absent_from_unreachable(
         args=["tmux"], returncode=returncode, stdout="", stderr="\n".join(stderr)
     )
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(_utils, "_run_tmux_bounded", lambda *a, **k: result)
+        patch.setattr(_utils, "_run_tmux_sync", lambda *a, **k: result)
         alive, unreachable = _utils._probe_liveness(t.cast("t.Any", object()))
 
     assert alive is expected_alive
@@ -1070,7 +1070,7 @@ def test_probe_liveness_reports_a_socket_that_answers_nothing() -> None:
     from libtmux_mcp import _utils
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(_utils, "_run_tmux_bounded", lambda *a, **k: None)
+        patch.setattr(_utils, "_run_tmux_sync", lambda *a, **k: None)
         alive, unreachable = _utils._probe_liveness(t.cast("t.Any", object()))
 
     assert alive is False

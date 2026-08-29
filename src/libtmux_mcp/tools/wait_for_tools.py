@@ -46,7 +46,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_SELF_BOUNDED,
     ExpectedToolError,
-    _get_server,
+    _get_server_async,
     _tmux_argv,
     handle_tool_errors_async,
 )
@@ -200,7 +200,7 @@ async def wait_for_channel(
         signal, so that case is detected by re-probing the server and
         reported rather than passed off as success.
     """
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
     cname = _validate_channel_name(channel)
     effective_timeout = min(timeout, _wait_ceiling_seconds())
     argv = _tmux_argv(server, "wait-for", cname)
@@ -278,7 +278,7 @@ async def signal_channel(
     str
         Confirmation message naming the channel.
     """
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
     cname = _validate_channel_name(channel)
     argv = _tmux_argv(server, "wait-for", "-S", cname)
     # Deliberately still a worker thread, unlike every other tmux call

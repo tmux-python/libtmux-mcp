@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from libtmux_mcp._utils import (
     ExpectedToolError,
-    _get_server,
+    _get_server_async,
     _resolve_pane,
     handle_tool_errors_async,
 )
@@ -589,7 +589,7 @@ async def capture_since(
     ):
         pane_id = decoded.pane_id
 
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
     pane = _resolve_pane(
         server,
         pane_id=pane_id,

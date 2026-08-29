@@ -29,7 +29,7 @@ from libtmux_mcp._utils import (
     _invalidate_server,
     _probe_liveness,
     _raise_if_start_directory_unusable,
-    _run_tmux_bounded,
+    _run_tmux_sync,
     _serialize_session,
     handle_tool_errors,
 )
@@ -293,7 +293,7 @@ def _probe_socket_bounded(server: Server, *, timeout: float) -> ServerInfo:
     "empty means absent" claim the resource path was fixed for, and a
     wedged server is exactly what an operator is looking for.
     """
-    sessions = _run_tmux_bounded(
+    sessions = _run_tmux_sync(
         server, "list-sessions", "-F", "#{session_id}", timeout=timeout
     )
     if sessions is None:
@@ -313,7 +313,7 @@ def _probe_socket_bounded(server: Server, *, timeout: float) -> ServerInfo:
         detail = sessions.stderr.strip()
         if detail and "no server running" not in detail.lower():
             reason = detail
-    version_result = _run_tmux_bounded(
+    version_result = _run_tmux_sync(
         server, "display-message", "-p", "#{version}", timeout=timeout
     )
     version = None

@@ -2711,6 +2711,72 @@ def test_capture_since_rejects_dead_pane_cursor(
         window.cmd("set-option", "-wu", "remain-on-exit")
 
 
+def test_resolving_a_server_does_not_block_the_event_loop(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Server resolution shells out, and it used to do so on the loop.
+
+    ``_get_server`` runs a tmux subprocess to check the socket answers:
+    ~4 ms against a healthy server, the full liveness bound against one
+    that never replies. Called straight from an async tool it cost every
+    OTHER in-flight call the same wait -- measured against a wedged
+    socket, ``capture_since`` held the loop for 5.01s and the ticker
+    beside it advanced exactly once.
+
+    Driven off a stubbed probe rather than a real wedged socket: the
+    property is "this work happens in a thread", and a socket fixture
+    would test the liveness bound instead.
+    """
+    from libtmux_mcp import _utils
+
+    real_probe = _utils._probe_liveness
+
+    def slow_probe(server: t.Any) -> tuple[bool, str | None]:
+        time.sleep(0.3)
+        return real_probe(server)
+
+    monkeypatch.setattr(_utils, "_probe_liveness", slow_probe)
+    _utils._server_cache.clear()
+
+    async def _drive() -> float:
+        gaps: list[float] = []
+        stop = asyncio.Event()
+
+        async def _ticker() -> None:
+            last = time.monotonic()
+            while not stop.is_set():
+                await asyncio.sleep(0.01)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+
+        async def _call() -> None:
+            try:
+                await capture_since(
+                    pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name
+                )
+            finally:
+                stop.set()
+
+        await asyncio.gather(_ticker(), _call())
+        return max(gaps) if gaps else 0.0
+
+    # Counting ticks cannot answer this: the rest of capture_since is
+    # already threaded, so the ticker runs plenty either way and the
+    # count stays high with the block present -- measured, that version
+    # passed against the unfixed code. The GAP is the signal: a 0.3s
+    # block on the loop is a 0.3s gap between ticks.
+    #
+    # The minimum across attempts, because load produces gaps of its
+    # own: a blocked loop shows one in EVERY attempt, a starved loop
+    # does not.
+    attempts = [asyncio.run(_drive()) for _ in range(3)]
+    assert min(attempts) < 0.25, (
+        f"longest gap between ticks was {min(attempts):.3f}s across "
+        f"{attempts} — resolving the server is blocking the event loop"
+    )
+
+
 def test_capture_since_does_not_block_event_loop(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:

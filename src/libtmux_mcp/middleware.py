@@ -631,6 +631,13 @@ _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
         "pattern",
         "patterns",
         "stop",
+        # A caller-supplied MATCH EXPRESSION, the same category as
+        # ``pattern`` -- {"pane_title__contains": ...} says what the
+        # caller was hunting for. It reached the log verbatim in both
+        # accepted shapes: a dict, and the JSON STRING that
+        # ``_coerce_dict_arg`` also accepts. A dict-only entry would
+        # have half-fixed it.
+        "filters",
     }
 )
 

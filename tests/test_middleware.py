@@ -2042,3 +2042,29 @@ def test_audit_redacts_the_arguments_that_search_for_a_secret() -> None:
     # The digest still correlates, so an auditor can tell the same value
     # was searched for without being shown it.
     assert _summarize_args({"pattern": secret})["pattern"] == delivered["value"]
+
+
+def test_filters_is_redacted_in_both_shapes_it_arrives_in() -> None:
+    """``filters`` is a match expression, the same category as ``pattern``.
+
+    ``{"pane_title__contains": ...}`` says what the caller was hunting
+    for, and it reached the audit log verbatim while ``pattern`` --
+    accepted as sensitive for exactly that reason -- was digested. Same
+    kind of value, opposite treatment, in one middleware.
+
+    Both shapes matter: ``_coerce_dict_arg`` accepts a JSON STRING as
+    well as a dict, so a dict-only entry would have half-fixed it.
+    """
+    secret = "hunter2-PROD-DB-PASSWORD"
+
+    as_dict = repr(_summarize_args({"filters": {"pane_title__contains": secret}}))
+    as_json = repr(
+        _summarize_args({"filters": f'{{"pane_title__contains": "{secret}"}}'})
+    )
+    assert secret not in as_dict
+    assert secret not in as_json
+
+    # Routing metadata is deliberately preserved -- an audit trail that
+    # redacts which pane was targeted is not an audit trail.
+    routing = _summarize_args({"pane_id": "%1", "socket_name": "dev"})
+    assert routing == {"pane_id": "%1", "socket_name": "dev"}

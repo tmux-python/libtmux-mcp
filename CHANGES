@@ -21,6 +21,43 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### One wedged socket no longer stalls every concurrent call
+
+Resolving a server shells out to tmux to check the socket answers --
+about 4 ms against a healthy one, the full liveness bound against one
+that never replies. The async tools called it straight from the event
+loop, so that wait was paid by every OTHER call in flight, not just the
+one that asked. Measured against a wedged socket: `capture_since` held
+the loop for 5.01 s and a ticker beside it advanced exactly once.
+
+The five async tools resolve off-loop now. Same measurement: 535 ticks.
+
+Through an async SUBPROCESS, not a worker thread. The wait path forbids
+threads outright -- `concurrent.futures.thread._python_exit` joins them
+with no timeout, so one wedged tmux would hang interpreter exit forever
+-- and a first attempt using `asyncio.to_thread` was caught by the test
+that guards it.
+
+The blocking predates the bound -- the cached path always shelled out
+-- but a bounded five-second stall shared by every concurrent caller is
+still a stall, and the async tools are the ones with company.
+
+#### `filters` is redacted from the audit log
+
+`filters` is a caller-supplied match expression, the same category as
+`pattern`: `{"pane_title__contains": ...}` says what the caller was
+hunting for. `pattern`, `patterns` and `stop` were accepted as
+sensitive for exactly that reason and `filters` was not, so it reached
+the log verbatim -- in BOTH shapes it arrives in, since the argument
+also accepts a JSON string.
+
+Routing metadata is still preserved. An audit trail that redacts which
+pane was targeted is not an audit trail.
+
+Reported by the QA instance, which planted a marker in every string,
+array and object parameter of all 60 tools rather than reading the
+list.
+
 #### The tool batches take a `timeout`
 
 `call_readonly_tools_batch`, `call_mutating_tools_batch` and

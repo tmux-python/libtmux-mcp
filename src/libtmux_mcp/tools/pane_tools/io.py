@@ -19,6 +19,7 @@ from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
+    _get_server_async,
     _map_exception_to_tool_error,
     _raise_if_untargeted,
     _resolve_pane,
@@ -686,7 +687,7 @@ async def run_command(
         raise ExpectedToolError(msg)
     effective_timeout = min(timeout, _wait_ceiling_seconds())
 
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
     pane = _resolve_pane(
         server,
         pane_id=pane_id,

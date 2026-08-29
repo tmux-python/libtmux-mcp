@@ -25,6 +25,8 @@ from libtmux import exc
 from libtmux._internal.query_list import LOOKUP_NAME_MAP, QueryList
 from libtmux.server import Server
 
+from libtmux_mcp._tmux_proc import _run_tmux_bounded as _run_tmux_async
+
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.session import Session
@@ -735,10 +737,13 @@ HUNG_SOCKET_REASON = (
 )
 
 
-def _run_tmux_bounded(
+def _run_tmux_sync(
     server: Server, *tmux_args: str, timeout: float
 ) -> subprocess.CompletedProcess[str] | None:
     """Run one tmux command with a hard bound, or ``None`` if it hung.
+
+    SYNCHRONOUS, and named so: the async path must not use this or a
+    thread wrapper around it. See :mod:`libtmux_mcp._tmux_proc`.
 
     A socket with a listener is not a server that answers. A tmux server
     spinning inside its own event loop accepts the connection and never
@@ -814,6 +819,42 @@ _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}
 _server_cache_lock = threading.Lock()
 
 
+def _server_cache_key(
+    socket_name: str | None, socket_path: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Cache key with the environment fallbacks already applied."""
+    if socket_name is None:
+        socket_name = os.environ.get("LIBTMUX_SOCKET")
+    if socket_path is None:
+        socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
+    return (socket_name, socket_path, os.environ.get("LIBTMUX_TMUX_BIN"))
+
+
+def _build_server(*, socket_name: str | None, socket_path: str | None) -> Server:
+    """Construct an unprobed handle, honouring the same env fallbacks."""
+    name, path, tmux_bin = _server_cache_key(socket_name, socket_path)
+    kwargs: dict[str, t.Any] = {}
+    if name is not None:
+        kwargs["socket_name"] = name
+    if path is not None:
+        kwargs["socket_path"] = path
+    if tmux_bin is not None:
+        kwargs["tmux_bin"] = tmux_bin
+    return Server(**kwargs)
+
+
+def _raise_socket_hung(server: Server) -> t.NoReturn:
+    """Report a socket that accepted a connection and then said nothing."""
+    target = server.socket_path or server.socket_name or "<default>"
+    msg = (
+        f"tmux server at {target} accepted the connection but did not "
+        f"answer within {_LIVENESS_TIMEOUT_SECONDS:g}s. It is running and "
+        "wedged rather than absent, so its sessions are not lost -- but no "
+        "tmux command against it can complete until it is killed."
+    )
+    raise ExpectedToolError(msg)
+
+
 def _get_server(
     socket_name: str | None = None,
     socket_path: str | None = None,
@@ -832,14 +873,7 @@ def _get_server(
     Server
         A cached libtmux Server instance.
     """
-    if socket_name is None:
-        socket_name = os.environ.get("LIBTMUX_SOCKET")
-    if socket_path is None:
-        socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
-
-    tmux_bin = os.environ.get("LIBTMUX_TMUX_BIN")
-
-    cache_key = (socket_name, socket_path, tmux_bin)
+    cache_key = _server_cache_key(socket_name, socket_path)
     with _server_cache_lock:
         cached = _server_cache.get(cache_key)
 
@@ -856,14 +890,7 @@ def _get_server(
             if _server_cache.get(cache_key) is cached:
                 del _server_cache[cache_key]
 
-    kwargs: dict[str, t.Any] = {}
-    if socket_name is not None:
-        kwargs["socket_name"] = socket_name
-    if socket_path is not None:
-        kwargs["socket_path"] = socket_path
-    if tmux_bin is not None:
-        kwargs["tmux_bin"] = tmux_bin
-    server = Server(**kwargs)
+    server = _build_server(socket_name=socket_name, socket_path=socket_path)
 
     # Probed before it is handed out, because nothing downstream is
     # bounded: ``server.panes`` and friends go straight to
@@ -890,14 +917,49 @@ def _raise_if_socket_hung(server: Server, reason: str | None) -> None:
     """
     if reason is not HUNG_SOCKET_REASON:
         return
-    target = server.socket_path or server.socket_name or "<default>"
-    msg = (
-        f"tmux server at {target} accepted the connection but did not "
-        f"answer within {_LIVENESS_TIMEOUT_SECONDS:g}s. It is running and "
-        "wedged rather than absent, so its sessions are not lost -- but no "
-        "tmux command against it can complete until it is killed."
-    )
-    raise ExpectedToolError(msg)
+    _raise_socket_hung(server)
+
+
+async def _get_server_async(
+    socket_name: str | None = None,
+    socket_path: str | None = None,
+) -> Server:
+    """Resolve a server without blocking the event loop.
+
+    ``_get_server`` runs a tmux subprocess to check the socket answers,
+    which is ~4 ms against a healthy server and the full liveness bound
+    against one that never replies. Called directly from an async tool
+    that cost every OTHER in-flight call the same wait: measured, an
+    ``capture_since`` against a wedged socket held the loop for 5.01 s
+    and the ticker beside it advanced once.
+
+    The blocking predates the bound -- the cached path always shelled
+    out -- but a bounded 5 s stall shared by every concurrent caller is
+    still a stall, and the async tools are the ones with company.
+
+    An async SUBPROCESS, not ``to_thread``: the wait path forbids
+    worker threads outright, because
+    ``concurrent.futures.thread._python_exit`` joins them with no
+    timeout and one wedged tmux would hang interpreter exit forever.
+    A subprocess we own can be killed. See
+    :mod:`libtmux_mcp._tmux_proc`.
+    """
+    server = _build_server(socket_name=socket_name, socket_path=socket_path)
+    cache_key = _server_cache_key(socket_name, socket_path)
+    with _server_cache_lock:
+        cached = _server_cache.get(cache_key)
+    probe = cached if cached is not None else server
+    argv = _tmux_argv(probe, "list-sessions")
+    try:
+        await _run_tmux_async(argv, timeout=_LIVENESS_TIMEOUT_SECONDS)
+    except TimeoutError:
+        _raise_socket_hung(probe)
+    except OSError:
+        pass  # a missing binary or socket is not a hang; let the caller see it
+    if cached is not None:
+        return cached
+    with _server_cache_lock:
+        return _server_cache.setdefault(cache_key, server)
 
 
 def _invalidate_server(
@@ -1671,7 +1733,7 @@ def _probe_liveness(server: Server) -> tuple[bool, str | None]:
     and a timeout is reported as unreachable -- which is what it is.
     """
     try:
-        result = _run_tmux_bounded(
+        result = _run_tmux_sync(
             server, "list-sessions", timeout=_LIVENESS_TIMEOUT_SECONDS
         )
     except Exception as err:  # noqa: BLE001 - probe must not raise
