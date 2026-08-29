@@ -580,7 +580,9 @@ async def run_command(
     Parameters
     ----------
     command : str
-        Shell command to run in the target pane.
+        Shell command to run in the target pane. Single-line only: join
+        with ``'; '``, or use ``send_keys``/``paste_text`` for raw
+        multi-line input.
     pane_id : str, optional
         Pane ID (e.g. '%1').
     session_name : str, optional
@@ -602,8 +604,7 @@ async def run_command(
         For MCP calls, omission uses the server's LIBTMUX_SUPPRESS_HISTORY
         default; an explicit value overrides it. Direct Python calls default
         to False. Best effort: the shell must honor space-prefixed history
-        suppression. Suppression requires a single-line command; multiline
-        commands remain available when suppression is false.
+        suppression.
     socket_name : str, optional
         tmux socket name.
 
@@ -616,8 +617,20 @@ async def run_command(
     if not command.strip():
         msg = "command must not be empty"
         raise ExpectedToolError(msg)
-    if suppress_history and ("\n" in command or "\r" in command):
-        msg = "command must be a single line when suppress_history=True"
+    if "\n" in command or "\r" in command:
+        # The wrapper must be ONE line, because that is what makes its
+        # "did this start" answer true. A shell mid-`read` consumes a
+        # whole line as its answer: one line is eaten entire and nothing
+        # executes, while a split wrapper has its first line eaten and
+        # then RUNS the rest -- and the tool would report "it has not
+        # run" about a command that just did, talking the caller into a
+        # retry that executes it twice. Measured.
+        msg = (
+            "command must be a single line. A multi-line command cannot be "
+            "sent atomically, so this tool cannot tell whether a pane "
+            "swallowed it or ran it. Join the lines with '; ', or use "
+            "send_keys / paste_text if you need raw multi-line input."
+        )
         raise ExpectedToolError(msg)
     if timeout <= 0:
         msg = "timeout must be positive"
@@ -662,27 +675,12 @@ async def run_command(
     # observation, and the tool reported the slow one -- "may still run"
     # about something that never ran.
     #
-    # One line whenever the command allows it, because atomicity is what
-    # makes the answer trustworthy. A shell mid-`read` consumes a whole
-    # line as its answer, so a single line is eaten entire and nothing
-    # executes. Split across lines, the same shell eats only the first
-    # and then RUNS the rest -- measured. Multi-line commands keep the
-    # split form and cannot detect that case; ``suppress_history``
-    # already refuses them for a related reason.
-    if "\n" in command or "\r" in command:
-        payload = "\n".join(
-            (
-                f"{history_prefix}{started_cmd}",
-                "(",
-                command.rstrip(),
-                (f'); s=$?; {status_cmd} "$s"; {signal_cmd}'),
-            )
-        )
-    else:
-        payload = (
-            f"{history_prefix}{started_cmd}; ( {command.strip()} ); "
-            f's=$?; {status_cmd} "$s"; {signal_cmd}'
-        )
+    # Always one line -- multi-line commands are refused above, because
+    # atomicity is what makes the "did this start" answer true.
+    payload = (
+        f"{history_prefix}{started_cmd}; ( {command.strip()} ); "
+        f's=$?; {status_cmd} "$s"; {signal_cmd}'
+    )
 
     started = time.monotonic()
     await asyncio.to_thread(

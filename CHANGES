@@ -184,9 +184,18 @@ nothing will" and "your input is queued behind a running command". Both
 look identical from outside and they call for opposite reactions, so
 the message names the foreground process and states both readings.
 
-It is incomplete by construction for multi-line commands, which keep
-the split wrapper and so remain vulnerable to the `read` split.
-`suppress_history` already refuses those for a related reason.
+Multi-line commands are now refused outright, whatever
+`suppress_history` says. They were the one path the wrapper could not
+send atomically, and leaving them meant shipping two code paths where
+only one was sound -- measured, a shell mid-`read` ate the split
+wrapper's first line, RAN the rest, and the tool then reported "it has
+not run" and "in a `read` ... it never will" about a command that just
+had. That is worse than the bug it replaced: the old timeout at least
+left a caller uncertain, while a confident sentence talks them into the
+retry, and a non-idempotent command executes twice.
+
+Join with `'; '`, or use `send_keys` / `paste_text` for raw multi-line
+input. The error says so.
 
 
 #### `list_servers` is 6.7x faster, and concurrent calls stop queueing

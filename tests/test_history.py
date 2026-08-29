@@ -479,8 +479,7 @@ def test_run_command_describes_mcp_precedence_and_direct_python_default() -> Non
         "For MCP calls, omission uses the server's "
         "LIBTMUX_SUPPRESS_HISTORY default; an explicit value overrides it. "
         "Direct Python calls default to False. Best effort: the shell must honor "
-        "space-prefixed history suppression. Suppression requires a single-line "
-        "command; multiline commands remain available when suppression is false."
+        "space-prefixed history suppression."
     )
     parameter = inspect.signature(pane_tools.run_command).parameters["suppress_history"]
     mcp = FastMCP("run-command-description")
@@ -961,32 +960,35 @@ def test_mcp_run_command_rejects_multiline_suppression_before_tmux(
 
     assert result.is_error is True
     assert result.content
-    assert result.content[0].text == (
-        "command must be a single line when suppress_history=True"
-    )
+    assert result.content[0].text.startswith("command must be a single line.")
     assert private_marker not in repr(result)
 
 
-def test_mcp_run_command_preserves_multiline_when_suppression_disabled(
+def test_mcp_run_command_refuses_multiline_even_without_suppression(
     mcp_server: Server,
     mcp_pane: Pane,
     tmp_path: pathlib.Path,
 ) -> None:
-    """An explicit false keeps the existing multiline command behavior."""
+    """Multi-line is refused whatever ``suppress_history`` says.
+
+    It used to be allowed here, and that path could not be made honest:
+    a shell mid-``read`` ate the wrapper's first line and RAN the rest,
+    while the tool reported "it has not run" -- talking the caller into
+    a retry that executed a non-idempotent command twice. The joined
+    form restores the atomicity the started-channel answer rests on.
+    """
     first = "MULTILINE_CONTROL_FIRST"
     second = "MULTILINE_CONTROL_SECOND"
     output = tmp_path / "multiline-control.txt"
-    command = (
-        f"printf '%s\\n' {first} > {shlex.quote(str(output))}\n"
-        f"printf '%s\\n' {second} >> {shlex.quote(str(output))}"
-    )
+    write_first = f"printf '%s\\n' {first} > {shlex.quote(str(output))}"
+    write_second = f"printf '%s\\n' {second} >> {shlex.quote(str(output))}"
 
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
-            result = await client.call_tool(
+            refused = await client.call_tool(
                 "run_command",
                 {
-                    "command": command,
+                    "command": f"{write_first}\n{write_second}",
                     "pane_id": mcp_pane.pane_id,
                     "timeout": 3.0,
                     "socket_name": mcp_server.socket_name,
@@ -994,8 +996,22 @@ def test_mcp_run_command_preserves_multiline_when_suppression_disabled(
                 },
                 raise_on_error=False,
             )
-            _assert_run_command_succeeded(result)
+            assert refused.is_error is True
+            assert refused.content[0].text.startswith("command must be a single line.")
+
+            joined = await client.call_tool(
+                "run_command",
+                {
+                    "command": f"{write_first}; {write_second}",
+                    "pane_id": mcp_pane.pane_id,
+                    "timeout": 10.0,
+                    "socket_name": mcp_server.socket_name,
+                    "suppress_history": False,
+                },
+                raise_on_error=False,
+            )
+            _assert_run_command_succeeded(joined)
 
     asyncio.run(_exercise())
 
-    assert output.read_text().splitlines() == [first, second]
+    assert not output.exists() or output.read_text().splitlines() == [first, second]

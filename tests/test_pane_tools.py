@@ -1738,6 +1738,58 @@ def test_capture_since_reports_a_narrowed_pane_as_missed(
     assert after.lines_missed is True
 
 
+def test_wait_for_text_matches_a_reprinted_line(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Text already on screen must still match when printed again.
+
+    The entry snapshot was a set of every row below the cursor, so a
+    line anywhere down there permanently blocked an identical line
+    arriving later -- and waiting for a repeated status line is this
+    tool's headline case. Compared per index now.
+
+    The second case is the falsifier: per-index comparison's obvious
+    failure mode is rows moving under it, so stale text plus unrelated
+    output scrolling the region is where a naive version false-matches.
+    """
+    import asyncio
+
+    marker = "BUILD_OK_REPRINT"
+
+    def run(reprint: bool) -> WaitForTextResult:
+        tail = f"printf '{marker}\\n'; " if reprint else ""
+        mcp_pane.respawn(
+            kill=True,
+            shell=(
+                f"sh -c \"printf '{marker}\\n'; sleep 1; "
+                f"for i in 1 2 3; do printf 'noise %s\\n' $i; sleep 0.2; done; "
+                f'{tail}sleep 5"'
+            ),
+        )
+        retry_until(
+            lambda: any(marker in line for line in mcp_pane.capture_pane()),
+            10,
+            raises=True,
+        )
+        return asyncio.run(
+            wait_for_text(
+                patterns=[marker],
+                pane_id=mcp_pane.pane_id,
+                timeout=4.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+    reprinted = run(reprint=True)
+    assert reprinted.found is True
+    assert reprinted.matched_at_entry is False
+
+    # Stale on screen, rows scrolling, never reprinted: must not match.
+    stale_only = run(reprint=False)
+    assert stale_only.found is False
+    assert stale_only.matched_at_entry is True
+
+
 def test_run_command_reports_a_command_that_never_ran(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
