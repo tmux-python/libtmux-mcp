@@ -2719,6 +2719,14 @@ def test_capture_since_rejects_dead_pane_cursor(
 #: the loop and every concurrent caller waits with them; awaited, they
 #: yield. Names stay here after being converted to an async bounded
 #: form, so reintroducing a synchronous one is caught.
+#: libtmux METHODS that make a tmux round trip. ``Pane.cmd`` and friends
+#: are the same hazard as the helpers below and are invisible to a
+#: name-based check, because the offending call is an attribute access
+#: on whatever object is in hand.
+_BLOCKING_TMUX_METHODS = frozenset(
+    {"cmd", "capture_pane", "display_message", "refresh"}
+)
+
 _BLOCKING_TMUX_HELPERS = frozenset(
     {
         "_resolve_pane",
@@ -2760,7 +2768,10 @@ def test_no_async_tool_makes_a_blocking_tmux_call_on_the_loop() -> None:
             return
         if isinstance(node, ast.Call):
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name in _BLOCKING_TMUX_HELPERS:
+            attr = isinstance(node.func, ast.Attribute)
+            if name in _BLOCKING_TMUX_HELPERS or (
+                attr and name in _BLOCKING_TMUX_METHODS
+            ):
                 offenders.append(f"{path.name}:{node.lineno} async {where} -> {name}()")
         for child in ast.iter_child_nodes(node):
             walk(child, where, path)

@@ -21,6 +21,20 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `run_command` read its exit status on the event loop
+
+Two `Pane.cmd` calls sat inline in an async body -- reading the exit
+status the wrapper had just written, and clearing it. `Pane.cmd` is a
+tmux round trip with no timeout, so every OTHER in-flight call waited
+with them, and against a server that had stopped answering, waited
+indefinitely.
+
+Invisible to the structural guard as written, because the offending
+call is an attribute access on whatever object is in hand rather than a
+name it could match. The guard now covers `cmd`, `capture_pane`,
+`display_message` and `refresh` on any receiver; putting one back names
+the file, line and method.
+
 #### `capture_since` can no longer take the process down with a wedged tmux
 
 A tmux server that answers once and then stops answering left

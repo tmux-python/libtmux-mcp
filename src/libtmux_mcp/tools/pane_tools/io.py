@@ -16,6 +16,7 @@ import uuid
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp._bounded_io import _run_tmux_lines
 from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
@@ -703,6 +704,9 @@ async def run_command(
         session_id=session_id,
         window_id=window_id,
     )
+    target_id = pane.pane_id
+    assert target_id is not None
+
     # A full-screen program (less, vi, htop) owns the pane's keyboard,
     # so the wrapper below is consumed as ITS keystrokes rather than by
     # a shell: measured against `less`, `s=$?...` became less's
@@ -841,7 +845,13 @@ async def run_command(
     elapsed = time.monotonic() - started
     exit_status: int | None = None
     if not timed_out:
-        status = pane.cmd("show-option", "-p", "-v", status_option).stdout
+        # Awaited, not inline: ``Pane.cmd`` is a tmux round trip with no
+        # timeout, so calling it from this async body made every OTHER
+        # in-flight call wait with it -- and against a tmux server that
+        # had stopped answering, wait indefinitely.
+        status = await _run_tmux_lines(
+            server, "show-option", "-p", "-t", target_id, "-v", status_option
+        )
         status_text = status[0].strip() if status else ""
         try:
             exit_status = int(status_text)
@@ -849,7 +859,9 @@ async def run_command(
             msg = f"run_command could not read exit status from {status_option!r}"
             raise ExpectedToolError(msg) from e
         with contextlib.suppress(Exception):
-            pane.cmd("set-option", "-p", "-u", status_option)
+            await _run_tmux_lines(
+                server, "set-option", "-p", "-t", target_id, "-u", status_option
+            )
 
     # join_wrapped keeps the per-call markers on one logical row so the
     # filter's exact-marker match survives a wide prompt; it also strips
