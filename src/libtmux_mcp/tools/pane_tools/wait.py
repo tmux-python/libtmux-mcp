@@ -285,12 +285,14 @@ async def wait_for_text(
     entry_rows = await _bounded_capture(
         server, target, start=entry.cursor_y, deadline=deadline
     )
-    # A LIST compared per index, not a set: a set discards position, so a
+    # A LIST compared per index, not a set. The ambiguity this resolves is
+    # confined to ONE row -- the entry cursor row, which the anchor above
+    # deliberately includes so a daemon's single "ready" line stays
+    # matchable -- so dedup cannot simply be loosened instead. Flattened, a
     # line twenty rows below the cursor permanently blocks a fresh
-    # identical line arriving on the cursor row -- a program printing
-    # "BUILD OK" a second time is suppressed and the wait runs to its
-    # ceiling reporting found=false. Waiting for a repeated status line is
-    # this tool's headline case.
+    # identical line on the cursor row: a program printing "BUILD OK" a
+    # second time is suppressed and the wait runs to its ceiling reporting
+    # found=false. Waiting for a repeated status line is the headline case.
     entry_below_cursor: list[str] = list(entry_rows)
 
     # Scans the WHOLE visible screen, not just the rows the delta filter
@@ -343,16 +345,17 @@ async def wait_for_text(
                 _raise_if_pane_lifecycle_changed(target, state, baseline_pid)
                 if state.alternate_on:
                     saw_alternate_screen = True
-                # At ``history-limit``, ``grid_collect_history`` frees the
-                # oldest rows and decrements ``gd->hsize``, so absolute
-                # index math on ``history_size + cursor_y`` is no longer
-                # recoverable. ``clear-history`` decrements it too.
+                # At ``history-limit``, ``grid_collect_history`` (grid.c)
+                # frees the oldest rows and decrements ``gd->hsize``, so
+                # absolute index math on ``history_size + cursor_y`` is no
+                # longer recoverable. ``clear-history`` decrements it too.
                 #
-                # So does resize-grow with ``hscrolled > 0``, where rows
-                # move from history into the visible region and no data is
-                # freed. ``pane_height`` separates them -- trim leaves it
-                # unchanged, resize-grow increases it -- so the conjunction
-                # below is the real eviction signature.
+                # So does resize-grow with ``hscrolled > 0``, where
+                # ``screen_resize_y`` (screen.c) moves rows from history
+                # into the visible region and frees nothing. ``pane_height``
+                # separates them -- trim leaves it unchanged, resize-grow
+                # increases it -- so the conjunction below is the real
+                # eviction signature.
                 if (
                     state.history_size < entry.history_size
                     and state.pane_height <= entry.pane_height
@@ -393,10 +396,10 @@ async def wait_for_text(
                 # held without hiding what arrives on it.
                 start_line = baseline_abs - state.history_size
                 # ``capture-pane -S`` clips a below-visible start back to
-                # the bottom row, so a naive capture returns stale
-                # bottom-row text until new rows appear. ``pane_height`` is
-                # re-read each tick so a mid-wait resize cannot leave the
-                # guard keyed to a stale height.
+                # the bottom row (cmd-capture-pane.c:205-206), so a naive
+                # capture returns stale bottom-row text until new rows
+                # appear. ``pane_height`` is re-read each tick so a mid-wait
+                # resize cannot leave the guard keyed to a stale height.
                 if start_line >= state.pane_height:
                     rows: list[str] = []
                 else:

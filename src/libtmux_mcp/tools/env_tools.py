@@ -76,11 +76,12 @@ def show_environment(
     else:
         env_dict = server.show_environment()
 
-    # tmux prints a REMOVED variable as ``-NAME``, and libtmux keeps the
-    # dash in the key with the value True -- so the removal is encoded in
-    # the key, and ``variables["-KRB5CCNAME"]`` reads as "set to true" for
-    # a variable that is explicitly unset. Split apart, a value is always
-    # a value.
+    # tmux prints a REMOVED variable as ``-NAME``
+    # (cmd-show-environment.c), and libtmux keeps the dash in the key with
+    # the value True, so the removal is encoded in the key and BOTH reads
+    # are wrong: ``variables["KRB5CCNAME"]`` raises KeyError, while
+    # ``variables["-KRB5CCNAME"]`` answers True for a variable that is
+    # explicitly unset. Split apart, a value is always a value.
     variables: dict[str, str] = {}
     removed: list[str] = []
     for name, value in env_dict.items():

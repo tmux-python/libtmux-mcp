@@ -440,7 +440,8 @@ class SwapEntry:
     #: Monotonic registration counter, the primary LIFO sort key for
     #: ``cmd_revert``. ``cmd_use_local`` takes ``max(existing seq_nos,
     #: default=-1) + 1``, so it increases strictly per swap whatever the
-    #: wall clock or dict iteration order does.
+    #: wall clock or dict iteration order does. The explicit-counter
+    #: pattern is CPython's, from ``Lib/sched.py``.
     seq_no: int
     #: Exact destination changed by the swap. ``config_path`` may be a
     #: symlink that is later repointed, so it is not sufficient recovery
@@ -1948,8 +1949,9 @@ def _cmd_revert(args: argparse.Namespace) -> int:
             label = f"{cli}:{args.scope}" if args.scope and cli == "claude" else cli
             print(f"[{label}] no state entry — skip")
             continue
-        # Unwind LIFO by the explicit ``SwapEntry.seq_no``, so order does
-        # not depend on JSON parse order, dict iteration or the wall clock.
+        # Unwind LIFO by the explicit ``SwapEntry.seq_no`` -- CPython's
+        # ``Lib/sched.py`` counter pattern -- so order does not depend on
+        # JSON parse order, dict iteration or the wall clock.
         # ``_parse_state_entry`` coerces it to ``int`` and drops entries
         # that cannot be, so this compares int to int. When two scopes back
         # the same physical file (Claude user + project), the later swap's

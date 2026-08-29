@@ -342,9 +342,11 @@ async def signal_channel(
 
 def register(mcp: FastMCP) -> None:
     """Register wait-for channel tools with the MCP instance."""
-    # ``timeout`` is clamped to the shared wait ceiling, but a batch would
-    # multiply that ceiling by the operation count, so
-    # ``TAG_SELF_BOUNDED`` keeps this out of the batch wrappers.
+    # ``timeout`` is clamped to the shared wait ceiling (see
+    # ``_wait_policy``), but a 1000-operation batch would multiply that
+    # ceiling by the operation count, so ``TAG_SELF_BOUNDED`` keeps this
+    # out of the batch wrappers. What earns the tag: the tool is already
+    # bounded per-call by the killable tmux child in ``_run_tmux_bounded``.
     mcp.tool(
         title="Wait For tmux Channel",
         annotations=ANNOTATIONS_MUTATING,

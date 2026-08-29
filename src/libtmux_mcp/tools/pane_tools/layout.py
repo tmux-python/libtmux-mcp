@@ -201,7 +201,8 @@ def select_pane(
     elif direction in ("next", "previous"):
         # By absolute pane_id, not tmux's relative pane-target syntax:
         # a bare `-t +` / `-t -1` resolves against the attached client's
-        # current window rather than the targeted one, and the scoped
+        # current window rather than the targeted one (cmd-find.c), and
+        # the scoped
         # `@window_id.+` form needs tmux 3.4 -- on 3.2a (this project's
         # floor) and 3.3a it exits 0, prints nothing, and leaves the
         # window with NO active pane.

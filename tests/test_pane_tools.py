@@ -7321,8 +7321,9 @@ def test_a_mutating_tool_answers_with_a_freshly_read_record(
     differing = {key for key in answered if answered[key] != later[key]}
     if differing and differing <= _SETTLING_FIELDS:
         # Two reads of a MOVING system are not evidence of staleness:
-        # pane_current_command lags pane_pid by a median 14 ms after a
-        # respawn, and under load that outlasts the settle loop, so the
+        # lifecycle.py measures pane_current_command lagging pane_pid by a
+        # median 14 ms after a respawn, and under load that outlasts the
+        # settle loop, so the
         # tool and this read can legitimately disagree. pane_pid changes
         # the instant respawn-pane returns, so it stays the witness and a
         # genuinely stale record still fails.

@@ -604,9 +604,10 @@ def test_list_servers_survives_a_socket_that_never_answers(
     from libtmux_mcp.tools.server_tools import _PROBE_TIMEOUT_SECONDS
 
     # An EMPTY TMUX_TMPDIR, so the measurement is of this code and not of
-    # the machine's socket litter. Unisolated, the scan probes every
-    # socket in the shared directory -- ~1 ms each when quiet, but the
-    # per-probe cost inflates under load and pushes past any fixed bound.
+    # the machine's socket litter. Unisolated, the scan probes every socket
+    # in the shared directory -- 1785 of them on the development box, ~1 ms
+    # each when quiet, but the per-probe cost inflates under load: 40.38 s
+    # against 0.25 s quiet. The sibling below isolates for the same reason.
     with (
         tempfile.TemporaryDirectory(prefix="lsq-") as empty_dir,
         tempfile.TemporaryDirectory() as tmpdir,
@@ -645,8 +646,9 @@ def test_list_servers_survives_a_socket_that_never_answers(
 
     # Derived from the product's constant, so it moves when that does. One
     # silent socket costs one probe timeout and the multiple is headroom:
-    # this is a CEILING a working scan returns from in about 2 s. A
-    # literal 10.0 asserts the machine's speed, and failed at loadavg 90.
+    # this is a CEILING a working scan returns from in about 2 s. A literal
+    # 10.0 asserts the machine's speed -- it failed at loadavg 90, once by
+    # 28 ms, which is a coin flip rather than a caught defect.
     ceiling = _PROBE_TIMEOUT_SECONDS * 5
     assert elapsed < ceiling, (
         f"list_servers took {elapsed:.1f}s against a silent socket "

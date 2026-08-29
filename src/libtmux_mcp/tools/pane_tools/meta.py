@@ -141,10 +141,12 @@ def snapshot_pane(
         window_id=window_id,
     )
 
-    # The delimiter is ␞ (U+241E), as libtmux uses for FORMAT_SEPARATOR.
-    # tmux's utf8_strvis copies valid UTF-8 verbatim, bypassing the vis()
-    # escape that renders 0x1f as literal "\037" on some builds; and
-    # unlike a tab it cannot occur in pane_current_path.
+    # The delimiter is ␞ (U+241E, SYMBOL FOR RECORD SEPARATOR), as libtmux
+    # uses for FORMAT_SEPARATOR. tmux's utf8_strvis (tmux/utf8.c) copies
+    # valid UTF-8 verbatim, bypassing the vis() escape that renders 0x1f as
+    # literal "\037" on some builds. A tab would be legal (if rare) in a
+    # Linux path and could realistically appear in pane_current_path; this
+    # glyph is merely far less likely, not impossible.
     _SEP = "␞"
     _FMT_VARS = [
         "#{cursor_x}",

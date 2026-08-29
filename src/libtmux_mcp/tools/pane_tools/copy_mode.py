@@ -29,7 +29,8 @@ if t.TYPE_CHECKING:
 
 #: Floor for :func:`copy_selection`. Below this, ``copy-selection`` kills
 #: the tmux SERVER -- not the pane, not the command -- taking every
-#: session on it. All four conditions hold in a default install:
+#: session on it. Four conditions, each varied independently across the
+#: supported matrix, and ALL hold in a default install:
 #:
 #:     tmux 3.2a or 3.3a       3.4+ is unaffected
 #:     a client attached       detached survives
@@ -380,7 +381,8 @@ def copy_selection(
         )
     # tmux exits 0 for copy-selection with nothing selected and creates no
     # buffer, so this is what keeps the tool from handing back a name that
-    # does not exist. Compared against "1": on the floor an absent
+    # does not exist. Compared against "1" rather than "0": on the floor an
+    # absent
     # selection reads as the empty string, not "0".
     if selection != "1":
         msg = f"pane {pane.pane_id} is in copy mode but nothing is selected"
