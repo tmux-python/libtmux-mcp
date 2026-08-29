@@ -223,6 +223,14 @@ class OptionResult(BaseModel):
             "was passed."
         )
     )
+    resolved_target: str | None = Field(
+        default=None,
+        description=(
+            "Session tmux resolved an untargeted query to. tmux picks a "
+            "'current' session from attached clients, and an MCP client has "
+            "none, so which one answered is not otherwise knowable."
+        ),
+    )
     scope_queried: str = Field(
         default="server",
         description="Scope this answer describes, so null is readable.",
@@ -240,7 +248,15 @@ class OptionResult(BaseModel):
 class OptionSetResult(BaseModel):
     """Result of a set_option call."""
 
-    option: str = Field(description="Option name")
+    option: str = Field(description="Option name as supplied by the caller")
+    resolved_option: str | None = Field(
+        default=None,
+        description=(
+            "Option tmux resolved the name to. tmux accepts unambiguous "
+            "prefixes, so 'history-lim' sets 'history-limit' and the caller "
+            "would otherwise have no way to confirm which option changed."
+        ),
+    )
     value: str = Field(description="Value that was set")
     status: str = Field(description="Operation status")
 
@@ -248,6 +264,10 @@ class OptionSetResult(BaseModel):
 class EnvironmentResult(BaseModel):
     """Result of a show_environment call."""
 
+    scope_queried: str = Field(
+        default="global",
+        description="Scope the variables were read from: 'global' or 'session'.",
+    )
     variables: dict[str, str] = Field(
         description="Variables that are SET, mapped to their values."
     )
@@ -270,7 +290,12 @@ class EnvironmentSetResult(BaseModel):
         default=None,
         description="Value that was set; null when the variable was unset",
     )
-    status: str = Field(description="Operation status: 'set' or 'unset'")
+    status: str = Field(
+        description=(
+            "'set'; 'unset' when a variable was removed; 'absent' when there "
+            "was nothing to remove."
+        )
+    )
 
 
 class WaitForTextResult(BaseModel):

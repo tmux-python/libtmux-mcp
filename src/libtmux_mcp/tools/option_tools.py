@@ -61,6 +61,37 @@ def _resolve_option_target(
     return server, opt_scope
 
 
+def _current_session_name(obj: t.Any) -> str | None:
+    """Session tmux would treat as current, or None if it will not say.
+
+    An untargeted option query resolves through tmux's current session,
+    which tmux picks from attached clients. An MCP client has none, so
+    the caller has no intuition for which session answered -- and the
+    answer is stable and real, not arbitrary.
+    """
+    try:
+        result = obj.cmd("display-message", "-p", "#{session_name}")
+    except Exception:  # noqa: BLE001 - a disclosure, never a failure
+        return None
+    return result.stdout[0] if result.stdout else None
+
+
+def _resolved_option_name(obj: t.Any, option: str, *flags: str) -> str | None:
+    """Full option name tmux resolved ``option`` to, or None.
+
+    tmux accepts an unambiguous prefix, so ``history-lim`` sets
+    ``history-limit`` -- and echoing the caller's spelling back leaves
+    them unable to confirm which option changed.
+    """
+    try:
+        result = obj.cmd("show-options", *flags, option)
+    except Exception:  # noqa: BLE001 - a disclosure, never a failure
+        return None
+    if not result.stdout:
+        return None
+    return result.stdout[0].split(" ", 1)[0] or None
+
+
 @handle_tool_errors
 def show_option(
     option: str,
@@ -115,6 +146,7 @@ def show_option(
     return OptionResult(
         option=option,
         value=value,
+        resolved_target=target or _current_session_name(obj),
         scope_queried=scope or ("global" if global_ else "server"),
         include_inherited=include_inherited,
     )
@@ -159,7 +191,14 @@ def set_option(
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
     _raise_if_flag_like("Option name", option)
     obj.set_option(option, value, global_=global_, scope=opt_scope)
-    return OptionSetResult(option=option, value=value, status="set")
+    return OptionSetResult(
+        option=option,
+        resolved_option=_resolved_option_name(
+            obj, option, *(["-g"] if global_ else [])
+        ),
+        value=value,
+        status="set",
+    )
 
 
 def register(mcp: FastMCP) -> None:

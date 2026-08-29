@@ -118,3 +118,26 @@ def test_unset_environment_removes_a_variable(
     variables = show_environment(socket_name=socket).variables
     assert "DROPME" not in variables
     assert variables.get("KEEPME") == "v1"
+
+
+def test_unset_environment_distinguishes_removal_from_no_op(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Tmux exits 0 either way, so read before removing.
+
+    "I removed it" and "there was nothing there" call for different
+    reactions when a caller is reconciling state, and afterwards they
+    are indistinguishable.
+    """
+    socket = mcp_server.socket_name
+    set_environment(name="REALVAR", value="x", socket_name=socket)
+
+    assert unset_environment(name="REALVAR", socket_name=socket).status == "unset"
+    assert unset_environment(name="NEVERSET", socket_name=socket).status == "absent"
+    assert show_environment(socket_name=socket).scope_queried == "global"
+    assert (
+        show_environment(
+            session_name=mcp_session.session_name, socket_name=socket
+        ).scope_queried
+        == "session"
+    )

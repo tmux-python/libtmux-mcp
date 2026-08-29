@@ -8,6 +8,32 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Four results now say what tmux actually did
+
+Each of these returned something true-but-uninformative, in a way that
+left the caller unable to check the thing they most needed to.
+
+**`set_option` echoed the caller's spelling.** tmux accepts an
+unambiguous prefix, so `set_option(option="history-lim")` sets
+`history-limit` and reported `history-lim` -- and that same field is
+the only evidence a caller gets that the option they named is the one
+that changed. `resolved_option` now carries what tmux resolved it to.
+
+**An untargeted `show_option` did not say which session answered.** tmux
+resolves it through a "current" session chosen from attached clients,
+and an MCP client has none, so `scope_queried="session"` named a scope
+without naming the object. It is a real and stable choice, not an
+arbitrary one -- `resolved_target` reports it.
+
+**`unset_environment` could not tell a removal from a no-op.** tmux
+exits 0 whether or not the variable existed, so afterwards the two are
+indistinguishable. The variable is read first; `status` is now `unset`
+or `absent`.
+
+**`show_environment` did not report its scope**, where `show_option`
+already did. `scope_queried` is `global` or `session`.
+
+
 #### `list_clients`
 
 Nothing could answer "who is attached to this server". Two behaviours

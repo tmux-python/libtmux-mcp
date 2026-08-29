@@ -70,7 +70,12 @@ def show_environment(
             removed.append(name[1:])
         elif isinstance(value, str):
             variables[name] = value
-    return EnvironmentResult(variables=variables, removed=sorted(removed))
+    scope = (
+        "session" if (session_name is not None or session_id is not None) else "global"
+    )
+    return EnvironmentResult(
+        scope_queried=scope, variables=variables, removed=sorted(removed)
+    )
 
 
 @handle_tool_errors
@@ -166,17 +171,24 @@ def unset_environment(
     _raise_if_not_env_name(name)
     server = _get_server(socket_name=socket_name)
 
+    target: t.Any = server
     if session_name is not None or session_id is not None:
-        session = _resolve_session(
+        target = _resolve_session(
             server,
             session_name=session_name,
             session_id=session_id,
         )
-        session.unset_environment(name)
-    else:
-        server.unset_environment(name)
 
-    return EnvironmentSetResult(name=name, value=None, status="unset")
+    # tmux exits 0 whether or not the variable existed, so removing
+    # something and removing nothing are indistinguishable afterwards.
+    # Read first: "unset" and "absent" call for different reactions when
+    # a caller is reconciling state.
+    existed = name in target.show_environment()
+    target.unset_environment(name)
+
+    return EnvironmentSetResult(
+        name=name, value=None, status="unset" if existed else "absent"
+    )
 
 
 def register(mcp: FastMCP) -> None:

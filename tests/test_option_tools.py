@@ -120,3 +120,24 @@ def test_set_option_refuses_a_flag_shaped_name(
         option="xterm-keys", scope="server", socket_name=mcp_server.socket_name
     ).value
     assert after == before
+
+
+def test_option_results_disclose_what_tmux_resolved(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Echoing the caller's spelling back proves nothing changed where.
+
+    tmux accepts an unambiguous prefix, so ``history-lim`` sets
+    ``history-limit``; and an untargeted query resolves through a
+    "current" session chosen from attached clients, which an MCP client
+    does not have.
+    """
+    socket = mcp_server.socket_name
+    written = set_option(
+        option="history-lim", value="8888", global_=True, socket_name=socket
+    )
+    assert written.option == "history-lim"
+    assert written.resolved_option == "history-limit"
+
+    read = show_option(option="history-limit", scope="session", socket_name=socket)
+    assert read.resolved_target is not None
