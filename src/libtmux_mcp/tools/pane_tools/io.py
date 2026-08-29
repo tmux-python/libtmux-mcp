@@ -852,7 +852,22 @@ def _truncate_lines_tail(
     (['a', 'b', 'c'], False, 0)
     >>> _truncate_lines_tail(["a", "b", "c"], max_lines=None)
     (['a', 'b', 'c'], False, 0)
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=0)
+    Traceback (most recent call last):
+    libtmux_mcp._utils.ExpectedToolError: max_lines must be at least 1, ...
     """
+    if max_lines is not None and max_lines < 1:
+        # Python slices a non-positive cap into nonsense rather than
+        # failing: ``lines[-0:]`` is the WHOLE list, so max_lines=0
+        # returned more rows than no truncation at all while announcing
+        # that everything had been dropped, and a negative inflated the
+        # count past the pane's own size -- 112 truncated from 12.
+        # The header is this tool's only disclosure channel, so a number
+        # that cannot be true is the whole defect.
+        msg = (
+            f"max_lines must be at least 1, or null for no limit (received {max_lines})"
+        )
+        raise ExpectedToolError(msg)
     if max_lines is None or len(lines) <= max_lines:
         return lines, False, 0
     dropped = len(lines) - max_lines

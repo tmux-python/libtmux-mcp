@@ -8,6 +8,30 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A truncation cap below 1 produced impossible numbers
+
+`capture_pane(max_lines=0)` returned MORE rows than no truncation at
+all -- eleven from a ten-line pane -- while its header announced that
+all ten had been dropped. `max_lines=-100` claimed 110 lines were
+truncated from a pane holding ten.
+
+Python slices a non-positive cap into nonsense rather than failing:
+`lines[-0:]` is the whole list, and the dropped count `len - max_lines`
+grows when `max_lines` is negative. Neither raised, so both answers
+looked like data.
+
+The severity is not a crash, it is that the header is the ONLY
+disclosure channel this tool has -- it returns a bare `str`, with no
+`truncated_lines` field to cross-check as `capture_since` and
+`snapshot_pane` have. A caller parsing it to decide whether to
+re-request with a bigger budget got a number that could not be true.
+
+Now refused with the wording `search_panes` already uses for the same
+shape. The guard sits in the helper the four truncating tools share, so
+`run_command`, `snapshot_pane` and `show_buffer` are covered by
+construction rather than one at a time.
+
+
 #### `break_pane` and `join_pane`
 
 Moving a pane between windows had no tool, so the only route was to
@@ -1135,6 +1159,12 @@ rather than at a number tuned to one. Verified at pane heights 24, 8,
 also reports pane geometry when it does fail, because two reproduction
 cycles were spent on a bare assertion that said only that the header
 was absent.
+
+Both tests in that pair also checked a marker was visible and then
+captured AGAIN to assert on, comparing two observations that were never
+simultaneous -- and on a short pane the marker can leave the visible
+region in between. They now assert on the capture that satisfied the
+precondition.
 
 Two hypotheses were ruled out by measurement and are worth recording:
 an attached 80x8 client does NOT shrink the pane, and a capture taken

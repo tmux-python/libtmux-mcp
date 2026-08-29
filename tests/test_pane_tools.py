@@ -1594,18 +1594,24 @@ def test_capture_pane_truncates_tail_preserving(
     """
     for i in range(20):
         mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
-    retry_until(
-        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
-        10,
-        raises=True,
-    )
 
-    # Derive the cap from what the pane actually holds. A literal cap
-    # carries an unasserted precondition -- max_lines=5 needs at least
-    # six visible rows, which put the assertion exactly on the boundary
-    # of a pane split three times. Asking for one fewer line than is
-    # there tests the property at any geometry.
-    raw = mcp_pane.capture_pane()
+    # Derive the cap from what the pane actually holds, in the SAME
+    # observation the assertions run against. A literal cap carries an
+    # unasserted precondition -- max_lines=5 needs six visible rows,
+    # which put the assertion exactly on the boundary of a pane split
+    # three times -- and a cap read from an earlier capture than the one
+    # asserted on compares two states that were never simultaneous.
+    settled: list[list[str]] = []
+
+    def _captured_with_marker() -> bool:
+        rows = mcp_pane.capture_pane()
+        if any("scrollback_line_19" in row for row in rows):
+            settled.append(rows)
+            return True
+        return False
+
+    retry_until(_captured_with_marker, 10, raises=True)
+    raw = settled[-1]
     geometry = mcp_pane.display_message(
         "#{pane_width}x#{pane_height} cursor_y=#{cursor_y} "
         "hsize=#{history_size} alt=#{alternate_on}",
@@ -1630,25 +1636,70 @@ def test_capture_pane_truncates_tail_preserving(
     assert any("scrollback_line_19" in line for line in lines[1:])
 
 
+def test_truncation_refuses_a_non_positive_cap(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A cap below 1 slices into nonsense instead of failing.
+
+    ``lines[-0:]`` is the WHOLE list, so ``max_lines=0`` returned more
+    rows than no truncation at all while announcing that every line had
+    been dropped, and a negative inflated the count past the pane's own
+    size. The header is ``capture_pane``'s only disclosure channel --
+    it returns a bare ``str`` -- so a number that cannot be true is the
+    whole defect.
+
+    Asserted through two tools because the guard lives in the helper the
+    four truncating tools share.
+    """
+    mcp_pane.send_keys("echo cap_probe", enter=True)
+    retry_until(
+        lambda: any("cap_probe" in line for line in mcp_pane.capture_pane()),
+        10,
+        raises=True,
+    )
+
+    for bad in (0, -1, -100):
+        with pytest.raises(ToolError, match="max_lines must be at least 1"):
+            capture_pane(
+                pane_id=mcp_pane.pane_id,
+                max_lines=bad,
+                socket_name=mcp_server.socket_name,
+            )
+    with pytest.raises(ToolError, match="max_lines must be at least 1"):
+        snapshot_pane(
+            pane_id=mcp_pane.pane_id,
+            max_lines=0,
+            socket_name=mcp_server.socket_name,
+        )
+
+
 def test_capture_pane_max_lines_none_disables_truncation(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """``max_lines=None`` opts out of truncation entirely."""
     for i in range(20):
         mcp_pane.send_keys(f"echo untrunc_line_{i}", enter=True)
-    retry_until(
-        lambda: "untrunc_line_19" in "\n".join(mcp_pane.capture_pane()),
-        10,
-        raises=True,
-    )
 
-    result = capture_pane(
-        pane_id=mcp_pane.pane_id,
-        max_lines=None,
-        socket_name=mcp_server.socket_name,
-    )
+    # Assert on the capture that satisfied the precondition, not on a
+    # later one. Checking visibility and then re-capturing compares two
+    # observations that were never simultaneous, and on a short pane the
+    # marker can scroll out of the visible region in between.
+    settled: list[str] = []
+
+    def _captured_with_marker() -> bool:
+        out = capture_pane(
+            pane_id=mcp_pane.pane_id,
+            max_lines=None,
+            socket_name=mcp_server.socket_name,
+        )
+        if "untrunc_line_19" in out:
+            settled.append(out)
+            return True
+        return False
+
+    retry_until(_captured_with_marker, 10, raises=True)
+    result = settled[-1]
     assert "[... truncated" not in result
-    assert "untrunc_line_19" in result
 
 
 # ---------------------------------------------------------------------------
