@@ -58,7 +58,7 @@ The libtmux layer is the tmux object hierarchy:
 
 Each tool module defines a `register(mcp)` function that registers tools with metadata:
 - `title` — human-readable name
-- `annotations` — MCP tool annotations (readOnlyHint, destructiveHint, idempotentHint)
+- `annotations` — all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), never partial
 - `tags` — safety tier tags for middleware filtering
 
 ### Server caching
