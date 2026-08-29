@@ -204,10 +204,10 @@ user's authority, and a pane holds whatever was printed into it.
 | {toolref}`set-environment` | {badge}`mutating` | false | true | true | false |
 | {toolref}`set-option` | {badge}`mutating` | false | true | true | false |
 | {toolref}`set-pane-title` | {badge}`mutating` | false | true | true | false |
-| {toolref}`signal-channel` | {badge}`mutating` | false | false | true | false |
+| {toolref}`signal-channel` | {badge}`mutating` | false | true | false | false |
 | {toolref}`split-window` | {badge}`mutating` | false | true | false | true |
 | {toolref}`swap-pane` | {badge}`mutating` | false | true | false | false |
-| {toolref}`wait-for-channel` | {badge}`mutating` | false | false | true | false |
+| {toolref}`wait-for-channel` | {badge}`mutating` | false | true | false | false |
 | {toolref}`call-destructive-tools-batch` | {badge}`destructive` | false | true | false | true |
 | {toolref}`kill-pane` | {badge}`destructive` | false | true | false | false |
 | {toolref}`kill-server` | {badge}`destructive` | false | true | false | false |

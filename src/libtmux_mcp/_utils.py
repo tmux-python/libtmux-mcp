@@ -419,15 +419,6 @@ ANNOTATIONS_MUTATING: dict[str, bool] = {
     "openWorldHint": False,
 }
 
-#: Annotations for tools that add state without replacing any, and land on
-#: the same state when repeated.
-ANNOTATIONS_ADDITIVE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": False,
-}
-
 #: Annotations for tools that allocate a new tmux object each call, so
 #: nothing is replaced and no two calls land on the same state.
 ANNOTATIONS_ALLOCATE: dict[str, bool] = {

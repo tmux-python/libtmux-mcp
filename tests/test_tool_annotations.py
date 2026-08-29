@@ -135,8 +135,6 @@ ADDITIVE_TOOLS = frozenset(
         "create_session",
         "create_window",
         "load_buffer",
-        "signal_channel",
-        "wait_for_channel",
     }
 )
 
