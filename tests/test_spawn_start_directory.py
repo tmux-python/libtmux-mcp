@@ -80,7 +80,10 @@ def test_start_directory_does_not_run_tmux_format_jobs(
 
 
 @pytest.mark.parametrize("spawner", list(_SPAWNERS))
-@pytest.mark.parametrize("name", ["plain", "has#hash", "job#(id)", "var#{x}"])
+@pytest.mark.parametrize(
+    "name",
+    ["plain", "has#hash", "job#(id)", "var#{x}", "style#[x]", "run##[x]"],
+)
 def test_start_directory_uses_the_directory_named(
     mcp_server: Server,
     mcp_session: Session,
@@ -108,22 +111,5 @@ def test_start_directory_rejects_a_missing_directory(
         split_window(
             pane_id=mcp_pane.pane_id,
             start_directory=str(tmp_path / "absent"),
-            socket_name=mcp_server.socket_name,
-        )
-
-
-def test_start_directory_rejects_a_style_prefix(
-    mcp_server: Server,
-    mcp_pane: Pane,
-    tmp_path: pathlib.Path,
-) -> None:
-    """``#[`` has no tmux format encoding, so such a path is refused."""
-    target = tmp_path / "style#[x]"
-    target.mkdir()
-
-    with pytest.raises(ExpectedToolError, match=r"#\["):
-        split_window(
-            pane_id=mcp_pane.pane_id,
-            start_directory=str(target),
             socket_name=mcp_server.socket_name,
         )

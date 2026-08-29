@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 import typing as t
 
@@ -486,14 +487,24 @@ DISCOVERY_META: dict[str, t.Any] = {
 }
 
 
-def _escape_tmux_format(value: str) -> str:
-    """Return ``value`` escaped so tmux's format pass yields it unchanged.
+#: A maximal run of ``#``, plus the ``[`` that may follow it. tmux reads a
+#: ``#``-run by what comes next, so the run is the unit to escape, not the
+#: individual ``#``.
+_TMUX_HASH_RUN = re.compile(r"(#+)(\[?)")
 
-    tmux expands several argument values as formats, where ``#(...)`` runs
-    a shell job and ``#{...}`` substitutes a variable. Doubling every ``#``
-    makes the whole string literal. ``#[`` is the exception: tmux hands a
-    ``#`` run before ``[`` to the style parser rather than collapsing it,
-    so no escaping renders it literal and such a value is refused.
+
+def _escape_tmux_format(value: str) -> str:
+    """Escape ``value`` so tmux's format expander reproduces it literally.
+
+    Doubling every ``#`` is the obvious escape and it is wrong. A ``#``-run
+    followed by ``[`` is a style sequence reserved for ``format_draw``, and
+    the expander copies the run through verbatim rather than collapsing it,
+    so doubling there corrupts the value. Leave those runs alone and double
+    the rest.
+
+    This covers the ``#`` expander only. A caller reaching an argument tmux
+    expands with ``format_expand_time`` must escape ``%`` for ``strftime``
+    as well — see :func:`~libtmux_mcp.tools.pane_tools.pipe.pipe_pane`.
 
     Parameters
     ----------
@@ -503,27 +514,23 @@ def _escape_tmux_format(value: str) -> str:
     Returns
     -------
     str
-        ``value`` with every ``#`` doubled.
-
-    Raises
-    ------
-    ExpectedToolError
-        If ``value`` contains ``#[``, which has no escaped form.
+        ``value`` escaped for one pass of tmux format expansion.
 
     Examples
     --------
-    >>> _escape_tmux_format("/srv/app")
-    '/srv/app'
     >>> _escape_tmux_format("/srv/#(id)")
     '/srv/##(id)'
+    >>> _escape_tmux_format("/srv/#[x]")
+    '/srv/#[x]'
+    >>> _escape_tmux_format("issue #42")
+    'issue ##42'
     """
-    if "#[" in value:
-        msg = (
-            f"tmux reads '#[' as a style prefix with no escaped form, so "
-            f"this value cannot be passed through: {value!r}"
-        )
-        raise ExpectedToolError(msg)
-    return value.replace("#", "##")
+
+    def escape_run(match: re.Match[str]) -> str:
+        run, bracket = match.group(1), match.group(2)
+        return f"{run}{bracket}" if bracket else run * 2
+
+    return _TMUX_HASH_RUN.sub(escape_run, value)
 
 
 def _prepare_start_directory(start_directory: str | None) -> str | None:

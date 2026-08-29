@@ -2,74 +2,31 @@
 
 from __future__ import annotations
 
-import re
 import shlex
 
 from libtmux_mcp._utils import (
     ExpectedToolError,
+    _escape_tmux_format,
     _get_server,
     _resolve_pane,
     handle_tool_errors,
 )
 
-#: A maximal run of ``#``, plus the ``[`` that may follow it. tmux
-#: treats a ``#``-run by what comes next, so the run is the unit that
-#: has to be escaped -- not the individual ``#``.
-_TMUX_HASH_RUN = re.compile(r"(#+)(\[?)")
 
+def _escape_pipe_target(value: str) -> str:
+    """Escape ``value`` for the two expansions ``pipe-pane`` applies.
 
-def _escape_tmux_format(value: str) -> str:
-    """Escape ``value`` so tmux's format expander reproduces it literally.
+    ``cmd-pipe-pane.c`` calls ``format_expand_time()``, so the argument goes
+    through ``strftime`` as well as the ``#``-format expander: ``%`` is as
+    dangerous as ``#``. ``100%done.log`` became ``10025one.log`` (``%d`` ->
+    day of month) and ``date-%Y.log`` became ``date-2026.log``. ``%%`` is
+    strftime's literal escape.
 
-    ``pipe-pane`` runs its argument through the format expander before
-    handing it to ``/bin/sh``, so :func:`shlex.quote` alone is not
-    enough -- it guards the shell layer while tmux has already rewritten
-    the string.
-
-    There are TWO expansions to escape, not one. ``cmd-pipe-pane.c``
-    calls ``format_expand_time()``, which runs the argument through
-    ``strftime`` as well as the ``#``-format expander, so a ``%`` is as
-    dangerous as a ``#``: ``100%done.log`` became ``10025one.log``
-    (``%d`` -> day of month) and ``date-%Y.log`` became
-    ``date-2026.log``. ``%%`` is strftime's literal escape and is safe
-    to apply to every ``%``.
-
-    Doubling every ``#`` is the obvious escape and it is wrong. A
-    ``#``-run followed by ``[`` is a style sequence, reserved for
-    ``format_draw``, and the expander copies the whole run through
-    verbatim without ever collapsing it. Doubling there corrupts the
-    path in exactly the way this function exists to prevent. Measured
-    against tmux 3.7b:
-
-    ==================  ==================  ==========================
-    input               expands to          note
-    ==================  ==================  ==========================
-    ``#{pane_id}``      ``%0``              substituted
-    ``##{pane_id}``     ``#{pane_id}``      run doubling escapes it
-    ``####{a}``         ``##{a}``           composes for longer runs
-    ``#S``              *(session name)*    legacy single-char alias
-    ``#(echo hi)``      *(command job)*     substituted away
-    ``##(echo hi)``     ``#(echo hi)``      run doubling escapes it
-    ``#[fg=red]``       ``#[fg=red]``       verbatim
-    ``##[fg=red]``      ``##[fg=red]``      verbatim -- never collapses
-    ``issue ##42``      ``issue #42``       ordinary run collapses
-    ==================  ==================  ==========================
-
-    The legacy aliases are the easiest to trip over by accident: a log
-    named ``#Session.log`` loses its ``#S`` to the session name and
-    lands on ``<session>ession.log``.
-
-    So: leave a run alone when ``[`` follows it, double it otherwise,
-    and double every ``%`` for strftime.
+    The ``#`` half is :func:`~libtmux_mcp._utils._escape_tmux_format`, which
+    every format-bearing argument needs; only the ``%`` half is specific to
+    the arguments tmux expands for time.
     """
-
-    def _escape_run(match: re.Match[str]) -> str:
-        run, bracket = match.group(1), match.group(2)
-        if bracket:
-            return f"{run}{bracket}"
-        return run * 2
-
-    return _TMUX_HASH_RUN.sub(_escape_run, value).replace("%", "%%")
+    return _escape_tmux_format(value).replace("%", "%%")
 
 
 @handle_tool_errors
@@ -144,6 +101,6 @@ def pipe_pane(
     redirect = ">>" if append else ">"
     # Two layers rewrite this string, so it needs two escapes: tmux
     # expands its own formats first, then /bin/sh parses what is left.
-    quoted = _escape_tmux_format(shlex.quote(output_path))
+    quoted = _escape_pipe_target(shlex.quote(output_path))
     pane.pipe(f"cat {redirect} {quoted}")
     return f"Piping pane {pane.pane_id} to {output_path}"
