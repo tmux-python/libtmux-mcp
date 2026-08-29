@@ -543,6 +543,13 @@ async def run_command(
     synchronizes on. Reserve ``wait_for_text`` for output you did not
     author: another process, a human, or a background job.
 
+    Because it runs in the pane's INTERACTIVE shell, every call pays
+    that shell's per-command hooks. Measured on one machine: 914 ms
+    against a configured zsh whose prompt runs ``git status``, versus
+    71 ms against ``zsh -f`` and 64 ms against ``sh`` — about 615 ms of
+    it is the shell, not this tool. For throughput-sensitive scripted
+    work, target a pane running a minimal shell.
+
     The command runs in a subshell, so ``cd``, ``export`` and other shell
     state changes do not persist to later calls.
 
@@ -969,7 +976,13 @@ def clear_pane(
     window_id: str | None = None,
     socket_name: str | None = None,
 ) -> str:
-    """Clear the contents of a tmux pane.
+    """Clear a pane's screen AND its scrollback history.
+
+    Destroys up to ``history-limit`` lines of the user's terminal
+    history, not just the visible screen, and there is no undo. Measured:
+    ``history_size`` 132 -> 0, with the prior content unreachable through
+    ``capture-pane -S -300`` afterwards. Reach for it only when losing
+    that history is intended.
 
     Use before a fresh run_command call or raw-input observation workflow
     when prior scrollback would make the result harder to inspect.

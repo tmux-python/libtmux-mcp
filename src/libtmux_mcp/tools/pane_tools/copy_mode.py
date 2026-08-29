@@ -84,6 +84,9 @@ def enter_copy_mode(
         window_id=window_id,
     )
     pane.copy_mode()
+    if scroll_up is not None and scroll_up < 0:
+        msg = f"scroll_up must be zero or greater (received {scroll_up})"
+        raise ExpectedToolError(msg)
     if scroll_up is not None and scroll_up > 0:
         _run_copy_mode_cmd(pane, "scroll-up", repeat=scroll_up)
     pane.refresh()

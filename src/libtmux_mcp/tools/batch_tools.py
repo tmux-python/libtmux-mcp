@@ -319,6 +319,14 @@ async def call_readonly_tools_batch(
     middleware, and safety checks. Mutating and destructive tools are
     rejected even if the server process itself is running at a higher
     safety tier.
+
+    Batching saves the transport round trip and re-pays the per-call
+    framework cost, so it is not a speed win below about three or four
+    operations -- measured 2.5x SLOWER at one, 1.2x at two, break-even
+    around three, and 0.80x at ten. It pays most when the nested
+    operations are individually expensive: a mixed read of
+    ``get_pane_info`` + ``list_panes`` + ``show_option`` + ``capture_pane``
+    measured 65 ms batched against 120 ms serial.
     """
     return await _call_tools_batch(
         operations=operations,

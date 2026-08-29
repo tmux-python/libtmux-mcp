@@ -427,7 +427,12 @@ def list_servers(
             continue
         extra = _probe_server_by_path(path)
         if extra is not None:
-            found[key] = extra
+            # Same completeness rule the scan follows: a row that omits
+            # its name cannot be matched by name against every other row
+            # in the same list.
+            found[key] = extra.model_copy(
+                update={"socket_name": path.name, "socket_path": str(path)}
+            )
     return list(found.values())
 
 

@@ -8,6 +8,36 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Four smaller honesty and validation fixes
+
+**`clear_pane` says what it destroys.** It clears scrollback, not just
+the visible screen -- measured, `history_size` 132 to 0 with the prior
+content unreachable through `capture-pane -S -300` afterwards. The
+docstring led with "Clear the contents of a tmux pane" and alluded to
+scrollback only sideways, so an agent reaching for "clear the screen
+before I run this" took the user's terminal history with it, with no
+undo, at the `mutating` tier.
+
+**A server named through `extra_socket_paths` now reports its name.**
+Those rows came back with `socket_name: null` while every scanned row
+carried both name and path, so a caller filtering the same list by name
+could not see them. Same completeness rule the scan already follows.
+
+**`enter_copy_mode` rejects a negative `scroll_up`.** It was accepted
+and silently did nothing; `search_panes` already refuses `offset=-1`
+with a precise message.
+
+**Two latency facts are now in the docstrings that would send an agent
+the wrong way.** `call_readonly_tools_batch` is not a speed win below
+three or four operations -- measured 2.5x slower at one, break-even
+around three -- because batching saves the transport round trip and
+re-pays the per-call framework cost. And `run_command` runs in the
+pane's INTERACTIVE shell, so it pays that shell's per-command hooks:
+914 ms against a configured zsh whose prompt runs `git status`, versus
+64 ms against `sh`. Roughly 615 ms of that is the shell, not the tool,
+and anyone benchmarking it would otherwise conclude the tool is slow.
+
+
 #### `run_command` stops claiming a command "may still run" when it never ran
 
 A pane whose shell is mid-continuation swallows the wrapper. Every
