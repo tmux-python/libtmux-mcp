@@ -21,6 +21,32 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### The client/server version boundary is documented
+
+`docs/installation.md` declared tmux >= 3.2a, which is the floor for the
+tmux **this server runs**. There is a second constraint it never
+mentioned, because tmux sockets outlive the binary that made them: a
+client can only talk to a server whose protocol it understands.
+
+Measured across all 81 pairs of the nine supported versions, checked
+against the tmux binary directly and then through this server:
+
+    server 3.6+, client 3.5 and older   unreachable  (20 of 81)
+    every other pair                    fine
+
+A clean rectangle, and one-directional — 3.6+ clients read every server
+including old ones. You hit it when a system tmux upgrade leaves a
+session running under the old binary. It already surfaces honestly
+rather than as an empty result, which is what the resource and resolver
+fixes above were for; the gap was that nothing told a reader the
+boundary exists or which binary to point at.
+
+Mapped by the QA instance, which also closed its own open gap in the
+process: its unreachable-server fixture had stopped reproducing because
+it was building an OLD server and pointing a NEW client at it -- the
+top-right of that table, which is entirely reachable. The case needs
+the newer side to be the server.
+
 #### An unset user option reads the same on every supported tmux
 
 `docs/installation.md` declares tmux 3.2a and up, and there is no
