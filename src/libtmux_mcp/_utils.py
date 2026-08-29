@@ -1224,6 +1224,18 @@ def _invalidate_server(
             del _server_cache[key]
 
 
+def _drain_server_cache() -> list[Server]:
+    """Empty the cache and return the servers it held.
+
+    The caller works on a snapshot, so per-server teardown work never
+    runs with an iterator open on a dict another thread may fill.
+    """
+    with _server_cache_lock:
+        servers = list(_server_cache.values())
+        _server_cache.clear()
+        return servers
+
+
 def _raise_if_server_unreachable(server: Server) -> None:
     """Refuse to read an empty enumeration as an absence.
 

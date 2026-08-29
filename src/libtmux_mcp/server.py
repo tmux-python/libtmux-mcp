@@ -15,6 +15,8 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware.timing import TimingMiddleware
 
 if t.TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from libtmux.server import Server
 
 from libtmux_mcp.__about__ import __version__
@@ -27,7 +29,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
-    _server_cache,
+    _drain_server_cache,
 )
 from libtmux_mcp._wait_policy import (
     WAIT_MAX_SECONDS_ENV,
@@ -47,10 +49,6 @@ from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
 
 logger = logging.getLogger(__name__)
 install_fastmcp_validation_log_filter()
-
-#: Cache key for :data:`_server_cache`: ``(socket_name, socket_path,
-#: tmux_bin)``.
-_ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 
 # ---------------------------------------------------------------------------
 # _BASE_INSTRUCTIONS — positive guidance plus gap-explainers for tools an
@@ -276,9 +274,9 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
 
     Shutdown
     --------
-    Clears the process-wide :data:`_server_cache` so repeated test runs
-    don't share stale Server references and HTTP-transport reload
-    cycles start clean. Also best-effort GC's any leftover
+    Drains the process-wide server cache so repeated test runs don't
+    share stale Server references and HTTP-transport reload cycles
+    start clean. Also best-effort GC's any leftover
     ``libtmux_mcp_*`` paste buffers on every cached server — agents
     are supposed to ``delete_buffer`` after use, but an interrupted
     call chain can leak. Note: FastMCP lifespan teardown runs on
@@ -293,20 +291,19 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
     try:
         yield
     finally:
-        _gc_mcp_buffers(_server_cache)
-        _server_cache.clear()
+        _gc_mcp_buffers(_drain_server_cache())
 
 
-def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
+def _gc_mcp_buffers(servers: Iterable[Server]) -> None:
     """Best-effort delete of leaked ``libtmux_mcp_*`` paste buffers.
 
-    Iterates every cached tmux Server, lists buffer names, and deletes
-    anything matching the MCP prefix. Never raises: tmux may be
-    unreachable, buffers may vanish mid-scan, and none of that should
-    block lifespan shutdown. Logs at debug level so operators can
-    still surface leaks via verbose logging.
+    Lists buffer names on each tmux server and deletes anything matching
+    the MCP prefix. Never raises: tmux may be unreachable, buffers may
+    vanish mid-scan, and none of that should block lifespan shutdown.
+    Logs at debug level so operators can still surface leaks via verbose
+    logging.
     """
-    for server in cache.values():
+    for server in servers:
         try:
             result = server.cmd("list-buffers", "-F", "#{buffer_name}")
         except Exception as err:

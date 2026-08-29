@@ -17,8 +17,6 @@ from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
 if t.TYPE_CHECKING:
     from libtmux.server import Server
 
-    from libtmux_mcp.server import _ServerCacheKey
-
 
 class BuildInstructionsFixture(t.NamedTuple):
     """Test fixture for _build_instructions."""
@@ -1167,7 +1165,7 @@ def test_gc_mcp_buffers_deletes_mcp_prefixed_and_spares_others(
     assert ref.buffer_name in names_before
     assert "human_buffer" in names_before
 
-    _gc_mcp_buffers({(mcp_server.socket_name, None, None): mcp_server})
+    _gc_mcp_buffers([mcp_server])
 
     names_after = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
     assert ref.buffer_name not in names_after, "GC must delete MCP-namespaced buffers"
@@ -1187,12 +1185,36 @@ def test_gc_mcp_buffers_swallows_errors() -> None:
             raise RuntimeError(msg)
 
     # Must not raise — lifespan shutdown cannot tolerate exceptions here.
-    # Cast is needed because _BrokenServer only implements ``cmd``; the
-    # real cache stores full Server instances, but GC is best-effort and
-    # consumes only the ``cmd`` method so a partial stub is sufficient.
-    _gc_mcp_buffers(
-        t.cast(
-            "t.Mapping[_ServerCacheKey, t.Any]",
-            {(None, None, None): _BrokenServer()},
-        )
-    )
+    # GC consumes only ``cmd``, so a partial stub stands in for a Server.
+    _gc_mcp_buffers([t.cast("t.Any", _BrokenServer())])
+
+
+def test_lifespan_teardown_survives_a_cache_write_mid_gc() -> None:
+    """Teardown must not iterate the live cache.
+
+    Buffer GC makes a tmux round trip per cached server, and a tool call
+    caching a new server inside that window resizes the dict under the
+    iterator.
+    """
+    import asyncio
+    import types
+
+    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp.server import _lifespan
+
+    class _CachesAnotherServer:
+        def cmd(self, *_a: object, **_kw: object) -> t.Any:
+            _server_cache[("raced", None, None)] = t.cast("t.Any", object())
+            return types.SimpleNamespace(stdout=[])
+
+    _server_cache.clear()
+    _server_cache[("scanned", None, None)] = t.cast("t.Any", _CachesAnotherServer())
+
+    async def _cycle() -> None:
+        async with _lifespan(_app=None):  # type: ignore[arg-type]
+            pass
+
+    try:
+        asyncio.run(_cycle())
+    finally:
+        _server_cache.clear()
