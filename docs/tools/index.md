@@ -82,7 +82,8 @@ shell-agnostic guidance.
 
 ## Inspect
 
-Read tmux state without changing anything.
+Read tmux state and terminal output. Starts no process, and hands no input
+of yours to one.
 
 ::::{grid} 1 2 3 3
 :gutter: 2 2 3 3
@@ -215,9 +216,14 @@ Inspect a single tmux hook by name.
 
 ::::
 
-## Act
+## Manage
 
-Create or modify tmux objects.
+Change tmux structure or presentation. Takes no input of yours that anything
+later executes.
+
+## Execute
+
+Start a pane process, deliver input to one, or store a value tmux later runs.
 
 ::::{grid} 1 2 3 3
 :gutter: 2 2 3 3
@@ -392,9 +398,9 @@ Wake clients blocked on a ``wait-for`` channel.
 
 ::::
 
-## Destroy
+## Teardown
 
-Tear down tmux objects. Not reversible.
+Delete tmux objects or retained scrollback. Not reversible.
 
 ::::{grid} 1 2 3 3
 :gutter: 2 2 3 3

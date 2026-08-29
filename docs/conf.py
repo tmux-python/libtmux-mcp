@@ -173,6 +173,31 @@ conf["fastmcp_model_classes"] = (
     "BufferRef",
     "BufferContent",
 )
+# sphinx-autodoc-fastmcp ships no default vocabulary: it documents
+# projects whose tags it does not choose. Declaration order is
+# precedence, and the summary tables follow it.
+conf["fastmcp_toolsets"] = (
+    {
+        "tag": "teardown",
+        "tooltip": "Teardown \u2014 deletes tmux objects or scrollback",
+        "icon": "\U0001f4a3",
+    },
+    {
+        "tag": "execute",
+        "tooltip": "Execute \u2014 starts or drives a pane process",
+        "icon": "\u270f\ufe0f",
+    },
+    {
+        "tag": "manage",
+        "tooltip": "Manage \u2014 changes tmux structure or presentation",
+        "icon": "\U0001f527",
+    },
+    {
+        "tag": "inspect",
+        "tooltip": "Inspect \u2014 reads tmux state and terminal output",
+        "icon": "\U0001f50d",
+    },
+)
 conf["fastmcp_section_badge_map"] = {
     "Inspect": "inspect",
     "Execute": "execute",
