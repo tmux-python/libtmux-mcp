@@ -10,6 +10,7 @@ from libtmux.pane import Pane
 from libtmux.window import Window
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -405,7 +406,7 @@ def rename_window(
         session_name=session_name,
         session_id=session_id,
     )
-    window.rename_window(new_name)
+    window.rename_window(escape_format(new_name))
     return _serialize_window(window)
 
 

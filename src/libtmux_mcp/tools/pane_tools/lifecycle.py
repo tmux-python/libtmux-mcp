@@ -13,6 +13,7 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _caller_is_on_server,
@@ -355,7 +356,7 @@ def set_pane_title(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.set_title(title)
+    pane.set_title(escape_format(title))
     return _serialize_pane(pane)
 
 

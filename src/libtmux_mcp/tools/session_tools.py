@@ -8,6 +8,7 @@ from libtmux.constants import WindowDirection
 from libtmux.window import Window
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -173,7 +174,7 @@ def create_window(
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
     if window_name is not None:
-        kwargs["window_name"] = window_name
+        kwargs["window_name"] = escape_format(window_name)
     if start_directory is not None:
         kwargs["start_directory"] = start_directory
     kwargs["attach"] = attach
@@ -224,7 +225,7 @@ def rename_session(
     """
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
-    session = session.rename_session(new_name)
+    session = session.rename_session(escape_format(new_name))
     return _serialize_session(session)
 
 

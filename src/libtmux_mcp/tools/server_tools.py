@@ -14,6 +14,7 @@ from libtmux.server import Server
 from libtmux.session import Session
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -155,11 +156,11 @@ def create_session(
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}
     if session_name is not None:
-        kwargs["session_name"] = session_name
+        kwargs["session_name"] = escape_format(session_name)
     if window_name is not None:
-        kwargs["window_name"] = window_name
+        kwargs["window_name"] = escape_format(window_name)
     if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+        kwargs["start_directory"] = escape_format(start_directory)
     if x is not None:
         kwargs["x"] = x
     if y is not None:

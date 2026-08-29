@@ -93,6 +93,35 @@ an untargeted read says which object answered.
 `create_session`, `create_window` and `split_window` return the new pane's id,
 so an agent that made the pane never needs to look one up.
 
+## Names and titles are literals, not tmux formats
+
+tmux expands `#{...}` in the name argument of `rename-window`,
+`rename-session`, `select-pane -T` and `new-session`, and unlike
+`set-option` there is no `-F` flag to turn it off. Passed through
+unchanged, `rename_window(new_name="#{pane_current_path}")` would name the
+window after a directory, and `#{host}` or `#{pane_pid}` would interpolate
+server state into a name that shows up in the terminal and in
+{tooliconl}`list-panes`.
+
+These tools escape on the way in, so the name you pass is the name you get.
+{tooliconl}`display-message` is the one tool that expands formats, by
+design — compose the two when you want an expanded name:
+
+```console
+$ display_message(format_string="#{pane_current_path}")   # -> /home/you/src
+$ rename_window(new_name="/home/you/src")
+```
+
+For a window that tracks its own state, prefer tmux's own
+`automatic-rename-format` option over re-naming on a timer.
+
+Option **names** are refused rather than escaped. `set-option` expands the
+name too, so `@a#{pane_id}` addresses `@a%0` — but an escaped name cannot be
+read back, because libtmux looks the result up under the name you asked for
+while tmux answers under the name it stored. A name containing `#` would be
+writable and permanently unreadable, so {tooliconl}`set-option` and
+{tooliconl}`show-option` reject it. Option *values* were never affected.
+
 ## Shell-history suppression is best effort
 
 MCP calls to {tooliconl}`run-command` request lightweight suppression by

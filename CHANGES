@@ -8,6 +8,15 @@ _Notes on upcoming releases will be added here_
 
 ### Breaking changes
 
+- **A name or title argument is now a literal.** `rename_window`,
+  `rename_session`, `set_pane_title`, `create_window` and `create_session`
+  escape tmux format sequences before dispatch, so a `#{...}` in a name is
+  stored rather than expanded. Callers relying on the expansion should call
+  `display_message` and pass the result.
+- **An option name containing `#` is refused.** `set_option` and
+  `show_option` raise instead of addressing a different option. Option
+  *values* are unaffected.
+
 - **Tools that deliver input require an explicit target.** `send_keys`,
   `send_keys_batch`, `paste_text`, `paste_buffer` and `run_command` no
   longer choose a pane. See MIGRATION for the one-field fix.
@@ -20,6 +29,48 @@ _Notes on upcoming releases will be added here_
   characters, `:` or `.`.
 
 ### What's new
+
+#### A name argument means what it says
+
+tmux expands `#{...}` in the name argument of `rename-window`,
+`rename-session`, `select-pane -T` and `new-session`, and gives no flag to
+turn it off -- unlike `set-option` and `set-environment`, which gate the
+same expansion behind `-F`. This server inherited the split without naming
+it, so five tools stored the expansion of a name instead of the name:
+
+    rename_window(new_name="#{pane_current_path}")
+      -> window named "/home/you/src"
+
+That reaches further than a wrong string. `#{host}`, `#{pane_pid}` and
+friends interpolate server state into a value that is visible in the
+terminal and returned by `list_panes`, at the *mutating* tier.
+
+It also defeated the input validator, which is the worse half.
+`create_session` validates the caller's literal; tmux expanded it
+afterwards and ran the result through `clean_name`, so
+`session_name="#{pane_current_path}"` reduced to the EMPTY name the
+validator exists to reject. The session came back reporting success, could
+not be addressed by name, and could not even be renamed back -- only its
+`session_id` reached it.
+
+The escape is not "double every `#`". A `#`-run followed by `[` is a style
+sequence that tmux copies verbatim and never collapses, so doubling there
+corrupts the value; the unit that gets escaped is the maximal run. And
+there are two expanders that disagree about `%`: only `pipe-pane` reaches
+the strftime-applying one, so doubling `%` -- correct there -- would
+corrupt `select-pane -T '%Y-%m-%d'`. `libtmux_mcp._tmux_format` now names
+both, and `pipe_pane`'s escaping moved onto the shared implementation.
+
+Option *names* are refused rather than escaped. Escaping works at the tmux
+layer, but libtmux keys its `show-options` result by the name the caller
+passed while tmux answers under the name it stored, so an escaped name
+reads back as "not set" forever. Writable and permanently unreadable is
+worse than rejected.
+
+Found by the QA instance, which also supplied the tmux source citations;
+the sweep of tmux's own command table then turned up `new-session -s/-n/-c`
+and the option-name case on top of the five reported.
+
 
 #### The client/server version boundary is documented
 

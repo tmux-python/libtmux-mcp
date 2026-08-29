@@ -7,6 +7,7 @@ import typing as t
 from libtmux import exc
 from libtmux.constants import OptionScope
 
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
@@ -110,6 +111,33 @@ def _resolved_option_name(obj: t.Any, option: str, *flags: str) -> str | None:
     return result.stdout[0].split(" ", 1)[0] or None
 
 
+def _raise_if_format_like(option: str) -> None:
+    """Refuse an option name tmux's format expander would rewrite.
+
+    ``set-option`` and ``show-options`` expand their NAME argument --
+    ``@a#{pane_id}`` addresses ``@a%0``, and which pane that is depends
+    on what the call resolved against, so the same name reaches
+    different options over time.
+
+    Escaping it is the obvious fix and it does not work: libtmux keys
+    its ``show-options`` result by the name the caller asked for, while
+    tmux answers under the name it stored, so an escaped name always
+    reads back as "not set". The option would be writable and
+    permanently unreadable. Refusing says so instead of pretending.
+
+    Only the NAME is affected. Values are safe -- tmux gates that
+    expansion behind ``-F``, which this server never passes.
+    """
+    if escape_format(option) != option:
+        msg = (
+            f"Option name {option!r} contains a tmux format sequence. tmux "
+            "expands option names, so this would address a different option "
+            "than the one named -- and the value could not be read back. "
+            "Use a name without '#', or run_command for a raw tmux call."
+        )
+        raise ExpectedToolError(msg)
+
+
 def _raise_unless_unset_user_option(option: str, err: exc.LibTmuxException) -> None:
     """Swallow tmux's error for a user option that is simply not set.
 
@@ -180,6 +208,7 @@ def show_option(
     OptionResult
         Option name, its value, and the scope that was queried.
     """
+    _raise_if_format_like(option)
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
     try:
         value = obj.show_option(
@@ -238,6 +267,7 @@ def set_option(
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
     _raise_if_flag_like("Option name", option)
+    _raise_if_format_like(option)
     obj.set_option(option, value, global_=global_, scope=opt_scope)
     return OptionSetResult(
         option=option,
