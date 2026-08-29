@@ -17,9 +17,11 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._bounded_io import (
+    CAPTURE_DEFAULT_MAX_LINES,
     _bounded_pane_state,
     _resolve_pane_bounded,
     _run_tmux_lines,
+    _truncate_lines_tail,
 )
 from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
@@ -654,6 +656,25 @@ def send_keys_batch(
     )
 
 
+async def _channel_already_signalled(
+    server: Server, channel: str, timeout: float
+) -> bool:
+    """Whether ``channel`` was signalled, without waiting for it.
+
+    tmux latches a ``wait-for -S`` that has no waiter, so a later wait
+    on that channel returns at once -- measured at 4 ms against 2 s for
+    a channel nobody signalled. That makes this a question about the
+    past rather than a second wait, which is why it can sit on the
+    timeout path without adding to the budget.
+    """
+    argv = _tmux_argv(server, "wait-for", channel)
+    try:
+        returncode, _stdout, _stderr = await _run_tmux_bounded(argv, timeout=timeout)
+    except TimeoutError:
+        return False
+    return returncode == 0
+
+
 @handle_tool_errors_async
 async def run_command(
     command: str,
@@ -991,86 +1012,6 @@ async def run_command(
         output_truncated_lines=dropped,
         effective_timeout=effective_timeout,
     )
-
-
-#: Default line cap applied to :func:`capture_pane` and similar scrollback
-#: readers. Large enough to cover typical prompt + a few screens of output,
-#: small enough that a pathological pane (e.g. 50K lines of ``tail -f``)
-#: cannot blow the agent's context window on a single call. Callers who
-#: need a full capture can pass ``max_lines=None`` to opt out.
-CAPTURE_DEFAULT_MAX_LINES = 500
-
-
-def _truncate_lines_tail(
-    lines: list[str], max_lines: int | None
-) -> tuple[list[str], bool, int]:
-    """Return the tail of ``lines`` at most ``max_lines`` long.
-
-    Tail-preserving truncation is required for terminal output: the
-    most recent lines (active prompt, latest command output) live at
-    the bottom of the scrollback buffer. Dropping the head keeps what
-    the agent actually needs.
-
-    Parameters
-    ----------
-    lines : list of str
-        The captured lines, oldest first.
-    max_lines : int or None
-        Maximum number of lines to keep. ``None`` disables truncation.
-
-    Returns
-    -------
-    tuple
-        ``(kept, truncated, dropped)`` — the kept suffix, whether
-        truncation happened, and how many lines were dropped.
-
-    Examples
-    --------
-    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=2)
-    (['b', 'c'], True, 1)
-    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=5)
-    (['a', 'b', 'c'], False, 0)
-    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=None)
-    (['a', 'b', 'c'], False, 0)
-    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=0)
-    Traceback (most recent call last):
-    libtmux_mcp._utils.ExpectedToolError: max_lines must be at least 1, ...
-    """
-    if max_lines is not None and max_lines < 1:
-        # Python slices a non-positive cap into nonsense rather than
-        # failing: ``lines[-0:]`` is the WHOLE list, so max_lines=0
-        # returned more rows than no truncation at all while announcing
-        # that everything had been dropped, and a negative inflated the
-        # count past the pane's own size -- 112 truncated from 12.
-        # The header is this tool's only disclosure channel, so a number
-        # that cannot be true is the whole defect.
-        msg = (
-            f"max_lines must be at least 1, or null for no limit (received {max_lines})"
-        )
-        raise ExpectedToolError(msg)
-    if max_lines is None or len(lines) <= max_lines:
-        return lines, False, 0
-    dropped = len(lines) - max_lines
-    return lines[-max_lines:], True, dropped
-
-
-async def _channel_already_signalled(
-    server: Server, channel: str, timeout: float
-) -> bool:
-    """Whether ``channel`` was signalled, without waiting for it.
-
-    tmux latches a ``wait-for -S`` that has no waiter, so a later wait
-    on that channel returns at once -- measured at 4 ms against 2 s for
-    a channel nobody signalled. That makes this a question about the
-    past rather than a second wait, which is why it can sit on the
-    timeout path without adding to the budget.
-    """
-    argv = _tmux_argv(server, "wait-for", channel)
-    try:
-        returncode, _stdout, _stderr = await _run_tmux_bounded(argv, timeout=timeout)
-    except TimeoutError:
-        return False
-    return returncode == 0
 
 
 def _filter_run_command_internal_lines(

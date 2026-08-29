@@ -77,6 +77,10 @@ Resize a pane.
 Enter tmux copy mode for scrollback navigation.
 :::
 
+:::{grid-item-card} {tooliconl}`copy-selection`
+Read the text a person has selected in copy mode.
+:::
+
 :::{grid-item-card} {tooliconl}`exit-copy-mode`
 Exit copy mode.
 :::
@@ -125,6 +129,7 @@ set-pane-title
 clear-pane
 resize-pane
 enter-copy-mode
+copy-selection
 exit-copy-mode
 wait-for-text
 wait-for-channel

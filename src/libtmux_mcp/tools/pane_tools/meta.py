@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from libtmux_mcp._bounded_io import (
+    CAPTURE_DEFAULT_MAX_LINES,
+    _truncate_lines_tail,
+)
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _coerce_bool,
@@ -13,10 +17,6 @@ from libtmux_mcp._utils import (
 )
 from libtmux_mcp.models import (
     PaneSnapshot,
-)
-from libtmux_mcp.tools.pane_tools.io import (
-    CAPTURE_DEFAULT_MAX_LINES,
-    _truncate_lines_tail,
 )
 
 

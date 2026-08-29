@@ -27,10 +27,16 @@ from libtmux_mcp.models import (
     SendKeysOperation,
     WaitForTextResult,
 )
+from libtmux_mcp.tools.buffer_tools import (
+    delete_buffer,
+    paste_buffer,
+    show_buffer,
+)
 from libtmux_mcp.tools.pane_tools import (
     capture_pane,
     capture_since,
     clear_pane,
+    copy_selection,
     display_message,
     enter_copy_mode,
     exit_copy_mode,
@@ -6997,3 +7003,142 @@ def test_send_keys_reports_an_oversized_payload_as_the_caller_s_problem(
     assert "Unexpected error" not in message
     assert "OSError" not in message
     assert "paste_text" in message
+
+
+# ---------------------------------------------------------------------------
+# copy_selection tests
+# ---------------------------------------------------------------------------
+
+_COPYSEL_MARKER = "COPYSEL_MARKER_XYZ"
+
+
+def _select_whole_screen(mcp_server: Server, pane: Pane, marker: str) -> None:
+    """Put ``marker`` on screen and select every row above the cursor."""
+    pane.send_keys(f"echo {marker}", enter=True)
+    retry_until(
+        lambda: marker in "\n".join(pane.capture_pane()),
+        5,
+        raises=True,
+    )
+    enter_copy_mode(pane_id=pane.pane_id, socket_name=mcp_server.socket_name)
+    pane.cmd("send-keys", "-X", "history-top")
+    pane.cmd("send-keys", "-X", "begin-selection")
+    pane.cmd("send-keys", "-N", "40", "-X", "cursor-down")
+
+
+def test_copy_selection_returns_the_selected_text(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """The selection is captured into an MCP buffer and returned."""
+    _select_whole_screen(mcp_server, mcp_pane, _COPYSEL_MARKER)
+
+    result = copy_selection(
+        pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name
+    )
+
+    assert _COPYSEL_MARKER in result.content
+    # The buffer is real and agrees with what was returned.
+    assert (
+        show_buffer(
+            buffer_name=result.buffer_name, socket_name=mcp_server.socket_name
+        ).content
+        == result.content
+    )
+
+
+def test_copy_selection_leaves_the_selection_intact(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Reading a person's selection must not destroy their UI state."""
+    _select_whole_screen(mcp_server, mcp_pane, _COPYSEL_MARKER)
+    copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+    state = mcp_pane.display_message("#{pane_mode} #{selection_present}", get_text=True)
+    assert state[0] == "copy-mode 1"
+
+
+def test_copy_selection_requires_copy_mode(mcp_server: Server, mcp_pane: Pane) -> None:
+    """A pane not in copy mode is a loud, explained refusal."""
+    with pytest.raises(ToolError, match="not in copy mode"):
+        copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+
+def test_copy_selection_rejects_another_mode(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """pane_in_mode is 1 for tree-mode too, so the guard reads pane_mode."""
+    mcp_pane.cmd("choose-tree")
+    assert mcp_pane.display_message("#{pane_in_mode}", get_text=True)[0] == "1"
+    with pytest.raises(ToolError, match="not in copy mode"):
+        copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+
+def test_copy_selection_refuses_when_nothing_is_selected(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Tmux exits 0 and creates NO buffer, so success would be a lie.
+
+    Without the guard the tool would report success and hand back a
+    buffer name that does not exist.
+    """
+    enter_copy_mode(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+    with pytest.raises(ToolError, match="nothing is selected"):
+        copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+
+
+def test_copy_selection_buffer_is_reachable_by_the_buffer_tools(
+    mcp_server: Server, mcp_pane: Pane, mcp_window: Window
+) -> None:
+    """The returned ref composes with paste_buffer and delete_buffer."""
+    _select_whole_screen(mcp_server, mcp_pane, _COPYSEL_MARKER)
+    result = copy_selection(
+        pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name
+    )
+    target = mcp_window.split(attach=False)
+
+    paste_buffer(
+        buffer_name=result.buffer_name,
+        pane_id=target.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    delete_buffer(buffer_name=result.buffer_name, socket_name=mcp_server.socket_name)
+
+
+def test_copy_selection_truncates_like_show_buffer(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Bounded output, same contract as every other read-heavy tool."""
+    _select_whole_screen(mcp_server, mcp_pane, _COPYSEL_MARKER)
+    result = copy_selection(
+        pane_id=mcp_pane.pane_id,
+        max_lines=2,
+        socket_name=mcp_server.socket_name,
+    )
+    assert result.content_truncated
+    assert result.content_truncated_lines > 0
+    # Bound derived from the argument, not from screen geometry: the
+    # tail of a whole-screen selection is blank rows, and joining two
+    # empty lines splits back into one.
+    assert len(result.content.splitlines()) <= 2
+    # Both paths read a buffer the same way, so they must agree.
+    assert (
+        show_buffer(
+            buffer_name=result.buffer_name,
+            max_lines=2,
+            socket_name=mcp_server.socket_name,
+        ).content
+        == result.content
+    )
+
+
+def test_copy_selection_rejects_an_overlong_label(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Tmux appends an index, so the label ceiling is one lower here."""
+    _select_whole_screen(mcp_server, mcp_pane, _COPYSEL_MARKER)
+    with pytest.raises(ToolError, match="63 characters"):
+        copy_selection(
+            pane_id=mcp_pane.pane_id,
+            logical_name="x" * 64,
+            socket_name=mcp_server.socket_name,
+        )

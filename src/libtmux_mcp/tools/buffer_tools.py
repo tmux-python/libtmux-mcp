@@ -34,6 +34,10 @@ import tempfile
 import typing as t
 import uuid
 
+from libtmux_mcp._bounded_io import (
+    CAPTURE_DEFAULT_MAX_LINES,
+    _truncate_lines_tail,
+)
 from libtmux_mcp._utils import (
     _LIVENESS_TIMEOUT_SECONDS,
     ANNOTATIONS_MUTATING,
@@ -49,10 +53,6 @@ from libtmux_mcp._utils import (
     handle_tool_errors,
 )
 from libtmux_mcp.models import BufferContent, BufferRef
-from libtmux_mcp.tools.pane_tools.io import (
-    CAPTURE_DEFAULT_MAX_LINES,
-    _truncate_lines_tail,
-)
 
 #: Default line cap for :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`.
 #: Reuses the scrollback default so agents see one consistent bound across
@@ -61,6 +61,7 @@ SHOW_BUFFER_DEFAULT_MAX_LINES = CAPTURE_DEFAULT_MAX_LINES
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.server import Server
 
 #: Reserved prefix for MCP-allocated buffers. Anything matching this
 #: regex is considered agent-owned; anything else is the human user's
@@ -333,6 +334,46 @@ def paste_buffer(
     return f"Buffer {cname!r} pasted to pane {pane.pane_id}"
 
 
+def _read_buffer(server: Server, cname: str, max_lines: int | None) -> BufferContent:
+    """Read one MCP-owned buffer under the bounded-output contract.
+
+    Shared with ``copy_selection`` so a selection and a staged buffer
+    are read the same way, with the same truncation fields.
+    """
+    argv = _tmux_argv(server, "show-buffer", "-b", cname)
+    try:
+        completed = subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=_LIVENESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        msg = (
+            f"tmux show-buffer did not return within "
+            f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {cname!r}; "
+            "the tmux server is unresponsive"
+        )
+        raise ExpectedToolError(msg) from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+        msg = f"show-buffer failed for {cname!r}: {stderr or e}"
+        raise ExpectedToolError(msg) from e
+    raw = completed.stdout.decode(errors="replace")
+    # Preserve a possible trailing newline so round-tripping through
+    # load_buffer/show_buffer stays byte-identical when truncation
+    # does not fire.
+    lines = raw.splitlines()
+    kept, truncated, dropped = _truncate_lines_tail(lines, max_lines)
+    content = "\n".join(kept) if truncated else raw
+    return BufferContent(
+        buffer_name=cname,
+        content=content,
+        content_truncated=truncated,
+        content_truncated_lines=dropped,
+    )
+
+
 @handle_tool_errors
 def show_buffer(
     buffer_name: str,
@@ -369,38 +410,7 @@ def show_buffer(
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_buffer_name(buffer_name)
-    argv = _tmux_argv(server, "show-buffer", "-b", cname)
-    try:
-        completed = subprocess.run(
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=_LIVENESS_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as e:
-        msg = (
-            f"tmux show-buffer did not return within "
-            f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {cname!r}; "
-            "the tmux server is unresponsive"
-        )
-        raise ExpectedToolError(msg) from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"show-buffer failed for {cname!r}: {stderr or e}"
-        raise ExpectedToolError(msg) from e
-    raw = completed.stdout.decode(errors="replace")
-    # Preserve a possible trailing newline so round-tripping through
-    # load_buffer/show_buffer stays byte-identical when truncation
-    # does not fire.
-    lines = raw.splitlines()
-    kept, truncated, dropped = _truncate_lines_tail(lines, max_lines)
-    content = "\n".join(kept) if truncated else raw
-    return BufferContent(
-        buffer_name=cname,
-        content=content,
-        content_truncated=truncated,
-        content_truncated_lines=dropped,
-    )
+    return _read_buffer(server, cname, max_lines)
 
 
 @handle_tool_errors

@@ -47,6 +47,7 @@ leave socket selection inside each nested tool's arguments. See
 
 **Scrollback / copy mode?**
 - Enter copy mode → {tool}`enter-copy-mode`
+- Read a person's copy-mode selection → {tool}`copy-selection`
 - Exit copy mode → {tool}`exit-copy-mode`
 - Log output to file → {tool}`pipe-pane`
 

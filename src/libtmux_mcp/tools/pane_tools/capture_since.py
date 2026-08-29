@@ -11,6 +11,7 @@ import typing as t
 from dataclasses import dataclass
 
 from libtmux_mcp._bounded_io import (
+    CAPTURE_DEFAULT_MAX_LINES,
     _bounded_history_limit,
     _bounded_pane_state,
     _resolve_pane_bounded,
@@ -22,7 +23,6 @@ from libtmux_mcp._utils import (
     handle_tool_errors_async,
 )
 from libtmux_mcp.models import CaptureSinceResult
-from libtmux_mcp.tools.pane_tools.io import CAPTURE_DEFAULT_MAX_LINES
 from libtmux_mcp.tools.pane_tools.state import (
     _PaneState,
     _raise_if_pane_lifecycle_changed,

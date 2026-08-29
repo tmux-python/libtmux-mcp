@@ -6,6 +6,43 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+#### `copy_selection` reads a person's copy-mode selection
+
+An agent could enter copy mode and perform a copy, and then never read
+it: the result lands in tmux's own `buffer0`, and `show_buffer`
+correctly refuses any buffer this server did not allocate, because tmux
+buffers may hold clipboard history. The workaround was
+`run_command("tmux show-buffer -b buffer0")`, which routes around the
+boundary rather than respecting it.
+
+The value is not the agent's own copy -- `capture_pane` already returns
+pane text. It is the case `capture_pane` cannot reach: a person attached
+to the session highlights something and asks about *that*, not about the
+pane. Measured against a real attached client, a selection survives idle
+time, cursor movement and further process output arriving on the pane's
+tty; only leaving copy mode clears it. So there is nothing to race.
+
+`copy_selection` copies into a fresh MCP-namespaced buffer and returns
+the same `BufferContent` shape `show_buffer` does, so the result is
+usable immediately and the `buffer_name` still composes with
+`paste_buffer` for moving a selection between panes. The selection is
+left intact -- reading it must not disturb the person who made it -- and
+the buffer privacy boundary is not widened: the copied-and-exited case
+stays unreachable.
+
+Two refusals are loud on purpose. The pane guard reads `pane_mode`
+rather than `pane_in_mode`, because `choose-tree` and the other modes
+also set the flag. And a copy with nothing selected is refused because
+tmux EXITS 0 for it and creates no buffer at all -- without the check
+the tool would report success and hand back a buffer name that does not
+exist.
+
+Prompted by the QA instance, which also established the persistence
+property from inside a real attached client, something the headless test
+suite structurally cannot observe.
+
 ### Fixes
 
 #### An oversized `send_keys` payload is the caller's problem, not a crash

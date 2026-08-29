@@ -12,11 +12,39 @@ from libtmux_mcp._utils import (
     handle_tool_errors,
 )
 from libtmux_mcp.models import (
+    BufferContent,
     PaneInfo,
+)
+from libtmux_mcp.tools.buffer_tools import (
+    SHOW_BUFFER_DEFAULT_MAX_LINES,
+    _allocate_buffer_name,
+    _read_buffer,
 )
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
+
+
+#: ``pane_mode`` for copy mode. Distinct from ``pane_in_mode``, which
+#: is also 1 for tree-mode, client-mode and the rest.
+_COPY_MODE = "copy-mode"
+
+#: One less than the 64 an ordinary logical buffer label may use: tmux
+#: appends an index to the prefix it is handed, and the resulting name
+#: still has to satisfy the MCP buffer-name shape.
+_COPY_LABEL_MAX = 63
+
+
+def _validate_copy_label(logical_name: str | None) -> str | None:
+    """Reject a label that tmux's appended index would push over length."""
+    if logical_name is not None and len(logical_name) > _COPY_LABEL_MAX:
+        msg = (
+            f"logical_name is limited to {_COPY_LABEL_MAX} characters here "
+            f"(received {len(logical_name)}), because tmux appends an index "
+            "to the buffer name it is given."
+        )
+        raise ExpectedToolError(msg)
+    return logical_name
 
 
 def _scrollable_rows(pane: Pane) -> int:
@@ -40,7 +68,13 @@ def _scrollable_rows(pane: Pane) -> int:
     return history + height
 
 
-def _run_copy_mode_cmd(pane: Pane, command: str, *, repeat: int | None = None) -> None:
+def _run_copy_mode_cmd(
+    pane: Pane,
+    command: str,
+    *,
+    repeat: int | None = None,
+    argument: str | None = None,
+) -> None:
     """Send one ``-X`` copy-mode command, raising if tmux rejected it.
 
     ``Pane.send_keys(copy_mode_cmd=...)`` discards tmux's result, so
@@ -72,12 +106,18 @@ def _run_copy_mode_cmd(pane: Pane, command: str, *, repeat: int | None = None) -
     unclamped call also ended up.
 
     No ``--`` here, unlike the ordinary send path: every *command* is a
-    module constant, never caller text.
+    module constant, never caller text. ``argument`` is the one value
+    that varies, and it is a server-allocated buffer name -- prefix plus
+    hex plus a restricted label -- so it cannot open with ``-``. It goes
+    in its own argv element because tmux parses the copy-mode command
+    and its argument separately.
     """
     args = ["send-keys"]
     if repeat is not None:
         args.extend(("-N", str(min(repeat, _scrollable_rows(pane)))))
     args.extend(("-X", command))
+    if argument is not None:
+        args.append(argument)
     result = pane.cmd(*args)
     if result.returncode != 0 or result.stderr:
         detail = " ".join(result.stderr).strip() if result.stderr else ""
@@ -182,3 +222,125 @@ def exit_copy_mode(
     _run_copy_mode_cmd(pane, "cancel")
     pane.refresh()
     return _serialize_pane(pane)
+
+
+def _copy_mode_state(pane: Pane) -> tuple[str, str]:
+    """Return ``(pane_mode, selection_present)`` in one round trip."""
+    stdout = pane.display_message("#{pane_mode}\t#{selection_present}", get_text=True)
+    if not stdout:
+        msg = f"pane {pane.pane_id} did not report its mode"
+        raise ExpectedToolError(msg)
+    mode, _, selection = stdout[0].partition("\t")
+    return mode, selection
+
+
+@handle_tool_errors
+def copy_selection(
+    pane_id: str | None = None,
+    logical_name: str | None = None,
+    max_lines: int | None = SHOW_BUFFER_DEFAULT_MAX_LINES,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    window_id: str | None = None,
+    socket_name: str | None = None,
+) -> BufferContent:
+    """Read the text currently SELECTED in a pane's copy mode.
+
+    Reads what is selected **right now**, which is the case
+    ``capture_pane`` cannot reach: a person attached to the session has
+    highlighted something, and the agent is being asked about that
+    highlight rather than about the pane. The selection survives idle
+    time, cursor movement and further process output -- only leaving
+    copy mode clears it -- so there is nothing to race.
+
+    Not "read what they just copied". A human who pressed Enter (or
+    ``y``) has already left copy mode, and that text is in tmux's own
+    ``buffer0``, which this server refuses to read for the reason given
+    in :func:`~libtmux_mcp.tools.buffer_tools.delete_buffer` -- tmux
+    buffers may hold clipboard history. Most key bindings copy AND
+    cancel, so this is the common human ending; the answer for it is to
+    ask the person to select again, not to widen that boundary.
+
+    The copy lands in a fresh MCP-namespaced buffer, so the returned
+    ``buffer_name`` works with ``paste_buffer`` (to move a selection
+    into another pane), ``show_buffer`` and ``delete_buffer``. The
+    selection itself is left intact.
+
+    Parameters
+    ----------
+    pane_id : str, optional
+        Pane ID (e.g. '%1').
+    logical_name : str, optional
+        Short label for the buffer this allocates, as in
+        ``load_buffer``. Limited to 63 characters here, one less than
+        elsewhere, because tmux appends an index to the name it is given.
+    max_lines : int or None
+        Maximum number of lines to return, tail-preserved. Pass ``None``
+        for no truncation. The buffer always holds the full selection
+        whatever this is set to.
+    session_name : str, optional
+        Session name for pane resolution.
+    session_id : str, optional
+        Session ID (e.g. '$1') for pane resolution.
+    window_id : str, optional
+        Window ID for pane resolution.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    BufferContent
+        ``buffer_name``, the selected ``content``, and the truncation
+        fields -- the same shape ``show_buffer`` returns.
+    """
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(
+        server,
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
+    mode, selection = _copy_mode_state(pane)
+    # Keyed on pane_mode, not pane_in_mode: choose-tree and the other
+    # modes also set the flag, and `-X copy-selection` in tree-mode
+    # would be sent to a mode that has no selection to give.
+    if mode != _COPY_MODE:
+        msg = f"pane {pane.pane_id} is not in copy mode" + (
+            f" (it is in {mode})" if mode else ""
+        )
+        raise ExpectedToolError(
+            msg,
+            suggestion=(
+                "Only a live selection is readable. If a person just "
+                "copied with Enter or y, they have already left copy "
+                "mode and the text is in tmux's own buffer, which this "
+                "server does not read. Use capture_pane for pane text, "
+                "or enter_copy_mode to make a selection yourself."
+            ),
+        )
+    # tmux EXITS 0 for copy-selection with nothing selected and creates
+    # no buffer at all, so without this the tool would report success
+    # and hand back a buffer name that does not exist.
+    if selection != "1":
+        msg = f"pane {pane.pane_id} is in copy mode but nothing is selected"
+        raise ExpectedToolError(
+            msg,
+            suggestion=(
+                "A selection that has not moved off its start counts as "
+                "absent. Begin one with send_keys(keys='-X begin-selection') "
+                "and move the cursor before copying."
+            ),
+        )
+
+    prefix = _allocate_buffer_name(_validate_copy_label(logical_name))
+    _run_copy_mode_cmd(pane, "copy-selection-no-clear", argument=prefix)
+    # tmux appends an index to the prefix. The name is not assumed:
+    # reading it back is also what proves the prefix argument was
+    # honoured, rather than the copy landing in an unnamed buffer
+    # outside the MCP namespace.
+    try:
+        return _read_buffer(server, f"{prefix}0", max_lines)
+    except ExpectedToolError as err:
+        msg = f"the selection in pane {pane.pane_id} was not captured to {prefix}0"
+        raise ExpectedToolError(msg) from err

@@ -25,7 +25,11 @@ from libtmux_mcp._utils import (
     TAG_SELF_BOUNDED,
 )
 from libtmux_mcp.tools.pane_tools.capture_since import capture_since
-from libtmux_mcp.tools.pane_tools.copy_mode import enter_copy_mode, exit_copy_mode
+from libtmux_mcp.tools.pane_tools.copy_mode import (
+    copy_selection,
+    enter_copy_mode,
+    exit_copy_mode,
+)
 from libtmux_mcp.tools.pane_tools.io import (
     capture_pane,
     clear_pane,
@@ -58,6 +62,7 @@ __all__ = [
     "capture_pane",
     "capture_since",
     "clear_pane",
+    "copy_selection",
     "display_message",
     "enter_copy_mode",
     "exit_copy_mode",
@@ -175,6 +180,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_MUTATING,
         tags={TAG_MUTATING},
     )(exit_copy_mode)
+    mcp.tool(
+        title="Copy Selection",
+        annotations=ANNOTATIONS_CREATE,
+        tags={TAG_MUTATING},
+    )(copy_selection)
     mcp.tool(title="Paste Text", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         paste_text
     )

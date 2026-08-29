@@ -1,4 +1,13 @@
-"""Wall-clock-bounded tmux reads, shared by the async tools.
+"""Bounded tmux reads, shared across the tool modules.
+
+Two different bounds live here. The wall-clock one keeps a single tmux
+invocation killable; the SIZE one (:func:`_truncate_lines_tail` and
+:data:`CAPTURE_DEFAULT_MAX_LINES`) keeps a large result from blowing the
+agent's context window. The size half moved here from
+``pane_tools/io.py`` because ``buffer_tools`` needed it too, and a tool
+module importing from a sibling tool module made the package
+import-order-dependent -- adding ``copy_selection``, which needs the
+buffer helpers, closed that into a genuine cycle.
 
 Split out of ``wait.py`` so ``capture_since`` can use the same reads
 without an import cycle -- ``wait.py`` imports ``_limit_lines`` from
@@ -61,6 +70,67 @@ _TMUX_CALL_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
 #: non-positive timeout and raise instantly, reporting "tmux is
 #: unresponsive" for what is really a normal expiry.
 _TMUX_CALL_MIN_SECONDS = 0.25
+
+
+#: Default line cap applied to :func:`capture_pane` and similar scrollback
+#: readers. Large enough to cover typical prompt + a few screens of output,
+#: small enough that a pathological pane (e.g. 50K lines of ``tail -f``)
+#: cannot blow the agent's context window on a single call. Callers who
+#: need a full capture can pass ``max_lines=None`` to opt out.
+CAPTURE_DEFAULT_MAX_LINES = 500
+
+
+def _truncate_lines_tail(
+    lines: list[str], max_lines: int | None
+) -> tuple[list[str], bool, int]:
+    """Return the tail of ``lines`` at most ``max_lines`` long.
+
+    Tail-preserving truncation is required for terminal output: the
+    most recent lines (active prompt, latest command output) live at
+    the bottom of the scrollback buffer. Dropping the head keeps what
+    the agent actually needs.
+
+    Parameters
+    ----------
+    lines : list of str
+        The captured lines, oldest first.
+    max_lines : int or None
+        Maximum number of lines to keep. ``None`` disables truncation.
+
+    Returns
+    -------
+    tuple
+        ``(kept, truncated, dropped)`` — the kept suffix, whether
+        truncation happened, and how many lines were dropped.
+
+    Examples
+    --------
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=2)
+    (['b', 'c'], True, 1)
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=5)
+    (['a', 'b', 'c'], False, 0)
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=None)
+    (['a', 'b', 'c'], False, 0)
+    >>> _truncate_lines_tail(["a", "b", "c"], max_lines=0)
+    Traceback (most recent call last):
+    libtmux_mcp._utils.ExpectedToolError: max_lines must be at least 1, ...
+    """
+    if max_lines is not None and max_lines < 1:
+        # Python slices a non-positive cap into nonsense rather than
+        # failing: ``lines[-0:]`` is the WHOLE list, so max_lines=0
+        # returned more rows than no truncation at all while announcing
+        # that everything had been dropped, and a negative inflated the
+        # count past the pane's own size -- 112 truncated from 12.
+        # The header is this tool's only disclosure channel, so a number
+        # that cannot be true is the whole defect.
+        msg = (
+            f"max_lines must be at least 1, or null for no limit (received {max_lines})"
+        )
+        raise ExpectedToolError(msg)
+    if max_lines is None or len(lines) <= max_lines:
+        return lines, False, 0
+    dropped = len(lines) - max_lines
+    return lines[-max_lines:], True, dropped
 
 
 def _call_budget(deadline: float | None) -> float:
