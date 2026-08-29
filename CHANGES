@@ -2346,6 +2346,20 @@ the same pass: its pass/fail classifier keyed on the substring "too
 long", which appears in both `command too long` and `Argument list too
 long`, so its first run scored the unhandled path as handled.
 
+#### Shutdown no longer crashes while sweeping leaked buffers
+
+Lifespan teardown deletes any `libtmux_mcp_*` paste buffers an
+interrupted call chain left behind, one tmux round trip per cached
+server. It walked the live cache of servers to do that, so a tool call
+that cached a new server inside the window resized the collection
+mid-walk and shutdown died with `RuntimeError: dictionary changed size
+during iteration`, leaving the remaining servers unswept.
+
+Teardown now claims the cache in one atomic step and sweeps the
+snapshot, which also keeps those round trips off the lock every other
+cache reader waits on.
+
+
 ### Documentation
 
 #### How to read a green run, and what a loaded one costs
