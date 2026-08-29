@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing as t
 
+from libtmux import exc
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
@@ -109,6 +110,32 @@ def _resolved_option_name(obj: t.Any, option: str, *flags: str) -> str | None:
     return result.stdout[0].split(" ", 1)[0] or None
 
 
+def _raise_unless_unset_user_option(option: str, err: exc.LibTmuxException) -> None:
+    """Swallow tmux's error for a user option that is simply not set.
+
+    The same call answers differently across the supported range. On
+    tmux 3.2a -- the floor ``docs/installation.md`` declares -- reading
+    an unset ``@option`` exits 0 with no value; from 3.3a onward it
+    exits 1 with ``invalid option``. There is no version branching in
+    this server, so a caller writing "read it, treat absent as unset"
+    worked on the floor and raised on every other supported version.
+
+    Normalised toward the floor, because "not set" is an ordinary
+    answer to "what is this option" and an exception is a poor way to
+    say it.
+
+    Narrow on purpose. An unset user option and a MISTYPED built-in
+    produce the identical message -- measured, ``@unset_probe`` and
+    ``notarealoption`` both give ``invalid option: <name>`` -- so the
+    only thing separating them is tmux's own rule that user options
+    begin with ``@``. A typo in a built-in name still raises, which is
+    the failure a caller needs to see.
+    """
+    if option.startswith("@") and "invalid option" in str(err).lower():
+        return
+    raise err
+
+
 @handle_tool_errors
 def show_option(
     option: str,
@@ -154,12 +181,16 @@ def show_option(
         Option name, its value, and the scope that was queried.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
-    value = obj.show_option(
-        option,
-        global_=global_,
-        scope=opt_scope,
-        include_inherited=include_inherited or None,
-    )
+    try:
+        value = obj.show_option(
+            option,
+            global_=global_,
+            scope=opt_scope,
+            include_inherited=include_inherited or None,
+        )
+    except exc.LibTmuxException as err:
+        _raise_unless_unset_user_option(option, err)
+        value = None
     return OptionResult(
         option=option,
         value=value,

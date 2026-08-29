@@ -21,6 +21,34 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### An unset user option reads the same on every supported tmux
+
+`docs/installation.md` declares tmux 3.2a and up, and there is no
+version branching in this server -- so every tool is claimed to behave
+identically across that range. `show_option` did not:
+
+    tmux 3.2a           rc 0, no value      ->  value=None
+    tmux 3.3a .. 3.7c   rc 1, invalid option ->  ERROR
+
+A clean boundary at 3.3a, on the DECLARED FLOOR versus everything else.
+A caller writing "read this option, treat absent as unset" worked on
+3.2a and raised on the other eight builds; one writing the try/except
+found it dead code on the floor.
+
+Normalised toward the floor: "not set" is an ordinary answer to "what
+is this option", and an exception is a poor way to say it.
+
+Narrow on purpose. An unset user option and a MISTYPED built-in give
+the identical tmux message -- `@unset_probe` and `notarealoption` both
+produce `invalid option: <name>` -- so the only thing separating them
+is tmux's own rule that user options begin with `@`. A typo in a
+built-in still raises, which is the failure a caller needs to see.
+
+Found by the QA instance sweeping all 60 tools against the declared
+floor with a modern control. It was the only version-specific
+divergence in the sweep, which is what makes it worth naming rather
+than a symptom of wider drift.
+
 #### Three tool descriptions that left a caller to guess
 
 A tool's docstring becomes its MCP schema description, and that is what

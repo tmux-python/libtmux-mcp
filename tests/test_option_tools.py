@@ -141,3 +141,44 @@ def test_option_results_disclose_what_tmux_resolved(
 
     read = show_option(option="history-limit", scope="session", socket_name=socket)
     assert read.resolved_target is not None
+
+
+def test_unset_user_option_reads_as_none_not_an_error(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """The same call answered differently across the supported range.
+
+    ``docs/installation.md`` declares tmux >= 3.2a and there is no
+    version branching here. On 3.2a, reading an unset ``@option`` exits
+    0 with no value; from 3.3a onward it exits 1 with ``invalid
+    option``. So "read it, treat absent as unset" worked on the floor
+    and raised on every other supported version.
+
+    The control is the half that matters: an unset user option and a
+    MISTYPED built-in produce the identical tmux message, so the only
+    thing separating them is tmux's own rule that user options begin
+    with ``@``. A typo must still raise.
+    """
+    name = mcp_session.session_name
+    socket = mcp_server.socket_name
+
+    unset = show_option(
+        option="@probe_never_set", scope="session", target=name, socket_name=socket
+    )
+    assert unset.value is None
+
+    with pytest.raises(ToolError, match="invalid option"):
+        show_option(
+            option="notarealoption", scope="session", target=name, socket_name=socket
+        )
+
+    mcp_session.set_option("@probe_never_set", "here")
+    assert (
+        show_option(
+            option="@probe_never_set",
+            scope="session",
+            target=name,
+            socket_name=socket,
+        ).value
+        == "here"
+    )
