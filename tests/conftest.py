@@ -172,3 +172,11 @@ def wire_annotations(tool: t.Any) -> dict[str, t.Any]:
         mode="json", by_alias=True, exclude_none=True
     )
     return dumped
+
+
+class FakeServer(t.NamedTuple):
+    """Minimal Server stand-in for tests that only build or read argv."""
+
+    socket_name: str | None
+    socket_path: str | None
+    tmux_bin: str | None = None

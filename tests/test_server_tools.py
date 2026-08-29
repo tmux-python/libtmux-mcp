@@ -136,7 +136,7 @@ def test_create_session_environment_accepts_json_string(
     """create_session accepts ``environment`` as a JSON string.
 
     Regression guard for the Cursor composer-1/1.5 dict-stringification
-    bug. Mirrors ``tests/test_utils.py::test_apply_filters`` which
+    bug. Mirrors ``tests/test_filters.py::test_apply_filters`` which
     exercises the same fallback for the ``filters`` parameter on list
     tools. The four fixtures match the filters test's four cases:
     valid JSON object, invalid JSON, JSON that is not an object
