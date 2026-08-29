@@ -164,12 +164,12 @@ def select_pane(
         # 1. A bare `-t +` / `-t -1` resolves against the attached
         #    client's current window (tmux cmd-find.c), not the window
         #    we're targeting.
-        # 2. The scoped form `@window_id.+` / `.-` works on tmux 3.6+
-        #    but the relative-offset parser's behavior for prefixed
-        #    window targets varies on older releases (tmux 3.2a still
-        #    falls back to client curw for `@id.+`). Enumerating
-        #    panes and selecting by absolute pane_id sidesteps
-        #    tmux-version variation entirely.
+        # 2. The scoped form `@window_id.+` / `.-` works from tmux 3.4.
+        #    On 3.2a and 3.3a -- and 3.2a is this project's floor -- it
+        #    exits 0, prints nothing, and leaves the window with NO
+        #    active pane. Not the wrong pane: none at all, silently.
+        #    Enumerating panes and selecting by absolute pane_id
+        #    sidesteps tmux-version variation entirely.
         window.refresh()
         panes = list(window.panes)
         active = next((p for p in panes if p.pane_active == "1"), panes[0])
