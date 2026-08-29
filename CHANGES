@@ -1985,7 +1985,24 @@ server instructions point at it three times. Clients that send objects
 got a validation error on first contact; clients that send strings
 never saw it.
 
-Both forms now validate identically.
+Both forms now validate identically, and typed values are compared the
+way tmux reports the field: every tmux-derived attribute is a string,
+so `{"pane_width": 80}` matches exactly what `{"pane_width": "80"}`
+matches. Accepting a type without that would have swapped a validation
+error for a confident empty list -- an agent told there is no such pane
+rather than that it passed the wrong type.
+
+#### `wait_for_text` reports progress on a cadence, not per poll
+
+Progress was emitted once per poll iteration, so the notification rate
+was set by `interval` -- about nine notifications a second at the
+default and nominally ~12,000 over a full-length wait at the 0.01
+floor, each carrying the same sentence with a different decimal.
+
+It now uses the same one-second ticker as `run_command` and
+`wait_for_channel`, so the wait family is consistent and the rate no
+longer depends on a polling knob. A wait shorter than a second reports
+nothing, which is what the other two already did.
 
 #### One sentence for an unresponsive tmux server
 
