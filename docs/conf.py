@@ -179,21 +179,25 @@ conf["fastmcp_model_classes"] = (
 conf["fastmcp_toolsets"] = (
     {
         "tag": "teardown",
+        "tone": "red",
         "tooltip": "Teardown \u2014 deletes tmux objects or scrollback",
         "icon": "\U0001f4a3",
     },
     {
         "tag": "execute",
+        "tone": "amber",
         "tooltip": "Execute \u2014 starts or drives a pane process",
         "icon": "\u270f\ufe0f",
     },
     {
         "tag": "manage",
+        "tone": "blue",
         "tooltip": "Manage \u2014 changes tmux structure or presentation",
         "icon": "\U0001f527",
     },
     {
         "tag": "inspect",
+        "tone": "green",
         "tooltip": "Inspect \u2014 reads tmux state and terminal output",
         "icon": "\U0001f50d",
     },
