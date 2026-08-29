@@ -8,6 +8,38 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### The audit log redacted a secret going in and logged it coming out
+
+`set_environment(value=...)` is digested. The natural next step --
+searching the pane to check the credential did not leak -- wrote it to
+the audit log verbatim:
+
+    ok      set_environment  value={'len': 30, 'sha256_prefix': 'bc79fc24b1e3'}
+    LEAKED  search_panes     pattern='AKIAIOSFODNN7EXAMPLE_LEAKCHECK'
+    LEAKED  wait_for_text    patterns=['AKIAIOSFODNN7EXAMPLE_LEAKCHECK']
+
+The delivery was protected and the verification was not, which is the
+wrong half: checking whether a secret reached somewhere is exactly what
+a careful caller does, and `wait_for_text`'s own docs steer callers
+toward waiting on markers.
+
+`pattern`, `patterns` and `stop` are now redacted. Their whole purpose
+is to carry a value the caller is looking FOR, and the realistic reason
+to look for a credential is that one may have leaked. They needed list
+handling as well as naming -- `patterns` is a list, and naming it
+without that would have reproduced the same bug one layer down. The
+digest still correlates with the one from `set_environment`, so an
+auditor can tell the same value was searched for without being shown
+it.
+
+The allowlist defaults to logging verbatim, so a free-text argument
+added later is exposed by omission rather than by judgement --
+`break_pane.window_name` landed earlier in this branch that way. The
+arguments deliberately left verbatim are now listed as such beside it:
+a path is legitimate audit content, and knowing where pane output went
+is often the point of the record.
+
+
 #### A truncation cap below 1 produced impossible numbers
 
 `capture_pane(max_lines=0)` returned MORE rows than no truncation at
@@ -1322,7 +1354,7 @@ Measured before and after, `pytest -n auto --reruns 0`, same box:
 | | runs failing | failures per run | loadavg at start |
 |---|---|---|---|
 | before | 6 of 6 | 3, 2, 2, 1, 1, 5 | 13 - 33 |
-| after | **0 of 6** | 0, 0, 0, 0, 0, 0 | 8 - 31 |
+| after | **0 of 6** | 0, 0, 0, 0, 0, 0 | 8 - 36 |
 
 The final run randomises test order, an axis the fixed-order runs never
 exercise. The "after" rows are the less favourable comparison, not the

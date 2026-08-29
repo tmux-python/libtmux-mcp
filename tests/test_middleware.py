@@ -2017,3 +2017,28 @@ def test_client_label_reads_both_sdk_field_names(
     context = type("_MW", (), {"fastmcp_context": fastmcp_ctx})()
 
     assert _client_label(t.cast("t.Any", context)) == expected
+
+
+def test_audit_redacts_the_arguments_that_search_for_a_secret() -> None:
+    """Redacting delivery and logging verification protects neither.
+
+    ``set_environment(value=...)`` was digested while the natural next
+    step -- searching a pane to check the credential did not leak --
+    wrote it to the audit log verbatim. ``patterns`` and ``stop`` are
+    lists, so naming them sensitive without handling the container
+    would have reproduced the same bug.
+    """
+    secret = "AKIAIOSFODNN7EXAMPLE_LEAKCHECK"
+    delivered = _summarize_args({"name": "AWS_SECRET", "value": secret})
+    assert secret not in repr(delivered)
+
+    for args in (
+        {"pattern": secret},
+        {"patterns": [secret], "timeout": 5},
+        {"stop": [secret]},
+    ):
+        assert secret not in repr(_summarize_args(args)), args
+
+    # The digest still correlates, so an auditor can tell the same value
+    # was searched for without being shown it.
+    assert _summarize_args({"pattern": secret})["pattern"] == delivered["value"]

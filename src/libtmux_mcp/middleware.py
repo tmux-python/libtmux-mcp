@@ -604,8 +604,34 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: ``environment={"AWS_SECRET_KEY": "..."}`` may briefly expose the values
 #: via the OS process table and tmux's ``pane_current_command`` metadata
 #: until the spawned shell takes over — see ``docs/topics/safety.md``.
+#: DECIDED AND LEFT VERBATIM: ``output_path``, ``start_directory`` and
+#: the various name arguments. A path is legitimate audit content --
+#: knowing where pane output was written is often the point of the
+#: record. Listed here because this allowlist defaults to "log it", so
+#: a free-text argument added later is exposed by omission rather than
+#: by judgement; anything new belongs in one of these two lists.
+#:
+#: ``pattern``/``patterns``/``stop`` are here because their whole
+#: purpose is to carry a value the caller is looking FOR, and the
+#: realistic reason to look for a credential is to check whether one
+#: leaked. Redacting it on the way in and logging it on the way out
+#: protected the delivery and not the verification -- measured, a
+#: ``set_environment`` value was digested and the same secret appeared
+#: verbatim in the following ``search_panes`` and ``wait_for_text``
+#: records.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
-    {"keys", "text", "command", "value", "content", "shell", "environment"}
+    {
+        "keys",
+        "text",
+        "command",
+        "value",
+        "content",
+        "shell",
+        "environment",
+        "pattern",
+        "patterns",
+        "stop",
+    }
 )
 
 #: Nested argument containers that may contain sensitive argument names.
@@ -728,6 +754,14 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
+        elif key in _SENSITIVE_ARG_NAMES and isinstance(value, list):
+            # ``patterns`` and ``stop`` are lists. Naming them sensitive
+            # without handling the container would have left them
+            # verbatim, which is the shape of the bug being fixed.
+            summary[key] = [
+                _redact_digest(item) if isinstance(item, str) else item
+                for item in value
+            ]
         elif key in _NESTED_ARG_LIST_NAMES:
             if isinstance(value, list):
                 summary[key] = [
