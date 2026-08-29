@@ -8,6 +8,13 @@ subprocess rather than a worker thread: a thread blocked in libtmux's
 untimed ``Popen.communicate()`` cannot be cancelled, and
 ``concurrent.futures.thread._python_exit`` joins pool workers untimed at
 shutdown, so one wedged tmux takes process exit with it.
+
+Building argv here rather than going through libtmux means the flags
+are ours to get right, and CI runs tmux 3.2a upward. Check a new one
+against the oldest supported version before using it -- the arg string
+in tmux's own source is authoritative::
+
+    git show 3.2a:cmd-capture-pane.c | grep -m1 'args = {'
 """
 
 from __future__ import annotations
