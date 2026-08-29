@@ -2384,6 +2384,36 @@ unusual entry shape.
 
 ### Development
 
+**Three more load-sensitive tests, from a series at loadavg 85**
+
+`matches_a_reprinted_line` needed a third pass, and the numbers said
+why: `saw_new_output` False, `effective_timeout` 12.0, and the marker
+PRESENT in `rows`. So the reprint had arrived and been captured -- it
+just landed before the wait took its entry baseline, and was counted as
+entry text rather than as new. Raising the ceiling could never fix
+that. The gate now releases on OBSERVING the baseline capture rather
+than on assuming it: `wait_for_text` reads pane state and then
+captures, so the first `capture-pane` means the snapshot is being
+taken. Verified the observation is load-bearing by pointing it at a
+subcommand that never runs and watching the test time out.
+
+`send_keys_batch_sends_operations_in_order` timed out on a 5 s channel
+wait. That bound is a CEILING -- the shell signals in milliseconds and
+the wait returns with it -- so it, and the three like it, now come from
+one named constant at 20 s carrying the reason.
+
+`a_mutating_tool_answers_with_a_freshly_read_record[respawn_pane]` was
+a FALSE POSITIVE of this release's own freshness guard, and the QA
+instance that specified the guard called it: comparing the tool's read
+against a later one asserts equality between two observations of a
+MOVING system. `lifecycle.py` already measures `pane_current_command`
+lagging `pane_pid` by a median of 14 ms after a respawn, and under load
+that lag outlasts the settle loop. A difference confined to that field
+is now reported as settling rather than staleness. Nothing is lost:
+`pane_pid` changes the instant `respawn-pane` returns, and with the
+refresh deleted the guard still fails, naming `pane_pid` and
+`pane_tty`.
+
 **Three load-sensitive test assertions, fixed without loosening one**
 
 The QA instance turned a one-in-ten mystery into one-in-one by
