@@ -688,7 +688,12 @@ async def run_command(
     effective_timeout = min(timeout, _wait_ceiling_seconds())
 
     server = await _get_server_async(socket_name=socket_name)
-    pane = _resolve_pane(
+    # Off the loop for the same reason the server handle is: this
+    # is a tmux round trip through ``Server.cmd``, which has no
+    # timeout, so a server that answers the liveness probe and then
+    # wedges would block every concurrent caller here instead.
+    pane = await asyncio.to_thread(
+        _resolve_pane,
         server,
         pane_id=pane_id,
         session_name=session_name,

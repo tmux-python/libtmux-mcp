@@ -2711,6 +2711,63 @@ def test_capture_since_rejects_dead_pane_cursor(
         window.cmd("set-option", "-wu", "remain-on-exit")
 
 
+#: Helpers that make a tmux round trip through ``Server.cmd``, which has
+#: no timeout. Awaiting is not the same as yielding: a call to one of
+#: these inside an async body runs ON the loop and every concurrent
+#: caller waits with it.
+_BLOCKING_TMUX_HELPERS = frozenset(
+    {
+        "_resolve_pane",
+        "_resolve_window",
+        "_resolve_session",
+        "_probe_liveness",
+        "_run_tmux_sync",
+        "_read_pane_state",
+        "_capture_rows",
+    }
+)
+
+
+def test_no_async_tool_makes_a_blocking_tmux_call_on_the_loop() -> None:
+    """Async tools must not do tmux work inline.
+
+    Measured before this was true: ``capture_since`` against a wedged
+    socket held the loop for 5.01s and a ticker beside it advanced once.
+    A behavioural test catches only the helper it stubs, and there were
+    three separate call sites -- so this reads the tree instead.
+
+    Nested ``def``s are skipped deliberately: those are what gets handed
+    to ``asyncio.to_thread``, which is the fix rather than the defect.
+    """
+    import ast
+
+    offenders: list[str] = []
+
+    def walk(node: ast.AST, where: str, path: pathlib.Path) -> None:
+        if isinstance(node, ast.FunctionDef):
+            return
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name in _BLOCKING_TMUX_HELPERS:
+                offenders.append(f"{path.name}:{node.lineno} async {where} -> {name}()")
+        for child in ast.iter_child_nodes(node):
+            walk(child, where, path)
+
+    root = pathlib.Path(__file__).parent.parent / "src" / "libtmux_mcp"
+    for path in sorted(root.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.AsyncFunctionDef):
+                for stmt in node.body:
+                    walk(stmt, node.name, path)
+
+    assert offenders == [], (
+        "blocking tmux work on the event loop: "
+        + "; ".join(offenders)
+        + " -- wrap in asyncio.to_thread, or use the async subprocess in "
+        "_tmux_proc if the call is on the wait path"
+    )
+
+
 def test_resolving_a_server_does_not_block_the_event_loop(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
