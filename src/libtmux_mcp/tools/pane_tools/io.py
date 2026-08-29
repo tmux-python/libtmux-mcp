@@ -23,6 +23,7 @@ from libtmux_mcp._bounded_io import (
     _run_tmux_lines,
     _truncate_lines_tail,
 )
+from libtmux_mcp._pane_state import _PaneState, _read_pane_state
 from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
@@ -45,7 +46,6 @@ from libtmux_mcp.models import (
     SendKeysOperation,
     SendKeysOperationResult,
 )
-from libtmux_mcp.tools.pane_tools.state import _PaneState, _read_pane_state
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane

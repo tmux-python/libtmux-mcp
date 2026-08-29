@@ -1,4 +1,8 @@
-"""Shared tmux pane state helpers for read and wait tools."""
+"""Pane grid and lifecycle state, read in one tmux round trip.
+
+Parsing only: no tool lives here, so the bounded-IO layer and the pane
+tools can both depend on it without depending on each other.
+"""
 
 from __future__ import annotations
 

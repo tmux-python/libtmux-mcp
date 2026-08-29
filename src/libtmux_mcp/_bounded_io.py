@@ -33,6 +33,11 @@ import typing as t
 
 from libtmux import exc
 
+from libtmux_mcp._pane_state import (
+    HISTORY_LIMIT_FORMAT,
+    PANE_STATE_FORMAT,
+    _parse_pane_state,
+)
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     _LIVENESS_TIMEOUT_SECONDS,
@@ -44,7 +49,7 @@ from libtmux_mcp._utils import (
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from libtmux.server import Server
 
-    from libtmux_mcp.tools.pane_tools.state import _PaneState
+    from libtmux_mcp._pane_state import _PaneState
 
 
 #: Per-``tmux``-invocation wall-clock bound, and the load-bearing half of
@@ -189,11 +194,6 @@ async def _bounded_pane_state(
     server: Server, pane_id: str, *, deadline: float | None = None
 ) -> _PaneState:
     """Read :class:`_PaneState` bounded by the remaining wait budget."""
-    from libtmux_mcp.tools.pane_tools.state import (
-        PANE_STATE_FORMAT,
-        _parse_pane_state,
-    )
-
     out = await _run_tmux_lines(
         server,
         "display-message",
@@ -210,8 +210,6 @@ async def _bounded_history_limit(
     server: Server, pane_id: str, *, deadline: float | None = None
 ) -> int:
     """Read ``history-limit`` bounded by the remaining wait budget."""
-    from libtmux_mcp.tools.pane_tools.state import HISTORY_LIMIT_FORMAT
-
     out = await _run_tmux_lines(
         server,
         "display-message",

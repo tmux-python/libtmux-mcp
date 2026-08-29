@@ -279,7 +279,7 @@ def test_parse_pane_state_survives_a_vanished_pane(
     with base 10: ''`` from the poll path. ``pane_dead`` reads empty
     too, so the empty pid is what identifies the pane as gone.
     """
-    from libtmux_mcp.tools.pane_tools.state import _parse_pane_state
+    from libtmux_mcp._pane_state import _parse_pane_state
 
     assert test_id
     state = _parse_pane_state(raw)
@@ -324,7 +324,7 @@ def test_run_command_refuses_a_full_screen_program(
     """
     import asyncio
 
-    from libtmux_mcp.tools.pane_tools.state import _read_pane_state
+    from libtmux_mcp._pane_state import _read_pane_state
 
     state = _read_pane_state(mcp_pane)
     stubbed = 0

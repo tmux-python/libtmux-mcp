@@ -17,16 +17,16 @@ from libtmux_mcp._bounded_io import (
     _resolve_pane_bounded,
     _run_tmux_lines,
 )
+from libtmux_mcp._pane_state import (
+    _PaneState,
+    _raise_if_pane_lifecycle_changed,
+)
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server_async,
     handle_tool_errors_async,
 )
 from libtmux_mcp.models import CaptureSinceResult
-from libtmux_mcp.tools.pane_tools.state import (
-    _PaneState,
-    _raise_if_pane_lifecycle_changed,
-)
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from libtmux.server import Server

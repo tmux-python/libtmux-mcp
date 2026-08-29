@@ -20,6 +20,9 @@ from libtmux_mcp._bounded_io import (
     _resolve_pane_bounded as _resolve_pane_bounded,  # noqa: PLC0414
     _run_tmux_lines as _run_tmux_lines,  # noqa: PLC0414
 )
+from libtmux_mcp._pane_state import (
+    _raise_if_pane_lifecycle_changed,
+)
 from libtmux_mcp._patterns import compile_pattern
 from libtmux_mcp._progress import (
     _maybe_log as _maybe_log,  # noqa: PLC0414
@@ -34,9 +37,6 @@ from libtmux_mcp._utils import (
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 from libtmux_mcp.models import WaitForTextResult
 from libtmux_mcp.tools.pane_tools.capture_since import _limit_lines
-from libtmux_mcp.tools.pane_tools.state import (
-    _raise_if_pane_lifecycle_changed,
-)
 
 logger = logging.getLogger(__name__)
 

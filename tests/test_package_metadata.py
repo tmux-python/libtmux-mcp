@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import typing as t
 
@@ -80,3 +81,22 @@ def test_the_lockfile_has_no_foreign_editable() -> None:
     )
 
     assert not foreign, f"lockfile pins editable source(s) outside the repo: {foreign}"
+
+
+def test_core_modules_never_import_a_tool_module() -> None:
+    """Core may not depend on ``tools/``; only the other direction is legal.
+
+    A core module reaching into a tool package forms a cycle that a
+    function-level import hides at no cost to any linter or type
+    checker, so nothing else in the gate chain reports it.
+    """
+    core = pathlib.Path(libtmux_mcp.__file__).parent
+    offenders = sorted(
+        f"{path.name}:{node.lineno} imports {node.module}"
+        for path in core.glob("_*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ImportFrom)
+        and (node.module or "").startswith("libtmux_mcp.tools")
+    )
+
+    assert not offenders, f"core module depends on a tool module: {offenders}"
