@@ -441,3 +441,76 @@ def test_break_pane_refuses_to_empty_its_source_session(
     mcp_session.new_window()
     moved = break_pane(pane_id=pane.pane_id, socket_name=mcp_server.socket_name)
     assert moved.window_id is not None
+
+
+def test_move_window_refuses_to_empty_its_source_session(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Moving a session's last window elsewhere destroys that session.
+
+    Same shape as ``break_pane``, and found by auditing which
+    ``mutating``-tier tools can reduce an object count rather than by
+    tripping over it: moving alpha's only window to beta made alpha
+    cease to exist while the result named only the destination.
+    """
+    other = mcp_server.new_session(session_name="move_target")
+    window = mcp_session.active_window
+
+    with pytest.raises(ToolError, match="would leave that one empty"):
+        move_window(
+            window_id=window.window_id,
+            destination_session=other.session_name,
+            socket_name=mcp_server.socket_name,
+        )
+
+    names = [s.session_name for s in mcp_server.sessions]
+    assert mcp_session.session_name in names
+
+    # A session with another window is not at risk, so the move proceeds.
+    mcp_session.new_window()
+    moved = move_window(
+        window_id=window.window_id,
+        destination_session=other.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert moved.session_name == other.session_name
+
+
+def test_join_pane_refuses_to_empty_its_source_session(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A mutating-tier tool must not be able to destroy a session.
+
+    ``break_pane`` already refused exactly this predicate -- only pane,
+    only window, of a session -- and its sibling reached the same end
+    state with no check, so a client restricted to ``mutating`` could
+    destroy sessions and, on a single-session server, the server.
+
+    A window emptying is inherent to moving its last pane and is
+    disclosed rather than refused. A session emptying is avoidable: add
+    a window first.
+    """
+    other = mcp_server.new_session(session_name="join_target")
+    window = mcp_session.active_window
+    pane = window.active_pane
+    assert pane is not None and pane.pane_id is not None
+    target = other.active_window
+    assert target.window_id is not None
+
+    with pytest.raises(ToolError, match="would leave that session with no windows"):
+        join_pane(
+            pane_id=pane.pane_id,
+            target_window_id=target.window_id,
+            socket_name=mcp_server.socket_name,
+        )
+    assert mcp_session.session_name in [s.session_name for s in mcp_server.sessions]
+
+    # Within the same session the source cannot be emptied, so it runs.
+    inner = mcp_session.new_window()
+    assert inner.window_id is not None
+    moved = join_pane(
+        pane_id=pane.pane_id,
+        target_window_id=inner.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert moved.pane.pane_id == pane.pane_id

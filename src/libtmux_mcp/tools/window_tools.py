@@ -486,6 +486,21 @@ def move_window(
         session_name=session_name,
         session_id=session_id,
     )
+    # Moving a session's LAST window to another session leaves the
+    # source with none, and tmux destroys it -- measured, moving alpha's
+    # only window to beta made alpha cease to exist while the result
+    # named only the destination. Same shape as break_pane, and
+    # avoidable the same way, so refused rather than disclosed:
+    # destroying a session is destructive-tier work.
+    if destination_session is not None and len(window.session.windows) == 1:
+        msg = (
+            f"window {window.window_id} is the only window in session "
+            f"{window.session.session_name!r}, so moving it to another "
+            "session would leave that one empty and tmux would destroy it. "
+            "Create another window there first."
+        )
+        raise ExpectedToolError(msg)
+
     window.move_window(
         destination=destination_index,
         session=destination_session,
@@ -607,6 +622,28 @@ def join_pane(
     window = _resolve_window(server, window_id=target_window_id)
     source_window = pane.window
     source_window_id = source_window.window_id if source_window else None
+
+    # A window emptying is inherent to moving its last pane, and is
+    # disclosed below. A SESSION emptying is not inherent -- the caller
+    # can add a window first -- and destroying a session is
+    # destructive-tier work reachable from a mutating-tier client.
+    # `break_pane` already refuses exactly this predicate; its sibling
+    # reached the same end state with no check, and from there a client
+    # restricted to `mutating` could take the whole server down.
+    if (
+        source_window is not None
+        and len(source_window.panes) == 1
+        and len(source_window.session.windows) == 1
+        and source_window.session.session_id != window.session.session_id
+    ):
+        msg = (
+            f"pane {pane_id} is the only pane in the only window of session "
+            f"{source_window.session.session_name!r}, so moving it away would "
+            "leave that session with no windows and tmux would destroy it. "
+            "Create another window in that session first."
+        )
+        raise ExpectedToolError(msg)
+
     pane.join(window, vertical=vertical)
 
     moved = server.panes.get(pane_id=pane.pane_id, default=None)

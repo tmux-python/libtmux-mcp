@@ -1083,7 +1083,14 @@ def test_run_command_kills_tmux_child_on_cancel(
         async def _pids() -> list[int]:
             return await asyncio.to_thread(_run_command_wait_pids, socket_name)
 
-        deadline = time.monotonic() + 4.0
+        # A ceiling, not a spend: the loop exits the moment a child
+        # appears, so widening costs nothing when it does. Before the
+        # first child exists the call resolves a pane, runs the busy
+        # guard, reads the occupant and sends the payload -- several
+        # tmux round trips plus a shell one, which under parallel load
+        # exceeded 4 s. Still well inside the call's own 8 s budget, so
+        # the cancel lands mid-flight.
+        deadline = time.monotonic() + 6.0
         while time.monotonic() < deadline and not await _pids():
             await asyncio.sleep(0.05)
         assert await _pids(), (

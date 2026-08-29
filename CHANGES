@@ -97,6 +97,25 @@ kill it and start again somewhere else -- which loses the process, the
 scrollback, and the pane id, along with any `capture_since` cursor a
 caller holds against that id.
 
+**A `mutating`-tier client could destroy sessions, and take the server
+down.** All four `kill_*` tools are hidden at that tier, and
+`join_pane` reached the same end state with no check: moving the only
+pane of a session's only window into another session left the source
+with no windows, and tmux destroyed it. On a single-session server that
+is the server.
+
+`break_pane` already refused exactly that predicate. The line was drawn
+correctly and implemented on one side of it -- a window emptying is
+inherent to moving its last pane and is disclosed; a session emptying
+is avoidable, so it is refused. `join_pane` now refuses it too, and
+only when the destination is a DIFFERENT session, since a move within
+one cannot empty it.
+
+`move_window` had the same defect and was found by auditing which
+`mutating` tools can reduce an object count, rather than by tripping
+over it: moving a session's last window elsewhere destroyed that
+session and the result named only the destination. Also refused.
+
 `join_pane` reports whether the move DESTROYED the source window.
 tmux removes a window left with no panes, so consolidating panes
 deletes windows the caller never named -- measured, moving the last
