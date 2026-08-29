@@ -8,6 +8,46 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `list_clients`
+
+Nothing could answer "who is attached to this server". Two behaviours
+depend on client state and neither could report it: `is_caller`
+compares against the caller's own client, and an untargeted
+`show_option` resolves through tmux's current session, which is chosen
+from the attached clients. Verifying either meant leaving the server
+and running `tmux list-clients` by hand.
+
+Reads tmux directly rather than through libtmux's `Server.clients`,
+which leaves `client_tty` and `client_pid` unset -- the same family of
+unpopulated `client_*` attributes that makes them useless as filter
+fields. An empty list means nobody is attached, which is the normal
+state for an agent-driven server, and is distinguished from a server
+that cannot be reached at all.
+
+#### A slow shell is no longer mistaken for a wedged one
+
+The started-channel grace refused a pane whose prompt hook takes longer
+than the grace -- and the command then ran, so the refusal said "it has
+not run" about something that had. That is the double execution the
+guard exists to prevent, arriving on an ordinary call rather than on a
+wedged pane. Measured: a `preexec` sleeping 8 s was refused at a 10 s
+timeout while its command completed.
+
+Scaling the grace off the caller's budget narrowed that window without
+closing it: any shell slower than the grace and faster than the timeout
+still lost. So the grace expiring is no longer the whole decision. A
+foreground process that CHANGED since the payload was sent is positive
+evidence that a shell read the line and is working, and the wait is
+extended instead.
+
+Partial by construction, and it fails in the safe direction. Slow work
+in a shell BUILTIN spawns no child and still reads as unchanged, so it
+is refused exactly as before -- the check can only remove an
+over-refusal, never create a false accept. Measured after: an 8 s
+prompt hook completes and reports `exit_status=0`, while a Python REPL,
+a `cat`, and a shell in `read` are all still refused at the grace.
+
+
 #### `pipe_pane` does what the redirect does, instead of predicting it
 
 Four more destinations passed the pre-flight, returned "Piping pane %N

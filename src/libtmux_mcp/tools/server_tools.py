@@ -31,7 +31,7 @@ from libtmux_mcp._utils import (
     _serialize_session,
     handle_tool_errors,
 )
-from libtmux_mcp.models import ServerInfo, SessionInfo
+from libtmux_mcp.models import ClientInfo, ClientListResult, ServerInfo, SessionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +436,81 @@ def list_servers(
     return list(found.values())
 
 
+def _int_or_none(value: str | None) -> int | None:
+    """Parse a tmux numeric format field, treating an empty one as absent."""
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+#: Field separator for the list-clients format. A literal rather
+#: than libtmux's FORMAT_SEPARATOR, which is not an exported name.
+#: No client field can contain it.
+_CLIENT_FIELD_SEP = "\u241e"
+
+_CLIENT_FIELDS: tuple[str, ...] = (
+    "client_tty",
+    "client_pid",
+    "client_session",
+    "client_width",
+    "client_height",
+    "client_termname",
+    "client_control_mode",
+    "client_readonly",
+)
+
+
+def _parse_client_row(row: str) -> ClientInfo:
+    """Parse one separator-joined ``list-clients`` row."""
+    parts = row.split(_CLIENT_FIELD_SEP)
+    values = dict(zip(_CLIENT_FIELDS, parts, strict=False))
+    return ClientInfo(
+        client_tty=values.get("client_tty") or None,
+        client_pid=_int_or_none(values.get("client_pid")),
+        session_name=values.get("client_session") or None,
+        width=_int_or_none(values.get("client_width")),
+        height=_int_or_none(values.get("client_height")),
+        term_name=values.get("client_termname") or None,
+        control_mode=values.get("client_control_mode") == "1",
+        readonly=values.get("client_readonly") == "1",
+    )
+
+
+@handle_tool_errors
+def list_clients(socket_name: str | None = None) -> ClientListResult:
+    """List the clients attached to a tmux server.
+
+    Answers "who is looking at this server", which nothing else could.
+    Two tool behaviours depend on client state and neither could report
+    it: ``is_caller`` compares against the caller's own client, and an
+    untargeted ``show_option`` resolves through tmux's current session,
+    which is chosen from the attached clients.
+
+    Reads tmux directly rather than through libtmux's ``Server.clients``,
+    which leaves ``client_tty`` and ``client_pid`` unset.
+
+    Returns
+    -------
+    ClientListResult
+        One row per attached client. An empty list means nobody is
+        attached, which is the normal state for an agent-driven server.
+    """
+    server = _get_server(socket_name=socket_name)
+    fmt = _CLIENT_FIELD_SEP.join(f"#{{{field}}}" for field in _CLIENT_FIELDS)
+    result = server.cmd("list-clients", "-F", fmt)
+    if result.stderr:
+        detail = "; ".join(result.stderr)
+        msg = f"list-clients failed: {detail}"
+        raise ExpectedToolError(msg)
+    return ClientListResult(
+        clients=[_parse_client_row(row) for row in result.stdout if row.strip()],
+        socket_name=server.socket_name,
+    )
+
+
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
     mcp.tool(
@@ -444,6 +519,9 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(
         title="List tmux Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(list_servers)
+    mcp.tool(
+        title="List tmux Clients", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(list_clients)
     mcp.tool(
         title="Create tmux Session",
         annotations=ANNOTATIONS_CREATE,

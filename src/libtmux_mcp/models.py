@@ -749,6 +749,38 @@ class SearchPanesResult(BaseModel):
     limit: int | None = Field(description="The ``limit`` that produced this page.")
 
 
+class ClientInfo(BaseModel):
+    """One client attached to a tmux server.
+
+    Read with an explicit ``list-clients -F`` rather than through
+    libtmux, whose ``Server.clients`` leaves ``client_tty`` and
+    ``client_pid`` unset -- the same family of unpopulated ``client_*``
+    attributes that makes them unusable as filter fields.
+    """
+
+    client_tty: str | None = Field(default=None, description="Client tty path.")
+    client_pid: int | None = Field(default=None, description="Client process id.")
+    session_name: str | None = Field(
+        default=None, description="Session this client is attached to."
+    )
+    width: int | None = Field(default=None, description="Client width in columns.")
+    height: int | None = Field(default=None, description="Client height in rows.")
+    term_name: str | None = Field(default=None, description="Client TERM value.")
+    control_mode: bool = Field(
+        default=False, description="Whether the client is in control mode."
+    )
+    readonly: bool = Field(default=False, description="Whether the client is readonly.")
+
+
+class ClientListResult(BaseModel):
+    """Result of a list_clients call."""
+
+    clients: list[ClientInfo] = Field(description="Clients attached to the server.")
+    socket_name: str | None = Field(
+        default=None, description="Socket the clients were read from."
+    )
+
+
 class HookEntry(BaseModel):
     """One entry in a tmux hook array.
 

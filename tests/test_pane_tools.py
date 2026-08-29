@@ -1815,6 +1815,53 @@ def test_wait_for_text_matches_a_reprinted_line(
     assert stale_only.matched_at_entry is True
 
 
+def test_run_command_allows_a_slow_shell(
+    mcp_server: Server, mcp_pane: Pane, tmp_path: pathlib.Path
+) -> None:
+    """A shell that is slow is not a shell that is wedged.
+
+    The started-channel grace alone refused a pane whose prompt hook
+    takes longer than the grace -- and the command then ran, so the
+    refusal said "it has not run" about something that had. That is the
+    double execution this guard exists to prevent, arriving on an
+    ordinary call instead of a wedged pane.
+
+    A foreground process that CHANGED since the payload was sent is
+    positive evidence a shell read the line and is working, so the wait
+    is extended rather than refused.
+    """
+    import asyncio
+    import shutil
+
+    if shutil.which("zsh") is None:
+        pytest.skip("zsh is required to install a slow preexec hook")
+
+    zdotdir = tmp_path / "zdot"
+    zdotdir.mkdir()
+    (zdotdir / ".zshrc").write_text("preexec() { sleep 6 }\n")
+    mcp_pane.respawn(kill=True, shell=f"env ZDOTDIR={shlex.quote(str(zdotdir))} zsh -i")
+    retry_until(
+        lambda: (
+            mcp_pane.display_message("#{pane_current_command}", get_text=True)
+            == ["zsh"]
+        ),
+        10,
+        raises=True,
+    )
+
+    # grace is max(5, timeout/2) = 5 s, and the hook holds the shell for
+    # 6 s, so the grace expires before the command starts.
+    result = asyncio.run(
+        run_command(
+            command="printf 'SLOW_SHELL_OK\\n'",
+            pane_id=mcp_pane.pane_id,
+            timeout=10.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert result.exit_status == 0
+
+
 def test_run_command_reports_a_command_that_never_ran(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

@@ -691,6 +691,10 @@ async def run_command(
         f's=$?; {status_cmd} "$s"; {signal_cmd}'
     )
 
+    # Read before sending, so a later change is evidence the pane
+    # accepted the line rather than a difference that predates it.
+    entry_occupant = await asyncio.to_thread(_read_pane_current_command, pane)
+
     started = time.monotonic()
     await asyncio.to_thread(
         _run_send_keys,
@@ -718,6 +722,19 @@ async def run_command(
     )
     if not started_ok and can_refuse:
         occupant = await asyncio.to_thread(_read_pane_current_command, pane)
+        # A foreground process that CHANGED since the send is positive
+        # evidence a shell read the line and is working -- slow, not
+        # wedged. Extend rather than refuse: measured, a prompt hook
+        # sleeping 8 s is refused by the grace alone while the command
+        # runs, which is the double execution this guard exists to
+        # prevent, arriving on an ordinary call.
+        #
+        # Partial by construction: slow work in a shell BUILTIN spawns
+        # no child, so it still reads as unchanged. It fails toward
+        # refusing, which is the behaviour without it, so it can only
+        # remove over-refusals and never create a false accept.
+        started_ok = occupant != entry_occupant
+    if not started_ok and can_refuse:
         named = f" (foreground: {occupant!r})" if occupant else ""
         # Deliberately does not guess between the two readings. A REPL
         # and a still-running command look identical from here, and
