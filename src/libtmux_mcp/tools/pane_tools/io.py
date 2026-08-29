@@ -693,6 +693,14 @@ async def run_command(
     non-idempotent command on a timed-out result without checking the
     pane first.
 
+    **The wrapper is visible in the pane.** Getting an exit status back
+    costs scaffolding — a ``wait-for`` signal, the command in
+    parentheses, ``s=$?`` — so someone watching the pane sees roughly
+    120 characters of machinery around what you asked for.
+    ``suppress_history`` keeps it out of the shell's history file; it
+    cannot keep it off the screen. Use ``send_keys`` where the pane
+    should look like a human typed it.
+
     Parameters
     ----------
     command : str

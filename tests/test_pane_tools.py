@@ -5155,24 +5155,31 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
         wait_for_text(
             patterns=["WILL_NEVER_MATCH_aBcDeF"],
             pane_id=mcp_pane.pane_id,
-            timeout=2.0,
+            timeout=2.5,
             interval=0.05,
             socket_name=mcp_server.socket_name,
             ctx=t.cast("t.Any", stub),
         )
     )
     assert result.found is False
-    # 2 s, not the 0.2 s this used to use. The assertion is about the
-    # CONTENT of the message, which needs two ticks but no particular
-    # wall clock. At 0.2 s the second tick had under 3x headroom
-    # (~13 ms setup + ~8 ms read + a 50 ms sleep), so on a loaded
-    # machine only one tick fired and this failed -- measured 0/20 at
-    # idle and 4/4 under mild oversubscription, and `--reruns` did not
-    # save it because the load persisted across retries.
-    assert len(progress_calls) >= 2
+    # Two reports need 2.5 s, because progress runs on its own 1 s
+    # cadence rather than once per poll. That decoupling is the point:
+    # ``interval`` is a polling knob with a 0.01 floor, and driving
+    # notifications from it sent the same sentence ~20 times a second
+    # with a different decimal.
+    # Asserted as a COUNT, not a gap. Load can only stretch a gap or
+    # drop a tick, so a magnitude assertion fails on a healthy machine
+    # under parallel load while a starved poll loop could fake one. The
+    # count runs the other way: 2.5 s at a 1 s cadence cannot exceed
+    # three, and reporting per 0.05 s iteration would be about fifty.
+    assert progress_calls, "no progress reported at all"
+    assert len(progress_calls) <= 5, (
+        f"{len(progress_calls)} reports in 2.5s; cadence is the poll "
+        "interval's, not the ticker's"
+    )
     first_progress, first_total, first_msg = progress_calls[0]
     assert first_progress >= 0.0
-    assert first_total == 2.0
+    assert first_total == 2.5
     assert mcp_pane.pane_id is not None
     assert mcp_pane.pane_id in first_msg
     # The message must carry the BUDGET, not just restate the pane. A
@@ -5217,12 +5224,16 @@ def test_wait_for_text_propagates_unexpected_progress_error(
     # original type + message preserved in the translated text. The
     # point of this regression guard is that the error reaches the
     # error handler at all — previously the broad ``suppress`` ate it.
+    # Longer than one ticker interval. Progress is reported on its own
+    # 1 s cadence rather than once per poll, so a sub-second wait now
+    # reports nothing at all -- as its siblings already did -- and would
+    # never reach the faulty context.
     with pytest.raises(ToolError, match="synthetic bug"):
         asyncio.run(
             wait_for_text(
                 patterns=["WILL_NEVER_MATCH_PROPAGATE_q2rj"],
                 pane_id=mcp_pane.pane_id,
-                timeout=0.5,
+                timeout=1.5,
                 interval=0.05,
                 socket_name=mcp_server.socket_name,
                 ctx=t.cast("t.Any", _FaultyContext()),

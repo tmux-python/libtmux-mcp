@@ -335,7 +335,16 @@ def test_tool_descriptions_do_not_document_arguments_that_do_not_exist() -> None
     pattern = re.compile(r"\b(\w+)\(([^)]*?)(\w+)\s*=")
     checked = 0
     for tool in tools.values():
-        for called, _, kwarg in pattern.findall(tool.description or ""):
+        # Parameter descriptions too, not just the tool's own: the other
+        # description bug of the same day lived in one, and a scan that
+        # reads only the top level reports a clean sweep it never took.
+        prose = [tool.description or ""]
+        prose += [
+            prop.get("description", "")
+            for prop in tool.parameters.get("properties", {}).values()
+            if isinstance(prop, dict)
+        ]
+        for called, _, kwarg in pattern.findall(" ".join(prose)):
             target = tools.get(called)
             if target is None:
                 continue  # not one of ours; nothing to check it against
@@ -347,4 +356,9 @@ def test_tool_descriptions_do_not_document_arguments_that_do_not_exist() -> None
 
     # "0 mismatches out of 0 checked" is the same result as a clean
     # sweep, so the count is asserted rather than the absence.
-    assert checked >= 4, f"only {checked} kwarg references checked; regex likely stale"
+    # Pinned to what the scan currently reaches. A drop means the
+    # extractor stopped seeing a surface, not that the docs got
+    # cleaner -- "0 mismatches out of 0" reads exactly like a pass.
+    assert checked >= 5, (
+        f"only {checked} kwarg references checked; the extractor lost a surface"
+    )

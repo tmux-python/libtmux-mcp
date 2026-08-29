@@ -24,6 +24,7 @@ from libtmux_mcp._patterns import compile_pattern
 from libtmux_mcp._progress import (
     _maybe_log as _maybe_log,  # noqa: PLC0414
     _maybe_report_progress as _maybe_report_progress,  # noqa: PLC0414
+    progress_ticker,
 )
 from libtmux_mcp._utils import (
     ExpectedToolError,
@@ -172,7 +173,8 @@ async def wait_for_text(
         tmux socket name.
     ctx : fastmcp.Context, optional
         FastMCP context; when injected the tool reports progress to the
-        client. Omitted in tests.
+        client once a second, independently of ``interval``. Omitted in
+        tests.
 
     Returns
     -------
@@ -328,170 +330,172 @@ async def wait_for_text(
     saw_alternate_screen = entry.alternate_on
     last_rows: list[str] = []
 
+    # Reported on its own 1 s cadence rather than once per poll, which
+    # is what the siblings do. Progress-per-iteration coupled the
+    # notification rate to ``interval`` -- a polling knob with a 0.01
+    # floor -- so the default sent ~20 notifications a second and the
+    # floor ~100, each an awaited JSON-RPC message carrying the same
+    # sentence with a different decimal. Nothing perceives the
+    # difference: the message only changes meaningfully once a second.
+    #
+    # Spend the message on the numbers, not on restating the pane.
+    # Clients that surface progress usually show the message rather
+    # than the raw progress/total pair, and it is the field most likely
+    # to survive a future transport -- MCP background tasks drop
+    # numeric progress entirely and keep only a status message.
     try:
-        while True:
-            elapsed = time.monotonic() - start_time
-            # Spend the message on the numbers, not on restating the
-            # pane. A constant string here is a wasted channel: clients
-            # that surface progress at all usually show the message and
-            # not the raw progress/total pair, and "how much budget is
-            # left" is the only thing a human watching a long wait wants
-            # to know. It is also the field most likely to survive a
-            # future transport — MCP background tasks drop numeric
-            # progress entirely and keep only a status message.
-            await _maybe_report_progress(
-                ctx,
-                progress=elapsed,
-                total=effective_timeout,
-                message=(
-                    f"Waiting on pane {target}: {elapsed:.1f}s elapsed, "
-                    f"{max(effective_timeout - elapsed, 0.0):.1f}s left"
-                ),
-            )
-
-            # FastMCP direct-awaits async tools on the main event loop
-            # and the tmux reads are blocking subprocess calls. Push
-            # them to the default executor so concurrent tool calls are
-            # not starved during long waits.
-            state = await _bounded_pane_state(server, target, deadline=deadline)
-            _raise_if_pane_lifecycle_changed(target, state, baseline_pid)
-            if state.alternate_on:
-                saw_alternate_screen = True
-            # When tmux's ``history-limit`` is reached, ``grid_collect_history``
-            # (grid.c) frees the oldest scrollback rows and decrements
-            # ``gd->hsize``, so absolute index math anchored on
-            # ``history_size + cursor_y`` is no longer recoverable. The same
-            # hsize-decrement also fires on ``clear-history``.
-            #
-            # ``hsize`` ALSO decrements on resize-grow when ``hscrolled > 0``
-            # (``screen.c`` ``screen_resize_y``: rows are pulled from history
-            # back into the visible region). In that case no row data is freed
-            # — only the hsize/visible-region partition shifts and absolute
-            # indices stay valid. Trim and resize-grow are distinguished by
-            # ``pane_height``: trim leaves it unchanged, resize-grow increases
-            # it. The conjunction below is the actual signature of row
-            # eviction; resize-grow falls through cleanly.
-            if (
-                state.history_size < entry.history_size
-                and state.pane_height <= entry.pane_height
-            ):
-                msg = (
-                    f"pane {target} history shrank below entry "
-                    f"baseline (history_size {entry.history_size} -> "
-                    f"{state.history_size}); baseline anchor lost — "
-                    "re-arm wait_for_text or use wait_for_channel for "
-                    "deterministic synchronization"
-                )
-                raise ExpectedToolError(msg)
-            # The shrink guard above catches clear-history and the
-            # entry-at-cap rollover edge. It does NOT catch
-            # grid_collect_history trim during continuous output, where
-            # hsize bounces between (hlimit - hlimit/10) and hlimit
-            # faster than we can poll. Emit a one-shot warning when
-            # sampled state is in the trim-risk band.
-            if not warned_risk_band and baseline_hlimit > 0:
-                trim_batch = max(baseline_hlimit // 10, 1)
-                risk_floor = baseline_hlimit - trim_batch
-                if state.history_size >= risk_floor:
-                    await _maybe_log(
-                        ctx,
-                        level="warning",
-                        message=(
-                            f"pane {target} is polling in the "
-                            "history-limit trim-risk band "
-                            f"(history_size {state.history_size} / "
-                            f"history_limit {baseline_hlimit}); "
-                            "wait_for_text correctness is best-effort "
-                            "here. For deterministic synchronization "
-                            "use wait_for_channel."
-                        ),
+        async with progress_ticker(
+            ctx,
+            total=effective_timeout,
+            message=lambda elapsed, left: (
+                f"Waiting on pane {target}: {elapsed:.1f}s elapsed, {left:.1f}s left"
+            ),
+        ):
+            while True:
+                # FastMCP direct-awaits async tools on the main event loop
+                # and the tmux reads are blocking subprocess calls. Push
+                # them to the default executor so concurrent tool calls are
+                # not starved during long waits.
+                state = await _bounded_pane_state(server, target, deadline=deadline)
+                _raise_if_pane_lifecycle_changed(target, state, baseline_pid)
+                if state.alternate_on:
+                    saw_alternate_screen = True
+                # When tmux's ``history-limit`` is reached, ``grid_collect_history``
+                # (grid.c) frees the oldest scrollback rows and decrements
+                # ``gd->hsize``, so absolute index math anchored on
+                # ``history_size + cursor_y`` is no longer recoverable. The same
+                # hsize-decrement also fires on ``clear-history``.
+                #
+                # ``hsize`` ALSO decrements on resize-grow when ``hscrolled > 0``
+                # (``screen.c`` ``screen_resize_y``: rows are pulled from history
+                # back into the visible region). In that case no row data is freed
+                # — only the hsize/visible-region partition shifts and absolute
+                # indices stay valid. Trim and resize-grow are distinguished by
+                # ``pane_height``: trim leaves it unchanged, resize-grow increases
+                # it. The conjunction below is the actual signature of row
+                # eviction; resize-grow falls through cleanly.
+                if (
+                    state.history_size < entry.history_size
+                    and state.pane_height <= entry.pane_height
+                ):
+                    msg = (
+                        f"pane {target} history shrank below entry "
+                        f"baseline (history_size {entry.history_size} -> "
+                        f"{state.history_size}); baseline anchor lost — "
+                        "re-arm wait_for_text or use wait_for_channel for "
+                        "deterministic synchronization"
                     )
-                    warned_risk_band = True
-            # Anchored ON the entry cursor row, not below it. That row is
-            # where the next line lands on a quiescent pane, so skipping
-            # it by index made the tool's headline case — a daemon
-            # printing one ``ready`` line — structurally unmatchable. The
-            # ``entry_below_cursor`` content filter below suppresses what
-            # was already on the row without hiding what arrives on it.
-            start_line = baseline_abs - state.history_size
-            # ``capture-pane -S`` clips a below-visible start back to the
-            # bottom row (cmd-capture-pane.c, post-tmux-3.0), so a naive
-            # capture would return stale bottom-row text whenever no new rows
-            # have appeared below the cursor yet. Compare against
-            # ``state.pane_height`` (re-read each tick) so a resize mid-wait
-            # doesn't leave the guard keyed to a stale height.
-            if start_line >= state.pane_height:
-                rows: list[str] = []
-            else:
-                rows = await _bounded_capture(
-                    server, target, start=start_line, deadline=deadline
-                )
-            last_rows = rows
-            # Drop lines whose content was already below the entry
-            # cursor — stale paint, not output written after the call.
-            # A row is new when it differs from what THAT index held at
-            # entry. Rows past the entry capture are new by construction.
-            # Residual, and not fixable from tmux primitives: a row that
-            # rewrites the same text at the same index still reads as
-            # unchanged. tmux exposes no per-row last-written time, so
-            # something content-shaped is unavoidable at the bottom --
-            # this shrinks the hole from "any line anywhere below the
-            # cursor" to "the exact row that already held that text".
-            new_lines = [
-                line
-                for index, line in enumerate(rows)
-                if index >= len(entry_below_cursor) or line != entry_below_cursor[index]
-            ]
-            if new_lines:
-                saw_new_output = True
+                    raise ExpectedToolError(msg)
+                # The shrink guard above catches clear-history and the
+                # entry-at-cap rollover edge. It does NOT catch
+                # grid_collect_history trim during continuous output, where
+                # hsize bounces between (hlimit - hlimit/10) and hlimit
+                # faster than we can poll. Emit a one-shot warning when
+                # sampled state is in the trim-risk band.
+                if not warned_risk_band and baseline_hlimit > 0:
+                    trim_batch = max(baseline_hlimit // 10, 1)
+                    risk_floor = baseline_hlimit - trim_batch
+                    if state.history_size >= risk_floor:
+                        await _maybe_log(
+                            ctx,
+                            level="warning",
+                            message=(
+                                f"pane {target} is polling in the "
+                                "history-limit trim-risk band "
+                                f"(history_size {state.history_size} / "
+                                f"history_limit {baseline_hlimit}); "
+                                "wait_for_text correctness is best-effort "
+                                "here. For deterministic synchronization "
+                                "use wait_for_channel."
+                            ),
+                        )
+                        warned_risk_band = True
+                # Anchored ON the entry cursor row, not below it. That row is
+                # where the next line lands on a quiescent pane, so skipping
+                # it by index made the tool's headline case — a daemon
+                # printing one ``ready`` line — structurally unmatchable. The
+                # ``entry_below_cursor`` content filter below suppresses what
+                # was already on the row without hiding what arrives on it.
+                start_line = baseline_abs - state.history_size
+                # ``capture-pane -S`` clips a below-visible start back to the
+                # bottom row (cmd-capture-pane.c, post-tmux-3.0), so a naive
+                # capture would return stale bottom-row text whenever no new rows
+                # have appeared below the cursor yet. Compare against
+                # ``state.pane_height`` (re-read each tick) so a resize mid-wait
+                # doesn't leave the guard keyed to a stale height.
+                if start_line >= state.pane_height:
+                    rows: list[str] = []
+                else:
+                    rows = await _bounded_capture(
+                        server, target, start=start_line, deadline=deadline
+                    )
+                last_rows = rows
+                # Drop lines whose content was already below the entry
+                # cursor — stale paint, not output written after the call.
+                # A row is new when it differs from what THAT index held at
+                # entry. Rows past the entry capture are new by construction.
+                # Residual, and not fixable from tmux primitives: a row that
+                # rewrites the same text at the same index still reads as
+                # unchanged. tmux exposes no per-row last-written time, so
+                # something content-shaped is unavoidable at the bottom --
+                # this shrinks the hole from "any line anywhere below the
+                # cursor" to "the exact row that already held that text".
+                new_lines = [
+                    line
+                    for index, line in enumerate(rows)
+                    if index >= len(entry_below_cursor)
+                    or line != entry_below_cursor[index]
+                ]
+                if new_lines:
+                    saw_new_output = True
 
-            if state.alternate_on:
-                # A full-screen program owns and repaints the whole
-                # grid, so rows "below the cursor" are its paint, not
-                # output written after this call. Matching them reports
-                # text the program had already drawn — a false accept,
-                # which is worse than waiting. Skip matching for as long
-                # as it lasts; never latch, so quitting a pager mid-wait
-                # resumes an honest wait.
+                if state.alternate_on:
+                    # A full-screen program owns and repaints the whole
+                    # grid, so rows "below the cursor" are its paint, not
+                    # output written after this call. Matching them reports
+                    # text the program had already drawn — a false accept,
+                    # which is worse than waiting. Skip matching for as long
+                    # as it lasts; never latch, so quitting a pager mid-wait
+                    # resumes an honest wait.
+                    if time.monotonic() >= deadline:
+                        break
+                    await asyncio.sleep(interval)
+                    continue
+
+                stop_hit = _first_match(compiled_stop, new_lines)
+                pattern_hit = _first_match(compiled_patterns, new_lines)
+                # ``stop`` wins a same-tick tie. Every tick re-captures the
+                # whole region, so a failure line at t=1.00 and a success
+                # line at t=1.02 arrive in the SAME ``new_lines`` — letting
+                # ``patterns`` win there means a broad success pattern (a
+                # shell-prompt regex, say) silently swallows every failure
+                # marker the caller supplied, which defeats the entire
+                # point of passing ``stop``.
+                if stop_hit is not None:
+                    matched_index, matched_lines = stop_hit
+                    outcome = "stopped"
+                    break
+                if pattern_hit is not None:
+                    matched_index, matched_lines = pattern_hit
+                    outcome = "matched"
+                    break
+                if not compiled_patterns and new_lines:
+                    # ``patterns=None`` catch-all: any new output satisfies
+                    # the wait. Subsumes the former wait_for_content_change.
+                    # Reported as its own outcome so an agent that dropped
+                    # ``patterns`` under context pressure can SEE that it
+                    # matched "something moved", not "the thing I wanted".
+                    matched_lines = _limit_lines(
+                        list(new_lines),
+                        max_lines=_TAIL_MAX_LINES,
+                        max_bytes=_TAIL_MAX_BYTES,
+                    ).lines
+                    outcome = "any_output"
+                    break
+
                 if time.monotonic() >= deadline:
                     break
                 await asyncio.sleep(interval)
-                continue
-
-            stop_hit = _first_match(compiled_stop, new_lines)
-            pattern_hit = _first_match(compiled_patterns, new_lines)
-            # ``stop`` wins a same-tick tie. Every tick re-captures the
-            # whole region, so a failure line at t=1.00 and a success
-            # line at t=1.02 arrive in the SAME ``new_lines`` — letting
-            # ``patterns`` win there means a broad success pattern (a
-            # shell-prompt regex, say) silently swallows every failure
-            # marker the caller supplied, which defeats the entire
-            # point of passing ``stop``.
-            if stop_hit is not None:
-                matched_index, matched_lines = stop_hit
-                outcome = "stopped"
-                break
-            if pattern_hit is not None:
-                matched_index, matched_lines = pattern_hit
-                outcome = "matched"
-                break
-            if not compiled_patterns and new_lines:
-                # ``patterns=None`` catch-all: any new output satisfies
-                # the wait. Subsumes the former wait_for_content_change.
-                # Reported as its own outcome so an agent that dropped
-                # ``patterns`` under context pressure can SEE that it
-                # matched "something moved", not "the thing I wanted".
-                matched_lines = _limit_lines(
-                    list(new_lines),
-                    max_lines=_TAIL_MAX_LINES,
-                    max_bytes=_TAIL_MAX_BYTES,
-                ).lines
-                outcome = "any_output"
-                break
-
-            if time.monotonic() >= deadline:
-                break
-            await asyncio.sleep(interval)
     except asyncio.CancelledError:
         # MCP cancellation: client hung up or aborted the request.
         # Re-raise so fastmcp's transport layer can complete shutdown

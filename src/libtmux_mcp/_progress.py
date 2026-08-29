@@ -1,15 +1,22 @@
-"""Progress reporting for waits that block without a poll loop.
+"""Progress reporting for the wait tools.
 
-``wait_for_text`` polls, so it reports progress from inside its own
-loop. ``run_command`` and ``wait_for_channel`` do not: each awaits one
-``tmux wait-for`` child and hears nothing until it returns. A client
-watching a thirty-second ``run_command`` therefore saw the same thing
-whether the command was running or the server had stopped answering.
+``run_command`` and ``wait_for_channel`` await a single tmux child and
+hear nothing until it returns, so without a ticker beside them a client
+watching a thirty-second call saw the same thing whether the command
+was running or the server had stopped answering.
 
-A ticker beside the wait closes that, and the shape is the delicate
-part. The ticker must not outlive the wait, must not swallow the
-cancellation the wait path is careful to propagate, and must not turn a
-disconnected client into a failed tool call.
+``wait_for_text`` has a poll loop and could report from inside it, but
+does not, and that is deliberate. Reporting per iteration ties the
+notification rate to ``interval`` -- a polling knob with a 0.01 floor
+-- so the default emitted about twenty notifications a second and the
+floor about a hundred, each an awaited JSON-RPC message carrying the
+same sentence with a different decimal. The message only changes
+meaningfully once a second. All three use this, at one cadence.
+
+The shape is the delicate part. The ticker must not outlive the wait,
+must not swallow the cancellation the wait path is careful to
+propagate, and must not turn a disconnected client into a failed tool
+call.
 """
 
 from __future__ import annotations
