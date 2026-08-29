@@ -1544,6 +1544,24 @@ unusual entry shape.
 
 ### Development
 
+**Four timing probes measured the machine instead of the code**
+
+The parallel gate caught two flakes and a grep found two more of the
+same shape. Each asserted something true about a fast machine:
+
+- `ticks >= 20` and `ticks >= 2` assume the event loop is scheduled.
+  At loadavg 28 the main thread went unscheduled for a whole 0.525s
+  window, so a starved loop and a blocked one both reported one tick.
+  The attempt is repeated now, which removes the false negative
+  without admitting a false positive: no number of attempts makes a
+  genuinely blocked loop tick twice. Verified by removing the
+  `to_thread` offload -- all three attempts return one tick and the
+  test fails.
+- Two cancellation probes waited a fixed window for a tmux child to
+  spawn before cancelling. At loadavg 37 it had not, and the probe
+  failed its own precondition. They poll now, with the window derived
+  from the call's own budget so the two constants cannot drift apart.
+
 **An in-flight wait does not slow a concurrent tool call**
 
 Measured rather than asserted, because a test probe in this branch

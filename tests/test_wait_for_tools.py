@@ -348,10 +348,21 @@ def test_wait_for_channel_does_not_block_event_loop(mcp_server: Server) -> None:
         await asyncio.gather(_ticker(), _waiter())
         return ticks
 
-    ticks = asyncio.run(_drive())
-    assert ticks >= 20, (
-        f"ticker advanced only {ticks} times — wait_for_channel is blocking "
-        f"the event loop instead of running the subprocess in a thread"
+    # A blocked loop yields EXACTLY one tick however long the block
+    # lasts and however many times you look; a STARVED loop yields one
+    # too, which is the only reason to retry. Counting to 20 instead
+    # assumed the loop ticks at ~100 Hz, and parallel load breaks that
+    # -- the same assumption already measured failing on the
+    # capture_since sibling.
+    attempts = []
+    for _ in range(3):
+        attempts.append(asyncio.run(_drive()))
+        if attempts[-1] >= 2:
+            break
+    assert max(attempts) >= 2, (
+        f"ticker never advanced past one tick in {len(attempts)} attempts "
+        f"({attempts}) — wait_for_channel is blocking the event loop "
+        "instead of running the subprocess in a thread"
     )
 
 
@@ -439,11 +450,17 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
     socket_name = mcp_server.socket_name
     assert socket_name is not None
 
+    # One constant governs the call's budget and the window the probe
+    # waits in, so they cannot drift: the cancel has to land while the
+    # call is in flight. Both are ceilings, so a generous value is free
+    # except on the loaded box that needs it.
+    call_budget = 20.0
+
     async def _drive() -> list[int]:
         task = asyncio.create_task(
             wait_for_channel(
                 channel=channel,
-                timeout=8.0,
+                timeout=call_budget,
                 socket_name=socket_name,
             )
         )
@@ -453,7 +470,12 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
         async def _pids() -> list[int]:
             return await asyncio.to_thread(_tmux_wait_pids, socket_name, channel)
 
-        await asyncio.sleep(0.5)
+        # Polled, not slept: a fixed wait asserts the child has spawned
+        # by a wall-clock moment, which under parallel load it has not.
+        # The loop exits the moment one appears.
+        deadline = time.monotonic() + call_budget * 0.75
+        while time.monotonic() < deadline and not await _pids():
+            await asyncio.sleep(0.05)
         assert await _pids(), (
             "no tmux wait-for child observed before the cancel — the probe "
             "is broken, so a later 'no survivors' result would be vacuous"
@@ -464,9 +486,9 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
             await task
 
         # Poll rather than sleep once: the kill is synchronous but the
-        # reap is not instantaneous. The 2 s window is far short of the
-        # ~7.5 s the child still has on its own budget, so a survivor
-        # here is an orphan and not a slow teardown.
+        # reap is not instantaneous. The window is far short of what the
+        # child still has on its own budget, so a survivor here is an
+        # orphan and not a slow teardown.
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
             if not await _pids():

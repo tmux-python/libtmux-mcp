@@ -1136,12 +1136,20 @@ def test_run_command_kills_tmux_child_on_cancel(
     socket_name = mcp_server.socket_name
     assert socket_name is not None
 
+    # One constant governs both the call's budget and the window the
+    # probe waits in, so they cannot drift apart: the cancel has to land
+    # while the call is still in flight. Both are ceilings -- the wait
+    # below exits the moment a child appears -- so a generous value is
+    # free except on the loaded box that needs it. Measured: the
+    # pre-child work exceeded 6 s at loadavg 37.
+    call_budget = 20.0
+
     async def _drive() -> list[int]:
         task = asyncio.create_task(
             run_command(
                 command="sleep 30",
                 pane_id=mcp_pane.pane_id,
-                timeout=8.0,
+                timeout=call_budget,
                 socket_name=socket_name,
             )
         )
@@ -1153,14 +1161,12 @@ def test_run_command_kills_tmux_child_on_cancel(
         async def _pids() -> list[int]:
             return await asyncio.to_thread(_run_command_wait_pids, socket_name)
 
-        # A ceiling, not a spend: the loop exits the moment a child
-        # appears, so widening costs nothing when it does. Before the
-        # first child exists the call resolves a pane, runs the busy
-        # guard, reads the occupant and sends the payload -- several
-        # tmux round trips plus a shell one, which under parallel load
-        # exceeded 4 s. Still well inside the call's own 8 s budget, so
-        # the cancel lands mid-flight.
-        deadline = time.monotonic() + 6.0
+        # Before the first child exists the call resolves a pane, runs
+        # the busy guard, reads the occupant and sends the payload --
+        # several tmux round trips plus a shell one. Three quarters of
+        # the call's budget leaves room for the cancel to land
+        # mid-flight.
+        deadline = time.monotonic() + call_budget * 0.75
         while time.monotonic() < deadline and not await _pids():
             await asyncio.sleep(0.05)
         assert await _pids(), (
@@ -2716,20 +2722,33 @@ def test_capture_since_does_not_block_event_loop(
         await asyncio.gather(_ticker(), _capture())
         return ticks, _time.monotonic() - started
 
-    ticks, elapsed = asyncio.run(_drive())
+    # A blocked loop yields EXACTLY one tick however long the block
+    # lasts, and however many times you look: the ticker runs once,
+    # awaits, and cannot be resumed until the blocking call returns.
+    # A STARVED loop also yields one tick, which is why the attempt is
+    # repeated -- at loadavg 28 the main thread went unscheduled for the
+    # whole 0.525s window and the single tick meant nothing about
+    # capture_since. Retrying removes that false negative without
+    # admitting a false positive, because no number of attempts can make
+    # a genuinely blocked loop tick twice.
+    #
+    # Counting to a larger number instead assumed the loop ticks at
+    # ~100 Hz, which parallel load breaks -- measured, that failed at 1
+    # tick short of an arbitrary 8.
+    attempts = []
+    for _ in range(3):
+        ticks, elapsed = asyncio.run(_drive())
+        attempts.append((ticks, elapsed))
+        if ticks >= 2:
+            break
 
     # The capture really was slow, so the ticker had time to run.
-    assert elapsed >= 0.15, (
-        f"capture finished in {elapsed:.3f}s; the stub did not apply"
+    assert all(elapsed >= 0.15 for _, elapsed in attempts), (
+        f"a capture finished too fast; the stub did not apply: {attempts}"
     )
-    # A blocked loop yields EXACTLY one tick however long the block
-    # lasts: the ticker runs once, awaits, and cannot be resumed until
-    # the blocking call returns. Counting to a larger number instead
-    # assumed the loop ticks at ~100 Hz, which parallel load breaks --
-    # measured, this failed at 1 tick short of an arbitrary 8.
-    assert ticks >= 2, (
-        f"ticker advanced only {ticks} times in {elapsed:.3f}s — "
-        "capture_since is blocking the event loop"
+    assert max(ticks for ticks, _ in attempts) >= 2, (
+        f"ticker never advanced past one tick in {len(attempts)} attempts "
+        f"({attempts}) — capture_since is blocking the event loop"
     )
 
 
