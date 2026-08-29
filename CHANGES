@@ -1636,6 +1636,23 @@ unusual entry shape.
 
 ### Development
 
+**`respawn_pane` reported the OLD command under load**
+
+`pane_current_command` lags `pane_pid` by a median of 14 ms while tmux
+replaces the process, so the tool waits for the requested command's
+basename before reporting. The 0.25s ceiling was called generous by an
+order of magnitude — against a measurement taken on an idle machine. At
+loadavg 30 it expired and `respawn_pane` returned `zsh` for a pane it
+had just respawned as `sleep`.
+
+Widening one budget could not fix it: a command whose basename never
+appears (`env FOO=1 sleep 5` reports `sleep`, not `env`) pays the
+ceiling in full every time, so the same number is a ceiling for one
+case and a bill for the other. Split in two — five seconds for the pid
+to change, which exits the instant it does, then a quarter second for
+the command to catch up. The wrapper case costs exactly what it did
+before.
+
 **A cancellation test cost 60 seconds and checked the wrong process**
 
 Its stub `tmux` recorded `$$` and then ran `sleep 60`, so the pid it

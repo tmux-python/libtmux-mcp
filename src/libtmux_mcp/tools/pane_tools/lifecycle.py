@@ -94,7 +94,17 @@ def kill_pane(
 #: Measured on tmux 3.7c over 15 runs, ``pane_current_command`` reaches
 #: its new value by 26.4 ms worst case, so this is generous by an order
 #: of magnitude while keeping a pane that never matches to a fixed cost.
-_RESPAWN_SETTLE_SECONDS = 0.25
+#: Ceiling for the pid to change. Exits the instant it does, so a
+#: generous value is free -- and 0.25 was NOT generous: measured
+#: failing at loadavg 30, where the whole round trip takes longer than
+#: the settle it was written to absorb.
+_RESPAWN_PID_SECONDS = 5.0
+
+#: Grace for the command to catch up ONCE THE PID HAS CHANGED. Small on
+#: purpose: a command whose basename never appears -- ``env FOO=1 sleep
+#: 5`` reports ``sleep``, not ``env`` -- pays this in full, so it is a
+#: bill rather than a ceiling and cannot be widened the same way.
+_RESPAWN_COMMAND_SECONDS = 0.25
 _RESPAWN_SETTLE_INTERVAL = 0.005
 
 
@@ -109,7 +119,9 @@ def _expected_command(shell: str | None) -> str | None:
     return pathlib.PurePath(program).name or None
 
 
-def _settle_respawned_pane(pane: Pane, shell: str | None) -> None:
+def _settle_respawned_pane(
+    pane: Pane, shell: str | None, previous_pid: str | None = None
+) -> None:
     """Wait until tmux reports the respawned pane's NEW command.
 
     ``pane_pid`` changes the instant ``respawn-pane`` returns, but
@@ -148,7 +160,16 @@ def _settle_respawned_pane(pane: Pane, shell: str | None) -> None:
     expected = _expected_command(shell)
     if expected is None:
         return
-    deadline = time.monotonic() + _RESPAWN_SETTLE_SECONDS
+    # Split in two so neither half has to be both generous and cheap.
+    # A single budget could not be: widening it to survive load also
+    # widened what a never-matching wrapper pays, every time.
+    pid_deadline = time.monotonic() + _RESPAWN_PID_SECONDS
+    while previous_pid is not None and time.monotonic() < pid_deadline:
+        stdout = pane.display_message("#{pane_pid}", get_text=True)
+        if stdout and stdout[0] != previous_pid:
+            break
+        time.sleep(_RESPAWN_SETTLE_INTERVAL)
+    deadline = time.monotonic() + _RESPAWN_COMMAND_SECONDS
     while time.monotonic() < deadline:
         stdout = pane.display_message("#{pane_current_command}", get_text=True)
         if stdout and stdout[0] == expected:
@@ -264,6 +285,8 @@ def respawn_pane(
         ),
     )
     _raise_if_start_directory_unusable(start_directory)
+    previous = pane.display_message("#{pane_pid}", get_text=True)
+    previous_pid = previous[0] if previous else None
     pane.respawn(
         kill=kill,
         start_directory=start_directory,
@@ -273,7 +296,7 @@ def respawn_pane(
     # Pick up fresh pane_pid and any command/path updates; tmux does
     # not invalidate the underlying object on respawn.
     try:
-        _settle_respawned_pane(pane, shell)
+        _settle_respawned_pane(pane, shell, previous_pid)
         pane.refresh()
     except exc.TmuxObjectDoesNotExist as err:
         # tmux does not fail a respawn whose command cannot be executed:
