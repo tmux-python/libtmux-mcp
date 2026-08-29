@@ -133,6 +133,25 @@ rejected by the same comparison, and deleting the real `refresh()` in
 
 ### Fixes
 
+#### `display_message` stops refusing a literal `#(`
+
+The job guard tested for the substring `#(`, but `##` is tmux's escape
+for a literal `#`, so `##(` is text -- tmux renders `pane ##(literal)`
+as `pane #(literal)` and runs nothing. The blunt check refused it, so a
+label or a code snippet containing `#(` could not be printed.
+
+Parity is what decides it, and for the same reason the escaper works on
+runs rather than characters: `format_expand1` consumes `#` pairs into a
+literal `#` before it ever looks at `(`, so only an ODD run leaves a
+bare `#` to open a job. `#(` and `###(` are jobs; `##(` and `####(` are
+text. The guard now measures the run.
+
+Every real job stays blocked, including the odd longer runs and a job
+nested inside a conditional. Found by the QA instance, whose security
+probe confirmed the guard holds at the readonly tier -- `#(...)` is
+refused before reaching tmux -- and that no expander-reintroduction
+route (`#{E:...}`, a space after the `#`) reaches execution on 3.7c.
+
 #### `signal_channel` documented the footgun as a safe habit
 
 The description said "signalling an unwaited channel is a no-op that

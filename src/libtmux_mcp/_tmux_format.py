@@ -56,6 +56,10 @@ from __future__ import annotations
 
 import re
 
+#: A maximal run of ``#`` immediately before ``(``. The run length
+#: decides whether a job starts, so the run is what gets measured.
+_TMUX_HASH_RUN_BEFORE_PAREN = re.compile(r"(#+)\(")
+
 #: A maximal run of ``#``, plus the ``[`` that may follow it. tmux
 #: treats a ``#``-run by what comes next, so the run is the unit that
 #: has to be escaped -- not the individual ``#``.
@@ -113,3 +117,41 @@ def escape_format_time(value: str) -> str:
         and every ``%`` doubled.
     """
     return escape_format(value).replace("%", "%%")
+
+
+def contains_format_job(value: str) -> bool:
+    """Whether ``value`` would start a ``#(command)`` job.
+
+    The parity of the ``#``-run decides it, for the same reason the
+    escaper doubles runs: ``format_expand1`` consumes ``#`` pairs into a
+    literal ``#`` before it ever looks for ``(``, so only an ODD run
+    leaves a bare ``#`` to open a job. Measured, and matching
+    ``format.c``'s ``case '#'`` (emit a literal and continue) against
+    its ``case '('`` (start a job):
+
+    ==========  ==============  ==============
+    input       renders as      runs a job
+    ==========  ==============  ==============
+    ``#(x)``    *(job output)*  yes
+    ``##(x)``   ``#(x)``        no
+    ``###(x)``  ``#`` + output  yes
+    ``####(x)`` ``##(x)``       no
+    ==========  ==============  ==============
+
+    A bare ``"#(" in value`` test blocks all four, so a caller could not
+    put a literal ``#(`` in a label or a code snippet even though tmux
+    would render it harmlessly.
+
+    Parameters
+    ----------
+    value : str
+        A caller-supplied tmux format string.
+
+    Returns
+    -------
+    bool
+        True when any ``#``-run before ``(`` is odd-length.
+    """
+    return any(
+        len(match.group(1)) % 2 for match in _TMUX_HASH_RUN_BEFORE_PAREN.finditer(value)
+    )

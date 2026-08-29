@@ -15,14 +15,20 @@ import typing as t
 import pytest
 from fastmcp.exceptions import ToolError
 
-from libtmux_mcp._tmux_format import escape_format, escape_format_time
+from libtmux_mcp._tmux_format import (
+    contains_format_job,
+    escape_format,
+    escape_format_time,
+)
 from libtmux_mcp.tools.option_tools import set_option, show_option
 from libtmux_mcp.tools.pane_tools.lifecycle import set_pane_title
+from libtmux_mcp.tools.pane_tools.meta import display_message
 from libtmux_mcp.tools.server_tools import create_session
 from libtmux_mcp.tools.session_tools import create_window, rename_session
 from libtmux_mcp.tools.window_tools import rename_window
 
 if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
     from libtmux.window import Window
@@ -194,3 +200,65 @@ def test_expansion_cannot_manufacture_a_name_the_validator_forbids(
     session = mcp_server.sessions.get(session_id=result.session_id)
     assert session is not None
     assert session.session_name == value
+
+
+@pytest.mark.parametrize(
+    ("value", "is_job"),
+    [
+        pytest.param("#(x)", True, id="one-hash-is-a-job"),
+        pytest.param("##(x)", False, id="two-hashes-are-a-literal"),
+        pytest.param("###(x)", True, id="three-hashes-are-a-job-again"),
+        pytest.param("####(x)", False, id="four-hashes-are-a-literal"),
+        pytest.param("pane #{pane_id}", False, id="no-paren"),
+        pytest.param("a ##(b) c #(d)", True, id="a-later-odd-run-still-counts"),
+        pytest.param("#{?#(cmd),a,b}", True, id="nested-inside-a-conditional"),
+        pytest.param("plain", False, id="unaffected"),
+    ],
+)
+def test_contains_format_job_reads_the_run_parity(value: str, is_job: bool) -> None:
+    """Only an ODD ``#``-run before ``(`` opens a job.
+
+    ``format_expand1`` consumes ``#`` pairs into a literal ``#`` before
+    it looks for ``(``, so an even run leaves nothing to start one.
+    """
+    assert contains_format_job(value) is is_job
+
+
+def test_display_message_allows_an_escaped_literal_job(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``##(`` is text, and tmux renders it as text.
+
+    The guard tested for the substring ``#(``, which also matched the
+    escaped form -- so a label or a code snippet containing ``#(`` was
+    refused even though nothing would run.
+    """
+    assert (
+        display_message(
+            format_string="pane ##(literal)",
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+        == "pane #(literal)"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param("#(echo pwned)", id="bare-job"),
+        pytest.param("###(echo pwned)", id="odd-run-still-a-job"),
+        pytest.param("x #(echo pwned) y", id="embedded"),
+        pytest.param("#{?#(echo pwned),a,b}", id="inside-a-conditional"),
+    ],
+)
+def test_display_message_still_refuses_a_real_job(
+    mcp_server: Server, mcp_pane: Pane, payload: str
+) -> None:
+    """Relaxing the guard must not let a job through."""
+    with pytest.raises(ToolError, match="format jobs"):
+        display_message(
+            format_string=payload,
+            pane_id=mcp_pane.pane_id,
+            socket_name=mcp_server.socket_name,
+        )

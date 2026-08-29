@@ -6,6 +6,7 @@ from libtmux_mcp._bounded_io import (
     CAPTURE_DEFAULT_MAX_LINES,
     _truncate_lines_tail,
 )
+from libtmux_mcp._tmux_format import contains_format_job
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _coerce_bool,
@@ -56,7 +57,7 @@ def display_message(
     str
         Expanded format string result.
     """
-    if "#(" in format_string:
+    if contains_format_job(format_string):
         msg = "tmux format jobs (#(...)) are not allowed in display_message"
         raise ExpectedToolError(msg)
 
