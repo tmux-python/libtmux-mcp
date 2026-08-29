@@ -33,7 +33,11 @@ the old binary, or when this server runs an older tmux than the one
 that created the socket. It surfaces honestly rather than as an empty
 result:
 
-    tmux server exists but could not be queried: server exited unexpectedly
+    tmux server exists but could not be queried: server exited
+    unexpectedly. ...
+
+That is the start of the message, not all of it — the rest explains why
+reporting no sessions would be wrong. Grep for `could not be queried`.
 
 If you see that, compare `tmux -V` against the version that started the
 session and point `LIBTMUX_TMUX_BIN` at the matching binary.
