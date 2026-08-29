@@ -2384,6 +2384,35 @@ unusual entry shape.
 
 ### Development
 
+**A slow-shell timeout is no longer read as a refusal**
+
+`test_run_command_allows_a_slow_shell` guards one property: a shell
+that is slow must not be REFUSED as one that never started. The
+refusal raises, so it fails the test whatever the machine is doing. But
+the test also asserted `exit_status == 0`, which turns a plain
+load-induced timeout -- a different outcome that disproves nothing --
+into the same red.
+
+The margin is thin by construction, not by oversight. The preexec hook
+holds the shell 6s and the whole budget is 10s, leaving under 4s for
+everything else; measured at 6.6-7.8s in isolation. The budget cannot
+be raised to buy room, because the started-channel grace is
+`max(5, timeout/2)` and grows with it -- above 10 the grace stops
+expiring before the command starts and the scenario is no longer the
+one under test.
+
+So a timeout now skips with its reason, and the refusal still fails.
+Verified reachable by squeezing the budget to 6.5s and watching it skip
+rather than fail.
+
+Honest about the evidence: this was seen failing once directly, under
+`-n auto`, passing in isolation, and the QA instance saw one
+unidentified failure in five runs on an independent machine. Eight
+further runs here were clean, so the rate is low and it has NOT been
+reproduced on demand. The change is justified by precision -- the
+assertion now matches the property the test names -- rather than by a
+measured rate.
+
 **A local dependency pin can no longer travel**
 
 Commit 1367707 added a `[tool.uv.sources]` path entry pointing libtmux
