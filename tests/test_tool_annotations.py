@@ -12,7 +12,7 @@ import typing as t
 
 import pytest
 
-from libtmux_mcp.server import build_mcp_server
+from libtmux_mcp.tools import register_tools
 
 from .conftest import wire_annotations
 
@@ -50,10 +50,18 @@ PANE_INPUT_TOOLS = frozenset(
 
 @pytest.fixture(scope="module")
 def advertised_tools() -> dict[str, t.Any]:
-    """Return every registered tool keyed by name, as clients see it."""
+    """Return every registered tool keyed by name, as clients see it.
+
+    Registers into a fresh server rather than the production one, whose
+    tier filter is fixed at import: reading that one would hide the
+    mutating and destructive tools whenever ``LIBTMUX_SAFETY`` is set.
+    """
     import asyncio
 
-    mcp = build_mcp_server()
+    from fastmcp import FastMCP
+
+    mcp = FastMCP(name="test-tool-annotations")
+    register_tools(mcp)
     tools = asyncio.run(mcp.list_tools())
     return {tool.name: tool for tool in tools}
 
@@ -108,6 +116,15 @@ def test_authored_command_spawns_do_not_claim_additive_updates(
 ) -> None:
     """A caller-authored command replaces what the pane would have run."""
     assert wire_annotations(advertised_tools[name])["destructiveHint"] is True
+
+
+@pytest.mark.parametrize("name", sorted(SPAWN_TOOLS))
+def test_spawn_tools_are_not_idempotent(
+    advertised_tools: dict[str, t.Any],
+    name: str,
+) -> None:
+    """Calling a spawn again starts another process; it does not settle."""
+    assert wire_annotations(advertised_tools[name])["idempotentHint"] is False
 
 
 #: The only tools whose updates are additive-only. Everything else that
