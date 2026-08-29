@@ -39,7 +39,7 @@ def list_windows(
     session_name: str | None = None,
     session_id: str | None = None,
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, str | bool | int] | str | None = None,
 ) -> list[WindowInfo]:
     """List tmux windows (terminal tabs) in a session, or across the server.
 

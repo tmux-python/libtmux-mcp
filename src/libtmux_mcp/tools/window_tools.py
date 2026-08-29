@@ -55,7 +55,7 @@ def list_panes(
     window_id: str | None = None,
     window_index: str | None = None,
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, str | bool | int] | str | None = None,
 ) -> list[PaneInfo]:
     """List tmux panes (terminal multiplexer splits) in a window, session, or server.
 

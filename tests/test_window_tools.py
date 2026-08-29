@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing as t
 
 import pytest
+from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp.tools.window_tools import (
@@ -699,3 +700,45 @@ def test_kill_tools_disclose_what_went_with_the_target(
     assert mcp_session.session_name in cascaded
     assert "is gone" in cascaded
     assert other.session_name in [s.session_name for s in mcp_server.sessions]
+
+
+def test_filters_validate_the_same_through_both_transports() -> None:
+    """The dict and JSON-string forms are documented as equivalent.
+
+    They were not. The dict branch validated strictly as
+    ``dict[str, str]`` so a bool value was rejected, while the string
+    branch was ``json.loads``-ed into a dict holding a real bool that
+    nothing re-checked. So ``{"is_caller": true}`` -- the description's
+    own answer to "which pane am I in?", and the only mechanism for it
+    since there is deliberately no whoami tool -- worked or failed
+    depending on how the client serialised the argument.
+    """
+    import asyncio
+    import json
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP("filters-transport")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    schema = tools["list_panes"].parameters["properties"]["filters"]
+
+    async def _validates(value: object) -> bool:
+        async with Client(mcp) as client:
+            try:
+                await client.call_tool("list_panes", {"filters": value})
+            except Exception as err:  # noqa: BLE001
+                return "validation error" not in str(err)
+            return True
+
+    for value in (
+        {"is_caller": True},
+        {"is_caller": "true"},
+        json.dumps({"is_caller": True}),
+        json.dumps({"is_caller": "true"}),
+    ):
+        assert asyncio.run(_validates(value)), f"rejected {value!r}"
+
+    assert schema, "filters must stay a declared parameter for this to mean anything"

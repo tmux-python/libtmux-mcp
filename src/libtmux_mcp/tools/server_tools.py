@@ -44,7 +44,7 @@ if t.TYPE_CHECKING:
 @handle_tool_errors
 def list_sessions(
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, str | bool | int] | str | None = None,
 ) -> list[SessionInfo]:
     """List tmux sessions (terminal workspaces) on a tmux server.
 

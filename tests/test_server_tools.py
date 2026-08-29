@@ -192,7 +192,7 @@ class ListSessionsFilterFixture(t.NamedTuple):
     """Test fixture for list_sessions with filters."""
 
     test_id: str
-    filters: dict[str, str] | None
+    filters: dict[str, str | bool | int] | None
     expected_count: int | None
     expect_error: bool
     error_match: str | None
@@ -274,7 +274,7 @@ def test_list_sessions_with_filters(
     mcp_server: Server,
     mcp_session: Session,
     test_id: str,
-    filters: dict[str, str] | None,
+    filters: dict[str, str | bool | int] | None,
     expected_count: int | None,
     expect_error: bool,
     error_match: str | None,
@@ -285,7 +285,7 @@ def test_list_sessions_with_filters(
     if filters is not None:
         session_name = mcp_session.session_name
         assert session_name is not None
-        resolved: dict[str, str] = {}
+        resolved: dict[str, str | bool | int] = {}
         for k, v in filters.items():
             if v == "<session_name>":
                 resolved[k] = session_name
