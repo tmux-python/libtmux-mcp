@@ -21,6 +21,7 @@ from libtmux_mcp._utils import (
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
+    _prepare_start_directory,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -190,7 +191,8 @@ def split_window(
         Size of the new pane. Use a string with '%%' suffix for
         percentage (e.g. '50%%') or an integer for lines/columns.
     start_directory : str, optional
-        Working directory for the new pane.
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     shell : str, optional
         Shell command to run in the new pane.
     socket_name : str, optional
@@ -227,12 +229,13 @@ def split_window(
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ExpectedToolError(msg)
 
+    prepared_start_directory = _prepare_start_directory(start_directory)
     if pane_id is not None:
         pane = _resolve_pane(server, pane_id=pane_id)
         new_pane = pane.split(
             direction=pane_dir,
             size=size,
-            start_directory=start_directory,
+            start_directory=prepared_start_directory,
             shell=shell,
             environment=spawn_environment,
         )
@@ -247,7 +250,7 @@ def split_window(
         new_pane = window.split(
             direction=pane_dir,
             size=size,
-            start_directory=start_directory,
+            start_directory=prepared_start_directory,
             shell=shell,
             environment=spawn_environment,
         )

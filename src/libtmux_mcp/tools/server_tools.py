@@ -25,6 +25,7 @@ from libtmux_mcp._utils import (
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _prepare_start_directory,
     _serialize_session,
     handle_tool_errors,
 )
@@ -91,7 +92,8 @@ def create_session(
     window_name : str, optional
         Name for the initial window.
     start_directory : str, optional
-        Working directory for the session.
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     x : int, optional
         Width of the initial window.
     y : int, optional
@@ -130,8 +132,9 @@ def create_session(
         kwargs["session_name"] = session_name
     if window_name is not None:
         kwargs["window_name"] = window_name
-    if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+    prepared_start_directory = _prepare_start_directory(start_directory)
+    if prepared_start_directory is not None:
+        kwargs["start_directory"] = prepared_start_directory
     if x is not None:
         kwargs["x"] = x
     if y is not None:

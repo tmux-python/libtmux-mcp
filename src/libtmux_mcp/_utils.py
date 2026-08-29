@@ -470,6 +470,87 @@ ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
 }
 
 
+def _escape_tmux_format(value: str) -> str:
+    """Return ``value`` escaped so tmux's format pass yields it unchanged.
+
+    tmux expands several argument values as formats, where ``#(...)`` runs
+    a shell job and ``#{...}`` substitutes a variable. Doubling every ``#``
+    makes the whole string literal. ``#[`` is the exception: tmux hands a
+    ``#`` run before ``[`` to the style parser rather than collapsing it,
+    so no escaping renders it literal and such a value is refused.
+
+    Parameters
+    ----------
+    value : str
+        Text to pass through a tmux format argument.
+
+    Returns
+    -------
+    str
+        ``value`` with every ``#`` doubled.
+
+    Raises
+    ------
+    ExpectedToolError
+        If ``value`` contains ``#[``, which has no escaped form.
+
+    Examples
+    --------
+    >>> _escape_tmux_format("/srv/app")
+    '/srv/app'
+    >>> _escape_tmux_format("/srv/#(id)")
+    '/srv/##(id)'
+    """
+    if "#[" in value:
+        msg = (
+            f"tmux reads '#[' as a style prefix with no escaped form, so "
+            f"this value cannot be passed through: {value!r}"
+        )
+        raise ExpectedToolError(msg)
+    return value.replace("#", "##")
+
+
+def _prepare_start_directory(start_directory: str | None) -> str | None:
+    """Resolve a caller path to the directory tmux will actually use.
+
+    tmux expands ``-c`` as a format before using it as a working
+    directory, and silently falls back to the client's directory when the
+    result does not exist — so an unresolvable path lands the pane
+    somewhere else instead of failing. Resolving here leaves no format for
+    tmux to run and turns a bad path into an error the caller can correct.
+
+    Parameters
+    ----------
+    start_directory : str or None
+        Caller-supplied working directory, or ``None``.
+
+    Returns
+    -------
+    str or None
+        Absolute path escaped for tmux, or ``None`` when none was given.
+
+    Raises
+    ------
+    ExpectedToolError
+        If the path does not name an existing directory.
+
+    Examples
+    --------
+    >>> _prepare_start_directory(None) is None
+    True
+    >>> _prepare_start_directory("/")
+    '/'
+    """
+    if start_directory is None:
+        return None
+
+    resolved = pathlib.Path(start_directory).expanduser().resolve()
+    if not resolved.is_dir():
+        msg = f"start_directory is not an existing directory: {str(resolved)!r}"
+        raise ExpectedToolError(msg)
+    return _escape_tmux_format(str(resolved))
+
+
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
     """Build a full tmux argv list honouring ``socket_name`` and ``socket_path``.
 

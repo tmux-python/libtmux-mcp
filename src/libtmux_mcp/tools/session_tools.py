@@ -21,6 +21,7 @@ from libtmux_mcp._utils import (
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
+    _prepare_start_directory,
     _resolve_session,
     _serialize_session,
     _serialize_window,
@@ -135,7 +136,8 @@ def create_window(
     window_name : str, optional
         Name for the new window.
     start_directory : str, optional
-        Working directory for the new window.
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     attach : bool, optional
         Whether to make the new window active.
     direction : str, optional
@@ -169,8 +171,9 @@ def create_window(
     kwargs: dict[str, t.Any] = {}
     if window_name is not None:
         kwargs["window_name"] = window_name
-    if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+    prepared_start_directory = _prepare_start_directory(start_directory)
+    if prepared_start_directory is not None:
+        kwargs["start_directory"] = prepared_start_directory
     kwargs["attach"] = attach
     if direction is not None:
         direction_map: dict[str, WindowDirection] = {
