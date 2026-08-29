@@ -57,14 +57,23 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
 #: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
 _SEND_KEYS_TIMEOUT_SECONDS = 5.0
 
-#: How long to give a shell to acknowledge that it began the payload.
-#: Paid only when nothing starts, so it is the refusal latency, not a
-#: cost on the happy path. Sized off the measured shell round trip --
-#: 56 ms on a clean shell, 714 ms on a configured zsh whose prompt runs
-#: `git status` -- with headroom for load. Waiting the caller's full
-#: budget instead meant a REPL took the default 30 s to report
-#: something knowable in milliseconds.
-_STARTED_GRACE_SECONDS = 3.0
+#: How long to give a shell to acknowledge that it began the payload,
+#: as a fraction of the caller's own budget with a floor. Paid only
+#: when nothing starts, so it is refusal latency rather than a cost on
+#: the happy path: a REPL is reported in half the budget instead of at
+#: the end of it.
+#:
+#: Scaled rather than fixed because over-refusal is the dangerous
+#: direction. A shell round trip is 56 ms clean and 714 ms on a
+#: configured zsh, but a fixed 3 s refused a LEGITIMATE command under
+#: parallel test load at loadavg 31 -- and telling a caller its command
+#: did not run, when it is merely slow and about to, is the same
+#: double-execution hazard the started channel exists to prevent. The
+#: caller's timeout is the only statement of how long the work may
+#: honestly take, so the grace is derived from it rather than from a
+#: guess about machine speed.
+_STARTED_GRACE_FRACTION = 0.5
+_STARTED_GRACE_FLOOR_SECONDS = 5.0
 
 #: Shared recovery hint for a pane that cannot accept a shell command.
 _BUSY_PANE_SUGGESTION = (
@@ -696,15 +705,18 @@ async def run_command(
     # than the caller's budget: the answer does not get truer by waiting
     # longer, and paying the full timeout for it made the failure path
     # fifty times slower than the success path.
-    grace = min(_STARTED_GRACE_SECONDS, effective_timeout)
-    started_ok = await _channel_already_signalled(
-        server, started_channel, timeout=grace
+    grace = max(
+        _STARTED_GRACE_FLOOR_SECONDS, effective_timeout * _STARTED_GRACE_FRACTION
     )
-    # Only a caller who gave us at least the full grace has told us
-    # enough to refuse. Under a shorter budget "it has not started yet"
-    # and "it never will" are the same observation, so that stays a
+    # Only a caller who gave us MORE than the grace has told us enough
+    # to refuse. When the budget is at or below it, "has not started
+    # yet" and "never will" are the same observation, so that stays a
     # plain timeout.
-    if not started_ok and effective_timeout > _STARTED_GRACE_SECONDS:
+    can_refuse = grace < effective_timeout
+    started_ok = await _channel_already_signalled(
+        server, started_channel, timeout=min(grace, effective_timeout)
+    )
+    if not started_ok and can_refuse:
         occupant = await asyncio.to_thread(_read_pane_current_command, pane)
         named = f" (foreground: {occupant!r})" if occupant else ""
         # Deliberately does not guess between the two readings. A REPL

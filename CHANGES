@@ -129,9 +129,20 @@ Measured: refusal is capped near 3 s at every caller timeout from 2 s to
 and a genuine long-running command on a pane at a prompt still reports
 `timed_out` with `command_may_still_run`.
 
-A caller whose own budget is shorter than the grace gets a plain
-timeout rather than a refusal: under a shorter budget "it has not
-started yet" and "it never will" are the same observation.
+A caller whose own budget is at or below the grace gets a plain
+timeout rather than a refusal: there, "it has not started yet" and "it
+never will" are the same observation.
+
+The grace is a fraction of the caller's budget (half, floored at 5 s)
+rather than a fixed constant, and the reason is a defect the parallel
+test gate caught in the first version of this fix. A fixed 3 s refused
+a LEGITIMATE command at loadavg 31, because a configured zsh under that
+load takes longer than 3 s to answer. Telling a caller its command did
+not run, when it is merely slow and about to, is the same
+double-execution hazard the started channel exists to prevent, pointed
+the other way -- so over-refusal is the dangerous direction and the
+grace has to be derived from the caller's own statement of how long the
+work may honestly take, not from a guess about machine speed.
 
 #### The `send_keys` Unicode warning blamed the wrong component
 

@@ -1843,15 +1843,16 @@ def test_run_command_reports_a_command_that_never_ran(
         raises=True,
     )
 
-    # Must exceed the started-channel grace: under a shorter budget
-    # "not started yet" and "never will" are the same observation, so
-    # the tool reports a plain timeout instead of refusing.
+    # Must exceed the started-channel grace, which is
+    # max(5s, timeout/2): at or below it, "not started yet" and "never
+    # will" are the same observation and the tool reports a plain
+    # timeout instead of refusing. 12s gives a 6s grace.
     with pytest.raises(ToolError, match="never reached a shell prompt"):
         asyncio.run(
             run_command(
                 command=f"printf '{marker}%s\\n' ''",
                 pane_id=mcp_pane.pane_id,
-                timeout=5.0,
+                timeout=12.0,
                 socket_name=mcp_server.socket_name,
             )
         )
