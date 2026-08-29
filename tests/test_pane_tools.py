@@ -2768,70 +2768,49 @@ def test_no_async_tool_makes_a_blocking_tmux_call_on_the_loop() -> None:
     )
 
 
-def test_resolving_a_server_does_not_block_the_event_loop(
+def test_async_tools_do_not_use_the_synchronous_server_resolver(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Server resolution shells out, and it used to do so on the loop.
+    """The async path must not reach the blocking resolver at all.
 
-    ``_get_server`` runs a tmux subprocess to check the socket answers:
-    ~4 ms against a healthy server, the full liveness bound against one
-    that never replies. Called straight from an async tool it cost every
-    OTHER in-flight call the same wait -- measured against a wedged
-    socket, ``capture_since`` held the loop for 5.01s and the ticker
-    beside it advanced exactly once.
+    ``_get_server`` shells out to tmux inline -- ~4 ms against a healthy
+    server, the full liveness bound against one that never replies -- so
+    calling it from an async tool charged every OTHER in-flight call the
+    same wait. Measured against a wedged socket before the fix:
+    ``capture_since`` held the loop for 5.01s while a ticker beside it
+    advanced exactly once.
 
-    Driven off a stubbed probe rather than a real wedged socket: the
-    property is "this work happens in a thread", and a socket fixture
-    would test the liveness bound instead.
+    Asserted by presence, not by timing. The first version of this test
+    measured the gap between ticks, and the parallel gate caught it
+    false-firing at loadavg 43: scheduler starvation produced gaps of
+    0.42-0.54s, indistinguishable by magnitude from the block it was
+    looking for. A stall the machine can fake is not a signal.
     """
     from libtmux_mcp import _utils
 
-    real_probe = _utils._probe_liveness
+    called: list[str] = []
+    real = _utils._probe_liveness
 
-    def slow_probe(server: t.Any) -> tuple[bool, str | None]:
-        time.sleep(0.3)
-        return real_probe(server)
+    def spy(server: t.Any) -> tuple[bool, str | None]:
+        called.append("sync")
+        return real(server)
 
-    monkeypatch.setattr(_utils, "_probe_liveness", slow_probe)
+    monkeypatch.setattr(_utils, "_probe_liveness", spy)
     _utils._server_cache.clear()
 
-    async def _drive() -> float:
-        gaps: list[float] = []
-        stop = asyncio.Event()
-
-        async def _ticker() -> None:
-            last = time.monotonic()
-            while not stop.is_set():
-                await asyncio.sleep(0.01)
-                now = time.monotonic()
-                gaps.append(now - last)
-                last = now
-
-        async def _call() -> None:
-            try:
-                await capture_since(
-                    pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name
-                )
-            finally:
-                stop.set()
-
-        await asyncio.gather(_ticker(), _call())
-        return max(gaps) if gaps else 0.0
-
-    # Counting ticks cannot answer this: the rest of capture_since is
-    # already threaded, so the ticker runs plenty either way and the
-    # count stays high with the block present -- measured, that version
-    # passed against the unfixed code. The GAP is the signal: a 0.3s
-    # block on the loop is a 0.3s gap between ticks.
-    #
-    # The minimum across attempts, because load produces gaps of its
-    # own: a blocked loop shows one in EVERY attempt, a starved loop
-    # does not.
-    attempts = [asyncio.run(_drive()) for _ in range(3)]
-    assert min(attempts) < 0.25, (
-        f"longest gap between ticks was {min(attempts):.3f}s across "
-        f"{attempts} — resolving the server is blocking the event loop"
+    asyncio.run(
+        capture_since(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
     )
+    assert called == [], (
+        "the async path went through the synchronous server resolver, which "
+        "makes its tmux round trip on the event loop"
+    )
+
+    # Control: the SYNC tools still use it, so an empty list above means
+    # "the async path avoided it" rather than "the spy never worked".
+    _utils._server_cache.clear()
+    capture_pane(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+    assert called, "the spy never fired; the assertion above proved nothing"
 
 
 def test_capture_since_does_not_block_event_loop(

@@ -49,6 +49,13 @@ there instead. A structural test now reads the tree for tmux work
 called inline from an async body, because a behavioural test catches
 only the helper it stubs and there were three separate call sites.
 
+The behavioural half asserts by PRESENCE, not by timing. Its first
+version measured the gap between event-loop ticks, and the parallel
+gate caught it false-firing at loadavg 43: scheduler starvation
+produced gaps of 0.42-0.54s, indistinguishable by magnitude from the
+0.3s block it was watching for. A stall the machine can fake is not a
+signal.
+
 #### `filters` is redacted from the audit log
 
 `filters` is a caller-supplied match expression, the same category as
