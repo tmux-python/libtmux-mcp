@@ -21,6 +21,30 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A split that flattens the pane it splits is refused
+
+`size` names the NEW pane, the way tmux's `-l` does, and `split_window`
+returns only that pane. So a caller who got the arithmetic backwards was
+handed a correct-looking result while their own pane was destroyed.
+Measured on an 80-column pane:
+
+    size=78         new pane 78, source 1     honoured
+    size=79 .. 1e6  new pane 78, source 1     SILENTLY CLAMPED
+
+The clamped rows are what is refused now, naming the largest size that
+fits. A faithful split that happens to leave a narrow source is still
+allowed: that is the caller's layout to choose and the report is true.
+
+Percentages go through the same check -- `99%` of 80 columns is 79.
+
+The parameter description now says `size` means the new pane and that
+the source keeps `extent - size - 1`, since the name alone reads either
+way. Contrast `resize_pane`, which takes `pane_id` plus `width`/`height`
+and so names its subject.
+
+Reported by an unrelated agent session that hit it splitting real panes
+and was left with a one-column sliver.
+
 #### `run_command` and `wait_for_channel` report progress
 
 `wait_for_text` polls, so it reports elapsed and remaining seconds from

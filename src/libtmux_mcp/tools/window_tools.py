@@ -161,6 +161,75 @@ def get_window_info(
     return _serialize_window(window)
 
 
+#: A split takes ``size`` for the NEW pane and one column or row for the
+#: border, so the pane being split keeps ``extent - size - 1``. The line
+#: is drawn where tmux stops HONOURING the request rather than where the
+#: layout gets cramped: leaving the source at one column is a choice, and
+#: refusing it would be policing the caller's layout. Being told the new
+#: pane is 78 when 120 was asked for is a false report.
+_MIN_REMAINING_EXTENT = 1
+
+
+def _raise_if_size_would_flatten_the_source(
+    target: Pane | Window, direction: PaneDirection | None, size: str | int | None
+) -> None:
+    """Refuse a split that would leave the pane being split unusable.
+
+    ``size`` names the NEW pane, the way tmux's ``-l`` does. Measured on
+    an 80-column pane: 78 is the largest value tmux honours (78 + border
+    + 1 for the source), and every larger value -- 79, 80, 120,
+    1_000_000 -- silently CLAMPS the new pane to 78 while leaving the
+    source at one column.
+
+    Those clamped values are what this refuses. The result covers only
+    the new pane, so a caller who asked for 120 was told 78 and shown
+    nothing about their own pane being flattened -- a clean success
+    report for a broken layout, which is worse than tmux's silence
+    because it is actively reassuring.
+
+    A faithful split that happens to leave a narrow source is allowed.
+    That is the caller's layout to choose; the report is true.
+    """
+    if size is None:
+        return
+    source = target if isinstance(target, Pane) else target.active_pane
+    if source is None:
+        return
+    vertical = direction in (PaneDirection.Above, PaneDirection.Below, None)
+    raw = source.pane_height if vertical else source.pane_width
+    try:
+        extent = int(raw or 0)
+    except ValueError:
+        return
+    if extent <= 0:
+        return
+
+    if isinstance(size, str) and size.endswith("%"):
+        try:
+            requested = extent * int(size[:-1]) // 100
+        except ValueError:
+            return  # tmux will reject the spelling itself
+    else:
+        try:
+            requested = int(size)
+        except (TypeError, ValueError):
+            return
+
+    largest = extent - _MIN_REMAINING_EXTENT - 1
+    if requested <= largest:
+        return
+    axis = "rows" if vertical else "columns"
+    msg = (
+        f"size={size!r} leaves the pane being split with "
+        f"{max(extent - requested - 1, 0)} {axis}. size names the NEW pane "
+        f"and one {axis[:-1]} goes to the border, so the source keeps "
+        f"extent - size - 1: at {extent} {axis} the largest usable size is "
+        f"{largest}. tmux reports none of this -- it clamps the new pane and "
+        "leaves the source as a sliver."
+    )
+    raise ExpectedToolError(msg)
+
+
 @handle_tool_errors
 def split_window(
     pane_id: str | None = None,
@@ -197,8 +266,11 @@ def split_window(
     direction : str, optional
         Split direction.
     size : str or int, optional
-        Size of the new pane. Use a string with '%%' suffix for
-        percentage (e.g. '50%%') or an integer for lines/columns.
+        Size of the NEW pane, as tmux's ``-l`` means it -- not the pane
+        being split, which keeps ``extent - size - 1`` after the border.
+        Use a string with '%%' suffix for percentage (e.g. '50%%') or an
+        integer for lines/columns. A size tmux would silently clamp is
+        refused, naming the largest that fits.
     start_directory : str, optional
         Working directory for the new pane.
     shell : str, optional
@@ -261,6 +333,7 @@ def split_window(
     # pane behind it. The window path notices while building the object
     # and raises a bare "Could not find pane_id"; the pane path returns
     # a stale object that only fails on the caller's NEXT call.
+    _raise_if_size_would_flatten_the_source(target, pane_dir, size)
     try:
         new_pane = target.split(
             direction=pane_dir,

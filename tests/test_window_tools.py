@@ -101,6 +101,47 @@ def test_split_window_with_direction(mcp_server: Server, mcp_session: Session) -
     assert result.pane_id is not None
 
 
+def test_split_window_refuses_a_size_tmux_would_silently_clamp(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``size`` names the NEW pane, and the result describes only that.
+
+    Measured on an 80-column pane: 78 is the largest value tmux honours,
+    and 79, 80, 120 and 1_000_000 all silently clamp the new pane to 78
+    while leaving the source at one column. The caller who asked for 120
+    was told 78, with nothing said about their own pane -- a clean
+    success report for a broken layout.
+
+    The line is where tmux stops honouring the request, not where the
+    layout gets cramped: a faithful split that leaves a narrow source is
+    the caller's choice and the report is true.
+    """
+    mcp_session.cmd("resize-window", "-x", "80", "-y", "24")
+    window = mcp_session.active_window
+    for bad in (79, 120, 1_000_000, "99%"):
+        with pytest.raises(ToolError, match="leaves the pane being split"):
+            split_window(
+                window_id=window.window_id,
+                direction="right",
+                size=bad,
+                socket_name=mcp_server.socket_name,
+            )
+
+    # Controls: the largest honoured size is allowed and the arithmetic
+    # holds, and an ordinary split is untouched.
+    source = window.active_pane
+    assert source is not None
+    result = split_window(
+        pane_id=source.pane_id,
+        direction="right",
+        size=40,
+        socket_name=mcp_server.socket_name,
+    )
+    source.refresh()
+    assert result.pane_width == "40"
+    assert source.pane_width == "39"  # 80 - 40 - 1 for the border
+
+
 def test_split_window_never_returns_a_pane_that_is_already_gone(
     mcp_server: Server, mcp_session: Session
 ) -> None:
