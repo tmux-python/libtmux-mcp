@@ -390,3 +390,40 @@ def test_a17_changelog_summarizes_history_features(
     assert "same JSON object form" in environment_entry
     assert "credential references, not literal credentials" in environment_entry
     assert "{ref}`safety`" in environment_entry
+
+
+def test_safety_annotation_table_matches_the_registered_surface(
+    docs_dir: pathlib.Path,
+) -> None:
+    """The hand-written hint table says what clients are actually told."""
+    import asyncio
+    import re
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    # Register into a fresh server rather than reading the production one:
+    # its tier filter is fixed at import, so the visible surface would
+    # depend on which test imported it first.
+    mcp = FastMCP(name="test-annotation-table")
+    register_tools(mcp)
+    tools = asyncio.run(mcp.list_tools())
+    assert len(tools) > 1
+
+    hints = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+    tiers = ("readonly", "mutating", "destructive")
+    expected = set()
+    for tool in tools:
+        annotations = tool.annotations
+        assert annotations is not None, tool.name
+        dumped = annotations.model_dump(mode="json", by_alias=True)
+        cells = " | ".join(str(dumped[hint]).lower() for hint in hints)
+        tier = next(tier for tier in tiers if tier in tool.tags)
+        slug = tool.name.replace("_", "-")
+        expected.add(f"| {{toolref}}`{slug}` | {{badge}}`{tier}` | {cells} |")
+
+    text = (docs_dir / "topics" / "safety.md").read_text(encoding="utf-8")
+    documented = set(re.findall(r"^\| \{toolref\}`.+\|$", text, flags=re.MULTILINE))
+
+    assert documented == expected

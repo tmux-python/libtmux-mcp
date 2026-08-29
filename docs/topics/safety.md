@@ -105,7 +105,7 @@ Mitigations:
 
 {tool}`respawn-pane` restarts a pane's process while preserving the pane id and layout — exactly what an agent wants when a shell wedges. Default `kill=True` terminates the running process before relaunch. The `pane_id` and layout are preserved (the point of the tool), but any unsaved REPL state, ssh session, or in-flight job in that pane is lost. Repeated calls are *not* idempotent — each call kills a new process.
 
-Unlike other `mutating` tools, the registration carries `destructiveHint=True` and `idempotentHint=False` (via the `ANNOTATIONS_MUTATING_DESTRUCTIVE` preset) so MCP clients see honest annotations even though the tier tag stays at `mutating` for default-profile recovery.
+The registration advertises `destructiveHint=True` and `idempotentHint=False` while the tier tag stays at `mutating`, so recovery remains available to default-profile clients without understating what the call does.
 
 Mitigations:
 
@@ -145,36 +145,71 @@ Route this logger to a dedicated sink if you want a durable audit trail; it is d
 
 ## Tool annotations
 
-Each tool carries MCP tool annotations that hint at its behavior:
+Every tool advertises the four MCP annotation hints. They are hints for client
+presentation, not authorization: a client may ignore them, and this server
+cannot enforce them.
 
-| Tool | Tier | readOnly | destructive | idempotent |
-|------|------|----------|-------------|------------|
-| {toolref}`list-sessions` | {badge}`readonly` | true | false | true |
-| {toolref}`get-server-info` | {badge}`readonly` | true | false | true |
-| {toolref}`list-windows` | {badge}`readonly` | true | false | true |
-| {toolref}`list-panes` | {badge}`readonly` | true | false | true |
-| {toolref}`capture-pane` | {badge}`readonly` | true | false | true |
-| {toolref}`capture-since` | {badge}`readonly` | true | false | true |
-| {toolref}`get-pane-info` | {badge}`readonly` | true | false | true |
-| {toolref}`search-panes` | {badge}`readonly` | true | false | true |
-| {toolref}`wait-for-text` | {badge}`readonly` | true | false | true |
-| {toolref}`show-option` | {badge}`readonly` | true | false | true |
-| {toolref}`show-environment` | {badge}`readonly` | true | false | true |
-| {toolref}`create-session` | {badge}`mutating` | false | false | false |
-| {toolref}`create-window` | {badge}`mutating` | false | false | false |
-| {toolref}`split-window` | {badge}`mutating` | false | false | false |
-| {toolref}`send-keys` | {badge}`mutating` | false | false | false |
-| {toolref}`rename-session` | {badge}`mutating` | false | false | true |
-| {toolref}`rename-window` | {badge}`mutating` | false | false | true |
-| {toolref}`resize-pane` | {badge}`mutating` | false | false | true |
-| {toolref}`resize-window` | {badge}`mutating` | false | false | true |
-| {toolref}`set-pane-title` | {badge}`mutating` | false | false | true |
-| {toolref}`clear-pane` | {badge}`mutating` | false | true | false |
-| {toolref}`select-layout` | {badge}`mutating` | false | false | true |
-| {toolref}`set-option` | {badge}`mutating` | false | false | true |
-| {toolref}`set-environment` | {badge}`mutating` | false | false | true |
-| {toolref}`respawn-pane` | {badge}`mutating` | false | true | false |
-| {toolref}`kill-server` | {badge}`destructive` | false | true | false |
-| {toolref}`kill-session` | {badge}`destructive` | false | true | false |
-| {toolref}`kill-window` | {badge}`destructive` | false | true | false |
-| {toolref}`kill-pane` | {badge}`destructive` | false | true | false |
+`destructiveHint: false` is a claim that a tool performs **only additive
+updates**, so a tool that replaces a name, a size, or a layout advertises
+`true` even though nothing is destroyed. `openWorldHint: true` says the tool
+reaches, or returns text from, outside tmux — a spawned process runs with your
+user's authority, and a pane holds whatever was printed into it.
+
+| Tool | Tier | readOnly | destructive | idempotent | openWorld |
+|------|------|----------|-------------|------------|-----------|
+| {toolref}`call-readonly-tools-batch` | {badge}`readonly` | true | false | true | true |
+| {toolref}`capture-pane` | {badge}`readonly` | true | false | true | true |
+| {toolref}`capture-since` | {badge}`readonly` | true | false | true | true |
+| {toolref}`display-message` | {badge}`readonly` | true | false | true | false |
+| {toolref}`find-pane-by-position` | {badge}`readonly` | true | false | true | false |
+| {toolref}`get-pane-info` | {badge}`readonly` | true | false | true | false |
+| {toolref}`get-server-info` | {badge}`readonly` | true | false | true | false |
+| {toolref}`get-session-info` | {badge}`readonly` | true | false | true | false |
+| {toolref}`get-window-info` | {badge}`readonly` | true | false | true | false |
+| {toolref}`list-panes` | {badge}`readonly` | true | false | true | false |
+| {toolref}`list-servers` | {badge}`readonly` | true | false | true | false |
+| {toolref}`list-sessions` | {badge}`readonly` | true | false | true | false |
+| {toolref}`list-windows` | {badge}`readonly` | true | false | true | false |
+| {toolref}`search-panes` | {badge}`readonly` | true | false | true | true |
+| {toolref}`show-buffer` | {badge}`readonly` | true | false | true | true |
+| {toolref}`show-environment` | {badge}`readonly` | true | false | true | false |
+| {toolref}`show-hook` | {badge}`readonly` | true | false | true | false |
+| {toolref}`show-hooks` | {badge}`readonly` | true | false | true | false |
+| {toolref}`show-option` | {badge}`readonly` | true | false | true | false |
+| {toolref}`snapshot-pane` | {badge}`readonly` | true | false | true | true |
+| {toolref}`wait-for-text` | {badge}`readonly` | true | false | true | true |
+| {toolref}`call-mutating-tools-batch` | {badge}`mutating` | false | true | false | true |
+| {toolref}`clear-pane` | {badge}`mutating` | false | true | false | false |
+| {toolref}`create-session` | {badge}`mutating` | false | false | false | true |
+| {toolref}`create-window` | {badge}`mutating` | false | false | false | true |
+| {toolref}`delete-buffer` | {badge}`mutating` | false | true | false | false |
+| {toolref}`enter-copy-mode` | {badge}`mutating` | false | true | false | false |
+| {toolref}`exit-copy-mode` | {badge}`mutating` | false | true | true | false |
+| {toolref}`load-buffer` | {badge}`mutating` | false | false | false | false |
+| {toolref}`move-window` | {badge}`mutating` | false | true | true | false |
+| {toolref}`paste-buffer` | {badge}`mutating` | false | true | false | true |
+| {toolref}`paste-text` | {badge}`mutating` | false | true | false | true |
+| {toolref}`pipe-pane` | {badge}`mutating` | false | true | false | true |
+| {toolref}`rename-session` | {badge}`mutating` | false | true | true | false |
+| {toolref}`rename-window` | {badge}`mutating` | false | true | true | false |
+| {toolref}`resize-pane` | {badge}`mutating` | false | true | true | false |
+| {toolref}`resize-window` | {badge}`mutating` | false | true | true | false |
+| {toolref}`respawn-pane` | {badge}`mutating` | false | true | false | true |
+| {toolref}`run-command` | {badge}`mutating` | false | true | false | true |
+| {toolref}`select-layout` | {badge}`mutating` | false | true | true | false |
+| {toolref}`select-pane` | {badge}`mutating` | false | true | true | false |
+| {toolref}`select-window` | {badge}`mutating` | false | true | true | false |
+| {toolref}`send-keys` | {badge}`mutating` | false | true | false | true |
+| {toolref}`send-keys-batch` | {badge}`mutating` | false | true | false | true |
+| {toolref}`set-environment` | {badge}`mutating` | false | true | true | false |
+| {toolref}`set-option` | {badge}`mutating` | false | true | true | false |
+| {toolref}`set-pane-title` | {badge}`mutating` | false | true | true | false |
+| {toolref}`signal-channel` | {badge}`mutating` | false | false | true | false |
+| {toolref}`split-window` | {badge}`mutating` | false | true | false | true |
+| {toolref}`swap-pane` | {badge}`mutating` | false | true | false | false |
+| {toolref}`wait-for-channel` | {badge}`mutating` | false | false | true | false |
+| {toolref}`call-destructive-tools-batch` | {badge}`destructive` | false | true | false | true |
+| {toolref}`kill-pane` | {badge}`destructive` | false | true | false | false |
+| {toolref}`kill-server` | {badge}`destructive` | false | true | false | false |
+| {toolref}`kill-session` | {badge}`destructive` | false | true | false | false |
+| {toolref}`kill-window` | {badge}`destructive` | false | true | false | false |
