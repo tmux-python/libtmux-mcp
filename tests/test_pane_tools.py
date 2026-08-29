@@ -1600,13 +1600,26 @@ def test_capture_pane_truncates_tail_preserving(
         raises=True,
     )
 
+    raw = mcp_pane.capture_pane()
+    geometry = mcp_pane.display_message(
+        "#{pane_width}x#{pane_height} cursor_y=#{cursor_y} "
+        "hsize=#{history_size} alt=#{alternate_on}",
+        get_text=True,
+    )
     result = capture_pane(
         pane_id=mcp_pane.pane_id,
         max_lines=5,
         socket_name=mcp_server.socket_name,
     )
     lines = result.split("\n")
-    assert lines[0].startswith("[... truncated ")
+    # Truncation requires more visible content than max_lines, so a
+    # missing header means the pane held less than expected. Report the
+    # geometry: this fails rarely and only in full-suite runs, and a bare
+    # assertion has twice cost a reproduction cycle to learn nothing.
+    assert lines[0].startswith("[... truncated "), (
+        f"no truncation header; geometry {geometry}, "
+        f"raw visible lines {len(raw)}, returned {len(lines)}: {lines[:3]}"
+    )
     assert lines[0].endswith(" lines ...]")
     assert len(lines) == 6  # header + exactly 5 preserved tail lines
     assert "scrollback_line_19" in lines[-1] or any(
