@@ -157,6 +157,7 @@ def register(mcp: FastMCP) -> None:
             (MIME: ``application/json``).
         """
         server = _get_server(socket_name=socket_name)
+        _raise_if_unreachable(server)
         session = server.sessions.get(session_name=session_name, default=None)
         if session is None:
             msg = f"Session not found: {session_name}"
@@ -194,6 +195,7 @@ def register(mcp: FastMCP) -> None:
             JSON array of window objects (MIME: ``application/json``).
         """
         server = _get_server(socket_name=socket_name)
+        _raise_if_unreachable(server)
         session = server.sessions.get(session_name=session_name, default=None)
         if session is None:
             msg = f"Session not found: {session_name}"
@@ -230,6 +232,7 @@ def register(mcp: FastMCP) -> None:
             (MIME: ``application/json``).
         """
         server = _get_server(socket_name=socket_name)
+        _raise_if_unreachable(server)
         session = server.sessions.get(session_name=session_name, default=None)
         if session is None:
             msg = f"Session not found: {session_name}"
@@ -267,6 +270,7 @@ def register(mcp: FastMCP) -> None:
             JSON object of pane details (MIME: ``application/json``).
         """
         server = _get_server(socket_name=socket_name)
+        _raise_if_unreachable(server)
         pane_id = _normalize_pane_id(pane_id)
         pane = server.panes.get(pane_id=pane_id, default=None)
         if pane is None:
@@ -297,6 +301,7 @@ def register(mcp: FastMCP) -> None:
             Plain text captured pane content (MIME: ``text/plain``).
         """
         server = _get_server(socket_name=socket_name)
+        _raise_if_unreachable(server)
         pane_id = _normalize_pane_id(pane_id)
         pane = server.panes.get(pane_id=pane_id, default=None)
         if pane is None:

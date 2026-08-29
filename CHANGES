@@ -27,6 +27,13 @@ it. That is why the surface had been checked and the case had not.
 An ABSENT server still returns an empty list, because there it is the
 true answer.
 
+All six templates carry the check, not just the listing that surfaced
+it. The other five resolve a specific object, so an unreachable server
+made them answer "Could not find session_name=alpha" for a session that
+exists -- the same wrong conclusion in different words, and one of them
+leaked a raw `LibTmuxException` instead. Audited rather than assumed:
+five of the six were missing it.
+
 Separately, a session name containing `/` is documented. tmux permits
 `a/b`, and `tmux://sessions/a/b` does not match the template at all, so
 it is rejected as "Unknown resource" -- which reads as "no such
