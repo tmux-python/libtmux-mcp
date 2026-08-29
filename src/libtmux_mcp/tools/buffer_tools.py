@@ -35,6 +35,7 @@ import typing as t
 import uuid
 
 from libtmux_mcp._utils import (
+    _LIVENESS_TIMEOUT_SECONDS,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
@@ -232,9 +233,15 @@ def load_buffer(
             f.write(content)
         argv = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
         try:
-            subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+            subprocess.run(
+                argv, check=True, capture_output=True, timeout=_LIVENESS_TIMEOUT_SECONDS
+            )
         except subprocess.TimeoutExpired as e:
-            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
+            msg = (
+                f"tmux load-buffer did not return within "
+                f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {buffer_name!r}; "
+                "the tmux server is unresponsive"
+            )
             raise ExpectedToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
@@ -368,10 +375,14 @@ def show_buffer(
             argv,
             check=True,
             capture_output=True,
-            timeout=5.0,
+            timeout=_LIVENESS_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as e:
-        msg = f"show-buffer timeout after 5s for {cname!r}"
+        msg = (
+            f"tmux show-buffer did not return within "
+            f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {cname!r}; "
+            "the tmux server is unresponsive"
+        )
         raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
@@ -426,9 +437,15 @@ def delete_buffer(
     cname = _validate_buffer_name(buffer_name)
     argv = _tmux_argv(server, "delete-buffer", "-b", cname)
     try:
-        subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+        subprocess.run(
+            argv, check=True, capture_output=True, timeout=_LIVENESS_TIMEOUT_SECONDS
+        )
     except subprocess.TimeoutExpired as e:
-        msg = f"delete-buffer timeout after 5s for {cname!r}"
+        msg = (
+            f"tmux delete-buffer did not return within "
+            f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {cname!r}; "
+            "the tmux server is unresponsive"
+        )
         raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""

@@ -726,9 +726,15 @@ def _raise_if_spawned_pane_is_gone(pane: Pane, shell: str | None) -> None:
         _raise_spawned_pane_gone(shell)
 
 
-#: Generous for a liveness probe: a responsive tmux server answers in
-#: single-digit milliseconds, and this only has to be short enough that
-#: a hung socket is reported rather than waited on forever.
+#: How long any single tmux call may take before this server calls the
+#: tmux server unresponsive. Generous: a responsive tmux answers in
+#: single-digit milliseconds, and the slowest operation constructible
+#: here -- capturing a 200,000-line history -- measured 37ms.
+#:
+#: THE one definition of that policy. Every other bound in the tree
+#: derives from it rather than repeating the literal, because a second
+#: 5.0 does not fail when this one moves; the tools simply start
+#: disagreeing about how long "unresponsive" takes.
 _LIVENESS_TIMEOUT_SECONDS = 5.0
 
 #: Distinguishable by identity, so callers can tell "did not answer"
@@ -1602,7 +1608,7 @@ def _raise_if_path_unresolvable(
 
 def _apply_filters(
     items: t.Any,
-    filters: dict[str, str] | str | None,
+    filters: dict[str, str | bool | int] | str | None,
     serializer: t.Callable[..., M],
     obj_type: type,
     model_type: type[BaseModel],

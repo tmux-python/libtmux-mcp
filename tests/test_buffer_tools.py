@@ -221,11 +221,11 @@ def test_show_buffer_no_truncation_under_cap(mcp_server: Server) -> None:
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "match_text"),
+    ("tool_name", "subcommand"),
     [
-        ("load_buffer", "load-buffer timeout"),
-        ("show_buffer", "show-buffer timeout"),
-        ("delete_buffer", "delete-buffer timeout"),
+        ("load_buffer", "load-buffer"),
+        ("show_buffer", "show-buffer"),
+        ("delete_buffer", "delete-buffer"),
     ],
 )
 @pytest.mark.usefixtures("mcp_session")
@@ -233,7 +233,7 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     mcp_server: Server,
     monkeypatch: pytest.MonkeyPatch,
     tool_name: str,
-    match_text: str,
+    subcommand: str,
 ) -> None:
     """Hung tmux raises ``TimeoutExpired`` → clear ``ToolError``.
 
@@ -247,7 +247,11 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     import subprocess
 
     real_run = subprocess.run
-    hung_command = match_text.split()[0]
+    # The tmux SUBCOMMAND, never argv[0]: matching on "tmux" hangs the
+    # liveness probe every tool makes first, and the assertion is then
+    # satisfied by an error from a different layer.
+    hung_command = subcommand
+    match_text = f"tmux {subcommand} did not return within"
 
     def _hang(*args: t.Any, **kwargs: t.Any) -> t.Any:
         # Only the command under test hangs. Patching every subprocess

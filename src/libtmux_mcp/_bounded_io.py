@@ -25,7 +25,12 @@ import typing as t
 from libtmux import exc
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
-from libtmux_mcp._utils import ExpectedToolError, _tmux_argv, tmux_id_sort_key
+from libtmux_mcp._utils import (
+    _LIVENESS_TIMEOUT_SECONDS,
+    ExpectedToolError,
+    _tmux_argv,
+    tmux_id_sort_key,
+)
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from libtmux.server import Server
@@ -50,7 +55,7 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 #: This is the CEILING on a single call; :func:`_call_budget` lowers it
 #: to whatever remains of the caller's own deadline, so the wait cannot
 #: overshoot by a whole call's worth.
-_TMUX_CALL_TIMEOUT_SECONDS = 5.0
+_TMUX_CALL_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
 #: Floor for a budget-derived per-call timeout. Without it, a wait
 #: whose deadline has just passed would hand ``subprocess.run`` a
 #: non-positive timeout and raise instantly, reporting "tmux is

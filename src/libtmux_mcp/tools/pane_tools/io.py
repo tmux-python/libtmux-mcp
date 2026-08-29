@@ -24,6 +24,7 @@ from libtmux_mcp._bounded_io import (
 from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
+    _LIVENESS_TIMEOUT_SECONDS,
     ExpectedToolError,
     _get_server,
     _get_server_async,
@@ -1342,7 +1343,11 @@ def paste_text(
         try:
             subprocess.run(load_args, check=True, capture_output=True, timeout=5.0)
         except subprocess.TimeoutExpired as e:
-            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
+            msg = (
+                f"tmux load-buffer did not return within "
+                f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {buffer_name!r}; "
+                "the tmux server is unresponsive"
+            )
             raise ExpectedToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
