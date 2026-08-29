@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import time
 import typing as t
+import uuid
 
 import pydantic
 import pytest
@@ -2168,12 +2169,21 @@ def test_wait_for_text_matches_a_reprinted_line(
 
     marker = "BUILD_OK_REPRINT"
 
-    def run(reprint: bool) -> WaitForTextResult:
+    def run(reprint: bool, timeout: float) -> WaitForTextResult:
+        # The output is GATED on a channel rather than on a timer. With
+        # `sleep 1` the reprint landed 1.6 s after the shell started, so
+        # respawn plus the marker poll had to finish inside that window
+        # -- and under load they do not, leaving the wait to start after
+        # the reprint it exists to catch. Observed failing at loadavg
+        # 60+. The shell now blocks until the wait is running, so
+        # ordering is established rather than raced for.
+        gate = f"reprint_gate_{uuid.uuid4().hex[:8]}"
         tail = f"printf '{marker}\\n'; " if reprint else ""
         mcp_pane.respawn(
             kill=True,
             shell=(
-                f"sh -c \"printf '{marker}\\n'; sleep 1; "
+                f"sh -c \"printf '{marker}\\n'; "
+                f"tmux -L {mcp_server.socket_name} wait-for {gate}; "
                 f"for i in 1 2 3; do printf 'noise %s\\n' $i; sleep 0.2; done; "
                 f'{tail}sleep 5"'
             ),
@@ -2183,21 +2193,40 @@ def test_wait_for_text_matches_a_reprinted_line(
             10,
             raises=True,
         )
-        return asyncio.run(
-            wait_for_text(
-                patterns=[marker],
-                pane_id=mcp_pane.pane_id,
-                timeout=4.0,
-                socket_name=mcp_server.socket_name,
-            )
-        )
 
-    reprinted = run(reprint=True)
+        async def _wait_then_release() -> WaitForTextResult:
+            waiting = asyncio.create_task(
+                wait_for_text(
+                    patterns=[marker],
+                    pane_id=mcp_pane.pane_id,
+                    timeout=timeout,
+                    socket_name=mcp_server.socket_name,
+                )
+            )
+            # to_thread yields, so the wait takes its entry snapshot
+            # before the shell is released. The three noise lines then
+            # give another 0.6 s before the reprint arrives.
+            await asyncio.to_thread(mcp_server.cmd, "wait-for", "-S", gate)
+            return await waiting
+
+        return asyncio.run(_wait_then_release())
+
+    # A generous CEILING, not a budget: this case returns the moment the
+    # reprint lands, about a second in. At 4 s it timed out under load
+    # with saw_new_output False -- the shell had not even produced its
+    # noise yet, so the reprint this asserts on could not have arrived.
+    # Raising a ceiling costs nothing when it is not reached.
+    reprinted = run(reprint=True, timeout=12.0)
     assert reprinted.found is True
     assert reprinted.matched_at_entry is False
 
     # Stale on screen, rows scrolling, never reprinted: must not match.
-    stale_only = run(reprint=False)
+    # This one SPENDS its timeout, so it stays short.
+    stale_only = run(reprint=False, timeout=4.0)
+    if not stale_only.saw_new_output:
+        # found=False is trivially true when nothing was written at all,
+        # so without the scrolling this case proves nothing.
+        pytest.skip("no output arrived within the window; the falsifier never ran")
     assert stale_only.found is False
     assert stale_only.matched_at_entry is True
 

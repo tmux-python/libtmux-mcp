@@ -2384,6 +2384,52 @@ unusual entry shape.
 
 ### Development
 
+**Three load-sensitive test assertions, fixed without loosening one**
+
+The QA instance turned a one-in-ten mystery into one-in-one by
+generating sustained load, and named three tests a quiet machine never
+fails. All three asserted something narrower than the property they
+guard; none was a product defect.
+
+`test_wait_for_channel_detects_a_vanished_server` pinned one of TWO
+honest messages. Reproduced deterministically: a server already gone
+when `wait-for` runs gives tmux's own "no server running on <path>",
+while one that dies mid-wait gives the liveness re-probe's "no longer
+running". Under load the kill can beat the child's connect, so the
+wrong one arrives. Widening the match would have been worse than the
+flake -- with the re-probe REMOVED, tmux's error still raises and
+`pytest.raises` is satisfied, so all three cases would pass. It now
+asserts the phrasing when the precondition held and skips with a reason
+when the waiter never connected. Verified: with the re-probe disabled,
+two of three fail and one skips.
+
+`test_the_silent_waits_now_report_progress` needed ticks inside a fixed
+0.6 s window. Its own comment already said load can only DROP ticks,
+never add them -- a race lost in one direction only. It now waits on an
+`asyncio.Event` set by the first progress callback, with a ceiling that
+is a bound rather than a spend.
+
+`test_wait_for_text_matches_a_reprinted_line` put the reprint on a
+timer 1.6 s after the shell started, so respawn plus the marker poll
+had to win a race against it. The shell now blocks on a `wait-for`
+gate that the test releases once the wait is running, establishing the
+ordering instead of racing for it -- and it runs in 5.7 s rather than
+8 s, because the `sleep 1` is gone.
+
+`test_wait_for_text_matches_a_reprinted_line` needed a second pass.
+Gating fixed the ordering, and the 4 s bound then became the binding
+constraint -- at 91 runnable it timed out with `saw_new_output` False,
+meaning the shell had not produced anything yet. That bound is a
+CEILING for the reprint case (it returns the moment the reprint lands,
+about a second in), so raising it to 12 s costs nothing when it is not
+reached. The stale case SPENDS its timeout, so that one stays at 4 s --
+and now skips when no output arrived at all, because `found is False`
+is trivially true when nothing was written and the falsifier never ran.
+
+Measured: nine runs at 44-126 runnable on 20 CPUs. The only failures
+were of the reprint case at its old 4 s bound, and the only skips were
+preconditions honestly reported.
+
 **A slow-shell timeout is no longer read as a refusal**
 
 `test_run_command_allows_a_slow_shell` guards one property: a shell

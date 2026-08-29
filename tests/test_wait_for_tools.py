@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import threading
@@ -198,7 +199,7 @@ def test_wait_for_channel_detects_a_vanished_server(
         thread = threading.Thread(target=_kill_after_delay)
         thread.start()
         try:
-            with pytest.raises(ToolError, match=expected_message):
+            with pytest.raises(ToolError) as excinfo:
                 asyncio.run(
                     wait_for_channel(
                         channel="never_signalled",
@@ -208,6 +209,23 @@ def test_wait_for_channel_detects_a_vanished_server(
                 )
         finally:
             thread.join()
+
+    message = str(excinfo.value)
+    # Two honest paths describe a vanished server, and which one arrives
+    # is a race this test cannot control: if the kill lands before the
+    # wait-for child connects, tmux reports the absence ITSELF and the
+    # liveness re-probe -- the thing under test -- never runs. Both
+    # raise, so the tool never claims a signal either way; but only one
+    # exercises the mechanism, so the other is an unestablished
+    # precondition rather than a pass. Reproduced deterministically:
+    # killing before the call gives "no server running on <path>",
+    # killing during it gives "no longer running".
+    if "no server running" in message:
+        pytest.skip(
+            "the server died before the wait-for child connected, so tmux "
+            "reported the absence itself and the liveness re-probe never ran"
+        )
+    assert re.search(expected_message, message), message
 
 
 def test_wait_for_channel_still_succeeds_on_a_live_server() -> None:
@@ -527,11 +545,13 @@ def test_the_silent_waits_now_report_progress(
     channel = f"pgt_{uuid.uuid4().hex[:8]}"
     monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.05)
     seen: list[str] = []
+    first_tick = asyncio.Event()
 
     async def _on_progress(
         progress: float, total: float | None, message: str | None
     ) -> None:
         seen.append(message or f"{progress}/{total}")
+        first_tick.set()
 
     async def _exercise() -> None:
         async with Client(build_mcp_server(), progress_handler=_on_progress) as client:
@@ -542,11 +562,14 @@ def test_the_silent_waits_now_report_progress(
                     raise_on_error=False,
                 )
             )
-            # Many chances at a fast cadence rather than one chance at the
-            # shipped 1 s. Needing N ticks in a fixed window is fragile in
-            # exactly one direction -- load drops ticks, never adds them --
-            # so margin has to come from the cadence, not the window.
-            await asyncio.sleep(0.6)
+            # Wait for the first tick rather than for a fixed window.
+            # Load can only DELAY ticks, never add them, so a sleep is a
+            # race this test loses in one direction only -- it was
+            # observed failing at loadavg 60+ with zero ticks in 0.6 s.
+            # The ceiling is a bound, not a spend: it returns the moment
+            # a tick lands.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(first_tick.wait(), timeout=5.0)
             mcp_server.cmd("wait-for", "-S", channel)
             await waiter
 
