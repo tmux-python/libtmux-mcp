@@ -1224,6 +1224,25 @@ simultaneous -- and on a short pane the marker can leave the visible
 region in between. They now assert on the capture that satisfied the
 precondition.
 
+**The last occurrence was an interaction between two fixes in this
+branch, and neither had it alone.** Deriving the cap as
+`len(visible) - 1` is 0 on a one-line pane, and refusing a cap below 1
+-- the validation added for the truncation-header bug above -- then
+rejects the call outright. Measured, two ordinary states reach one
+visible line: a pane just after `clear`, and a fresh pane with nothing
+on it.
+
+That is why it survived the single-observation fix: it was never about
+observations. A capture of one line is a correct capture; the test was
+constructing a call it was no longer allowed to make.
+
+The two-row requirement is now part of what the test WAITS for rather
+than something it asserts afterwards, so the illegal call cannot be
+constructed at all. Clamping the cap instead would have made the call
+legal and left the claim wrong -- a one-line pane has nothing to
+truncate, so no header can appear and an assertion expecting one still
+fails.
+
 Two hypotheses were ruled out by measurement and are worth recording:
 an attached 80x8 client does NOT shrink the pane, and a capture taken
 while the alternate screen is active still returns the header.

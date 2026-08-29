@@ -1605,7 +1605,11 @@ def test_capture_pane_truncates_tail_preserving(
 
     def _captured_with_marker() -> bool:
         rows = mcp_pane.capture_pane()
-        if any("scrollback_line_19" in row for row in rows):
+        # Two rows is the precondition, not an assertion: a cap of
+        # ``len(rows) - 1`` is 0 on a one-line pane, and a cap below 1
+        # is refused outright. Waiting for it means the test cannot
+        # construct a call it is not allowed to make.
+        if len(rows) >= 2 and any("scrollback_line_19" in row for row in rows):
             settled.append(rows)
             return True
         return False
@@ -1617,7 +1621,6 @@ def test_capture_pane_truncates_tail_preserving(
         "hsize=#{history_size} alt=#{alternate_on}",
         get_text=True,
     )
-    assert len(raw) >= 2, f"pane too short to truncate: {geometry}, {len(raw)} lines"
     cap = len(raw) - 1
 
     result = capture_pane(
