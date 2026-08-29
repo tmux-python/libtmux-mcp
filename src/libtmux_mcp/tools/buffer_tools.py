@@ -35,6 +35,7 @@ import typing as t
 import uuid
 
 from libtmux_mcp._utils import (
+    ANNOTATIONS_CREATE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
@@ -380,14 +381,12 @@ def delete_buffer(
 def register(mcp: FastMCP) -> None:
     """Register buffer tools with the MCP instance.
 
-    ``load_buffer`` is tagged with
-    :data:`~libtmux_mcp._utils.ANNOTATIONS_SHELL` because its ``content``
-    argument is arbitrary user text that may carry interactive-environment
-    side effects (commands about to be pasted into a shell). Other buffer
-    tools are plain mutating ops on the tmux buffer store.
+    ``load_buffer`` stages content into a buffer it allocates, so it is
+    additive and closed-world. ``paste_buffer`` is what delivers that
+    content to a pane's program, and carries the hints for it.
     """
     mcp.tool(
-        title="Load tmux Buffer", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING}
+        title="Load tmux Buffer", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
     )(load_buffer)
     mcp.tool(
         title="Paste tmux Buffer",

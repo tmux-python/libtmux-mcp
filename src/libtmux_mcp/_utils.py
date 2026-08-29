@@ -405,26 +405,20 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
-#: Annotations for tools that move user-supplied payloads into a shell
-#: context. Six consumers today:
+#: Annotations for tools whose caller-supplied payload reaches a program
+#: that runs it: ``send_keys``, ``send_keys_batch``, ``run_command``,
+#: ``paste_text``, ``paste_buffer``, and ``pipe_pane``.
 #:
-#: * ``send_keys``, ``run_command``, ``paste_text``, ``pipe_pane`` — the
-#:   canonical shell-driving tools; caller's keys/command/text/stream
-#:   reaches the shell prompt or pipes into an external command
-#:   respectively.
-#: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
-#:   into a tmux paste buffer; ``paste_buffer`` pushes that content
-#:   into a target pane where the shell receives it as input. The two
-#:   are split into a stage/fire pair so callers can validate before
-#:   paste, but both participate in the same open-world transfer.
+#: ``destructiveHint`` is ``True`` because MCP defines ``False`` as a
+#: claim of additive-only updates, and typed input can overwrite a file,
+#: end a process, or leave a shell mid-line. ``openWorldHint`` is ``True``
+#: because the effect extends into whatever the payload runs.
 #:
-#: Distinguished from :data:`ANNOTATIONS_CREATE` by ``openWorldHint=True``:
-#: the effects of these tools extend into whatever command or content
-#: the caller supplies, which is the canonical open-world MCP
-#: interaction.
+#: ``load_buffer`` is deliberately not here: it allocates a fresh buffer
+#: and delivers nothing, so it is additive and closed-world.
 ANNOTATIONS_SHELL: dict[str, bool] = {
     "readOnlyHint": False,
-    "destructiveHint": False,
+    "destructiveHint": True,
     "idempotentHint": False,
     "openWorldHint": True,
 }

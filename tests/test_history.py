@@ -428,7 +428,7 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
     assert payload["schema"]["default"] is expected
     assert "anyOf" not in payload["schema"]
     assert payload["annotations"] == {
-        "destructiveHint": False,
+        "destructiveHint": True,
         "idempotentHint": False,
         "openWorldHint": True,
         "readOnlyHint": False,
