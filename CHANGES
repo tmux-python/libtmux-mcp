@@ -8,6 +8,29 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### The environment tools answer scope questions like their siblings
+
+`show_option` documents "not set AT THIS SCOPE, not 'not set'" and
+takes `include_inherited`. `show_hook` gained the same this release.
+The environment trio was the last of the option-shaped family without
+it, and the gap was reachable rather than theoretical: unsetting a
+GLOBALLY-set variable at session scope removed nothing, reported
+`status="absent"` -- the same answer a name that never existed gets --
+and every new pane in that session kept receiving it.
+
+`unset_environment` now reports `still_set_globally`, which separates
+"there was nothing to remove" from "it is still in force everywhere".
+`show_environment` takes `include_inherited`, merging the global set
+underneath a session's with session values winning, which is the
+precedence a spawned pane actually sees -- so "what will the next pane
+get" is now one call rather than two plus a merge.
+
+Reported by the QA instance, which measured the concrete harm (a
+"removed" variable arriving in a fresh pane). One half of the report did
+not reproduce: the global environment is not invisible to the tool
+surface -- `show_environment` with no session reads it and says
+`scope_queried="global"`. The gap was the conflation, not the access.
+
 #### `copy_selection` reads a person's copy-mode selection
 
 An agent could enter copy mode and perform a copy, and then never read

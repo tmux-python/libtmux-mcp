@@ -141,3 +141,71 @@ def test_unset_environment_distinguishes_removal_from_no_op(
         ).scope_queried
         == "session"
     )
+
+
+def test_unset_environment_distinguishes_absent_from_inherited(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """'absent' covered two situations with opposite consequences.
+
+    Unsetting a globally-set name at session scope removes nothing and
+    reported the same 'absent' as a name that never existed -- while
+    every new pane kept receiving it.
+    """
+    mcp_server.cmd("set-environment", "-g", "QA_GLOB", "g1")
+
+    shadowed = unset_environment(
+        name="QA_GLOB",
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert shadowed.status == "absent"
+    assert shadowed.still_set_globally is True
+
+    never = unset_environment(
+        name="QA_NEVER_EXISTED",
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert never.status == "absent"
+    assert never.still_set_globally is False
+
+
+def test_show_environment_can_answer_what_a_new_pane_gets(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A session view alone omits globals the next pane will inherit."""
+    mcp_server.cmd("set-environment", "-g", "QA_GLOB", "g1")
+    mcp_session.cmd("set-environment", "QA_SESS", "s1")
+
+    at_scope = show_environment(
+        session_name=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "QA_SESS" in at_scope.variables
+    assert "QA_GLOB" not in at_scope.variables
+    assert at_scope.include_inherited is False
+
+    in_force = show_environment(
+        session_name=mcp_session.session_name,
+        include_inherited=True,
+        socket_name=mcp_server.socket_name,
+    )
+    assert in_force.variables["QA_SESS"] == "s1"
+    assert in_force.variables["QA_GLOB"] == "g1"
+    assert in_force.include_inherited is True
+
+
+def test_show_environment_session_value_wins_over_the_global(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Merge order must match the precedence a spawned pane sees."""
+    mcp_server.cmd("set-environment", "-g", "QA_BOTH", "from-global")
+    mcp_session.cmd("set-environment", "QA_BOTH", "from-session")
+
+    in_force = show_environment(
+        session_name=mcp_session.session_name,
+        include_inherited=True,
+        socket_name=mcp_server.socket_name,
+    )
+    assert in_force.variables["QA_BOTH"] == "from-session"

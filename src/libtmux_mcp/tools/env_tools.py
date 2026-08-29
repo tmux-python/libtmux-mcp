@@ -24,11 +24,21 @@ if t.TYPE_CHECKING:
 def show_environment(
     session_name: str | None = None,
     session_id: str | None = None,
+    include_inherited: bool = False,
     socket_name: str | None = None,
 ) -> EnvironmentResult:
     """Show tmux environment variables.
 
     Use to inspect tmux environment variables that affect child processes.
+
+    Naming a session reads only what is set ON that session. A new pane
+    there also inherits the GLOBAL environment, so the session view
+    alone does not answer "what will the next pane get" --
+    ``include_inherited=True`` merges the global set underneath and does.
+    Omitting the session reads the global set on its own.
+
+    Same shape as ``show_option`` and ``show_hook``: an answer at one
+    scope is not an answer about what is in force.
 
     Parameters
     ----------
@@ -36,6 +46,11 @@ def show_environment(
         Session name to query environment for.
     session_id : str, optional
         Session ID to query environment for.
+    include_inherited : bool
+        Merge the global environment underneath the session's, so the
+        result is what a new pane in that session actually receives.
+        Session values win. Ignored when no session is named, since the
+        global set has nothing to inherit from.
     socket_name : str, optional
         tmux socket name.
 
@@ -46,13 +61,18 @@ def show_environment(
     """
     server = _get_server(socket_name=socket_name)
 
-    if session_name is not None or session_id is not None:
+    scoped = session_name is not None or session_id is not None
+    if scoped:
         session = _resolve_session(
             server,
             session_name=session_name,
             session_id=session_id,
         )
         env_dict = session.show_environment()
+        if include_inherited:
+            # Global first so the session's own values overwrite it --
+            # that is the precedence a spawned pane sees.
+            env_dict = {**server.show_environment(), **env_dict}
     else:
         env_dict = server.show_environment()
 
@@ -70,11 +90,11 @@ def show_environment(
             removed.append(name[1:])
         elif isinstance(value, str):
             variables[name] = value
-    scope = (
-        "session" if (session_name is not None or session_id is not None) else "global"
-    )
     return EnvironmentResult(
-        scope_queried=scope, variables=variables, removed=sorted(removed)
+        scope_queried="session" if scoped else "global",
+        variables=variables,
+        removed=sorted(removed),
+        include_inherited=include_inherited and scoped,
     )
 
 
@@ -167,6 +187,13 @@ def unset_environment(
     EnvironmentSetResult
         Confirmation with the variable name and ``status="unset"``.
         ``value`` is null: the variable no longer has one.
+
+    Notes
+    -----
+    ``status="absent"`` means nothing was removed AT THE SCOPE TARGETED,
+    which covers two situations with opposite consequences: the name
+    never existed, or it is set GLOBALLY and every new pane still
+    receives it. ``still_set_globally`` separates them.
     """
     _raise_if_not_env_name(name)
     server = _get_server(socket_name=socket_name)
@@ -186,8 +213,17 @@ def unset_environment(
     existed = name in target.show_environment()
     target.unset_environment(name)
 
+    # "Nothing to remove here" and "still in force everywhere" were the
+    # same answer. Measured: unsetting a globally-set name at session
+    # scope reported absent, and a pane spawned afterwards still got it.
+    still_global = (
+        target is not server and not existed and name in server.show_environment()
+    )
     return EnvironmentSetResult(
-        name=name, value=None, status="unset" if existed else "absent"
+        name=name,
+        value=None,
+        status="unset" if existed else "absent",
+        still_set_globally=still_global,
     )
 
 

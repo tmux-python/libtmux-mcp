@@ -314,6 +314,15 @@ class EnvironmentResult(BaseModel):
             "does not report at all."
         ),
     )
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "Whether the global environment was merged underneath a "
+            "session's. When false and ``scope_queried`` is 'session', "
+            "``variables`` omits globals that new panes in that session "
+            "will still receive."
+        ),
+    )
 
 
 class EnvironmentSetResult(BaseModel):
@@ -327,8 +336,18 @@ class EnvironmentSetResult(BaseModel):
     status: str = Field(
         description=(
             "'set'; 'unset' when a variable was removed; 'absent' when there "
-            "was nothing to remove."
+            "was nothing to remove AT THE SCOPE TARGETED -- see "
+            "``still_set_globally``."
         )
+    )
+    still_set_globally: bool = Field(
+        default=False,
+        description=(
+            "True when a session-scoped unset reported 'absent' but the "
+            "name is still set in the GLOBAL environment, so new panes "
+            "keep receiving it. Without this, 'never existed' and "
+            "'still in force everywhere' are the same answer."
+        ),
     )
 
 
