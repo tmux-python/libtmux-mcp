@@ -280,3 +280,21 @@ def test_display_message_expands_plain_variables(
     )
 
     assert result == f"id={mcp_pane.pane_id} zoomed=0"
+
+
+def test_the_hash_escaper_owns_only_the_hash_expander() -> None:
+    """Escaping is per interpreter, and applying it twice is not a no-op.
+
+    ``pipe_pane`` adds ``%`` doubling because ``pipe-pane`` runs its
+    argument through ``strftime`` as well; ``-c`` and the name arguments
+    do not, so a percent there is literal. Whoever owns a value escapes
+    it once, at the boundary that knows which expanders it will meet.
+    """
+    from libtmux_mcp._utils import _escape_tmux_format
+
+    assert _escape_tmux_format("100%done") == "100%done"
+    assert _escape_tmux_format("log-%Y.txt") == "log-%Y.txt"
+    assert _escape_tmux_format("a#b") == "a##b"
+    assert _escape_tmux_format("a##b") == "a####b"
+    assert _escape_tmux_format(_escape_tmux_format("a#b")) == "a####b"
+    assert _escape_tmux_format("") == ""
