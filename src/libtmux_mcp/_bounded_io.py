@@ -33,18 +33,15 @@ import typing as t
 
 from libtmux import exc
 
+from libtmux_mcp._errors import ExpectedToolError
+from libtmux_mcp._exec import _LIVENESS_TIMEOUT_SECONDS, _tmux_argv
 from libtmux_mcp._pane_state import (
     HISTORY_LIMIT_FORMAT,
     PANE_STATE_FORMAT,
     _parse_pane_state,
 )
+from libtmux_mcp._resolve import tmux_id_sort_key
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
-from libtmux_mcp._utils import (
-    _LIVENESS_TIMEOUT_SECONDS,
-    ExpectedToolError,
-    _tmux_argv,
-    tmux_id_sort_key,
-)
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from libtmux.server import Server
@@ -113,7 +110,7 @@ def _truncate_lines_tail(
     (['a', 'b', 'c'], False, 0)
     >>> _truncate_lines_tail(["a", "b", "c"], max_lines=0)
     Traceback (most recent call last):
-    libtmux_mcp._utils.ExpectedToolError: max_lines must be at least 1, ...
+    libtmux_mcp._errors.ExpectedToolError: max_lines must be at least 1, ...
     """
     if max_lines is not None and max_lines < 1:
         # Python slices a non-positive cap into nonsense rather than
@@ -266,7 +263,7 @@ async def _resolve_pane_bounded(
     while a thread is involved, so this reproduces the resolution
     against :func:`_run_tmux_lines`, which owns a killable subprocess.
 
-    Mirrors :func:`libtmux_mcp._utils._resolve_pane` for exactly the
+    Mirrors :func:`libtmux_mcp._resolve._resolve_pane` for exactly the
     four targeting arguments this tool accepts, including which
     argument wins and which exception each miss raises, so the
     agent-visible error text is unchanged.

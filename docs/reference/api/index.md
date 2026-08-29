@@ -29,10 +29,10 @@ Pydantic models for requests and responses.
 Safety-tier enforcement and request hooks.
 :::
 
-:::{grid-item-card} Utils
-:link: utils
+:::{grid-item-card} Internals
+:link: internals
 :link-type: doc
-Shared helpers and utilities.
+Errors, safety tiers, tmux execution, caching, resolution and filters.
 :::
 
 ::::
@@ -44,5 +44,5 @@ server
 tools
 models
 middleware
-utils
+internals
 ```

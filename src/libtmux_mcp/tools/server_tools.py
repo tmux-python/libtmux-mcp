@@ -13,27 +13,23 @@ from concurrent.futures import ThreadPoolExecutor
 from libtmux.server import Server
 from libtmux.session import Session
 
+from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._exec import _run_tmux_sync
+from libtmux_mcp._filters import _apply_filters
+from libtmux_mcp._guards import _raise_if_start_directory_unusable
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._tmux_format import escape_format
-from libtmux_mcp._utils import (
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_RO,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _apply_filters,
-    _caller_is_on_server,
-    _get_caller_identity,
-    _get_server,
-    _invalidate_server,
-    _probe_liveness,
-    _raise_if_start_directory_unusable,
-    _run_tmux_sync,
-    _serialize_session,
-    handle_tool_errors,
 )
+from libtmux_mcp._serialize import _serialize_session
+from libtmux_mcp._servers import _get_server, _invalidate_server, _probe_liveness
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp.models import ClientInfo, ClientListResult, ServerInfo, SessionInfo
 
 logger = logging.getLogger(__name__)
@@ -128,7 +124,7 @@ def create_session(
         Environment variables to store in the session environment. Accepts
         either a dict of env vars or a JSON-serialized string of the same —
         the latter is the cursor-composer-1 workaround described in
-        :func:`libtmux_mcp._utils._coerce_dict_arg`. Each item appears in the
+        :func:`libtmux_mcp._filters._coerce_dict_arg`. Each item appears in the
         tmux client argv as one ``-eKEY=VALUE`` element and may be visible to
         host process inspection during launch. tmux retains the values in
         tmux session state, where ``show-environment`` can reveal them. They reach

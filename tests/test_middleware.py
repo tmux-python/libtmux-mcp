@@ -14,12 +14,8 @@ from fastmcp.server.middleware import MiddlewareContext
 from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams
 
-from libtmux_mcp._utils import (
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
-    ExpectedToolError,
-)
+from libtmux_mcp._errors import ExpectedToolError
+from libtmux_mcp._safety import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.middleware import (
     AuditMiddleware,
     ReadonlyRetryMiddleware,
@@ -1050,7 +1046,7 @@ def test_audit_records_safety_denial(
     than skipping the record. Without this ordering, denied access
     attempts would silently bypass forensic logging.
     """
-    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp._errors import ExpectedToolError
 
     audit = AuditMiddleware()
     ctx = _fake_context(name="kill_server", arguments={})
@@ -1192,7 +1188,7 @@ def test_readonly_retry_skips_self_bounded_tool() -> None:
     """
     from libtmux import exc as libtmux_exc
 
-    from libtmux_mcp._utils import TAG_SELF_BOUNDED
+    from libtmux_mcp._safety import TAG_SELF_BOUNDED
 
     middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
     ctx = _retry_context(tags={TAG_READONLY, TAG_SELF_BOUNDED})
@@ -1405,7 +1401,7 @@ def _error_probe_server() -> t.Any:
     from fastmcp import FastMCP
     from libtmux import exc as libtmux_exc
 
-    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp._errors import ExpectedToolError, _map_exception_to_tool_error
     from libtmux_mcp.middleware import ToolErrorResultMiddleware
 
     probe = FastMCP(
@@ -1708,7 +1704,7 @@ def _limiter_probe_server(
     """
     from fastmcp import FastMCP
 
-    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp._errors import ExpectedToolError
     from libtmux_mcp.middleware import (
         TailPreservingResponseLimitingMiddleware,
         ToolErrorResultMiddleware,
@@ -1969,7 +1965,7 @@ def test_wait_for_text_is_registered_self_bounded_and_still_readonly() -> None:
     """
     from fastmcp import FastMCP
 
-    from libtmux_mcp._utils import TAG_SELF_BOUNDED
+    from libtmux_mcp._safety import TAG_SELF_BOUNDED
     from libtmux_mcp.middleware import SafetyMiddleware
     from libtmux_mcp.tools import register_tools
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import typing as t
 
-from libtmux_mcp._utils import ExpectedToolError
+from libtmux_mcp._errors import ExpectedToolError
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane

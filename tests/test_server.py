@@ -11,7 +11,7 @@ import typing as t
 
 import pytest
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
+from libtmux_mcp._safety import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
 
 if t.TYPE_CHECKING:
@@ -1114,7 +1114,7 @@ def test_lifespan_clears_server_cache_on_exit() -> None:
     """Clean lifespan exit empties the process-wide ``_server_cache``."""
     import asyncio
 
-    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp._servers import _server_cache
     from libtmux_mcp.server import _lifespan
 
     # Seed the cache with a sentinel entry — the actual value doesn't
@@ -1199,7 +1199,7 @@ def test_lifespan_teardown_survives_a_cache_write_mid_gc() -> None:
     import asyncio
     import types
 
-    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp._servers import _server_cache
     from libtmux_mcp.server import _lifespan
 
     class _CachesAnotherServer:

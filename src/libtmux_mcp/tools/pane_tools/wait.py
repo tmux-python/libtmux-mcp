@@ -20,6 +20,7 @@ from libtmux_mcp._bounded_io import (
     _resolve_pane_bounded as _resolve_pane_bounded,  # noqa: PLC0414
     _run_tmux_lines as _run_tmux_lines,  # noqa: PLC0414
 )
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors_async
 from libtmux_mcp._pane_state import (
     _raise_if_pane_lifecycle_changed,
 )
@@ -29,11 +30,7 @@ from libtmux_mcp._progress import (
     _maybe_report_progress as _maybe_report_progress,  # noqa: PLC0414
     progress_ticker,
 )
-from libtmux_mcp._utils import (
-    ExpectedToolError,
-    _get_server_async,
-    handle_tool_errors_async,
-)
+from libtmux_mcp._servers import _get_server_async
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 from libtmux_mcp.models import WaitForTextResult
 from libtmux_mcp.tools.pane_tools.capture_since import _limit_lines

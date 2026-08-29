@@ -47,12 +47,12 @@ from mcp import McpError
 from mcp.types import CallToolRequestParams, ErrorData, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import ExpectedToolError
+from libtmux_mcp._safety import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     TAG_SELF_BOUNDED,
-    ExpectedToolError,
 )
 
 #: Errors describing a CALLER-caused failure, which must never reach the
@@ -247,7 +247,7 @@ def _is_schema_validation_error(error: BaseException) -> bool:
     too early for the ``handle_tool_errors`` decorators to classify.
     Bad arguments are agent-correctable (fix the call and retry), so
     they get the same expected/WARNING treatment as
-    :class:`~libtmux_mcp._utils.ExpectedToolError`.
+    :class:`~libtmux_mcp._errors.ExpectedToolError`.
 
     Output validation cannot be mistaken for this case: fastmcp's tool
     layer converts output-shape failures into error results itself, so
@@ -401,7 +401,7 @@ def _error_tool_result(
       (``__cause__`` when the raise site chained one, so agents see
       ``PaneNotFound`` rather than the ``ToolError`` wrapper).
     * ``expected`` — True for agent-correctable failures
-      (:class:`~libtmux_mcp._utils.ExpectedToolError` and
+      (:class:`~libtmux_mcp._errors.ExpectedToolError` and
       argument-schema validation errors), False for operator faults
       and potential server bugs.
     * ``suggestion`` — recovery hint. Carried by the error when the
@@ -474,7 +474,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 
     Logging honors ``FastMCPError.log_level`` (fastmcp >= 3.3): the
     expected failures demoted to WARNING by
-    :class:`~libtmux_mcp._utils.ExpectedToolError` no longer get
+    :class:`~libtmux_mcp._errors.ExpectedToolError` no longer get
     re-shouted at ERROR by the stock ``_log_error``. Argument-schema
     validation failures — raised by fastmcp before tool code can
     classify them — are treated as expected too (see

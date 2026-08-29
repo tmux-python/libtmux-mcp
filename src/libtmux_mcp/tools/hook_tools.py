@@ -36,16 +36,10 @@ from libtmux.pane import Pane
 from libtmux.session import Session
 from libtmux.window import Window
 
-from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
-    TAG_READONLY,
-    ExpectedToolError,
-    _get_server,
-    _resolve_pane,
-    _resolve_session,
-    _resolve_window,
-    handle_tool_errors,
-)
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._resolve import _resolve_pane, _resolve_session, _resolve_window
+from libtmux_mcp._safety import ANNOTATIONS_RO, TAG_READONLY
+from libtmux_mcp._servers import _get_server
 from libtmux_mcp.models import HookEntry, HookListResult
 
 if t.TYPE_CHECKING:

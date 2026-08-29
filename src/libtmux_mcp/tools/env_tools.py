@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import typing as t
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import handle_tool_errors
+from libtmux_mcp._guards import _raise_if_not_env_name
+from libtmux_mcp._resolve import _resolve_session
+from libtmux_mcp._safety import (
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     TAG_MUTATING,
     TAG_READONLY,
-    _get_server,
-    _raise_if_not_env_name,
-    _resolve_session,
-    handle_tool_errors,
 )
+from libtmux_mcp._servers import _get_server
 from libtmux_mcp.models import EnvironmentResult, EnvironmentSetResult
 
 if t.TYPE_CHECKING:

@@ -9,9 +9,18 @@ from libtmux.constants import PaneDirection
 from libtmux.pane import Pane
 from libtmux.window import Window
 
+from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._filters import _apply_filters
+from libtmux_mcp._guards import (
+    _raise_if_shell_unrunnable,
+    _raise_if_spawned_pane_is_gone,
+    _raise_if_start_directory_unusable,
+    _raise_spawned_pane_gone,
+)
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
-from libtmux_mcp._utils import (
+from libtmux_mcp._resolve import _resolve_pane, _resolve_session, _resolve_window
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
@@ -20,22 +29,10 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _apply_filters,
-    _caller_is_on_server,
-    _get_caller_identity,
-    _get_server,
-    _raise_if_shell_unrunnable,
-    _raise_if_spawned_pane_is_gone,
-    _raise_if_start_directory_unusable,
-    _raise_spawned_pane_gone,
-    _resolve_pane,
-    _resolve_session,
-    _resolve_window,
-    _serialize_pane,
-    _serialize_window,
-    handle_tool_errors,
 )
+from libtmux_mcp._serialize import _serialize_pane, _serialize_window
+from libtmux_mcp._servers import _get_server
+from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
 from libtmux_mcp.models import PaneInfo, PaneMoveResult, SplitResult, WindowInfo
 
 if t.TYPE_CHECKING:

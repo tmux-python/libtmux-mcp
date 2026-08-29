@@ -10,7 +10,7 @@ import typing as t
 import pytest
 from fastmcp import Client
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._safety import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
@@ -233,7 +233,7 @@ def test_run_command_is_registered_self_bounded_and_unbatchable() -> None:
     """
     from fastmcp import FastMCP
 
-    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp._errors import ExpectedToolError
     from libtmux_mcp.models import ToolCallOperation
     from libtmux_mcp.tools import register_tools
     from libtmux_mcp.tools.batch_tools import _get_allowed_tool_tier

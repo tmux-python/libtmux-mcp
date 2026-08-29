@@ -12,7 +12,15 @@ from libtmux import exc
 from libtmux.session import Session
 from libtmux.test.retry import retry_until
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._filters import _apply_filters
+from libtmux_mcp._guards import _unrunnable_spawn_program
+from libtmux_mcp._resolve import (
+    _resolve_pane,
+    _resolve_session,
+    _resolve_window,
+    tmux_id_sort_key,
+)
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
@@ -22,19 +30,13 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
-    _apply_filters,
-    _get_server,
-    _invalidate_server,
-    _resolve_pane,
-    _resolve_session,
-    _resolve_window,
+)
+from libtmux_mcp._serialize import (
     _serialize_pane,
     _serialize_session,
     _serialize_window,
-    _server_cache,
-    _unrunnable_spawn_program,
-    tmux_id_sort_key,
 )
+from libtmux_mcp._servers import _get_server, _invalidate_server, _server_cache
 from libtmux_mcp.models import SessionInfo
 from libtmux_mcp.tools.hook_tools import show_hooks
 from libtmux_mcp.tools.option_tools import show_option
@@ -56,13 +58,14 @@ def test_get_server_creates_server() -> None:
 def test_get_server_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_server returns the same instance for the same socket."""
     _server_cache.clear()
-    from libtmux_mcp import _utils
 
     # Simulate a live server so the cache is not evicted. Patched on the
     # probe rather than on ``Server.is_alive``: _get_server reads the
     # cached handle's liveness through the BOUNDED probe now, so a
     # server it cannot reach is refused rather than silently replaced.
-    monkeypatch.setattr(_utils, "_probe_liveness", lambda server: (True, None))
+    from libtmux_mcp import _servers
+
+    monkeypatch.setattr(_servers, "_probe_liveness", lambda server: (True, None))
     s1 = _get_server(socket_name="test_cache")
     s2 = _get_server(socket_name="test_cache")
     assert s1 is s2
@@ -395,7 +398,7 @@ def test_get_caller_identity_parses_tmux_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_get_caller_identity parses TMUX as socket_path,pid,session_id."""
-    from libtmux_mcp._utils import _get_caller_identity
+    from libtmux_mcp._caller import _get_caller_identity
 
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,$7")
     monkeypatch.setenv("TMUX_PANE", "%3")
@@ -411,7 +414,7 @@ def test_get_caller_identity_returns_none_when_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """_get_caller_identity returns None when neither TMUX nor TMUX_PANE set."""
-    from libtmux_mcp._utils import _get_caller_identity
+    from libtmux_mcp._caller import _get_caller_identity
 
     monkeypatch.delenv("TMUX", raising=False)
     monkeypatch.delenv("TMUX_PANE", raising=False)
@@ -422,7 +425,7 @@ def test_get_caller_identity_tolerant_of_malformed_tmux(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Malformed TMUX doesn't raise — missing fields become None."""
-    from libtmux_mcp._utils import _get_caller_identity
+    from libtmux_mcp._caller import _get_caller_identity
 
     monkeypatch.setenv("TMUX", "/tmp/sock")  # only socket, no pid/session
     monkeypatch.setenv("TMUX_PANE", "%1")
@@ -437,7 +440,7 @@ def test_caller_is_on_server_matches_realpath(
     mcp_server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Same resolved socket path matches across symlink variants."""
-    from libtmux_mcp._utils import (
+    from libtmux_mcp._caller import (
         _caller_is_on_server,
         _effective_socket_path,
         _get_caller_identity,
@@ -467,7 +470,7 @@ def test_effective_socket_path_prefers_display_message_query(
     fails and we fall back. The full structural fix requires
     consulting the caller's ``$TMUX`` path — see ``docs/topics/safety.md``.
     """
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     # Clear libtmux's cached socket_path so the query path is exercised.
     monkeypatch.setattr(mcp_server, "socket_path", None)
@@ -494,7 +497,7 @@ def test_effective_socket_path_falls_back_when_query_fails(
     Undoes the ``cmd`` monkeypatch before returning so the fixture's
     teardown ``kill-server`` call on the real method still works.
     """
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     def _boom(*_a: object, **_kw: object) -> object:
         msg = "display-message rejected"
@@ -515,7 +518,7 @@ def test_caller_is_on_server_rejects_different_socket(
     mcp_server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Different socket paths mean caller is on a different server."""
-    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+    from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
 
     monkeypatch.setenv("TMUX", "/tmp/tmux-99999/unrelated,1,$0")
     monkeypatch.setenv("TMUX_PANE", "%1")
@@ -537,7 +540,7 @@ def test_caller_is_on_server_basename_fallback_survives_tmpdir_divergence(
     different namespaces than ``$TMUX_TMPDIR``), so the conservative
     last-chance match still fires and blocks.
     """
-    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+    from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
 
     def _boom(*_a: object, **_kw: object) -> object:
         msg = "display-message rejected"
@@ -566,7 +569,7 @@ def test_caller_is_on_server_conservative_when_socket_unknown(
     mcp_server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """TMUX_PANE without TMUX: err on the side of blocking (True)."""
-    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+    from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
 
     monkeypatch.delenv("TMUX", raising=False)
     monkeypatch.setenv("TMUX_PANE", "%1")
@@ -577,7 +580,7 @@ def test_caller_is_on_server_none_when_not_in_tmux(
     mcp_server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Neither TMUX nor TMUX_PANE set → no caller → no guard."""
-    from libtmux_mcp._utils import _caller_is_on_server, _get_caller_identity
+    from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
 
     monkeypatch.delenv("TMUX", raising=False)
     monkeypatch.delenv("TMUX_PANE", raising=False)
@@ -662,7 +665,7 @@ def test_serialize_pane_is_caller_false_across_sockets(
     caller at server A, serialize pane ``%0`` on server B, assert the
     annotation says ``False``.
     """
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     server_a = TestServer()
     session_a = server_a.new_session(session_name="mcp_issue19_a")
@@ -833,7 +836,7 @@ def test_tmux_argv_honours_socket_and_binary(
     server: _FakeServer, args: tuple[str, ...], expected: list[str]
 ) -> None:
     """``_tmux_argv`` covers the socket_name / socket_path / tmux_bin axes."""
-    from libtmux_mcp._utils import _tmux_argv
+    from libtmux_mcp._exec import _tmux_argv
 
     assert _tmux_argv(t.cast("t.Any", server), *args) == expected
 
@@ -845,7 +848,7 @@ def test_tmux_argv_honours_socket_and_binary(
 
 def test_handle_tool_errors_passes_value_through() -> None:
     """A successful sync call returns the function's result untouched."""
-    from libtmux_mcp._utils import handle_tool_errors
+    from libtmux_mcp._errors import handle_tool_errors
 
     @handle_tool_errors
     def _ok(x: int) -> int:
@@ -856,7 +859,7 @@ def test_handle_tool_errors_passes_value_through() -> None:
 
 def test_handle_tool_errors_translates_libtmux_exception() -> None:
     """Libtmux errors are remapped to ``ToolError``."""
-    from libtmux_mcp._utils import handle_tool_errors
+    from libtmux_mcp._errors import handle_tool_errors
 
     err_msg = "session foo already exists"
 
@@ -870,7 +873,7 @@ def test_handle_tool_errors_translates_libtmux_exception() -> None:
 
 def test_handle_tool_errors_preserves_existing_tool_error() -> None:
     """An explicit ``ToolError`` is not rewrapped."""
-    from libtmux_mcp._utils import handle_tool_errors
+    from libtmux_mcp._errors import handle_tool_errors
 
     sentinel = ToolError("explicit message")
 
@@ -887,7 +890,7 @@ def test_handle_tool_errors_async_passes_value_through() -> None:
     """Successful async tools return their result normally."""
     import asyncio
 
-    from libtmux_mcp._utils import handle_tool_errors_async
+    from libtmux_mcp._errors import handle_tool_errors_async
 
     @handle_tool_errors_async
     async def _ok(x: int) -> int:
@@ -900,7 +903,7 @@ def test_handle_tool_errors_async_translates_libtmux_exception() -> None:
     """Async libtmux errors are remapped to ``ToolError`` consistently."""
     import asyncio
 
-    from libtmux_mcp._utils import handle_tool_errors_async
+    from libtmux_mcp._errors import handle_tool_errors_async
 
     msg = "%99"
 
@@ -916,7 +919,7 @@ def test_handle_tool_errors_async_preserves_tool_error() -> None:
     """Async tools re-raise explicit ``ToolError`` without rewrapping."""
     import asyncio
 
-    from libtmux_mcp._utils import handle_tool_errors_async
+    from libtmux_mcp._errors import handle_tool_errors_async
 
     sentinel = ToolError("explicit async message")
 
@@ -933,7 +936,7 @@ def test_handle_tool_errors_async_wraps_unexpected_exception() -> None:
     """Non-libtmux exceptions are wrapped with a typed prefix."""
     import asyncio
 
-    from libtmux_mcp._utils import handle_tool_errors_async
+    from libtmux_mcp._errors import handle_tool_errors_async
 
     msg = "boom"
 
@@ -969,7 +972,7 @@ def test_map_exception_expected_failures_log_at_warning(
     """Agent-correctable libtmux failures map to WARNING-level errors."""
     import logging
 
-    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp._errors import ExpectedToolError, _map_exception_to_tool_error
 
     mapped = _map_exception_to_tool_error("some_tool", raised)
     assert isinstance(mapped, ExpectedToolError)
@@ -988,7 +991,7 @@ def test_map_exception_operator_faults_stay_at_error(raised: Exception) -> None:
     """Environment faults and unexpected bugs keep the ERROR default."""
     import logging
 
-    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp._errors import ExpectedToolError, _map_exception_to_tool_error
 
     mapped = _map_exception_to_tool_error("some_tool", raised)
     assert not isinstance(mapped, ExpectedToolError)
@@ -1045,7 +1048,7 @@ def test_probe_liveness_separates_absent_from_unreachable(
     """
     import subprocess
 
-    from libtmux_mcp import _utils
+    from libtmux_mcp import _servers
 
     assert test_id
 
@@ -1053,8 +1056,8 @@ def test_probe_liveness_separates_absent_from_unreachable(
         args=["tmux"], returncode=returncode, stdout="", stderr="\n".join(stderr)
     )
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(_utils, "_run_tmux_sync", lambda *a, **k: result)
-        alive, unreachable = _utils._probe_liveness(t.cast("t.Any", object()))
+        patch.setattr(_servers, "_run_tmux_sync", lambda *a, **k: result)
+        alive, unreachable = _servers._probe_liveness(t.cast("t.Any", object()))
 
     assert alive is expected_alive
     assert unreachable == expected_unreachable
@@ -1068,14 +1071,14 @@ def test_probe_liveness_reports_a_socket_that_answers_nothing() -> None:
     separate -- absent and unreachable -- are both wrong, and the probe
     itself used to hang on the socket it was classifying.
     """
-    from libtmux_mcp import _utils
+    from libtmux_mcp import _servers
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(_utils, "_run_tmux_sync", lambda *a, **k: None)
-        alive, unreachable = _utils._probe_liveness(t.cast("t.Any", object()))
+        patch.setattr(_servers, "_run_tmux_sync", lambda *a, **k: None)
+        alive, unreachable = _servers._probe_liveness(t.cast("t.Any", object()))
 
     assert alive is False
-    assert unreachable is _utils.HUNG_SOCKET_REASON
+    assert unreachable is _servers.HUNG_SOCKET_REASON
 
 
 def test_map_exception_explains_a_newline_in_a_format_value() -> None:
@@ -1087,7 +1090,7 @@ def test_map_exception_explains_a_newline_in_a_format_value() -> None:
     previously reached the agent as "Unexpected error", at ERROR,
     naming nothing it could act on.
     """
-    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp._errors import ExpectedToolError, _map_exception_to_tool_error
 
     raised = ValueError("zip() argument 2 is shorter than argument 1")
     mapped = _map_exception_to_tool_error("list_panes", raised)
@@ -1105,7 +1108,7 @@ def test_map_exception_does_not_double_the_pane_prefix() -> None:
     mapper prefixed it again — visible on the most frequently hit error
     in the server.
     """
-    from libtmux_mcp._utils import _map_exception_to_tool_error
+    from libtmux_mcp._errors import _map_exception_to_tool_error
 
     raised = exc.PaneNotFound("%9999")
     assert str(raised) == "Pane not found: %9999"
@@ -1130,7 +1133,7 @@ def test_expected_tool_error_logs_warning_through_server(
 
     from fastmcp import Client, FastMCP
 
-    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp._errors import ExpectedToolError
 
     probe = FastMCP(name="probe")
 
@@ -1176,7 +1179,7 @@ def test_map_exception_suggestion_policy(
     most common agent mistake. The other expected branches stay
     hint-free until real transcripts show agents flailing on them.
     """
-    from libtmux_mcp._utils import _map_exception_to_tool_error
+    from libtmux_mcp._errors import _map_exception_to_tool_error
 
     mapped = _map_exception_to_tool_error("some_tool", raised)
     suggestion = getattr(mapped, "suggestion", None)
@@ -1198,14 +1201,14 @@ def test_resolve_session_does_not_call_an_unreachable_server_empty(
     asked. ``rename_session`` reported a running session missing, which
     invites recreating it under the same name.
     """
-    from libtmux_mcp import _utils
-
     # Control first: a genuinely absent session must still be absent.
     with pytest.raises(exc.TmuxObjectDoesNotExist):
         _resolve_session(mcp_server, session_name="definitely-not-here")
 
+    from libtmux_mcp import _servers
+
     monkeypatch.setattr(
-        _utils, "_probe_liveness", lambda _server: (False, "server exited")
+        _servers, "_probe_liveness", lambda _server: (False, "server exited")
     )
     with pytest.raises(ToolError, match="could not be queried"):
         _resolve_session(mcp_server, session_name="definitely-not-here")
@@ -1388,7 +1391,7 @@ def test_every_libtmux_tmux_cmd_call_site_is_bounded() -> None:
 
     import libtmux
 
-    from libtmux_mcp._utils import _PATCHED_LIBTMUX_MODULES, _BoundedTmuxCmd
+    from libtmux_mcp._exec import _PATCHED_LIBTMUX_MODULES, _BoundedTmuxCmd
 
     root = pathlib.Path(libtmux.__file__).parent
     callers: set[str] = set()
@@ -1427,7 +1430,7 @@ def test_bounded_tmux_cmd_matches_stock_output(mcp_server: Server) -> None:
     that fails on stderr, and ``has-session``, which libtmux reports
     through *stdout* rather than stderr.
     """
-    from libtmux_mcp._utils import _BoundedTmuxCmd
+    from libtmux_mcp._exec import _BoundedTmuxCmd
 
     stock = _BoundedTmuxCmd.__bases__[0]
     socket_flag = f"-L{mcp_server.socket_name}"
@@ -1470,7 +1473,7 @@ def test_caller_is_on_server_blocks_a_nested_self_kill(
       satisfied by a fallback route, so it does not isolate that path.
       ``test_caller_is_on_server_matches_realpath`` is what covers it.
     """
-    from libtmux_mcp._utils import (
+    from libtmux_mcp._caller import (
         CallerIdentity,
         _caller_is_on_server,
         _effective_socket_path,

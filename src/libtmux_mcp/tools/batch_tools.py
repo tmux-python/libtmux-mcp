@@ -10,14 +10,13 @@ from fastmcp import Context
 from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors_async
+from libtmux_mcp._safety import (
     ANNOTATIONS_RO,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     TAG_SELF_BOUNDED,
-    ExpectedToolError,
-    handle_tool_errors_async,
 )
 from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
 from libtmux_mcp.models import (

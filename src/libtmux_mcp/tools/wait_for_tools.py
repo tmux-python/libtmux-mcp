@@ -42,19 +42,16 @@ import typing as t
 
 from fastmcp import Context
 
-from libtmux_mcp._progress import progress_ticker
-from libtmux_mcp._tmux_proc import _run_tmux_bounded
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors_async
+from libtmux_mcp._exec import (
     _LIVENESS_TIMEOUT_SECONDS as _CALL_TIMEOUT_SECONDS,
-    ANNOTATIONS_MUTATING,
-    TAG_MUTATING,
-    TAG_SELF_BOUNDED,
-    ExpectedToolError,
-    _get_server_async,
     _raise_tmux_exec_error,
     _tmux_argv,
-    handle_tool_errors_async,
 )
+from libtmux_mcp._progress import progress_ticker
+from libtmux_mcp._safety import ANNOTATIONS_MUTATING, TAG_MUTATING, TAG_SELF_BOUNDED
+from libtmux_mcp._servers import _get_server_async
+from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 
 if t.TYPE_CHECKING:
@@ -132,11 +129,11 @@ def _validate_channel_name(name: str) -> str:
     >>> _validate_channel_name("has space")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid channel name: 'has space'
+    libtmux_mcp._errors.ExpectedToolError: Invalid channel name: 'has space'
     >>> _validate_channel_name("")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid channel name: ''
+    libtmux_mcp._errors.ExpectedToolError: Invalid channel name: ''
     """
     if not _CHANNEL_NAME_RE.fullmatch(name):
         msg = f"Invalid channel name: {name!r}"

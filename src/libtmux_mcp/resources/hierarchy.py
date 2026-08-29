@@ -7,13 +7,12 @@ import typing as t
 
 from fastmcp.exceptions import ResourceError
 
-from libtmux_mcp._utils import (
-    _get_server,
-    _probe_liveness,
+from libtmux_mcp._serialize import (
     _serialize_pane,
     _serialize_session,
     _serialize_window,
 )
+from libtmux_mcp._servers import _get_server, _probe_liveness
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP

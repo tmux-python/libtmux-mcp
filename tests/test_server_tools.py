@@ -332,7 +332,7 @@ def test_kill_server_self_kill_guard(
     """kill_server refuses when the caller shares the target's socket."""
     from fastmcp.exceptions import ToolError
 
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     socket_path = _effective_socket_path(mcp_server)
     monkeypatch.setenv("TMUX", f"{socket_path},12345,$0")
@@ -525,7 +525,7 @@ def test_tools_refuse_a_wedged_server_instead_of_hanging(
 
     from fastmcp.exceptions import ToolError
 
-    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp._servers import _server_cache
     from libtmux_mcp.tools.server_tools import get_server_info
 
     # A short dir, not ``tmp_path``: UNIX socket paths cap at 108 bytes.
@@ -715,13 +715,13 @@ def test_a_tool_is_bounded_past_the_liveness_probe(
 
     from fastmcp.exceptions import ToolError
 
-    from libtmux_mcp import _utils
-    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp import _exec
+    from libtmux_mcp._servers import _server_cache
     from libtmux_mcp.tools.window_tools import break_pane
 
     # Exercise the mechanism, not the shipped constant: a 5s bound would
     # spend 5s of suite time proving what 0.5s proves.
-    monkeypatch.setattr(_utils, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(_exec, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
     upstream = (
         pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
         / f"tmux-{os.geteuid()}"
@@ -850,7 +850,7 @@ def test_kill_server_refuses_the_caller_s_own_server(
     rather than belt-and-braces -- it catches a tool that refuses in
     words and kills in fact.
     """
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     socket_path = _effective_socket_path(mcp_server)
     assert socket_path is not None

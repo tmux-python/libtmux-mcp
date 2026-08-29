@@ -91,7 +91,7 @@ async def _run_tmux_bounded(
     ----------
     argv : list of str
         Full tmux command vector, as built by
-        :func:`~libtmux_mcp._utils._tmux_argv`.
+        :func:`~libtmux_mcp._exec._tmux_argv`.
     timeout : float
         Wall-clock bound in seconds. On expiry the child is killed and
         reaped before ``TimeoutError`` is raised.

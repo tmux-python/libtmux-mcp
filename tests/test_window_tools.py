@@ -502,7 +502,7 @@ def test_list_panes_filters_by_is_caller(
     filterable. It is the only documented answer to "which pane am I
     in?" -- there is no whoami tool.
     """
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     pane = mcp_session.active_window.active_pane
     assert pane is not None and pane.pane_id is not None

@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import typing as t
 
-from libtmux_mcp._utils import ExpectedToolError
+from libtmux_mcp._errors import ExpectedToolError
 
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Iterable

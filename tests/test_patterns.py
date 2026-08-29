@@ -6,8 +6,8 @@ import re
 
 import pytest
 
+from libtmux_mcp._errors import ExpectedToolError
 from libtmux_mcp._patterns import compile_pattern
-from libtmux_mcp._utils import ExpectedToolError
 
 #: Patterns that backtrack exponentially on a non-matching line.
 #: ``(a+)+$`` against one 121-character line does not finish in three

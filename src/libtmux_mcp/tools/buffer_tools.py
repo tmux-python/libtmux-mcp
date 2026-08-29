@@ -38,20 +38,18 @@ from libtmux_mcp._bounded_io import (
     CAPTURE_DEFAULT_MAX_LINES,
     _truncate_lines_tail,
 )
-from libtmux_mcp._utils import (
-    _LIVENESS_TIMEOUT_SECONDS,
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._exec import _LIVENESS_TIMEOUT_SECONDS, _tmux_argv
+from libtmux_mcp._guards import _raise_if_untargeted
+from libtmux_mcp._resolve import _resolve_pane
+from libtmux_mcp._safety import (
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _get_server,
-    _raise_if_untargeted,
-    _resolve_pane,
-    _tmux_argv,
-    handle_tool_errors,
 )
+from libtmux_mcp._servers import _get_server
 from libtmux_mcp.models import BufferContent, BufferRef
 
 #: Default line cap for :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`.
@@ -99,11 +97,11 @@ def _validate_logical_name(name: str) -> str:
     >>> _validate_logical_name("has space")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid logical buffer name: 'has space'
+    libtmux_mcp._errors.ExpectedToolError: Invalid logical buffer name: 'has space'
     >>> _validate_logical_name("with/slash")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid logical buffer name: 'with/slash'
+    libtmux_mcp._errors.ExpectedToolError: Invalid logical buffer name: 'with/slash'
     """
     if name == "":
         return "buf"
@@ -128,11 +126,11 @@ def _validate_buffer_name(name: str) -> str:
     >>> _validate_buffer_name("clipboard")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: 'clipboard' is not an MCP-allocated buffer
+    libtmux_mcp._errors.ExpectedToolError: 'clipboard' is not an MCP-allocated buffer
     >>> _validate_buffer_name("libtmux_mcp_shortuuid_buf")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: 'libtmux_mcp_...' is not an MCP-...
+    libtmux_mcp._errors.ExpectedToolError: 'libtmux_mcp_...' is not an MCP-...
     """
     if not _BUFFER_NAME_RE.fullmatch(name):
         # Not "invalid": tmux accepts any of these names happily. It is
@@ -468,7 +466,7 @@ def register(mcp: FastMCP) -> None:
     """Register buffer tools with the MCP instance.
 
     ``load_buffer`` is tagged with
-    :data:`~libtmux_mcp._utils.ANNOTATIONS_SHELL` because its ``content``
+    :data:`~libtmux_mcp._safety.ANNOTATIONS_SHELL` because its ``content``
     argument is arbitrary user text that may carry interactive-environment
     side effects (commands about to be pasted into a shell). Other buffer
     tools are plain mutating ops on the tmux buffer store.

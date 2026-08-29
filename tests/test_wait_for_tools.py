@@ -633,12 +633,12 @@ def test_a_channel_signalled_past_the_flat_bound_still_succeeds(
     Pinned because that refactor would pass every other test in the
     suite: nothing else signals a channel later than the flat bound.
     """
-    from libtmux_mcp import _utils
-
     # Exercise the distinction, not the shipped constants: with the flat
     # bound at 0.5s, a signal at 1.5s is past it by the same logic that
     # 6s is past 5s, and costs the suite 1.5s instead of 6.
-    monkeypatch.setattr(_utils, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
+    from libtmux_mcp import _exec
+
+    monkeypatch.setattr(_exec, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
     channel = f"slow_{uuid.uuid4().hex[:8]}"
     socket_name = mcp_server.socket_name
     assert socket_name is not None

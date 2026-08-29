@@ -19,11 +19,9 @@ from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
 from libtmux_mcp import _progress as _progress_module
-from libtmux_mcp._utils import (
-    ExpectedToolError,
-    _resolve_pane,
-    _serialize_pane,
-)
+from libtmux_mcp._errors import ExpectedToolError
+from libtmux_mcp._resolve import _resolve_pane
+from libtmux_mcp._serialize import _serialize_pane
 from libtmux_mcp.models import (
     CaptureSinceResult,
     PaneContentMatch,
@@ -2928,17 +2926,17 @@ def test_async_tools_do_not_use_the_synchronous_server_resolver(
     0.42-0.54s, indistinguishable by magnitude from the block it was
     looking for. A stall the machine can fake is not a signal.
     """
-    from libtmux_mcp import _utils
+    from libtmux_mcp import _servers
 
     called: list[str] = []
-    real = _utils._probe_liveness
+    real = _servers._probe_liveness
 
     def spy(server: t.Any) -> tuple[bool, str | None]:
         called.append("sync")
         return real(server)
 
-    monkeypatch.setattr(_utils, "_probe_liveness", spy)
-    _utils._server_cache.clear()
+    monkeypatch.setattr(_servers, "_probe_liveness", spy)
+    _servers._server_cache.clear()
 
     asyncio.run(
         capture_since(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
@@ -2950,7 +2948,7 @@ def test_async_tools_do_not_use_the_synchronous_server_resolver(
 
     # Control: the SYNC tools still use it, so an empty list above means
     # "the async path avoided it" rather than "the spy never worked".
-    _utils._server_cache.clear()
+    _servers._server_cache.clear()
     capture_pane(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
     assert called, "the spy never fired; the assertion above proved nothing"
 
@@ -3276,7 +3274,7 @@ def test_respawn_pane_self_kill_guard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """respawn_pane refuses when the caller's pane is the target."""
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     window = mcp_session.active_window
     new_pane = window.split(shell="sleep 3600")
@@ -4145,7 +4143,7 @@ def test_wait_resolver_matches_the_canonical_resolver(
     """
     import asyncio
 
-    from libtmux_mcp._utils import _resolve_pane
+    from libtmux_mcp._resolve import _resolve_pane
     from libtmux_mcp.tools.pane_tools.wait import _resolve_pane_bounded
 
     # A second window and pane so "first listed" is a real choice rather
@@ -4202,7 +4200,7 @@ def test_wait_resolver_raises_like_the_canonical_resolver(
     """
     import asyncio
 
-    from libtmux_mcp._utils import _resolve_pane
+    from libtmux_mcp._resolve import _resolve_pane
     from libtmux_mcp.tools.pane_tools.wait import _resolve_pane_bounded
 
     with pytest.raises(libtmux_exc.LibTmuxException) as canonical_exc:
@@ -5572,7 +5570,7 @@ def test_wait_for_text_propagates_cancellation(
     """``wait_for_text`` raises ``CancelledError`` (not ``ToolError``).
 
     Regression guard for MCP cancellation semantics.
-    ``handle_tool_errors_async`` in ``_utils.py:827-850`` catches
+    ``handle_tool_errors_async`` in ``_servers.py:827-850`` catches
     ``Exception`` (not ``BaseException``); since
     ``asyncio.CancelledError`` is a ``BaseException`` (Python 3.8+) it
     propagates today. Locking that in: if a future change broadens the

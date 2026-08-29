@@ -13,7 +13,7 @@ import typing as t
 import pytest
 from libtmux.server import Server as _Server
 
-from libtmux_mcp._utils import _server_cache
+from libtmux_mcp._servers import _server_cache
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane

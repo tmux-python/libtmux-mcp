@@ -12,20 +12,17 @@ from libtmux import exc
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
 
-from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
-from libtmux_mcp._utils import (
-    ExpectedToolError,
-    _caller_is_on_server,
-    _get_caller_identity,
-    _get_server,
+from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._guards import (
     _raise_if_shell_unrunnable,
     _raise_if_start_directory_unusable,
-    _resolve_pane,
-    _resolve_window,
-    _serialize_pane,
-    handle_tool_errors,
 )
+from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._resolve import _resolve_pane, _resolve_window
+from libtmux_mcp._serialize import _serialize_pane
+from libtmux_mcp._servers import _get_server
+from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
 from libtmux_mcp.models import (
     PaneInfo,
 )

@@ -10,7 +10,7 @@ across MCP restarts.
 
 **Side effects:** Removes the named buffer from the tmux server.
 Subsequent {tooliconl}`paste-buffer` calls against the deleted name
-return an {exc}`~libtmux_mcp._utils.ExpectedToolError`.
+return an {exc}`~libtmux_mcp._errors.ExpectedToolError`.
 
 ```{fastmcp-tool-input} buffer_tools.delete_buffer
 ```

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import typing as t
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,

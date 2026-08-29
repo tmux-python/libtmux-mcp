@@ -24,13 +24,13 @@ from libtmux_mcp._history import (
     _configure_history_defaults,
     _resolve_suppress_history,
 )
-from libtmux_mcp._utils import (
+from libtmux_mcp._safety import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
-    _drain_server_cache,
 )
+from libtmux_mcp._servers import _drain_server_cache
 from libtmux_mcp._wait_policy import (
     WAIT_MAX_SECONDS_ENV,
     _configure_wait_ceiling,

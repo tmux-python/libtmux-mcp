@@ -7,20 +7,17 @@ import typing as t
 from libtmux import exc
 from libtmux.constants import OptionScope
 
-from libtmux_mcp._tmux_format import escape_format
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._guards import _raise_if_flag_like
+from libtmux_mcp._resolve import _resolve_pane, _resolve_session, _resolve_window
+from libtmux_mcp._safety import (
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _get_server,
-    _raise_if_flag_like,
-    _resolve_pane,
-    _resolve_session,
-    _resolve_window,
-    handle_tool_errors,
 )
+from libtmux_mcp._servers import _get_server
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp.models import OptionResult, OptionSetResult
 
 if t.TYPE_CHECKING:
