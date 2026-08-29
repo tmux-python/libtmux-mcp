@@ -1634,6 +1634,16 @@ unusual entry shape.
 
 ### Development
 
+**A cancellation test cost 60 seconds and checked the wrong process**
+
+Its stub `tmux` recorded `$$` and then ran `sleep 60`, so the pid it
+asserted was reaped belonged to the SHELL, while the `sleep` that
+actually held the stdout pipe was a child of it. Cancelling killed the
+shell; the orphan kept the pipe open, so the test waited out the full
+sleep. `exec sleep 60` makes the recorded pid the sleeping process:
+0.02s instead of 60.03s, and the assertion now covers the process that
+was surviving.
+
 **Four timing probes measured the machine instead of the code**
 
 The parallel gate caught two flakes and a grep found two more of the

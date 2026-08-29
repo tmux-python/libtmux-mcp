@@ -5973,7 +5973,12 @@ def test_run_tmux_lines_cancel_reaps_child(
 
     pidfile = tmp_path / "pid"
     stub = tmp_path / "tmux"
-    stub.write_text(f'#!/bin/sh\necho $$ > "{pidfile}"\nsleep 60\n')
+    # ``exec``, so the recorded pid IS the sleeping process rather than
+    # a shell that spawned it. Without it the shell died on cancel and
+    # its orphaned ``sleep`` kept the stdout pipe open, so the test cost
+    # the full 60 seconds -- and it was checking that the PARENT was
+    # reaped while the process actually holding the pipe survived.
+    stub.write_text(f'#!/bin/sh\necho $$ > "{pidfile}"\nexec sleep 60\n')
     stub.chmod(0o755)
 
     class _StubServer:
