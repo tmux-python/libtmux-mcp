@@ -321,14 +321,16 @@ def send_keys(
     payloads.
 
     **Verifying a write:** do not string-compare captured text against
-    what you sent. tmux renders a character it will not draw as a
-    ``<XXXX>`` placeholder, so the bytes can arrive correctly and still
-    read back different. Measured on tmux 3.7c: a combining sequence
-    (``e`` + U+0301) returns ``e<0301>``, U+200D returns ``<200d>``,
-    U+FE0F ``<fe0f>``, U+200B ``<200b>``. Precomposed characters such as
-    U+00E9 do survive, which is what makes this easy to miss -- ``école``
-    round-trips when it is precomposed and does not when it is decomposed.
-    Compare on an ASCII marker you control instead.
+    what you sent. The bytes arrive correctly and can still read back
+    different, because the pane's LINE EDITOR echoes them, not tmux.
+    zsh renders a character it considers unprintable as ``<XXXX>``:
+    measured, ``e`` + U+0301 echoes as ``e<0301>``, U+200D as
+    ``<200d>``, while precomposed U+00E9 survives -- so ``école``
+    round-trips composed and does not decomposed. The same payload
+    reaches a pane running ``sh`` or ``cat`` verbatim, which is why
+    this looks unreproducible until the occupant is taken into account.
+    tmux itself has no such transform. Compare on an ASCII marker you
+    control instead.
 
     Parameters
     ----------

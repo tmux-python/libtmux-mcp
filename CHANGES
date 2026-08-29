@@ -8,6 +8,37 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Hook queries answer about the object you named
+
+`show_hooks(scope="window", target="@0")` returned the SESSION's hooks,
+and the window's were unreachable at any scope. Same for `scope="pane"`.
+A caller asking "what hooks are on this window" was told about a
+different object, with nothing indicating the answer came from
+elsewhere.
+
+`_resolve_hook_target` resolved the object and then dropped the scope,
+because passing a redundant scope to a Session mis-builds libtmux's
+argv. That premise holds for Session, whose object default IS the
+session tree -- measured, `Session.show_hooks(scope=Session)` returns
+an empty listing. It does not hold for Window or Pane: their default
+resolves to the session tree too, so dropping the scope redirected the
+query one level up. They take the explicit scope without the argv
+problem, so the reset now applies to Session alone.
+
+The untargeted listing was incoherent for a related reason. It merged
+the GLOBAL-window tree onto a session-scope base, producing a set that
+corresponds to no tmux scope -- session hooks plus global-window hooks,
+with global-session hooks missing entirely -- and it listed hooks that
+`show_hook(name)` with the same defaults could not find.
+
+Which window tree is the counterpart depends on the base query, and
+treating `scope=None` and `scope="server"` as interchangeable is what
+broke it: `"server"` queries the global session tree, so the global
+window tree pairs with it; `None` queries this session's tree, so this
+window's does. `show_hooks()` and `show_hook(name)` now agree at every
+scope, which is the invariant the merge existed to protect.
+
+
 #### `wait_for_text` sees a status line printed again
 
 A program that prints `BUILD OK`, scrolls, and prints `BUILD OK` again
@@ -55,17 +86,29 @@ A caller whose own budget is shorter than the grace gets a plain
 timeout rather than a refusal: under a shorter budget "it has not
 started yet" and "it never will" are the same observation.
 
-#### The `send_keys` Unicode warning was right, and is now specific
+#### The `send_keys` Unicode warning blamed the wrong component
 
 It read "tmux renders combining marks and zero-width joiners as
-`<XXXX>` placeholders". Re-tested because a sweep across nine tmux
-versions and three locales reported it unreproducible. It reproduces
-immediately once the payload distinguishes precomposed from decomposed
-characters -- which is exactly why the sweep missed it. Measured on
-3.7c: `e` + U+0301 returns `e<0301>`, U+200D `<200d>`, U+FE0F `<fe0f>`,
-U+200B `<200b>`, while precomposed U+00E9 survives. So `école`
-round-trips when precomposed and does not when decomposed. The note now
-names the constructs rather than asserting the conclusion.
+`<XXXX>` placeholders". The advice built on it -- do not string-compare
+captured text against what you sent -- is right and worth keeping. The
+attribution was wrong, and tmux's source settles it: there is no
+hex-in-angle-brackets format anywhere in it.
+
+The transform is the pane's LINE EDITOR. Same payload, same tmux,
+different occupant:
+
+| pane running | result |
+|---|---|
+| `sh` | verbatim |
+| `cat` | verbatim |
+| `zsh -f` | `e<0301>`, `a<200d>b` |
+
+zsh renders a character it considers unprintable as `<XXXX>` when it
+echoes typed input. Precomposed U+00E9 survives and decomposed
+`e` + U+0301 does not, so `école` round-trips one way and not the
+other -- which is why a sweep across nine tmux versions and three
+locales reported the whole thing unreproducible, and why testing more
+tmux versions could never have settled it.
 
 
 #### Four smaller honesty and validation fixes

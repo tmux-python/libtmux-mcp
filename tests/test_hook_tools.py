@@ -125,12 +125,16 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
             scope="server",
             socket_name=mcp_server.socket_name,
         )
-        # The DEFAULT call shape, which is what an agent actually
-        # writes. The merge was gated on an explicit scope="server", so
-        # this path skipped it and reproduced the very inconsistency the
-        # merge exists to prevent -- and this test, named for that
-        # behavior, never exercised it.
+        # The invariant holds WITHIN a scope, so the default listing is
+        # compared against the default lookup. Comparing it against
+        # show_hook(scope="server") instead is what the old assertion
+        # did, and the only way to satisfy that was to staple global
+        # hooks onto a session-scope listing -- a set corresponding to
+        # no tmux scope.
         defaulted = show_hooks(socket_name=mcp_server.socket_name)
+        defaulted_singular = show_hook(
+            hook_name="pane-focus-in", socket_name=mcp_server.socket_name
+        )
 
         # Control: show_hook finds the -g-set pane hook.
         singular_names = {e.hook_name for e in singular.entries}
@@ -146,9 +150,13 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
         )
 
         defaulted_names = {e.hook_name for e in defaulted.entries}
-        assert "pane-focus-in" in defaulted_names, (
-            f"show_hooks() returned {defaulted_names} but show_hook found "
-            f"pane-focus-in — the default scope must merge both trees too."
+        singular_default = {e.hook_name for e in defaulted_singular.entries}
+        assert ("pane-focus-in" in defaulted_names) == (
+            "pane-focus-in" in singular_default
+        ), (
+            f"show_hooks() returned {defaulted_names} and show_hook() "
+            f"returned {singular_default} — the two must agree at the same "
+            "scope, whichever way."
         )
     finally:
         mcp_server.cmd("set-hook", "-g", "-u", "pane-focus-in")
@@ -206,3 +214,34 @@ def test_show_hooks_target_without_scope(mcp_server: Server) -> None:
             target="somesession",
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_show_hooks_reports_the_scope_it_was_asked_for(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A window- or pane-scoped query must not answer about the session.
+
+    Window and Pane objects default to the SESSION tree, so resolving
+    the object and then dropping the scope silently redirected the
+    query one level up: ``scope="window"`` returned the session's hooks
+    and no spelling reached the window's at all.
+    """
+    window = mcp_session.active_window
+    mcp_session.cmd("set-hook", "alert-activity", "display-message SESSION_MARK")
+    window.cmd("set-hook", "-w", "pane-focus-in", "display-message WINDOW_MARK")
+
+    def marks(**kwargs: t.Any) -> set[str]:
+        result = show_hooks(socket_name=mcp_server.socket_name, **kwargs)
+        return {entry.command.split()[-1] for entry in result.entries}
+
+    assert marks(scope="session", target=mcp_session.session_name) == {"SESSION_MARK"}
+    assert marks(scope="window", target=window.window_id) == {"WINDOW_MARK"}
+
+    # The untargeted listing must contain exactly what a name-targeted
+    # lookup finds with the same defaults -- the invariant its own
+    # docstring promises, previously broken in both directions.
+    listed = marks()
+    assert listed == {"SESSION_MARK", "WINDOW_MARK"}
+    for hook_name in ("alert-activity", "pane-focus-in"):
+        found = show_hook(hook_name=hook_name, socket_name=mcp_server.socket_name)
+        assert found.entries, f"{hook_name} listed but not findable by name"

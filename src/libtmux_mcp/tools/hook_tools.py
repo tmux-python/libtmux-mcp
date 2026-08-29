@@ -93,14 +93,21 @@ def _resolve_hook_target(
         raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is not None:
-        # Let the resolved object carry its own scope — passing scope
-        # explicitly is redundant and can mis-build the CLI args.
+        # Session only. Its object default IS the session tree, so
+        # dropping the scope there is genuinely redundant -- and passing
+        # it mis-builds the argv (measured: returns an empty listing).
+        #
+        # Window and Pane default to the SESSION tree too, so dropping
+        # the scope for them silently answered about a different object:
+        # show_hooks(scope="window", target=@0) returned the session's
+        # hooks and no spelling reached the window's. Measured, they
+        # take the explicit scope without the argv problem.
         if opt_scope == OptionScope.Session:
             return _resolve_session(server, session_name=target), None
         if opt_scope == OptionScope.Window:
-            return _resolve_window(server, window_id=target), None
+            return _resolve_window(server, window_id=target), opt_scope
         if opt_scope == OptionScope.Pane:
-            return _resolve_pane(server, pane_id=target), None
+            return _resolve_pane(server, pane_id=target), opt_scope
     return server, opt_scope
 
 
@@ -199,17 +206,21 @@ def show_hooks(
     raw: dict[str, t.Any] = obj.show_hooks(global_=global_, scope=opt_scope)
 
     if target is None and scope in (None, "server"):
-        # Also consult the global-window options tree. tmux doesn't
-        # unify ``-g`` listings across the session and window trees;
-        # ``show-hooks -g`` alone misses pane/window-level globals.
-        # Without this merge, ``show_hook(name)`` would find a hook
-        # that ``show_hooks()`` silently drops.
+        # tmux does not unify a listing across the session and window
+        # trees, so one query alone misses half of what a name-targeted
+        # ``show_hook`` would find -- the inconsistency this merge
+        # exists to prevent.
         #
-        # ``scope=None`` must be included: it is the DEFAULT, so the
-        # obvious call — ``show_hooks()`` — skipped the merge entirely
-        # and reproduced the very inconsistency this block exists to
-        # prevent. Only an explicit ``scope="server"`` got the fix.
-        raw_window = obj.show_hooks(global_=True, scope=OptionScope.Window)
+        # WHICH window tree depends on the base query, and treating the
+        # two as interchangeable is what made the untargeted listing
+        # incoherent: it returned session-scope hooks stapled to
+        # GLOBAL-window ones, a combination corresponding to no tmux
+        # scope, while omitting global-session hooks entirely.
+        #
+        # scope="server" queries the global session tree, so the global
+        # window tree is its counterpart. scope=None queries THIS
+        # session's tree, so the counterpart is this window's.
+        raw_window = obj.show_hooks(global_=scope == "server", scope=OptionScope.Window)
         for name, value in raw_window.items():
             raw.setdefault(name, value)
 
