@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import typing as t
+import uuid
 
 import pytest
 from fastmcp.exceptions import ToolError
@@ -501,3 +502,85 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
         f"cancelled wait_for_channel orphaned tmux child(ren) {survivors}; "
         "the child outlives the cancellation for the rest of its timeout"
     )
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_the_silent_waits_now_report_progress(mcp_server: Server) -> None:
+    """Two of the three waits told the client nothing until they returned.
+
+    ``wait_for_text`` polls, so it reports from inside its own loop.
+    ``run_command`` and ``wait_for_channel`` each await ONE
+    ``tmux wait-for`` child, so a client watching a thirty-second call
+    saw the same thing whether the command was running or the server had
+    stopped answering.
+    """
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+    channel = f"pgt_{uuid.uuid4().hex[:8]}"
+    seen: list[str] = []
+
+    async def _on_progress(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        seen.append(message or f"{progress}/{total}")
+
+    async def _exercise() -> None:
+        async with Client(build_mcp_server(), progress_handler=_on_progress) as client:
+            waiter = asyncio.create_task(
+                client.call_tool(
+                    "wait_for_channel",
+                    {"channel": channel, "timeout": 8.0, "socket_name": socket_name},
+                    raise_on_error=False,
+                )
+            )
+            # Long enough for at least one tick, short enough to stay an
+            # inner-loop test.
+            await asyncio.sleep(1.5)
+            mcp_server.cmd("wait-for", "-S", channel)
+            await waiter
+
+    asyncio.run(_exercise())
+    assert seen, "the client received no progress during the wait"
+    assert any("elapsed" in message for message in seen), seen
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_a_fast_wait_reports_no_progress(mcp_server: Server) -> None:
+    """The ticker must not fire on a call that returns immediately.
+
+    Without this the assertion above is satisfied by a ticker that
+    reports unconditionally, which would put a notification on the wire
+    for every sub-second call.
+    """
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+    channel = f"pgf_{uuid.uuid4().hex[:8]}"
+    seen: list[str] = []
+
+    async def _on_progress(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        seen.append(message or "")
+
+    async def _exercise() -> t.Any:
+        async with Client(build_mcp_server(), progress_handler=_on_progress) as client:
+            mcp_server.cmd("wait-for", "-S", channel)
+            return await client.call_tool(
+                "wait_for_channel",
+                {"channel": channel, "timeout": 8.0, "socket_name": socket_name},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_exercise())
+    # An errored call also reports nothing, so the outcome is asserted
+    # first: otherwise this passes for the wrong reason.
+    assert result.is_error is False, result.content
+    assert seen == [], f"a sub-second wait put {len(seen)} notifications on the wire"

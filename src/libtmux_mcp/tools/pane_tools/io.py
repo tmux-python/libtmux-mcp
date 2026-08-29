@@ -13,8 +13,10 @@ import time
 import typing as t
 import uuid
 
+from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     ExpectedToolError,
@@ -578,6 +580,7 @@ async def run_command(
     max_lines: int | None = None,
     suppress_history: bool = False,
     socket_name: str | None = None,
+    ctx: Context | None = None,
 ) -> RunCommandResult:
     """Run a shell command in a pane, wait for completion, and capture output.
 
@@ -809,11 +812,24 @@ async def run_command(
     returncode = 0
     stderr_bytes = b""
     if started_ok:
+        # A single await hears nothing until it returns, so a client
+        # watching a thirty-second command saw the same thing whether
+        # the command was running or the server had stopped answering.
+        # wait_for_text reports from inside its poll loop; this one has
+        # no loop to report from.
         try:
-            returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
-                wait_argv,
-                timeout=max(effective_timeout - (time.monotonic() - started), 0.0),
-            )
+            async with progress_ticker(
+                ctx,
+                total=effective_timeout,
+                message=lambda elapsed, left: (
+                    f"Running in pane {pane.pane_id}: {elapsed:.1f}s elapsed, "
+                    f"{left:.1f}s left"
+                ),
+            ):
+                returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
+                    wait_argv,
+                    timeout=max(effective_timeout - (time.monotonic() - started), 0.0),
+                )
         except TimeoutError:
             timed_out = True
     if returncode != 0:

@@ -21,6 +21,28 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `run_command` and `wait_for_channel` report progress
+
+`wait_for_text` polls, so it reports elapsed and remaining seconds from
+inside its own loop. The other two waits each await ONE `tmux wait-for`
+child, so a client watching a thirty-second `run_command` saw the same
+thing whether the command was running or the tmux server had stopped
+answering.
+
+A ticker beside the wait closes that, once a second:
+
+    Running in pane %0: 2.0s elapsed, 8.0s left
+    Waiting on channel deploy_ok: 2.0s elapsed, 3.0s left
+
+It does not fire on a call that returns inside the first second, so a
+sub-second wait still puts nothing on the wire.
+
+The ticker is cancelled and awaited in a `finally`, and its own
+`CancelledError` is suppressed so it cannot replace the one the caller
+is propagating — `run_command` is the most-cancelled wait in the tree
+and its cancellation semantics are the thing least worth breaking for a
+notification.
+
 #### One wedged socket no longer stalls every concurrent call
 
 Resolving a server shells out to tmux to check the socket answers --

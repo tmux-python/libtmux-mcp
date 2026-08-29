@@ -40,6 +40,9 @@ import re
 import subprocess
 import typing as t
 
+from fastmcp import Context
+
+from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     ANNOTATIONS_MUTATING,
@@ -53,7 +56,7 @@ from libtmux_mcp._utils import (
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 
 if t.TYPE_CHECKING:
-    from fastmcp import FastMCP
+    from fastmcp import Context, FastMCP
     from libtmux.server import Server
 
 #: Allowed characters and length range for channel names. Channels are
@@ -146,6 +149,7 @@ async def wait_for_channel(
     channel: str,
     timeout: float = 30.0,
     socket_name: str | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """Block until a tmux ``wait-for`` channel is signalled.
 
@@ -214,9 +218,19 @@ async def wait_for_channel(
     # killable async subprocess instead, the same one
     # :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text` uses.
     try:
-        returncode, _stdout, stderr = await _run_tmux_bounded(
-            argv, timeout=effective_timeout
-        )
+        # One await, no poll loop, so nothing reaches the client until
+        # it returns -- the same gap run_command had. wait_for_text
+        # reports from inside its loop; this has no loop.
+        async with progress_ticker(
+            ctx,
+            total=effective_timeout,
+            message=lambda elapsed, left: (
+                f"Waiting on channel {cname}: {elapsed:.1f}s elapsed, {left:.1f}s left"
+            ),
+        ):
+            returncode, _stdout, stderr = await _run_tmux_bounded(
+                argv, timeout=effective_timeout
+            )
     except TimeoutError as e:
         msg = (
             f"wait-for timeout: channel {cname!r} was not signalled within "
