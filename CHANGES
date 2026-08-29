@@ -1935,6 +1935,55 @@ FastMCP context is present. It previously fell through to the tool,
 which was fail-open in a gate whose top tier includes `kill_server`, and
 was masked only because the native gate made the dispatch fail anyway.
 
+#### Every tmux call is bounded, not just the first one
+
+A tmux server can accept connections and then never answer. Every tool
+carries a five-second liveness probe for that, and the probe covers the
+tool's FIRST round trip only. `break_pane` makes eleven. Measured
+against a socket that answers the probe and stalls afterwards, it was
+still running at 150 seconds; healthy, the same call takes 0.13s.
+
+It was never one tool. libtmux reaches tmux through an untimed
+`Popen.communicate()`, so roughly 57 tools had no bound of their own,
+and being an `async def` did not help -- the tool batches are
+coroutines and hung exactly the same way.
+
+Worse than one slow call: a hung call never returned its worker, and
+cancelling the request did not interrupt it, so hung calls only
+accumulated. Forty of them -- at once, or one at a time with a cancel
+between each -- exhausted the thread pool, after which the server
+stopped answering everything, including sockets that were perfectly
+healthy. Forty is reached by an agent behaving correctly: call a tool,
+give up when it does not return, try again.
+
+Now every tmux call is bounded and refuses with the subcommand that
+stalled:
+
+    tmux list-panes did not return within 5.00s; the tmux server is unresponsive
+
+`break_pane` against that socket: 150s+ and unrecoverable, now 5.01s,
+worker returned, and the tmux client killed rather than left behind.
+Verified on all nine supported tmux versions.
+
+The bound sits at libtmux's `tmux_cmd` rather than at `Server.cmd`,
+because `Server.cmd` is not the only way there -- `neo.fetch_objs`
+builds one directly, and it is what `Window.panes` and
+`Session.windows` go through. A test walks the installed libtmux for
+call sites and fails if one appears outside the bound set.
+
+#### `paste_buffer` takes `delete_after`
+
+`delete_buffer`'s description told agents not to bother after
+`paste_buffer(delete_after=True)`. That call did not validate: the
+parameter existed on the libtmux method underneath and never on the
+tool, and both are spelled `paste_buffer`, so the prose was true of the
+implementation and false of the interface.
+
+It now exists, pastes and deletes in one tmux call, and says which it
+did. A test cross-checks every `tool(kwarg=...)` reference in every
+tool description against that tool's schema, so a description cannot
+again promise an argument that is not there.
+
 ### Documentation
 
 #### The safety tier gates tools, not what a shell can type
@@ -1964,6 +2013,22 @@ panel rather than a paste-this-JSON one — which also sidesteps opencode's
 unusual entry shape.
 
 ### Development
+
+- `just lint-ci`, `just test-ci` and `just deps-ci` reproduce CI's
+  gates locally. They existed nowhere before, and two of the recipes
+  that looked equivalent were not: `just ruff-format` rewrites what CI
+  rejects, and `just mypy` checks a `find`-derived file list rather
+  than `mypy .`. The formatter is also the only gate that reads Python
+  inside Markdown fences, so it was the single check capable of
+  catching an unformatted example -- and its local recipe silently
+  repaired one instead.
+- `just deps-ci` builds a throwaway environment and asserts it is
+  actually dev-free. `uv run --no-dev` alone reuses `.venv`, which has
+  pytest, ruff and mypy in it; CI only avoids that because its check
+  runs before dependencies are installed.
+- CI's tmux matrix gates 3.7c. It ran 3.2a through 3.6 and then jumped
+  to a non-gating `master`, leaving the entire 3.7 line -- the current
+  stable release -- tested by nothing.
 
 **`respawn_pane` reported the OLD command under load**
 

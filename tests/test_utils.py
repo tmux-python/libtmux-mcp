@@ -1375,6 +1375,11 @@ def test_every_libtmux_tmux_cmd_call_site_is_bounded() -> None:
     ``break_pane`` hang for 150s. AST rather than text search: the
     ``tmux_cmd(...)`` lines in ``options.py`` are doctest examples
     inside docstrings, and only a parser can tell those from calls.
+
+    This covers list COMPLETENESS -- it fires on a libtmux upgrade. That
+    the list actually drives the binding is covered by the half-wedge
+    regression test, which walks ``window.panes`` and so goes through
+    ``neo``; that one fires on a refactor here.
     """
     import ast
     import importlib

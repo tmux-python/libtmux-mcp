@@ -156,7 +156,16 @@ async def wait_for_text(
         Requested seconds to wait. Default 8.0. Clamped by server
         policy; see ``effective_timeout`` in the result.
     interval : float
-        Seconds between polls. Default 0.05 (50ms). Minimum 0.01.
+        Seconds to sleep between polls. Default 0.05 (50ms). Minimum
+        0.01.
+
+        A sleep, not a period: the tick's tmux reads happen first and
+        the sleep follows, so the achieved period is ``interval`` plus
+        the cost of those reads. Below roughly 0.02 the reads dominate
+        and a smaller interval buys proportionally fewer polls than it
+        costs in load — asking for 100 polls/s yields about half that.
+        Raising it is the cheap knob: a 10s wait costs about 14% of a
+        core at the default and 3.3% at 0.25.
     match_case : bool
         Whether to match case. Default False (case-insensitive).
     socket_name : str, optional

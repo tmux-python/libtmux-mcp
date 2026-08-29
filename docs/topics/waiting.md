@@ -73,6 +73,21 @@ tmux has **no hook that fires on pane output** — the `notify_*` set in
 "wait for text" must poll, tap the pty, or attach a control-mode client.
 {tooliconl}`wait-for-text` polls.
 
+Polling has a price and it is worth knowing before you reach for a small
+`interval`. Each tick spawns two tmux clients — one for pane state, one
+for the capture — so a 10 s wait costs roughly:
+
+| `interval` | CPU for a 10 s wait |
+| --- | --- |
+| 0.05 (default) | 14% of one core |
+| 0.25 | 3.3% of one core |
+
+`interval` is the sleep *between* ticks, not the period of them: the two
+reads happen first and the sleep follows. Below about 0.02 the reads
+dominate, so halving the interval stops buying proportionally more polls
+while still costing the load. If you are waiting on something that takes
+seconds, raise it.
+
 At entry it records an absolute grid anchor (`history_size + cursor_y`)
 and snapshots the content of the entry cursor row and everything below
 it. Each tick it re-captures from the anchor and drops rows whose content

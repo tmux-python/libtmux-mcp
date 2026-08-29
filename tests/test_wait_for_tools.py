@@ -24,6 +24,7 @@ from libtmux_mcp.tools.wait_for_tools import (
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
+    from libtmux.session import Session
 
 
 @pytest.mark.parametrize(
@@ -584,3 +585,51 @@ def test_a_fast_wait_reports_no_progress(mcp_server: Server) -> None:
     # first: otherwise this passes for the wrong reason.
     assert result.is_error is False, result.content
     assert seen == [], f"a sub-second wait put {len(seen)} notifications on the wire"
+
+
+def test_a_channel_signalled_past_the_flat_bound_still_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    mcp_server: Server,
+    mcp_session: Session,
+) -> None:
+    """The two bounding strategies are not interchangeable.
+
+    ``tmux wait-for`` blocks until signalled, so ONE tmux call
+    legitimately occupies the whole timeout -- up to the 120s wait
+    ceiling, not the 5s flat bound every other tmux call gets. Routing
+    this path through the flat bound would fail a channel signalled at
+    six seconds, and would report it as ``the tmux server is
+    unresponsive`` while the server was answering normally.
+
+    Pinned because that refactor would pass every other test in the
+    suite: nothing else signals a channel later than the flat bound.
+    """
+    from libtmux_mcp import _utils
+
+    # Exercise the distinction, not the shipped constants: with the flat
+    # bound at 0.5s, a signal at 1.5s is past it by the same logic that
+    # 6s is past 5s, and costs the suite 1.5s instead of 6.
+    monkeypatch.setattr(_utils, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
+    channel = f"slow_{uuid.uuid4().hex[:8]}"
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+
+    def signal_later() -> None:
+        time.sleep(1.5)
+        subprocess.run(
+            ["tmux", "-L", socket_name, "wait-for", "-S", channel], check=False
+        )
+
+    thread = threading.Thread(target=signal_later, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    try:
+        result = asyncio.run(
+            wait_for_channel(channel=channel, timeout=20.0, socket_name=socket_name)
+        )
+    finally:
+        thread.join(timeout=5)
+    elapsed = time.monotonic() - started
+
+    assert "was signalled" in result
+    assert elapsed > 0.5, "returned before the flat bound; the wait never blocked"

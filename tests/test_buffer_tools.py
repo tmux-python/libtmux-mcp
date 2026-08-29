@@ -277,3 +277,70 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
 
     with pytest.raises(ToolError, match=match_text):
         fn(**kwargs)
+
+
+def test_paste_buffer_delete_after_removes_the_buffer(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``delete_after`` pastes and deletes in one tmux call.
+
+    ``delete_buffer``'s description told agents this call existed
+    before the parameter did, so the failure was an invalid-argument
+    error at the one moment an agent was following instructions.
+    """
+    ref = load_buffer(
+        content="echo DELETE_AFTER_MARKER",
+        logical_name="del_after",
+        socket_name=mcp_server.socket_name,
+    )
+    message = paste_buffer(
+        buffer_name=ref.buffer_name,
+        pane_id=mcp_pane.pane_id,
+        delete_after=True,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "deleted" in message
+    with pytest.raises(ToolError):
+        show_buffer(buffer_name=ref.buffer_name, socket_name=mcp_server.socket_name)
+
+
+def test_tool_descriptions_do_not_document_arguments_that_do_not_exist() -> None:
+    """A description that names a kwarg is a promise the schema must keep.
+
+    ``delete_buffer`` told agents to call
+    ``paste_buffer(delete_after=True)`` while the tool had no such
+    parameter. The prose was true of the libtmux call made underneath
+    and false of the MCP tool, because both are spelled
+    ``paste_buffer`` -- so a reader who knew the internals read it as
+    correct.
+
+    Descriptions are re-read on every call, which makes a wrong one
+    more expensive than a wrong docstring.
+    """
+    import asyncio
+    import re
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP("description-kwarg-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    pattern = re.compile(r"\b(\w+)\(([^)]*?)(\w+)\s*=")
+    checked = 0
+    for tool in tools.values():
+        for called, _, kwarg in pattern.findall(tool.description or ""):
+            target = tools.get(called)
+            if target is None:
+                continue  # not one of ours; nothing to check it against
+            checked += 1
+            assert kwarg in target.parameters["properties"], (
+                f"{tool.name}'s description calls {called}({kwarg}=...), "
+                f"but {called} has no {kwarg} parameter"
+            )
+
+    # "0 mismatches out of 0 checked" is the same result as a clean
+    # sweep, so the count is asserted rather than the absence.
+    assert checked >= 4, f"only {checked} kwarg references checked; regex likely stale"

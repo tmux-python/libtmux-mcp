@@ -251,6 +251,7 @@ def paste_buffer(
     buffer_name: str,
     pane_id: str | None = None,
     bracket: bool = True,
+    delete_after: bool = False,
     session_name: str | None = None,
     session_id: str | None = None,
     window_id: str | None = None,
@@ -287,6 +288,10 @@ def paste_buffer(
         return the new pane's id directly.
     bracket : bool
         Use tmux bracketed paste mode. Default True.
+    delete_after : bool
+        Delete the buffer once it has been pasted (tmux ``-d``), in the
+        same tmux call. Use it on the LAST paste of a staged buffer;
+        leave it False while the same content still has panes to go to.
     session_name, session_id, window_id : optional
         Pane resolution fallbacks.
     socket_name : str, optional
@@ -295,7 +300,9 @@ def paste_buffer(
     Returns
     -------
     str
-        Confirmation message naming the target pane.
+        Confirmation message naming the target pane, and saying whether
+        the buffer was deleted -- a caller that passed ``delete_after``
+        should not have to issue ``show_buffer`` to find out.
     """
     _raise_if_untargeted(
         "paste_buffer",
@@ -313,7 +320,9 @@ def paste_buffer(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.paste_buffer(buffer_name=cname, bracket=bracket)
+    pane.paste_buffer(buffer_name=cname, bracket=bracket, delete_after=delete_after)
+    if delete_after:
+        return f"Buffer {cname!r} pasted to pane {pane.pane_id} and deleted"
     return f"Buffer {cname!r} pasted to pane {pane.pane_id}"
 
 
