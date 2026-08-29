@@ -55,9 +55,14 @@ def test_get_server_creates_server() -> None:
 def test_get_server_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_server returns the same instance for the same socket."""
     _server_cache.clear()
+    from libtmux_mcp import _utils
+
+    # Simulate a live server so the cache is not evicted. Patched on the
+    # probe rather than on ``Server.is_alive``: _get_server reads the
+    # cached handle's liveness through the BOUNDED probe now, so a
+    # server it cannot reach is refused rather than silently replaced.
+    monkeypatch.setattr(_utils, "_probe_liveness", lambda server: (True, None))
     s1 = _get_server(socket_name="test_cache")
-    # Simulate a live server so the cache is not evicted
-    monkeypatch.setattr(s1, "is_alive", lambda: True)
     s2 = _get_server(socket_name="test_cache")
     assert s1 is s2
     # Verify 3-tuple cache key includes tmux_bin
@@ -1037,23 +1042,39 @@ def test_probe_liveness_separates_absent_from_unreachable(
     absent with no error. Driven off a fake result rather than a second
     tmux binary so the assertion does not depend on the CI tmux version.
     """
-    from libtmux_mcp._utils import _probe_liveness
+    import subprocess
+
+    from libtmux_mcp import _utils
 
     assert test_id
 
-    class _Result:
-        def __init__(self) -> None:
-            self.returncode = returncode
-            self.stderr = stderr
-
-    class _Server:
-        def cmd(self, *args: str) -> _Result:
-            return _Result()
-
-    alive, unreachable = _probe_liveness(t.cast("t.Any", _Server()))
+    result = subprocess.CompletedProcess(
+        args=["tmux"], returncode=returncode, stdout="", stderr="\n".join(stderr)
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(_utils, "_run_tmux_bounded", lambda *a, **k: result)
+        alive, unreachable = _utils._probe_liveness(t.cast("t.Any", object()))
 
     assert alive is expected_alive
     assert unreachable == expected_unreachable
+
+
+def test_probe_liveness_reports_a_socket_that_answers_nothing() -> None:
+    """Silence is a third answer, and stderr cannot carry it.
+
+    A tmux server spinning inside its own event loop accepts the
+    connection and writes nothing, so the two cases this probe exists to
+    separate -- absent and unreachable -- are both wrong, and the probe
+    itself used to hang on the socket it was classifying.
+    """
+    from libtmux_mcp import _utils
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(_utils, "_run_tmux_bounded", lambda *a, **k: None)
+        alive, unreachable = _utils._probe_liveness(t.cast("t.Any", object()))
+
+    assert alive is False
+    assert unreachable is _utils.HUNG_SOCKET_REASON
 
 
 def test_map_exception_explains_a_newline_in_a_format_value() -> None:

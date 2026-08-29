@@ -825,9 +825,16 @@ def test_send_keys_batch_timeout(
 
     call_count = 0
 
-    def timed_send_keys(
-        *args: t.Any, **kwargs: t.Any
-    ) -> subprocess.CompletedProcess[str]:
+    real_run = subprocess.run
+
+    def timed_send_keys(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        # Counts SEND-KEYS calls only. Counting every subprocess call
+        # made the fixture depend on how many tmux round trips the tool
+        # happens to make around them, so adding one elsewhere silently
+        # moved which operation timed out.
+        argv = list(args[0]) if args else list(kwargs.get("args", []))
+        if "send-keys" not in argv:
+            return real_run(*args, **kwargs)
         nonlocal call_count
         call_count += 1
         if call_count == 3:
@@ -880,7 +887,15 @@ def test_send_keys_batch_timeout_bounds_in_progress_send(
     def stalled_send_keys(*args: t.Any, **kwargs: t.Any) -> None:
         time.sleep(blocked_seconds)
 
-    def timed_out_run(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
+    real_run = subprocess.run
+
+    def timed_out_run(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        # send-keys only: hanging every subprocess call also hung the
+        # liveness probe the tool makes first, so the assertion was
+        # satisfied by a refusal from a different layer.
+        argv = list(args[0]) if args else list(kwargs.get("args", []))
+        if "send-keys" not in argv:
+            return real_run(*args, **kwargs)
         raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
 
     monkeypatch.setattr(Pane, "send_keys", stalled_send_keys)

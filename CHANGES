@@ -24,9 +24,29 @@ exactly what an operator is reaching for `list_servers` to find.
 Every probe is bounded now, and a socket that does not answer is
 reported with `unreachable_reason` set rather than dropped -- dropping
 it would be the same "empty means absent" claim the resource path was
-fixed for. The same scan takes 2.09s with the silent listener present,
-and 0.11s without, down from 2.03s: the bounded probe also replaced
+fixed for. The same scan takes 2.07s with the silent listener present,
+and 0.09s without, down from 2.03s: the bounded probe also replaced
 three tmux round trips per server with two.
+
+**The other tools were the same defect one step later.** Fixing the
+listing routed operators straight into it: `list_servers` names an
+unreachable socket, and the obvious next call hung.
+
+    get_server_info(socket_name=<that socket>)   never returned
+    list_sessions(socket_name=<that socket>)     never returned
+    capture_pane(pane_id='%0', socket_name=...)  never returned
+
+`capture_pane` is the one that shows it is not a `list_servers`
+problem: it never probed liveness at all, it just resolved a pane
+through `Server.cmd`, which has no timeout.
+
+The bound now sits in `_get_server`, which every tool funnels through,
+so a socket that accepts and never answers is refused before anything
+downstream touches it. All three now return in 5.00s with a message
+saying the server is wedged rather than absent -- its sessions are not
+lost, but nothing can reach them until it is killed. A DEAD socket is
+unaffected: it answers "no server running" immediately and every tool
+reports it exactly as before.
 
 Found while chasing an unrelated 286-second test, which turned out to
 be measuring the QA instance's wedged tmux servers rather than anything

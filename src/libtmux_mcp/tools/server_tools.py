@@ -10,6 +10,7 @@ import socket
 import typing as t
 from concurrent.futures import ThreadPoolExecutor
 
+from libtmux.server import Server
 from libtmux.session import Session
 
 from libtmux_mcp._history import _prepare_spawn_environment
@@ -38,7 +39,6 @@ logger = logging.getLogger(__name__)
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
-    from libtmux.server import Server
 
 
 @handle_tool_errors
@@ -331,6 +331,25 @@ def _probe_socket_bounded(server: Server, *, timeout: float) -> ServerInfo:
     )
 
 
+def _probe_or_report_unreachable(socket_path: pathlib.Path) -> ServerInfo:
+    """Describe one socket found by scanning, without going through the cache.
+
+    Deliberately NOT ``_get_server``. That funnel refuses a socket which
+    accepts and never answers, which is right for a tool aimed at one
+    and wrong here: a listing that raises because ONE entry is wedged
+    says nothing about the other twenty-five, and the wedged one is what
+    the operator came for. It would also cache every socket in the
+    directory -- over a thousand on this machine -- for a pass that
+    reads each exactly once, and impose its liveness timeout on top of
+    the scan's own shorter one.
+    """
+    kwargs: dict[str, t.Any] = {"socket_path": str(socket_path)}
+    tmux_bin = os.environ.get("LIBTMUX_TMUX_BIN")
+    if tmux_bin is not None:
+        kwargs["tmux_bin"] = tmux_bin
+    return _probe_socket_bounded(Server(**kwargs), timeout=_PROBE_TIMEOUT_SECONDS)
+
+
 def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     """Return a :class:`ServerInfo` for a live socket at ``socket_path``.
 
@@ -350,8 +369,7 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
         return None
     if not _is_tmux_socket_live(socket_path):
         return None
-    server = _get_server(socket_path=str(socket_path))
-    return _probe_socket_bounded(server, timeout=_PROBE_TIMEOUT_SECONDS)
+    return _probe_or_report_unreachable(socket_path)
 
 
 #: Tools that intentionally do NOT accept ``socket_name`` because they
@@ -393,8 +411,7 @@ def _probe_scanned_socket(entry: pathlib.Path) -> tuple[str, ServerInfo] | None:
     # Addressed by PATH, not name: a socket name that does not round-trip
     # through ``-L`` -- one holding a newline, say -- used to drop a live
     # server from the listing silently. The path always works.
-    server = _get_server(socket_path=str(entry))
-    info = _probe_socket_bounded(server, timeout=_PROBE_TIMEOUT_SECONDS)
+    info = _probe_or_report_unreachable(entry)
     # The scan holds the full path; reporting only the name left
     # ``socket_path`` null on every scanned row, so no row carried a
     # complete identity.

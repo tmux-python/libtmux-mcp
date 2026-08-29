@@ -246,8 +246,18 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     """
     import subprocess
 
-    def _hang(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
+    real_run = subprocess.run
+    hung_command = match_text.split()[0]
+
+    def _hang(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        # Only the command under test hangs. Patching every subprocess
+        # call instead also hung the liveness probe every tool makes
+        # first, so the assertion was satisfied by an error from a
+        # different layer.
+        argv = args[0] if args else kwargs.get("args", [])
+        if hung_command in list(argv):
+            raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
+        return real_run(*args, **kwargs)
 
     monkeypatch.setattr("libtmux_mcp.tools.buffer_tools.subprocess.run", _hang)
 

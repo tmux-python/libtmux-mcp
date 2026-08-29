@@ -722,6 +722,19 @@ def _raise_if_spawned_pane_is_gone(pane: Pane, shell: str | None) -> None:
         _raise_spawned_pane_gone(shell)
 
 
+#: Generous for a liveness probe: a responsive tmux server answers in
+#: single-digit milliseconds, and this only has to be short enough that
+#: a hung socket is reported rather than waited on forever.
+_LIVENESS_TIMEOUT_SECONDS = 5.0
+
+#: Distinguishable by identity, so callers can tell "did not answer"
+#: from every other unreachable reason without matching on prose.
+HUNG_SOCKET_REASON = (
+    "the tmux server accepted the connection but did not answer within "
+    f"{_LIVENESS_TIMEOUT_SECONDS:g}s"
+)
+
+
 def _run_tmux_bounded(
     server: Server, *tmux_args: str, timeout: float
 ) -> subprocess.CompletedProcess[str] | None:
@@ -835,7 +848,9 @@ def _get_server(
     # process behind one another -- measured, it capped a 16-way
     # parallel socket scan at about 2x instead of 8x.
     if cached is not None:
-        if cached.is_alive():
+        alive, reason = _probe_liveness(cached)
+        _raise_if_socket_hung(cached, reason)
+        if alive:
             return cached
         with _server_cache_lock:
             if _server_cache.get(cache_key) is cached:
@@ -850,10 +865,39 @@ def _get_server(
         kwargs["tmux_bin"] = tmux_bin
     server = Server(**kwargs)
 
+    # Probed before it is handed out, because nothing downstream is
+    # bounded: ``server.panes`` and friends go straight to
+    # ``Server.cmd``, which has no timeout. A socket that never answers
+    # would otherwise hang whichever tool touched it first. This costs
+    # one round trip per socket per process -- the cached path above
+    # already pays one on every call.
+    _, reason = _probe_liveness(server)
+    _raise_if_socket_hung(server, reason)
+
     # Two threads racing to fill the same key both build a valid handle;
     # ``setdefault`` makes them agree on which one the cache keeps.
     with _server_cache_lock:
         return _server_cache.setdefault(cache_key, server)
+
+
+def _raise_if_socket_hung(server: Server, reason: str | None) -> None:
+    """Refuse to hand out a server that accepted a connection in silence.
+
+    A DEAD socket is not this: it answers immediately with "no server
+    running" and every tool reports it correctly. This is only the
+    socket that takes the connection and never replies, where the
+    alternative to refusing is blocking a worker until the process ends.
+    """
+    if reason is not HUNG_SOCKET_REASON:
+        return
+    target = server.socket_path or server.socket_name or "<default>"
+    msg = (
+        f"tmux server at {target} accepted the connection but did not "
+        f"answer within {_LIVENESS_TIMEOUT_SECONDS:g}s. It is running and "
+        "wedged rather than absent, so its sessions are not lost -- but no "
+        "tmux command against it can complete until it is killed."
+    )
+    raise ExpectedToolError(msg)
 
 
 def _invalidate_server(
@@ -1619,16 +1663,27 @@ def _probe_liveness(server: Server) -> tuple[bool, str | None]:
     sockets older than the binary -- reported as False tells the agent
     the user's work is gone. tmux distinguishes them on stderr, so read
     it rather than the boolean.
+
+    There is a THIRD case stderr cannot report, because nothing is
+    written: a server spinning inside its own event loop accepts the
+    connection and never replies. ``Server.cmd`` has no timeout, so the
+    probe meant to classify the server hung on it instead. Bounded here,
+    and a timeout is reported as unreachable -- which is what it is.
     """
     try:
-        result = server.cmd("list-sessions")
+        result = _run_tmux_bounded(
+            server, "list-sessions", timeout=_LIVENESS_TIMEOUT_SECONDS
+        )
     except Exception as err:  # noqa: BLE001 - probe must not raise
         return False, str(err)
+
+    if result is None:
+        return False, HUNG_SOCKET_REASON
 
     if result.returncode == 0:
         return True, None
 
-    detail = " ".join(result.stderr).strip() if result.stderr else ""
+    detail = result.stderr.strip()
     lowered = detail.lower()
     if any(marker in lowered for marker in _NO_SERVER_MARKERS):
         return False, None
