@@ -660,18 +660,22 @@ That broke two different promises:
   `stop` takes caller regex on the same terms as `patterns`.
 
 Neither a deadline nor a worker cap can help, because a thread inside
-`re` cannot be reclaimed. So the bound is the pattern, and three shapes
-are refused before they run: a repeat nested in a repeat (`(a+)+`), a
-repeat over alternatives that can start on the same character
-(`(a|a)+`, `(a|ab)+`), and a body that can match nothing owed many
-iterations (`(a?){20}`). Each is refused wherever it appears, including
-inside a lookahead or a conditional. They are a model of catastrophic
-backtracking rather than a proof of its absence: a pattern that
-compiles is one the screen could not show to be exponential.
+`re` cannot be reclaimed. So the bound is the pattern. A repeat that
+can iterate freely is refused when its body can match one string more
+than one way: a body of varying width (`(a+)+`, `(a{0,3})*`,
+`(a?){20}`), or alternatives that can begin on the same character
+(`(a|a)+`, `(a|ab)+`). Either is refused wherever it appears, including
+inside a lookahead or a conditional.
+
+The screen is a model of catastrophic backtracking rather than a proof
+of its absence, and it is deliberately coarser than the engine:
+`(a?)*` is refused even though CPython finishes it, because a screen
+that leaned on that would also have to know when it stops applying.
 
 Ordinary patterns are unaffected, which is the half that matters:
-`(cat|dog)+`, `(\d{2}){3}`, `^\[(INFO|WARN|ERROR)\]`, `https?://\S+`,
-`a+b+c+$`, `(?=.*ERROR)^\[` and `(a?)*` all still compile. A literal
+`(cat|dog)+`, `(\d{2}){3}`, `(\d{2}){20}`, `^\[(INFO|WARN|ERROR)\]`,
+`https?://\S+`, `a+b+c+$`, `\s{0,20}X` and `(?=.*ERROR)^\[` all still
+compile -- a fixed-width body has only one way to split. A literal
 (`regex=false`) is escaped and never screened.
 
 Reported by the QA instance, which also established that the tools keep
