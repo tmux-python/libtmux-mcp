@@ -111,6 +111,31 @@ options table, so these are the same store reached two ways.
 
 ### Development
 
+**Record atomicity is asserted, not left to fall out**
+
+A pane record cannot be torn -- half its fields from before a
+concurrent mutation and half from after -- because tmux expands a whole
+`-F` format in one pass per pane, so a mutation lands strictly before
+or strictly after it. Nothing in this server arranges that. It falls
+out of asking once for everything, which is why it needed a test:
+splitting the fat format into targeted queries ("why fetch forty fields
+to serve six") is a plausible optimisation that would make torn records
+possible for the first time, and nothing would notice -- a torn record
+is inconsistent only sometimes and passes every schema.
+
+The guard requires exactly one `list-panes` per record and requires
+that single format to carry the geometry fields the atomicity argument
+rests on. It is deterministic rather than probabilistic: a concurrency
+assertion catches a torn record only when the race lands, while this
+fails the moment the format is split. Verified to discriminate -- two
+records produce two listings.
+
+Same remedy as the freshness guard and the `tmux_cmd` drift test:
+assert the property, not the placement. The QA instance named the
+family these three share -- an invariant held by convention rather than
+by construction, correct today and silently breakable by the next
+author.
+
 **A returned record is asserted fresh, not assumed fresh**
 
 libtmux objects hold their fields as plain attributes populated when the

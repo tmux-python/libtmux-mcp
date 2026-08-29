@@ -7308,3 +7308,53 @@ def test_the_freshness_guard_detects_a_stale_record(
     )
     fresh = _serialize_pane(_resolve_pane(mcp_server, pane_id=mcp_pane.pane_id))
     assert stale != fresh
+
+
+def test_a_pane_record_is_built_from_one_tmux_call(
+    mcp_server: Server, mcp_window: Window, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every field of a pane record arrives in a single tmux expansion.
+
+    That is what makes a record atomic: tmux expands a whole ``-F``
+    format in one pass per pane, so a concurrent mutation lands strictly
+    before or strictly after it and never inside. Nothing in this server
+    arranges that -- it falls out of asking once for everything.
+
+    Which is why it needs a test. Splitting the fat format into targeted
+    queries ("why fetch forty fields to serve six") is a plausible,
+    well-motivated optimisation that would make torn records possible
+    for the first time, and no other test would notice: a torn record is
+    internally inconsistent only sometimes, and passes every schema.
+    """
+    mcp_window.split(attach=False)
+    pane_id = mcp_window.panes[0].pane_id
+    assert pane_id is not None
+
+    argvs: list[list[str]] = []
+    real_run = subprocess.run
+
+    def recording_run(argv: t.Any, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        if isinstance(argv, list) and argv and "tmux" in str(argv[0]):
+            argvs.append([str(a) for a in argv])
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recording_run)
+    info = _serialize_pane(_resolve_pane(mcp_server, pane_id=pane_id))
+
+    listings = [a for a in argvs if "list-panes" in a]
+    assert len(listings) == 1, f"a pane record took {len(listings)} listings"
+
+    # The geometry fields the atomicity argument rests on must be in
+    # that one format, not gathered separately afterwards.
+    fmt = " ".join(listings[0])
+    for field in (
+        "pane_left",
+        "pane_top",
+        "pane_right",
+        "pane_bottom",
+        "pane_width",
+        "pane_height",
+    ):
+        assert f"#{{{field}}}" in fmt, f"{field} is not in the single listing format"
+    assert info.pane_width is not None
+    assert info.pane_bottom is not None
