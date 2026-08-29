@@ -9,6 +9,7 @@ from fastmcp.exceptions import ResourceError
 
 from libtmux_mcp._utils import (
     _get_server,
+    _probe_liveness,
     _serialize_pane,
     _serialize_session,
     _serialize_window,
@@ -16,6 +17,7 @@ from libtmux_mcp._utils import (
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.server import Server
 
 #: MIME type advertised for resources that return structured tmux
 #: metadata (session / window / pane views). Previously these resources
@@ -29,6 +31,27 @@ _JSON_MIME = "application/json"
 #: is the right choice — the consumer should neither JSON-parse it nor
 #: render it as HTML.
 _TEXT_MIME = "text/plain"
+
+
+def _raise_if_unreachable(server: Server) -> None:
+    """Refuse to answer for a server that exists but will not talk.
+
+    ``server.sessions`` swallows the failure and yields an empty list,
+    so a live session-holding server whose socket cannot be queried --
+    a client/server protocol mismatch is the realistic cause -- reads
+    as "no sessions". That is the wrong conclusion rather than a
+    missing one.
+
+    The tool path already discriminates this; the fix never reached
+    here, so the two surfaces disagreed about the same server.
+    """
+    alive, reason = _probe_liveness(server)
+    if not alive and reason is not None:
+        msg = (
+            f"tmux server exists but could not be queried: {reason}. "
+            "Reporting no sessions here would be wrong rather than empty."
+        )
+        raise ResourceError(msg)
 
 
 def _normalize_pane_id(pane_id: str) -> str:
@@ -88,6 +111,7 @@ def register(mcp: FastMCP) -> None:
             JSON array of session objects (MIME: ``application/json``).
         """
         server = _get_server(socket_name=socket_name)
+        _raise_if_unreachable(server)
         sessions = [_serialize_session(s).model_dump() for s in server.sessions]
         return json.dumps(sessions, indent=2)
 
@@ -111,6 +135,13 @@ def register(mcp: FastMCP) -> None:
            reads the session named ``pct name`` instead, silently and
            with no error. A space needs no encoding, which is what
            makes a literal ``%`` easy to miss.
+
+           A ``/`` in the name needs the same treatment and fails
+           differently: tmux permits a session named ``a/b``, and
+           ``tmux://sessions/a/b`` does not match this template at all,
+           so it is rejected as "Unknown resource" -- which reads as
+           "no such endpoint" rather than "encode the name".
+           ``tmux://sessions/a%2Fb`` reaches it.
 
         Parameters
         ----------

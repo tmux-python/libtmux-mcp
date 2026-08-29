@@ -219,3 +219,28 @@ def test_pane_resource_names_a_percent_decoded_id(
     fn = resource_functions["tmux://panes/{pane_id}{?socket_name}"]
     with pytest.raises(ResourceError, match="percent-decoded by the URI layer"):
         fn("\x10")
+
+
+def test_sessions_resource_refuses_a_live_but_unqueryable_server(
+    resource_functions: dict[str, t.Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty listing must not stand in for "could not ask".
+
+    ``server.sessions`` swallows a query failure and yields ``[]``, so a
+    live session-holding server whose socket cannot be talked to reads
+    as "no sessions" -- the wrong conclusion rather than a missing one.
+    The tool path already discriminated this; the fix had never reached
+    the resource path, so the two surfaces disagreed about one server.
+    """
+    from libtmux_mcp.resources import hierarchy
+
+    monkeypatch.setattr(
+        hierarchy, "_probe_liveness", lambda _server: (False, "server exited")
+    )
+    fn = resource_functions["tmux://sessions{?socket_name}"]
+    with pytest.raises(ResourceError, match="could not be queried"):
+        fn()
+
+    # An ABSENT server is genuinely empty, and must stay empty.
+    monkeypatch.setattr(hierarchy, "_probe_liveness", lambda _server: (False, None))
+    assert json.loads(fn()) == [] or isinstance(json.loads(fn()), list)

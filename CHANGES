@@ -8,6 +8,33 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A live server that will not answer is no longer reported as empty
+
+The resource path returned `[]` for a tmux server that exists, holds
+sessions, and cannot be queried. That is the wrong conclusion rather
+than a missing one, and it is the exact defect the tool path was fixed
+for -- the fix had never reached the resources, so the two surfaces
+disagreed about the same server:
+
+    RESOURCE tmux://sessions -> []
+    TOOL     list_sessions   -> "tmux server exists but could not be
+                                 queried: server exited unexpectedly"
+
+Reproducing it needs a live-but-unreachable server, which a nonexistent
+socket cannot produce -- an old tmux client against a newer server does
+it. That is why the surface had been checked and the case had not.
+
+An ABSENT server still returns an empty list, because there it is the
+true answer.
+
+Separately, a session name containing `/` is documented. tmux permits
+`a/b`, and `tmux://sessions/a/b` does not match the template at all, so
+it is rejected as "Unknown resource" -- which reads as "no such
+endpoint" rather than "encode the name". `tmux://sessions/a%2Fb`
+reaches it. Same class as the pane-id encoding above, failing one layer
+earlier where the message cannot be improved from here.
+
+
 #### The kill tools say what went with the target
 
 Killing the last child takes its parent, and the results did not
