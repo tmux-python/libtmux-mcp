@@ -369,8 +369,11 @@ def get_pane_info(
 ) -> PaneInfo:
     """Get detailed information about a tmux pane.
 
-    Use this for metadata (PID, path, dimensions) without reading terminal content.
-    To read what is displayed in the pane, use capture_pane instead.
+    Use this for metadata (PID, path, dimensions) without reading terminal
+    content. For content INSTEAD of metadata, use ``capture_pane``. For
+    content AND metadata, use ``snapshot_pane`` -- it returns both in one
+    call, and pairing this tool with ``capture_pane`` is the two-call
+    pattern ``snapshot_pane`` exists to replace.
 
     Parameters
     ----------

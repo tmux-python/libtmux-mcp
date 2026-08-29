@@ -256,7 +256,21 @@ def paste_buffer(
     window_id: str | None = None,
     socket_name: str | None = None,
 ) -> str:
-    """Paste an MCP-owned buffer into a pane.
+    """Paste a staged buffer into a pane, without re-sending its text.
+
+    The delivery half of the staged path: ``load_buffer`` puts text in
+    tmux, this puts it in a pane, and ``delete_buffer`` removes it.
+    Pass the ``buffer_name`` from ``load_buffer``'s
+    :class:`~libtmux_mcp.models.BufferRef` -- the name is namespaced per
+    call and is not the ``logical_name`` you asked for.
+
+    **Prefer** ``paste_text`` for one-shot input: it loads, pastes and
+    deletes in a single call. Come here when the same content goes to
+    more than one pane, when you want ``show_buffer`` to confirm what
+    was staged before it lands, or when staging and delivery are
+    separated in time.
+
+    Requires a target. This types into a pane, so it will not pick one.
 
     Parameters
     ----------
@@ -374,7 +388,18 @@ def delete_buffer(
     buffer_name: str,
     socket_name: str | None = None,
 ) -> str:
-    """Delete an MCP-owned buffer.
+    """Delete a staged buffer once it is no longer needed.
+
+    tmux buffers persist until something removes them, and every
+    ``load_buffer`` call allocates a new one. Long-running agents that
+    stage repeatedly will accumulate them, so this is the other end of
+    ``load_buffer``.
+
+    Not needed after ``paste_text``, which deletes its own buffer, or
+    after ``paste_buffer(delete_after=True)``. Only MCP-namespaced
+    buffers are accepted: a caller cannot reach the user's own paste
+    buffers or their clipboard history through this tool, which is the
+    same reason no ``list_buffers`` exists.
 
     Parameters
     ----------

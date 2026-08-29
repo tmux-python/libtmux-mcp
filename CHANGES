@@ -21,6 +21,32 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Three tool descriptions that left a caller to guess
+
+A tool's docstring becomes its MCP schema description, and that is what
+an agent reads when choosing between neighbours -- not the docs.
+
+`get_pane_info` said "to read what is displayed, use `capture_pane`
+instead", while the server instructions say "prefer `snapshot_pane`
+over `capture_pane` + `get_pane_info`". Same question, two answers. The
+tool was right for *content instead of metadata* and the instructions
+for *content and metadata*, but the phrasing did not carve that, so a
+caller reading only the schema was steered into the two-call pattern
+the instructions exist to prevent. It now names both cases. Swept the
+rest: `wait_for_text`'s steer away from polling `capture_pane` is about
+waiting, not about metadata, and is correct as written.
+
+`paste_buffer` was 38 characters and `delete_buffer` 27, in a family
+where every sibling explains itself -- `paste_text` even documents when
+to prefer them, and got nothing back. Both now say what they are for,
+when to prefer them over `paste_text`, and (for `delete_buffer`) that
+it is unnecessary after the paths that clean up after themselves.
+
+Found by comparing the per-tool descriptions against the server-level
+instructions rather than reading either alone. Each was sensible on its
+own, which is why an audit of either surface passes it -- the same
+shape as the untargeted-resolution seam.
+
 #### Validation refusals say what you sent
 
 Most of this server already echoes the offending value -- `offset`,
