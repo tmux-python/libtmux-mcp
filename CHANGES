@@ -300,6 +300,13 @@ Measured: refusal is capped near 3 s at every caller timeout from 2 s to
 and a genuine long-running command on a pane at a prompt still reports
 `timed_out` with `command_may_still_run`.
 
+Cancellation reaps whichever phase is in flight -- verified directly on
+a pane that never starts, where the started channel's child appears and
+is gone after the cancel. The suite's orphan probe knew only the
+completion channel's `r_` prefix, so under load it could look during
+the started phase, find nothing, and trip its own "the probe is broken"
+guard. It matches both prefixes now.
+
 A caller whose own budget is at or below the grace gets a plain
 timeout rather than a refusal: there, "it has not started yet" and "it
 never will" are the same observation.

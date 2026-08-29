@@ -1004,12 +1004,17 @@ def _armed_after_baseline(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
 
 
 def _run_command_wait_pids(socket_name: str) -> list[int]:
-    """Return pids of live ``tmux -L <socket> wait-for r_*`` processes.
+    """Return pids of live ``tmux -L <socket> wait-for r_*``/``p_*`` procs.
 
     Asks the kernel rather than the tool: the defect this backs is a
     tool that reports a clean cancellation while its child runs on, so
     the tool's own return value cannot be the witness. ``run_command``
-    mints a random ``r_<hex>`` channel per call, hence the prefix match
+    mints a random ``r_<hex>`` completion channel and a ``p_<hex>``
+    started channel per call, hence the prefix match. BOTH must be
+    matched: the started channel is waited on FIRST, so a probe that
+    knew only about ``r_`` could look before that phase had finished and
+    conclude no child existed -- which is what happened under load once
+    the started channel was added.
     rather than an exact name.
 
     The argv must be the whole five-token vector and ``/proc/<pid>/exe``
@@ -1035,7 +1040,7 @@ def _run_command_wait_pids(socket_name: str) -> list[int]:
         argv = [chunk.decode(errors="replace") for chunk in raw.split(b"\0") if chunk]
         if len(argv) != 5 or argv[1:4] != ["-L", socket_name, "wait-for"]:
             continue
-        if not argv[4].startswith("r_") or exe.name != "tmux":
+        if not argv[4].startswith(("r_", "p_")) or exe.name != "tmux":
             continue
         pids.append(pid)
     return pids
