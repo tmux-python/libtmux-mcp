@@ -639,7 +639,16 @@ async def wait_for_text(
     entry_rows = await _bounded_capture(
         server, target, start=entry.cursor_y, deadline=deadline
     )
-    entry_below_cursor: frozenset[str] = frozenset(entry_rows)
+    # Kept as a LIST, compared per index. A set discards position, and
+    # the ambiguity this resolves is confined to one row -- the entry
+    # cursor row, which the anchor deliberately includes so a daemon's
+    # single "ready" line stays matchable. Flattened, a line twenty rows
+    # below the cursor permanently blocked a fresh identical line
+    # arriving on the cursor row: a program printing "BUILD OK" again,
+    # two seconds into the wait, was suppressed and the wait ran to its
+    # ceiling reporting found=false. Waiting for a repeated status line
+    # is this tool's headline case.
+    entry_below_cursor: list[str] = list(entry_rows)
 
     # ``matched_at_entry`` scans the WHOLE visible screen, not just the
     # rows the delta filter suppresses. The usual shape of this mistake
@@ -770,7 +779,19 @@ async def wait_for_text(
             last_rows = rows
             # Drop lines whose content was already below the entry
             # cursor — stale paint, not output written after the call.
-            new_lines = [line for line in rows if line not in entry_below_cursor]
+            # A row is new when it differs from what THAT index held at
+            # entry. Rows past the entry capture are new by construction.
+            # Residual, and not fixable from tmux primitives: a row that
+            # rewrites the same text at the same index still reads as
+            # unchanged. tmux exposes no per-row last-written time, so
+            # something content-shaped is unavoidable at the bottom --
+            # this shrinks the hole from "any line anywhere below the
+            # cursor" to "the exact row that already held that text".
+            new_lines = [
+                line
+                for index, line in enumerate(rows)
+                if index >= len(entry_below_cursor) or line != entry_below_cursor[index]
+            ]
             if new_lines:
                 saw_new_output = True
 

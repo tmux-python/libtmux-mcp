@@ -57,10 +57,14 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
 #: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
 _SEND_KEYS_TIMEOUT_SECONDS = 5.0
 
-#: Ceiling for the latched-signal read. It is a local tmux round
-#: trip against a signal that has either already been recorded or
-#: never will be, so it never waits on a shell.
-_STARTED_CHANNEL_PROBE_SECONDS = 1.0
+#: How long to give a shell to acknowledge that it began the payload.
+#: Paid only when nothing starts, so it is the refusal latency, not a
+#: cost on the happy path. Sized off the measured shell round trip --
+#: 56 ms on a clean shell, 714 ms on a configured zsh whose prompt runs
+#: `git status` -- with headroom for load. Waiting the caller's full
+#: budget instead meant a REPL took the default 30 s to report
+#: something knowable in milliseconds.
+_STARTED_GRACE_SECONDS = 3.0
 
 #: Shared recovery hint for a pane that cannot accept a shell command.
 _BUSY_PANE_SUGGESTION = (
@@ -317,9 +321,14 @@ def send_keys(
     payloads.
 
     **Verifying a write:** do not string-compare captured text against
-    what you sent. tmux renders combining marks and zero-width joiners
-    as ``<XXXX>`` placeholders, so ``école`` and emoji sequences come
-    back transformed even though the bytes were delivered correctly.
+    what you sent. tmux renders a character it will not draw as a
+    ``<XXXX>`` placeholder, so the bytes can arrive correctly and still
+    read back different. Measured on tmux 3.7c: a combining sequence
+    (``e`` + U+0301) returns ``e<0301>``, U+200D returns ``<200d>``,
+    U+FE0F ``<fe0f>``, U+200B ``<200b>``. Precomposed characters such as
+    U+00E9 do survive, which is what makes this easy to miss -- ``école``
+    round-trips when it is precomposed and does not when it is decomposed.
+    Compare on an ASCII marker you control instead.
 
     Parameters
     ----------
@@ -683,37 +692,19 @@ async def run_command(
         suppress_history=False,
     )
 
-    timed_out = False
-    wait_argv = _tmux_argv(server, "wait-for", channel)
-    # The wait must be owned by a killable child, not a worker thread.
-    # ``asyncio.to_thread(subprocess.run, ...)`` cannot be interrupted:
-    # cancelling the call raised ``CancelledError`` at once while the
-    # thread stayed blocked in an untimed ``waitpid``, so ``tmux
-    # wait-for`` ran on for the rest of the budget — measured at 22 s
-    # of orphan for a 25 s ``run_command`` cancelled at 3 s. This is
-    # the most-cancelled wait of the three: agents routinely bail out
-    # of a long shell command. ``_run_tmux_bounded`` kills the child on
-    # expiry and on cancellation alike.
-    returncode = 0
-    stderr_bytes = b""
-    try:
-        returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
-            wait_argv, timeout=effective_timeout
-        )
-    except TimeoutError:
-        timed_out = True
-    if returncode != 0:
-        stderr = stderr_bytes.decode(errors="replace").strip()
-        detail = stderr or f"exit {returncode}"
-        msg = f"wait-for failed for run_command channel {channel!r}: {detail}"
-        raise ExpectedToolError(msg)
-
-    elapsed = time.monotonic() - started
-    # On a timeout, ask whether the shell ever started the payload.
-    # tmux latches a `wait-for -S` with no waiter (measured: a later
-    # wait returns in 4 ms), so this is a question about the past, not
-    # a second wait.
-    if timed_out and not await _channel_already_signalled(server, started_channel):
+    # Did a shell begin the payload at all? Bounded by a grace rather
+    # than the caller's budget: the answer does not get truer by waiting
+    # longer, and paying the full timeout for it made the failure path
+    # fifty times slower than the success path.
+    grace = min(_STARTED_GRACE_SECONDS, effective_timeout)
+    started_ok = await _channel_already_signalled(
+        server, started_channel, timeout=grace
+    )
+    # Only a caller who gave us at least the full grace has told us
+    # enough to refuse. Under a shorter budget "it has not started yet"
+    # and "it never will" are the same observation, so that stays a
+    # plain timeout.
+    if not started_ok and effective_timeout > _STARTED_GRACE_SECONDS:
         occupant = await asyncio.to_thread(_read_pane_current_command, pane)
         named = f" (foreground: {occupant!r})" if occupant else ""
         # Deliberately does not guess between the two readings. A REPL
@@ -729,6 +720,34 @@ async def run_command(
         )
         raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
 
+    timed_out = not started_ok
+    wait_argv = _tmux_argv(server, "wait-for", channel)
+    # The wait must be owned by a killable child, not a worker thread.
+    # ``asyncio.to_thread(subprocess.run, ...)`` cannot be interrupted:
+    # cancelling the call raised ``CancelledError`` at once while the
+    # thread stayed blocked in an untimed ``waitpid``, so ``tmux
+    # wait-for`` ran on for the rest of the budget — measured at 22 s
+    # of orphan for a 25 s ``run_command`` cancelled at 3 s. This is
+    # the most-cancelled wait of the three: agents routinely bail out
+    # of a long shell command. ``_run_tmux_bounded`` kills the child on
+    # expiry and on cancellation alike.
+    returncode = 0
+    stderr_bytes = b""
+    if started_ok:
+        try:
+            returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
+                wait_argv,
+                timeout=max(effective_timeout - (time.monotonic() - started), 0.0),
+            )
+        except TimeoutError:
+            timed_out = True
+    if returncode != 0:
+        stderr = stderr_bytes.decode(errors="replace").strip()
+        detail = stderr or f"exit {returncode}"
+        msg = f"wait-for failed for run_command channel {channel!r}: {detail}"
+        raise ExpectedToolError(msg)
+
+    elapsed = time.monotonic() - started
     exit_status: int | None = None
     if not timed_out:
         status = pane.cmd("show-option", "-p", "-v", status_option).stdout
@@ -811,7 +830,9 @@ def _truncate_lines_tail(
     return lines[-max_lines:], True, dropped
 
 
-async def _channel_already_signalled(server: Server, channel: str) -> bool:
+async def _channel_already_signalled(
+    server: Server, channel: str, timeout: float
+) -> bool:
     """Whether ``channel`` was signalled, without waiting for it.
 
     tmux latches a ``wait-for -S`` that has no waiter, so a later wait
@@ -822,9 +843,7 @@ async def _channel_already_signalled(server: Server, channel: str) -> bool:
     """
     argv = _tmux_argv(server, "wait-for", channel)
     try:
-        returncode, _stdout, _stderr = await _run_tmux_bounded(
-            argv, timeout=_STARTED_CHANNEL_PROBE_SECONDS
-        )
+        returncode, _stdout, _stderr = await _run_tmux_bounded(argv, timeout=timeout)
     except TimeoutError:
         return False
     return returncode == 0

@@ -8,6 +8,66 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `wait_for_text` sees a status line printed again
+
+A program that prints `BUILD OK`, scrolls, and prints `BUILD OK` again
+could never be waited on. The second occurrence was suppressed and the
+wait ran to its ceiling reporting `found=false` -- against a pattern the
+program had just printed, fresh, inside the wait. That is the tool's
+headline use case with the sign flipped: a test runner printing `PASS`
+per file, a dev server printing `Compiled successfully` on every
+rebuild, a poller printing `waiting...`.
+
+The entry snapshot resolves one row's worth of ambiguity -- the entry
+cursor row, which the anchor deliberately includes so a daemon's single
+`ready` line stays matchable -- and it was doing so with a `frozenset`
+of every row below the cursor. Flattening discards position, so a line
+twenty rows down permanently blocked an identical line arriving on the
+cursor row.
+
+Rows are now compared against what THAT index held at entry. Measured:
+the identical reprint matches 1.96 s in (when it is printed), a near
+miss `BUILD OK 2` still matches, and a pane where the text is never
+reprinted still does not match, reporting `matched_at_entry=true`.
+
+Not a complete fix and the code says so: a row that rewrites the same
+text at the same index still reads as unchanged. tmux exposes no
+per-row last-written time, so something content-shaped is unavoidable
+at the bottom. The hole shrinks from "any line anywhere below the
+cursor" to "the exact row that already held that exact text".
+
+#### `run_command` answers a wedged pane in seconds, not at the timeout
+
+The refusal above was correct and arrived at `timeout + 1s`, so a call
+against a Python REPL at the default 30 s timeout took **31 seconds** to
+report something knowable in milliseconds -- fifty times slower than the
+success path, for an answer that does not get truer by waiting.
+
+The started channel is now waited on with its own short grace before
+the completion channel takes the remaining budget: two bounded
+`wait-for` calls, still no polling and still no extra shell round trip.
+Measured: refusal is capped near 3 s at every caller timeout from 2 s to
+30 s, an ordinary call is unchanged at 774 ms, a nested `bash` at 47 ms,
+and a genuine long-running command on a pane at a prompt still reports
+`timed_out` with `command_may_still_run`.
+
+A caller whose own budget is shorter than the grace gets a plain
+timeout rather than a refusal: under a shorter budget "it has not
+started yet" and "it never will" are the same observation.
+
+#### The `send_keys` Unicode warning was right, and is now specific
+
+It read "tmux renders combining marks and zero-width joiners as
+`<XXXX>` placeholders". Re-tested because a sweep across nine tmux
+versions and three locales reported it unreproducible. It reproduces
+immediately once the payload distinguishes precomposed from decomposed
+characters -- which is exactly why the sweep missed it. Measured on
+3.7c: `e` + U+0301 returns `e<0301>`, U+200D `<200d>`, U+FE0F `<fe0f>`,
+U+200B `<200b>`, while precomposed U+00E9 survives. So `école`
+round-trips when precomposed and does not when decomposed. The note now
+names the constructs rather than asserting the conclusion.
+
+
 #### Four smaller honesty and validation fixes
 
 **`clear_pane` says what it destroys.** It clears scrollback, not just
