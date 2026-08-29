@@ -8,10 +8,10 @@ from libtmux.constants import WindowDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    ANNOTATIONS_SPAWN,
     DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
@@ -361,7 +361,7 @@ def register(mcp: FastMCP) -> None:
         title="Get tmux Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(get_session_info)
     mcp.tool(
-        title="Create tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+        title="Create tmux Window", annotations=ANNOTATIONS_SPAWN, tags={TAG_MUTATING}
     )(create_window)
     mcp.tool(
         title="Rename tmux Session",

@@ -8,10 +8,10 @@ from libtmux.constants import PaneDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    ANNOTATIONS_SHELL,
     DISCOVERY_META,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
@@ -509,7 +509,7 @@ def register(mcp: FastMCP) -> None:
         title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(get_window_info)
     mcp.tool(
-        title="Split tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+        title="Split tmux Window", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING}
     )(split_window)
     mcp.tool(
         title="Rename tmux Window",

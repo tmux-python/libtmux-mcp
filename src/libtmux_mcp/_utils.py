@@ -405,17 +405,28 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
-#: Annotations for tools whose caller-supplied payload reaches a program
-#: that runs it: ``send_keys``, ``send_keys_batch``, ``run_command``,
-#: ``paste_text``, ``paste_buffer``, and ``pipe_pane``.
+#: Annotations for tools that hand a caller-supplied payload to a program
+#: that runs it — typed keys, a pasted buffer, an authored shell command,
+#: or the command ``pipe_pane`` feeds.
 #:
-#: ``destructiveHint`` is ``True`` because MCP defines ``False`` as a
-#: claim of additive-only updates, and typed input can overwrite a file,
-#: end a process, or leave a shell mid-line. ``openWorldHint`` is ``True``
-#: because the effect extends into whatever the payload runs.
+#: ``destructiveHint`` is ``True`` because MCP defines ``False`` as a claim
+#: of additive-only updates, and such a payload can overwrite a file, end a
+#: process, or leave a shell mid-line. ``openWorldHint`` is ``True`` because
+#: the effect extends into whatever the payload runs.
 #:
-#: ``load_buffer`` is deliberately not here: it allocates a fresh buffer
-#: and delivers nothing, so it is additive and closed-world.
+#: Contrast :data:`ANNOTATIONS_SPAWN`, which starts the pane's *configured*
+#: process and carries no payload.
+#: Annotations for tools that start a pane's configured process without a
+#: caller-supplied command. Additive at the tmux level, but ``openWorldHint``
+#: is ``True``: the new process runs with the user's authority and reaches
+#: whatever that user reaches.
+ANNOTATIONS_SPAWN: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
+
 ANNOTATIONS_SHELL: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
@@ -442,25 +453,6 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
 #: honour the hint, so widening the set has a real cost.
 DISCOVERY_META: dict[str, t.Any] = {
     "anthropic/alwaysLoad": True,
-}
-#: Annotations for tools that stay in the ``mutating`` tier (so they remain
-#: visible to default-profile agents) but whose default behaviour can
-#: terminate processes or otherwise lose state.
-#:
-#: Canonical users include ``respawn_pane`` and ``clear_pane``:
-#: tier=mutating because shell recovery and scrollback cleanup are part
-#: of normal agent workflows, while the hints still disclose process
-#: termination or state loss.
-#:
-#: Distinct from :data:`ANNOTATIONS_DESTRUCTIVE` (same hint values) because
-#: the tier tag differs: ``ANNOTATIONS_DESTRUCTIVE`` is paired with
-#: ``TAG_DESTRUCTIVE`` everywhere it is used; this preset is paired with
-#: ``TAG_MUTATING``. The distinct name documents intent at the call site.
-ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "idempotentHint": False,
-    "openWorldHint": False,
 }
 
 

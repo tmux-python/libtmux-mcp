@@ -15,7 +15,6 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
-    ANNOTATIONS_MUTATING_DESTRUCTIVE,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
     DISCOVERY_META,
@@ -116,7 +115,7 @@ def register(mcp: FastMCP) -> None:
     )(kill_pane)
     mcp.tool(
         title="Respawn Pane",
-        annotations=ANNOTATIONS_MUTATING_DESTRUCTIVE,
+        annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING},
     )(respawn_pane)
     mcp.tool(
@@ -132,7 +131,7 @@ def register(mcp: FastMCP) -> None:
     )(find_pane_by_position)
     mcp.tool(
         title="Clear Pane",
-        annotations=ANNOTATIONS_MUTATING_DESTRUCTIVE,
+        annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_MUTATING},
     )(clear_pane)
     mcp.tool(title="Search Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(

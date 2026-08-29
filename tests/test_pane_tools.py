@@ -5512,15 +5512,6 @@ def test_paste_text_does_not_leak_named_buffer(
 @pytest.mark.parametrize(
     ("tool_name", "expected_open_world"),
     [
-        # Shell-driving tools: the command the caller sends can reach
-        # arbitrary external state, so the interaction is open-world.
-        ("send_keys", True),
-        ("send_keys_batch", True),
-        ("run_command", True),
-        ("paste_text", True),
-        ("pipe_pane", True),
-        # Create-style tools: allocate tmux objects only. Not open-world
-        # even though they share the old ANNOTATIONS_CREATE preset.
         ("swap_pane", False),
         ("enter_copy_mode", False),
     ],
@@ -5528,15 +5519,7 @@ def test_paste_text_does_not_leak_named_buffer(
 def test_pane_tool_open_world_hint_registration(
     tool_name: str, expected_open_world: bool
 ) -> None:
-    """Pane tools advertise ``openWorldHint`` matching their real semantics.
-
-    Regression guard for the shared-preset trap: the old
-    ``ANNOTATIONS_CREATE`` preset was applied to both shell-driving and
-    non-shell-driving tools, so every caller saw ``openWorldHint=False``.
-    A new ``ANNOTATIONS_SHELL`` preset now carries ``openWorldHint=True``
-    for the three shell-driving tools only, leaving the other
-    ``ANNOTATIONS_CREATE`` users unchanged.
-    """
+    """Pane tools that only rearrange tmux state stay closed-world."""
     import asyncio
 
     from fastmcp import FastMCP
@@ -5552,39 +5535,6 @@ def test_pane_tool_open_world_hint_registration(
         f"{tool_name} registration should carry annotations"
     )
     assert wire_annotations(tool).get("openWorldHint") is expected_open_world
-
-
-def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
-    """``respawn_pane`` registers as mutating-tier with destructive hints.
-
-    Default ``kill=True`` sends ``SPAWN_KILL`` to the running process
-    (`cmd-respawn-pane.c:78-79`); repeated calls kill repeated processes.
-    The MCP spec defines ``destructiveHint`` as "may perform destructive
-    updates" and ``idempotentHint`` as "calling repeatedly will have no
-    additional effect" (`mcp/types.py:1268-1282`). The default
-    ``ANNOTATIONS_MUTATING`` preset (``destructiveHint=False``,
-    ``idempotentHint=True``) would lie to the agent. The new
-    ``ANNOTATIONS_MUTATING_DESTRUCTIVE`` preset stays in ``TAG_MUTATING``
-    so the recovery use case remains visible to default-profile clients,
-    while honestly advertising destructive non-idempotent semantics.
-    """
-    import asyncio
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import pane_tools
-
-    mcp = FastMCP(name="test-respawn-annotations")
-    pane_tools.register(mcp)
-
-    tool = asyncio.run(mcp.get_tool("respawn_pane"))
-    assert tool is not None, "respawn_pane should be registered"
-    assert tool.annotations is not None, (
-        "respawn_pane registration should carry annotations"
-    )
-    assert wire_annotations(tool).get("destructiveHint") is True
-    assert wire_annotations(tool).get("idempotentHint") is False
-    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 def test_clear_pane_advertises_destructive_non_idempotent() -> None:

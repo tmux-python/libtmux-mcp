@@ -13,9 +13,9 @@ from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_RO,
+    ANNOTATIONS_SPAWN,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -373,7 +373,7 @@ def register(mcp: FastMCP) -> None:
     )(list_servers)
     mcp.tool(
         title="Create tmux Session",
-        annotations=ANNOTATIONS_CREATE,
+        annotations=ANNOTATIONS_SPAWN,
         tags={TAG_MUTATING},
     )(create_session)
     mcp.tool(

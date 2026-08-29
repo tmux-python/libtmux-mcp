@@ -16,6 +16,22 @@ from libtmux_mcp.server import build_mcp_server
 
 from .conftest import wire_annotations
 
+#: Tools that start a process. The pane's program runs with the user's
+#: authority and reaches whatever that user reaches, so the effect does
+#: not stop at tmux.
+SPAWN_TOOLS = frozenset(
+    {
+        "create_session",
+        "create_window",
+        "respawn_pane",
+        "split_window",
+    }
+)
+
+#: Spawn tools that additionally accept a command string to run in place
+#: of the pane's configured process.
+AUTHORED_COMMAND_TOOLS = frozenset({"respawn_pane", "split_window"})
+
 #: Tools whose caller-supplied payload reaches a program that runs it —
 #: a shell prompt, a pane's process, or the command ``pipe_pane`` feeds.
 #: Membership is a fact about where the value lands, not about the
@@ -74,3 +90,21 @@ def test_pane_input_tools_do_not_claim_additive_updates(
     assert hints["destructiveHint"] is True
     assert hints["idempotentHint"] is False
     assert hints["openWorldHint"] is True
+
+
+@pytest.mark.parametrize("name", sorted(SPAWN_TOOLS))
+def test_spawn_tools_are_advertised_open_world(
+    advertised_tools: dict[str, t.Any],
+    name: str,
+) -> None:
+    """A pane's program runs with the user's authority, not inside tmux."""
+    assert wire_annotations(advertised_tools[name])["openWorldHint"] is True
+
+
+@pytest.mark.parametrize("name", sorted(AUTHORED_COMMAND_TOOLS))
+def test_authored_command_spawns_do_not_claim_additive_updates(
+    advertised_tools: dict[str, t.Any],
+    name: str,
+) -> None:
+    """A caller-authored command replaces what the pane would have run."""
+    assert wire_annotations(advertised_tools[name])["destructiveHint"] is True
