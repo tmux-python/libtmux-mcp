@@ -2186,6 +2186,29 @@ again promise an argument that is not there.
 
 ### Fixes
 
+#### A spawn start directory is a literal path
+
+`create_session` escaped its `start_directory` because `new-session -c`
+is format-expanded. `split_window`, `create_window` and `respawn_pane`
+did not, and they are expanded too -- all four are.
+
+The first sweep got this wrong by READING rather than measuring:
+`cmd-split-window.c` assigns `sc.cwd = args_get(args, 'c')` with no
+expansion in sight, so it was recorded as safe. The expansion happens
+further down, in the spawn path. Measured on all four commands, a `#S`
+in the path moves.
+
+Failure is silent, which is what makes it worth a fix rather than a
+note. An unescaped `#` does not error: tmux expands the path into one
+that does not exist and starts the shell in `$HOME` instead. The tool
+reports the pane it created, the pane is real, and the caller never
+learns it is in the wrong directory -- the same shape as the
+`create_session` empty-name defeat, where validation ran on a string
+tmux then rewrote.
+
+The regression test covers all four spawns and was checked to fail
+without the escape.
+
 #### `display_message` stops refusing a literal `#(`
 
 The job guard tested for the substring `#(`, but `##` is tmux's escape

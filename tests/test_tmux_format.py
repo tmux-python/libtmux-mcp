@@ -21,11 +21,11 @@ from libtmux_mcp._tmux_format import (
     escape_format_time,
 )
 from libtmux_mcp.tools.option_tools import set_option, show_option
-from libtmux_mcp.tools.pane_tools.lifecycle import set_pane_title
+from libtmux_mcp.tools.pane_tools.lifecycle import respawn_pane, set_pane_title
 from libtmux_mcp.tools.pane_tools.meta import display_message
 from libtmux_mcp.tools.server_tools import create_session
 from libtmux_mcp.tools.session_tools import create_window, rename_session
-from libtmux_mcp.tools.window_tools import rename_window
+from libtmux_mcp.tools.window_tools import rename_window, split_window
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -262,3 +262,61 @@ def test_display_message_still_refuses_a_real_job(
             pane_id=mcp_pane.pane_id,
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_a_spawn_start_directory_is_a_literal_path(
+    mcp_server: Server, mcp_session: Session, mcp_window: Window, tmp_path: t.Any
+) -> None:
+    """Every spawn command expands its ``-c``, and failure is silent.
+
+    Measured on all four -- ``new-session``, ``new-window``,
+    ``split-window`` and ``respawn-pane``. An unescaped ``#`` does not
+    error: tmux expands the path into one that does not exist and starts
+    the shell in ``$HOME`` instead, so the tool reports a pane it
+    created and the caller never learns it is in the wrong directory.
+
+    ``#S`` is the session name, which makes this the cheapest value that
+    actually moves. A path with a ``#`` no format claims -- ``#d`` --
+    passes through unchanged and would prove nothing.
+    """
+    target = tmp_path / "qa#Sdir"
+    target.mkdir()
+    where = str(target)
+
+    def cwd_of(pane_id: str) -> str:
+        return display_message(
+            format_string="#{pane_current_path}",
+            pane_id=pane_id,
+            socket_name=mcp_server.socket_name,
+        )
+
+    created = create_session(
+        session_name="cwd-session",
+        start_directory=where,
+        socket_name=mcp_server.socket_name,
+    )
+    assert created.active_pane_id is not None
+    assert cwd_of(created.active_pane_id) == where
+
+    window = create_window(
+        session_id=mcp_session.session_id,
+        start_directory=where,
+        socket_name=mcp_server.socket_name,
+    )
+    assert window.active_pane_id is not None
+    assert cwd_of(window.active_pane_id) == where
+
+    split = split_window(
+        window_id=mcp_window.window_id,
+        start_directory=where,
+        socket_name=mcp_server.socket_name,
+    )
+    assert cwd_of(split.pane_id) == where
+
+    respawned = respawn_pane(
+        pane_id=split.pane_id,
+        kill=True,
+        start_directory=where,
+        socket_name=mcp_server.socket_name,
+    )
+    assert cwd_of(respawned.pane_id) == where

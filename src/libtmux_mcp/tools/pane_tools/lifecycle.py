@@ -13,7 +13,7 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
 
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._tmux_format import escape_format
+from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _caller_is_on_server,
@@ -290,7 +290,7 @@ def respawn_pane(
     previous_pid = previous[0] if previous else None
     pane.respawn(
         kill=kill,
-        start_directory=start_directory,
+        start_directory=_escaped_or_none(start_directory),
         environment=spawn_environment,
         shell=shell,
     )

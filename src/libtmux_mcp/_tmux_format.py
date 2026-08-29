@@ -155,3 +155,16 @@ def contains_format_job(value: str) -> bool:
     return any(
         len(match.group(1)) % 2 for match in _TMUX_HASH_RUN_BEFORE_PAREN.finditer(value)
     )
+
+
+def _escaped_or_none(start_directory: str | None) -> str | None:
+    """Escape a spawn cwd, passing ``None`` through.
+
+    Every spawn command expands its ``-c`` argument -- measured on
+    ``split-window``, ``new-window``, ``respawn-pane`` and
+    ``new-session``, all four. An unescaped ``#`` does not fail: tmux
+    expands the path into one that does not exist and silently starts
+    the shell in ``$HOME`` instead, so the caller is told the pane was
+    created and never learns it is in the wrong directory.
+    """
+    return None if start_directory is None else escape_format(start_directory)

@@ -10,7 +10,7 @@ from libtmux.pane import Pane
 from libtmux.window import Window
 
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._tmux_format import escape_format
+from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
@@ -342,7 +342,7 @@ def split_window(
         new_pane = target.split(
             direction=pane_dir,
             size=size,
-            start_directory=start_directory,
+            start_directory=_escaped_or_none(start_directory),
             shell=shell,
             environment=spawn_environment,
         )

@@ -176,7 +176,7 @@ def create_window(
     if window_name is not None:
         kwargs["window_name"] = escape_format(window_name)
     if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+        kwargs["start_directory"] = escape_format(start_directory)
     kwargs["attach"] = attach
     if direction is not None:
         direction_map: dict[str, WindowDirection] = {
