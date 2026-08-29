@@ -62,7 +62,7 @@ Tools fall into three categories:
 - **Destruction** — Remove tmux objects: {toolref}`kill-server`,
   {toolref}`kill-session`, {toolref}`kill-window`, {toolref}`kill-pane`
 
-These map to {ref}`safety tiers <safety>`.
+These map to {ref}`toolsets <trust>`.
 
 ## Agent self-awareness
 
@@ -70,7 +70,7 @@ When the MCP server runs inside a tmux pane (detected via the `TMUX_PANE` enviro
 
 - Includes the caller's pane context in server instructions
 - Annotates the caller's own pane with `is_caller=true` in tool results
-- Prevents destructive tools from killing the caller's own pane, window, session, or server
+- Prevents the `teardown` tools from killing the caller's own pane, window, session, or server
 
 This means agents can safely explore and manage tmux without accidentally terminating themselves.
 

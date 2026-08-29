@@ -212,7 +212,7 @@ def test_create_session_page_warns_against_literal_credentials(
     assert "Values persist in the new session" in normalized
     assert "initial pane and future panes" in normalized
     assert "Pass credential references instead" in normalized
-    assert "{ref}`safety`" in caution_block
+    assert "{ref}`trust`" in caution_block
     assert "```{fastmcp-tool-input} server_tools.create_session" in text
 
 
@@ -238,11 +238,11 @@ def test_run_command_page_documents_effective_history_policy(
     assert "`true` unless {envvar}`LIBTMUX_SUPPRESS_HISTORY` is `0`" in text
 
 
-def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
+def test_trust_docs_name_history_non_goals_and_secret_reference_guidance(
     docs_dir: pathlib.Path,
 ) -> None:
     """Safety guidance does not present history suppression as secret transport."""
-    text = (docs_dir / "topics" / "safety.md").read_text(encoding="utf-8")
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
 
     for surface in (
         "pane echo",
@@ -392,7 +392,7 @@ def test_a17_changelog_summarizes_history_features(
     assert "{ref}`safety`" in environment_entry
 
 
-def test_safety_annotation_table_matches_the_registered_surface(
+def test_annotation_table_matches_the_registered_surface(
     docs_dir: pathlib.Path,
 ) -> None:
     """The hand-written hint table says what clients are actually told."""
@@ -412,18 +412,19 @@ def test_safety_annotation_table_matches_the_registered_surface(
     assert len(tools) > 1
 
     hints = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
-    tiers = ("readonly", "mutating", "destructive")
+    from libtmux_mcp._utils import VALID_TOOLSETS
+
     expected = set()
     for tool in tools:
         annotations = tool.annotations
         assert annotations is not None, tool.name
         dumped = annotations.model_dump(mode="json", by_alias=True)
         cells = " | ".join(str(dumped[hint]).lower() for hint in hints)
-        tier = next(tier for tier in tiers if tier in tool.tags)
+        toolset = next(name for name in VALID_TOOLSETS if name in tool.tags)
         slug = tool.name.replace("_", "-")
-        expected.add(f"| {{toolref}}`{slug}` | {{badge}}`{tier}` | {cells} |")
+        expected.add(f"| {{toolref}}`{slug}` | {{badge}}`{toolset}` | {cells} |")
 
-    text = (docs_dir / "topics" / "safety.md").read_text(encoding="utf-8")
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
     documented = set(re.findall(r"^\| \{toolref\}`.+\|$", text, flags=re.MULTILINE))
 
     assert documented == expected

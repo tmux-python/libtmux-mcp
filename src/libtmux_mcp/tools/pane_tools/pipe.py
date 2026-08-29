@@ -56,7 +56,7 @@ def pipe_pane(
        tier — it is the broadest-reach tool in that tier. If you run
        libtmux-mcp on untrusted input, consider
        ``LIBTMUX_SAFETY=readonly`` or run the server under a user with
-       a scoped home directory. See :doc:`/topics/safety` for the full
+       a scoped home directory. See :doc:`/topics/trust` for the full
        footgun list.
 
     Parameters

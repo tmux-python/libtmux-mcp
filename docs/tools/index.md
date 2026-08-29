@@ -55,9 +55,9 @@ leave socket selection inside each nested tool's arguments. See
 - Signal a waiter → {tool}`signal-channel`
 
 **Batching typed tool calls?**
-- Read-only observations → {tool}`call-readonly-tools-batch`
-- Ordered readonly + mutating workflows → {tool}`call-mutating-tools-batch`
-- Reviewed workflows that include destructive steps → {tool}`call-destructive-tools-batch`
+- Read-only observations → {tool}`call-read-tools-batch`
+- Anything that writes → call the tool directly; a batch would hide its
+  name from a client rule keyed on it
 
 **Staging multi-line input?**
 - Stage content → {tool}`load-buffer`
@@ -159,8 +159,8 @@ Wait for text to appear in a pane.
 Get tmux server info.
 :::
 
-:::{grid-item-card} call_readonly_tools_batch
-:link: call-readonly-tools-batch
+:::{grid-item-card} call_read_tools_batch
+:link: call-read-tools-batch
 :link-type: ref
 Call typed readonly tools in order.
 :::
@@ -256,12 +256,6 @@ Send several ordered raw-input operations.
 :link: run-command
 :link-type: ref
 Run a shell command and report exit status.
-:::
-
-:::{grid-item-card} call_mutating_tools_batch
-:link: call-mutating-tools-batch
-:link-type: ref
-Call typed readonly or mutating tools in order.
 :::
 
 :::{grid-item-card} rename_session
@@ -427,12 +421,6 @@ Destroy a pane.
 :link: kill-server
 :link-type: ref
 Kill the entire tmux server.
-:::
-
-:::{grid-item-card} call_destructive_tools_batch
-:link: call-destructive-tools-batch
-:link-type: ref
-Call typed tools including destructive steps.
 :::
 
 :::{grid-item-card} delete_buffer

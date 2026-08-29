@@ -30,7 +30,7 @@ Install, connect, get a first result. Under 2 minutes.
 :link: tools/index
 :link-type: doc
 
-Every tool, grouped by intent and safety tier.
+Every tool, grouped by intent and toolset.
 :::
 
 :::{grid-item-card} Prompts
@@ -47,11 +47,11 @@ Four workflow recipes the client renders for the model.
 Snapshot views of the tmux hierarchy via `tmux://` URIs.
 :::
 
-:::{grid-item-card} Safety tiers
-:link: topics/safety
+:::{grid-item-card} Trust model
+:link: topics/trust
 :link-type: doc
 
-Readonly, mutating, destructive. Know what changes state.
+What the toolsets group, and what they do not bound.
 :::
 
 :::{grid-item-card} Client setup
@@ -67,23 +67,23 @@ Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 
 ## What you can do
 
-### Inspect (readonly)
+### Inspect
 
 Read tmux state without changing anything.
 
-{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`display-message` · {toolref}`call-readonly-tools-batch`
+{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`display-message` · {toolref}`call-read-tools-batch`
 
-### Act (mutating)
+### Execute
 
 Create or modify tmux objects.
 
-{toolref}`create-session` · {toolref}`send-keys` · {toolref}`send-keys-batch` · {toolref}`run-command` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option` · {toolref}`call-mutating-tools-batch`
+{toolref}`create-session` · {toolref}`send-keys` · {toolref}`send-keys-batch` · {toolref}`run-command` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option`
 
-### Destroy (destructive)
+### Teardown
 
 Tear down tmux objects. Not reversible.
 
-{toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server` · {toolref}`call-destructive-tools-batch`
+{toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server`
 
 ### Example: keep test runs out of persistent history
 
@@ -108,7 +108,7 @@ The agent calls {tooliconl}`create-session` with
 
 These controls reduce history noise; they do not make commands secret. See
 {ref}`history-suppression` for shell-specific behavior,
-{ref}`configuration` for the server default, and {ref}`safety` for other
+{ref}`configuration` for the server default, and {ref}`trust` for other
 observation surfaces.
 
 [Browse all tools →](tools/index)
@@ -118,7 +118,7 @@ observation surfaces.
 ## Mental model
 
 - **Object hierarchy** — sessions contain windows, windows contain panes ({doc}`topics/concepts`)
-- **Read vs. mutate** — some tools observe, some act, some destroy ({doc}`topics/safety`)
+- **Toolsets** — inspect, manage, execute, teardown; what each groups ({doc}`topics/trust`)
 - **tmux is the source of truth** — the server reads from it and writes to it, never caches or abstracts
 
 ---

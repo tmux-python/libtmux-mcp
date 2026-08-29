@@ -433,7 +433,7 @@ def test_production_mcp_schema_scopes_startup_default_to_run_command(
         "openWorldHint": True,
         "readOnlyHint": False,
     }
-    assert sorted(payload["tags"]) == ["mutating", "self-bounded"]
+    assert sorted(payload["tags"]) == ["execute", "self-bounded"]
     assert payload["raw_defaults"] == {
         "send_keys": False,
         "send_keys_batch": False,
@@ -589,7 +589,7 @@ def test_mcp_run_command_uses_effective_default_and_resists_batching(
                 assert output.read_text() == f"{marker}\n"
 
             batch = await client.call_tool(
-                "call_mutating_tools_batch",
+                "call_read_tools_batch",
                 {
                     "operations": [
                         {

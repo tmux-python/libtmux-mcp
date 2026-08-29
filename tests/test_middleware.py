@@ -14,124 +14,101 @@ from fastmcp.server.middleware import MiddlewareContext
 from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
+from libtmux_mcp._utils import (
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
+)
 from libtmux_mcp.middleware import (
     AuditMiddleware,
-    ReadonlyRetryMiddleware,
-    SafetyMiddleware,
+    InspectRetryMiddleware,
+    ToolsetMiddleware,
     _client_label,
     _redact_digest,
     _summarize_args,
 )
 
 
-class SafetyAllowedFixture(t.NamedTuple):
-    """Test fixture for SafetyMiddleware._is_allowed."""
+class ToolsetEnabledFixture(t.NamedTuple):
+    """One membership decision for :class:`ToolsetMiddleware`."""
 
     test_id: str
-    max_tier: str
+    toolsets: set[str]
+    tool_name: str
     tool_tags: set[str]
-    expected_allowed: bool
+    expected_enabled: bool
 
 
-SAFETY_ALLOWED_FIXTURES: list[SafetyAllowedFixture] = [
-    # readonly tier: only readonly tools allowed
-    SafetyAllowedFixture(
-        test_id="readonly_allows_readonly",
-        max_tier=TAG_READONLY,
-        tool_tags={TAG_READONLY},
-        expected_allowed=True,
+TOOLSET_ENABLED_FIXTURES: list[ToolsetEnabledFixture] = [
+    ToolsetEnabledFixture(
+        test_id="tool_in_an_enabled_toolset",
+        toolsets={TOOLSET_INSPECT},
+        tool_name="capture_pane",
+        tool_tags={TOOLSET_INSPECT},
+        expected_enabled=True,
     ),
-    SafetyAllowedFixture(
-        test_id="readonly_blocks_mutating",
-        max_tier=TAG_READONLY,
-        tool_tags={TAG_MUTATING},
-        expected_allowed=False,
+    ToolsetEnabledFixture(
+        test_id="tool_outside_the_enabled_toolsets",
+        toolsets={TOOLSET_INSPECT},
+        tool_name="send_keys",
+        tool_tags={TOOLSET_EXECUTE},
+        expected_enabled=False,
     ),
-    SafetyAllowedFixture(
-        test_id="readonly_blocks_destructive",
-        max_tier=TAG_READONLY,
-        tool_tags={TAG_DESTRUCTIVE},
-        expected_allowed=False,
+    # An ordered ladder could not express this: teardown without execute.
+    ToolsetEnabledFixture(
+        test_id="teardown_without_execute",
+        toolsets={TOOLSET_INSPECT, TOOLSET_TEARDOWN},
+        tool_name="kill_pane",
+        tool_tags={TOOLSET_TEARDOWN},
+        expected_enabled=True,
     ),
-    # mutating tier: readonly + mutating allowed
-    SafetyAllowedFixture(
-        test_id="mutating_allows_readonly",
-        max_tier=TAG_MUTATING,
-        tool_tags={TAG_READONLY},
-        expected_allowed=True,
+    ToolsetEnabledFixture(
+        test_id="execute_stays_out_of_that_surface",
+        toolsets={TOOLSET_INSPECT, TOOLSET_TEARDOWN},
+        tool_name="run_command",
+        tool_tags={TOOLSET_EXECUTE},
+        expected_enabled=False,
     ),
-    SafetyAllowedFixture(
-        test_id="mutating_allows_mutating",
-        max_tier=TAG_MUTATING,
-        tool_tags={TAG_MUTATING},
-        expected_allowed=True,
-    ),
-    SafetyAllowedFixture(
-        test_id="mutating_blocks_destructive",
-        max_tier=TAG_MUTATING,
-        tool_tags={TAG_DESTRUCTIVE},
-        expected_allowed=False,
-    ),
-    # destructive tier: all allowed
-    SafetyAllowedFixture(
-        test_id="destructive_allows_readonly",
-        max_tier=TAG_DESTRUCTIVE,
-        tool_tags={TAG_READONLY},
-        expected_allowed=True,
-    ),
-    SafetyAllowedFixture(
-        test_id="destructive_allows_mutating",
-        max_tier=TAG_DESTRUCTIVE,
-        tool_tags={TAG_MUTATING},
-        expected_allowed=True,
-    ),
-    SafetyAllowedFixture(
-        test_id="destructive_allows_destructive",
-        max_tier=TAG_DESTRUCTIVE,
-        tool_tags={TAG_DESTRUCTIVE},
-        expected_allowed=True,
-    ),
-    # untagged tools are denied (fail-closed)
-    SafetyAllowedFixture(
-        test_id="untagged_denied_at_readonly",
-        max_tier=TAG_READONLY,
+    ToolsetEnabledFixture(
+        test_id="untagged_tool_is_refused",
+        toolsets={TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_EXECUTE},
+        tool_name="mystery",
         tool_tags=set(),
-        expected_allowed=False,
+        expected_enabled=False,
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    SafetyAllowedFixture._fields,
-    SAFETY_ALLOWED_FIXTURES,
-    ids=[f.test_id for f in SAFETY_ALLOWED_FIXTURES],
+    ToolsetEnabledFixture._fields,
+    TOOLSET_ENABLED_FIXTURES,
+    ids=[f.test_id for f in TOOLSET_ENABLED_FIXTURES],
 )
-def test_safety_middleware_is_allowed(
+def test_toolset_middleware_membership(
     test_id: str,
-    max_tier: str,
+    toolsets: set[str],
+    tool_name: str,
     tool_tags: set[str],
-    expected_allowed: bool,
+    expected_enabled: bool,
 ) -> None:
-    """SafetyMiddleware._is_allowed gates tools by tier."""
-    mw = SafetyMiddleware(max_tier=max_tier)
-    assert mw._is_allowed(tool_tags) is expected_allowed
+    """A tool is advertised when one of its toolsets is enabled."""
+    mw = ToolsetMiddleware(toolsets)
+
+    assert mw._is_enabled(tool_name, tool_tags) is expected_enabled
 
 
-def test_safety_middleware_default_tier() -> None:
-    """SafetyMiddleware defaults to mutating tier."""
-    mw = SafetyMiddleware()
-    assert mw._is_allowed({TAG_READONLY}) is True
-    assert mw._is_allowed({TAG_MUTATING}) is True
-    assert mw._is_allowed({TAG_DESTRUCTIVE}) is False
+def test_named_tools_join_and_exclusions_win() -> None:
+    """`LIBTMUX_TOOLS` adds by name; `LIBTMUX_EXCLUDE_TOOLS` beats it."""
+    mw = ToolsetMiddleware(
+        {TOOLSET_INSPECT},
+        tools={"send_keys"},
+        exclude_tools={"capture_pane", "send_keys"},
+    )
 
-
-def test_safety_middleware_invalid_tier_falls_back() -> None:
-    """SafetyMiddleware falls back to readonly for unknown tiers."""
-    mw = SafetyMiddleware(max_tier="nonexistent")
-    assert mw._is_allowed({TAG_READONLY}) is True
-    assert mw._is_allowed({TAG_MUTATING}) is False
-    assert mw._is_allowed({TAG_DESTRUCTIVE}) is False
+    assert mw._is_enabled("send_keys", {TOOLSET_EXECUTE}) is False
+    assert mw._is_enabled("capture_pane", {TOOLSET_INSPECT}) is False
+    assert mw._is_enabled("list_panes", {TOOLSET_INSPECT}) is True
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +621,7 @@ def test_server_middleware_stack_order() -> None:
     security observability without an obvious test failure, so pin
     the sequence explicitly.
 
-    ReadonlyRetryMiddleware sits between Audit and Safety so retried
+    InspectRetryMiddleware sits between Audit and Safety so retried
     calls are audited once each (Audit wraps the retry loop) and
     tier-denied tools never reach retry (Safety stops them first).
     """
@@ -652,10 +629,10 @@ def test_server_middleware_stack_order() -> None:
 
     from libtmux_mcp.middleware import (
         AuditMiddleware,
-        ReadonlyRetryMiddleware,
-        SafetyMiddleware,
+        InspectRetryMiddleware,
         TailPreservingResponseLimitingMiddleware,
         ToolErrorResultMiddleware,
+        ToolsetMiddleware,
     )
     from libtmux_mcp.server import mcp
 
@@ -668,8 +645,8 @@ def test_server_middleware_stack_order() -> None:
         TailPreservingResponseLimitingMiddleware,
         ToolErrorResultMiddleware,
         AuditMiddleware,
-        ReadonlyRetryMiddleware,
-        SafetyMiddleware,
+        InspectRetryMiddleware,
+        ToolsetMiddleware,
     ]
 
 
@@ -737,7 +714,7 @@ def test_audit_records_safety_denial(
 
 
 # ---------------------------------------------------------------------------
-# ReadonlyRetryMiddleware tests
+# InspectRetryMiddleware tests
 # ---------------------------------------------------------------------------
 
 
@@ -801,8 +778,8 @@ def test_readonly_retry_recovers_from_libtmux_exception() -> None:
     """
     from libtmux import exc as libtmux_exc
 
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_READONLY})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_INSPECT})
     call_next = _FlakyCallNext(
         raises_n_times=1,
         exception=libtmux_exc.LibTmuxException("transient socket error"),
@@ -824,8 +801,8 @@ def test_readonly_retry_skips_mutating_tool() -> None:
     """
     from libtmux import exc as libtmux_exc
 
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_MUTATING})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_MANAGE})
     call_next = _FlakyCallNext(
         raises_n_times=1,
         exception=libtmux_exc.LibTmuxException("transient socket error"),
@@ -853,8 +830,8 @@ def test_readonly_retry_skips_self_bounded_tool() -> None:
 
     from libtmux_mcp._utils import TAG_SELF_BOUNDED
 
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_READONLY, TAG_SELF_BOUNDED})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_INSPECT, TAG_SELF_BOUNDED})
     call_next = _FlakyCallNext(
         raises_n_times=1,
         exception=libtmux_exc.LibTmuxException("transient socket error"),
@@ -874,8 +851,8 @@ def test_readonly_retry_skips_non_libtmux_exception() -> None:
     programming error, not a transient socket hiccup, and retrying
     it would just delay the real failure.
     """
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_READONLY})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_INSPECT})
     call_next = _FlakyCallNext(
         raises_n_times=1,
         exception=ValueError("bad caller input"),
@@ -929,8 +906,8 @@ def test_readonly_retry_recovers_on_decorated_tool(
 
     monkeypatch.setattr(Server, "sessions", property(_flaky_sessions))
 
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_READONLY})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_INSPECT})
 
     async def real_call_next(_context: t.Any) -> t.Any:
         # ``list_sessions`` is sync + ``@handle_tool_errors`` decorated.
@@ -970,8 +947,8 @@ def test_readonly_retry_skips_deterministic_failures(raised: Exception) -> None:
     not become unambiguous. Retrying buys a second tmux round-trip and 100 ms
     of latency in order to fail identically.
     """
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_READONLY})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_INSPECT})
     call_next = _FlakyCallNext(raises_n_times=1, exception=raised)
 
     with pytest.raises(libtmux_exc.LibTmuxException):
@@ -1017,8 +994,8 @@ def test_readonly_retry_skips_not_found_on_decorated_tool(
 
     monkeypatch.setattr(Server, "sessions", property(_missing_sessions))
 
-    middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TAG_READONLY})
+    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
+    ctx = _retry_context(tags={TOOLSET_INSPECT})
 
     async def real_call_next(_context: t.Any) -> t.Any:
         return list_sessions(socket_name="retry-skip-smoke")
@@ -1042,7 +1019,7 @@ def test_readonly_retry_logger_uses_project_namespace() -> None:
     explicit override, retry warnings would silently bypass any
     project-namespace audit-stream routing.
     """
-    middleware = ReadonlyRetryMiddleware()
+    middleware = InspectRetryMiddleware()
     assert middleware._retry.logger.name == "libtmux_mcp.retry"
 
 
@@ -1621,28 +1598,29 @@ def test_unexpected_argument_suggestion_without_handshake() -> None:
     assert "some clients (e.g. Gemini CLI)" in meta["suggestion"]
 
 
-def test_wait_for_text_is_registered_self_bounded_and_still_readonly() -> None:
-    """``wait_for_text`` carries both tags, and the extra tag is inert.
+def test_wait_for_text_carries_a_marker_tag_that_does_not_gate_it() -> None:
+    """``wait_for_text`` is in ``inspect``; its extra marker tag is inert.
 
-    ``SafetyMiddleware._is_allowed`` inspects only the three tier tags,
-    so an additional marker tag must not change tier visibility at any
-    safety level.
+    ``ToolsetMiddleware`` intersects a tool's tags with the toolsets, so
+    a marker tag that names no toolset cannot change what is advertised.
     """
     from fastmcp import FastMCP
 
     from libtmux_mcp._utils import TAG_SELF_BOUNDED
-    from libtmux_mcp.middleware import SafetyMiddleware
+    from libtmux_mcp.middleware import ToolsetMiddleware
     from libtmux_mcp.tools import register_tools
 
     mcp = FastMCP(name="self-bounded-audit")
     register_tools(mcp)
     tool = asyncio.run(mcp.get_tool("wait_for_text"))
     assert tool is not None
-    assert TAG_READONLY in tool.tags
+    assert TOOLSET_INSPECT in tool.tags
     assert TAG_SELF_BOUNDED in tool.tags
 
-    for tier in (TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE):
-        assert SafetyMiddleware(max_tier=tier)._is_allowed(set(tool.tags)) is True
+    enabled = ToolsetMiddleware({TOOLSET_INSPECT})
+    assert enabled._is_enabled("wait_for_text", set(tool.tags)) is True
+    without = ToolsetMiddleware({TOOLSET_MANAGE, TOOLSET_TEARDOWN})
+    assert without._is_enabled("wait_for_text", set(tool.tags)) is False
 
 
 class ClientLabelFieldFixture(t.NamedTuple):

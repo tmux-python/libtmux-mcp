@@ -17,10 +17,10 @@ Source layout, request flow, and extension points.
 tmux hierarchy, MCP protocol, and the mental model.
 :::
 
-:::{grid-item-card} Safety Tiers
-:link: safety
+:::{grid-item-card} Trust model
+:link: trust
 :link-type: doc
-Three-tier safety system for controlling tool access.
+What the four toolsets group, and what filtering them does not bound.
 :::
 
 :::{grid-item-card} History Suppression
@@ -92,7 +92,7 @@ observation cursors.
 
 architecture
 concepts
-safety
+trust
 history-suppression
 waiting
 gotchas

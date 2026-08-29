@@ -14,10 +14,10 @@ No manual wiring needed.
 All loggers are children of ``libtmux_mcp``. The primary streams
 are:
 
-- ``libtmux_mcp.audit`` — one structured line per tool call, emitted by {class}`~libtmux_mcp.middleware.AuditMiddleware`. Includes tool name, digest-redacted arguments, latency, and outcome. See {doc}`/topics/safety` for the argument-redaction rules. It does not record tool return values.
+- ``libtmux_mcp.audit`` — one structured line per tool call, emitted by {class}`~libtmux_mcp.middleware.AuditMiddleware`. Includes tool name, digest-redacted arguments, latency, and outcome. See {doc}`/topics/trust` for the argument-redaction rules. It does not record tool return values.
 - ``libtmux_mcp.retry`` — warnings from
-  {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` when a
-  readonly tool retried after a transient
+  {class}`~libtmux_mcp.middleware.InspectRetryMiddleware` when an
+  `inspect` tool retried after a transient
   {exc}`~libtmux.exc.LibTmuxException`.
 - ``libtmux_mcp.server`` / ``libtmux_mcp.tools.*`` / etc. — ad-hoc
   warnings and debug messages from the codebase.
@@ -29,7 +29,7 @@ are:
 Tool failures are logged at a level matching who needs to act:
 
 - **WARNING** — expected, agent-correctable failures: unknown
-  pane/window/session ids, invalid arguments, safety-tier denials,
+  pane/window/session ids, invalid arguments, toolset refusals,
   transient tmux errors. The calling agent receives the message and
   can correct course; operators don't need to.
 - **ERROR** — operator faults and potential bugs: a missing ``tmux``
@@ -61,7 +61,7 @@ the Python logger name, which the protocol doesn't model.
 
 ## History controls stay observable
 
-`suppress_history` and `suppress_persistent_history` affect shell-history behavior only. They do not disable audit logging and do not clear pane echo or scrollback. The audit logger still summarizes the call's arguments and outcome, other library or application loggers keep their own behavior, and an MCP client can still retain the original request and response. See {ref}`safety` for every observation boundary that remains outside history suppression.
+`suppress_history` and `suppress_persistent_history` affect shell-history behavior only. They do not disable audit logging and do not clear pane echo or scrollback. The audit logger still summarizes the call's arguments and outcome, other library or application loggers keep their own behavior, and an MCP client can still retain the original request and response. See {ref}`trust` for every observation boundary that remains outside history suppression.
 
 ```{tip}
 If a tool call has no user-visible error or side effect, the ``libtmux_mcp.audit`` log shows the invocation and whether it returned or raised, not the tool's return value. Use the MCP response and current tmux state to determine what the tool returned or changed.
@@ -70,6 +70,6 @@ If a tool call has no user-visible error or side effect, the ``libtmux_mcp.audit
 ## Further reading
 
 - [MCP logging spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging)
-- {doc}`/topics/safety` — audit log redaction rules
+- {doc}`/topics/trust` — audit log redaction rules
 - {class}`~libtmux_mcp.middleware.AuditMiddleware` — the primary
   audit emitter

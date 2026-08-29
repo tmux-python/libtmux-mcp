@@ -6,13 +6,14 @@ orphan: true
 
 A showcase of the custom Sphinx roles and visual elements available in libtmux-mcp documentation.
 
-## Safety badges
+## Toolset badges
 
 Standalone badges via `{badge}`:
 
-- {badge}`readonly` — green, read-only operations
-- {badge}`mutating` — amber, state-changing operations
-- {badge}`destructive` — red, irreversible operations
+- {badge}`inspect` — read tmux state and terminal output
+- {badge}`manage` — change tmux structure or presentation
+- {badge}`execute` — start or drive pane processes
+- {badge}`teardown` — delete tmux objects or retained scrollback
 
 ## Tool references
 
@@ -50,19 +51,19 @@ Standalone badges via `{badge}`:
 
 These are the actual tool headings as they render on tool pages:
 
-> `capture_pane` {badge}`readonly`
+> `capture_pane` {badge}`inspect`
 
-> `split_window` {badge}`mutating`
+> `split_window` {badge}`manage`
 
-> `kill_session` {badge}`destructive`
+> `kill_session` {badge}`teardown`
 
 ### In a table
 
 | Tool | Tier | Description |
 |------|------|-------------|
-| {toolref}`list-sessions` | {badge}`readonly` | List all sessions |
-| {toolref}`send-keys` | {badge}`mutating` | Send commands to a pane |
-| {toolref}`kill-pane` | {badge}`destructive` | Destroy a pane |
+| {toolref}`list-sessions` | {badge}`inspect` | List all sessions |
+| {toolref}`send-keys` | {badge}`manage` | Send commands to a pane |
+| {toolref}`kill-pane` | {badge}`teardown` | Destroy a pane |
 
 ### In prose
 
@@ -78,7 +79,7 @@ The fundamental command pattern: {toolref}`run-command` → inspect `exit_status
 
 ## Glossary terms
 
-{term}`SIGINT` · {term}`SIGQUIT` · {term}`MCP` · {term}`Safety tier` · {term}`Pane` · {term}`Session`
+{term}`SIGINT` · {term}`SIGQUIT` · {term}`MCP` · {term}`Toolset` · {term}`Pane` · {term}`Session`
 
 ## Admonitions
 
@@ -101,7 +102,7 @@ Each badge renders as:
 ```html
 <span class="sd-badge sd-bg-success"
       role="note"
-      aria-label="Safety tier: readonly">
+      aria-label="Toolset: readonly">
   🔍 readonly
 </span>
 ```

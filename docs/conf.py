@@ -174,9 +174,9 @@ conf["fastmcp_model_classes"] = (
     "BufferContent",
 )
 conf["fastmcp_section_badge_map"] = {
-    "Inspect": "readonly",
-    "Act": "mutating",
-    "Destroy": "destructive",
+    "Inspect": "inspect",
+    "Execute": "execute",
+    "Teardown": "teardown",
 }
 conf["fastmcp_section_badge_pages"] = ("tools/index", "index")
 

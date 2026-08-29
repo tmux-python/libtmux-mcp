@@ -117,6 +117,7 @@ class ToolsetMiddleware(Middleware):
                     f"it, or LIBTMUX_TOOLS to enable it by name."
                 )
                 raise ExpectedToolError(msg)
+        return await call_next(context)
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +472,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: audit log only. ``respawn_pane(shell="env SECRET=... bash")`` and
 #: ``environment={"AWS_SECRET_KEY": "..."}`` may briefly expose the values
 #: via the OS process table and tmux's ``pane_current_command`` metadata
-#: until the spawned shell takes over — see ``docs/topics/safety.md``.
+#: until the spawned shell takes over — see ``docs/topics/trust.md``.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {"keys", "text", "command", "value", "content", "shell", "environment"}
 )

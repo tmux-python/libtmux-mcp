@@ -1,6 +1,6 @@
-# Call readonly tools batch
+# Call Read Tools Batch
 
-```{fastmcp-tool} batch_tools.call_readonly_tools_batch
+```{fastmcp-tool} batch_tools.call_read_tools_batch
 ```
 
 **Use when** you need several read-only observations in one ordered
@@ -19,7 +19,7 @@ running with a higher safety tier.
 
 ```json
 {
-  "tool": "call_readonly_tools_batch",
+  "tool": "call_read_tools_batch",
   "arguments": {
     "operations": [
       {"tool": "list_sessions", "arguments": {}},
@@ -30,5 +30,5 @@ running with a higher safety tier.
 }
 ```
 
-```{fastmcp-tool-input} batch_tools.call_readonly_tools_batch
+```{fastmcp-tool-input} batch_tools.call_read_tools_batch
 ```

@@ -174,11 +174,10 @@ def _build_instructions(
 
     # Safety tier context
     parts.append(
-        "\n\nToolsets enabled: "
+        "\n\nToolsets: "
         + (", ".join(sorted(toolsets)) or "(none)")
-        + f" (of {', '.join(VALID_TOOLSETS)}). Set LIBTMUX_TOOLSETS; tools "
-        "outside them are hidden. This shapes what is advertised, not what "
-        "tmux or a pane's shell can do."
+        + f" (of {', '.join(VALID_TOOLSETS)}), set by LIBTMUX_TOOLSETS. "
+        "Hiding one shapes this list, not what a pane can run."
     )
     history_default = "true" if suppress_history else "false"
     parts.append(
@@ -186,15 +185,12 @@ def _build_instructions(
         "raw send/batch/paste and spawn do not."
     )
 
-    # Tier-conditioned discoverability hint. False-positive activation is
-    # cheap on readonly (worst case: an extra list_panes call) and
-    # expensive on mutating/destructive (where kill_* is one mis-routed
-    # query away). Reuse the existing safety axis instead of shipping a
-    # separate LIBTMUX_DISCOVERABILITY knob.
+    # Only when nothing but inspect is enabled: a wrong guess costs one
+    # extra capture, where the same nudge on a surface holding kill_* or
+    # send_keys could cost a pane. Keyed on the enabled toolsets rather
+    # than a separate discoverability variable.
     if toolsets == frozenset({TOOLSET_INSPECT}):
-        parts.append(
-            "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
-        )
+        parts.append("\n\nProbe snapshot_pane/list_panes/search_panes if unsure.")
 
     instructions = "".join(parts)
     if len(instructions.encode("utf-8")) > _INSTRUCTIONS_MAX_BYTES:

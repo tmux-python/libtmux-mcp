@@ -74,5 +74,5 @@ return only new pane output.
 
 - {ref}`concepts` — Understand the tmux hierarchy and how tools target panes
 - {ref}`configuration` — Environment variables and socket isolation
-- {ref}`safety` — Control which tools are available
+- {ref}`trust` — Control which tools are available
 - {ref}`Tools <tools-overview>` — Browse all available tools

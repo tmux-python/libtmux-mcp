@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -11,8 +10,12 @@ import typing as t
 
 import pytest
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
-from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
+from libtmux_mcp._utils import TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN
+from libtmux_mcp.server import (
+    _BASE_INSTRUCTIONS,
+    DEFAULT_TOOLSETS,
+    _build_instructions,
+)
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
@@ -24,188 +27,137 @@ class BuildInstructionsFixture(t.NamedTuple):
     """Test fixture for _build_instructions."""
 
     test_id: str
-    safety_level: str
+    toolsets: frozenset[str]
     tmux_pane_env: str | None
     tmux_env: str | None
     expect_agent_context: bool
     expect_pane_id_in_text: str | None
     expect_socket_name: str | None
-    expect_safety_in_text: str | None
+    expect_toolsets_in_text: str
 
 
 BUILD_INSTRUCTIONS_FIXTURES: list[BuildInstructionsFixture] = [
     BuildInstructionsFixture(
         test_id="inside_tmux_full_context",
-        safety_level=TAG_MUTATING,
+        toolsets=DEFAULT_TOOLSETS,
         tmux_pane_env="%42",
         tmux_env="/tmp/tmux-1000/default,12345,0",
         expect_agent_context=True,
         expect_pane_id_in_text="%42",
         expect_socket_name="default",
-        expect_safety_in_text="mutating",
+        expect_toolsets_in_text="execute, inspect, manage",
     ),
     BuildInstructionsFixture(
         test_id="outside_tmux_no_context",
-        safety_level=TAG_MUTATING,
+        toolsets=DEFAULT_TOOLSETS,
         tmux_pane_env=None,
         tmux_env=None,
         expect_agent_context=False,
         expect_pane_id_in_text=None,
         expect_socket_name=None,
-        expect_safety_in_text="mutating",
+        expect_toolsets_in_text="execute, inspect, manage",
     ),
     BuildInstructionsFixture(
         test_id="pane_only_no_tmux_env",
-        safety_level=TAG_MUTATING,
+        toolsets=DEFAULT_TOOLSETS,
         tmux_pane_env="%99",
         tmux_env=None,
         expect_agent_context=True,
         expect_pane_id_in_text="%99",
         expect_socket_name=None,
-        expect_safety_in_text="mutating",
+        expect_toolsets_in_text="execute, inspect, manage",
     ),
     BuildInstructionsFixture(
-        test_id="readonly_safety_level",
-        safety_level=TAG_READONLY,
+        test_id="inspect_only",
+        toolsets=frozenset({TOOLSET_INSPECT}),
         tmux_pane_env=None,
         tmux_env=None,
         expect_agent_context=False,
         expect_pane_id_in_text=None,
         expect_socket_name=None,
-        expect_safety_in_text="readonly",
+        expect_toolsets_in_text="inspect",
     ),
+    # The ladder could not express this: deletion without the typing tools.
     BuildInstructionsFixture(
-        test_id="destructive_safety_level",
-        safety_level=TAG_DESTRUCTIVE,
+        test_id="inspect_and_teardown",
+        toolsets=frozenset({TOOLSET_INSPECT, TOOLSET_TEARDOWN}),
         tmux_pane_env=None,
         tmux_env=None,
         expect_agent_context=False,
         expect_pane_id_in_text=None,
         expect_socket_name=None,
-        expect_safety_in_text="destructive",
+        expect_toolsets_in_text="inspect, teardown",
     ),
 ]
 
 
-class SafetyLevelFixture(t.NamedTuple):
-    """Test fixture for server safety-level resolution."""
+class ToolsetsFixture(t.NamedTuple):
+    """One ``LIBTMUX_TOOLSETS`` value and the surface it selects."""
 
     test_id: str
     env_value: str | None
-    expected_level: str
+    expected: frozenset[str]
 
 
-SAFETY_LEVEL_FIXTURES: list[SafetyLevelFixture] = [
-    SafetyLevelFixture("unset_defaults_mutating", None, TAG_MUTATING),
-    SafetyLevelFixture("valid_readonly", TAG_READONLY, TAG_READONLY),
-    SafetyLevelFixture("valid_mutating", TAG_MUTATING, TAG_MUTATING),
-    SafetyLevelFixture("valid_destructive", TAG_DESTRUCTIVE, TAG_DESTRUCTIVE),
-    SafetyLevelFixture("invalid_fails_closed", "read", TAG_READONLY),
+TOOLSETS_FIXTURES: list[ToolsetsFixture] = [
+    ToolsetsFixture("unset_takes_the_default", None, DEFAULT_TOOLSETS),
+    ToolsetsFixture("single", "inspect", frozenset({"inspect"})),
+    ToolsetsFixture(
+        "teardown_without_execute",
+        "inspect,teardown",
+        frozenset({"inspect", "teardown"}),
+    ),
+    ToolsetsFixture(
+        "whitespace_tolerated", " inspect , manage ", frozenset({"inspect", "manage"})
+    ),
+    ToolsetsFixture("empty_is_legal", "", frozenset()),
 ]
 
 
 @pytest.mark.parametrize(
-    BuildInstructionsFixture._fields,
-    BUILD_INSTRUCTIONS_FIXTURES,
-    ids=[f.test_id for f in BUILD_INSTRUCTIONS_FIXTURES],
+    ToolsetsFixture._fields,
+    TOOLSETS_FIXTURES,
+    ids=[f.test_id for f in TOOLSETS_FIXTURES],
 )
-def test_build_instructions(
-    monkeypatch: pytest.MonkeyPatch,
-    test_id: str,
-    safety_level: str,
-    tmux_pane_env: str | None,
-    tmux_env: str | None,
-    expect_agent_context: bool,
-    expect_pane_id_in_text: str | None,
-    expect_socket_name: str | None,
-    expect_safety_in_text: str | None,
-) -> None:
-    """_build_instructions includes agent context and safety level."""
-    if tmux_pane_env is not None:
-        monkeypatch.setenv("TMUX_PANE", tmux_pane_env)
-    else:
-        monkeypatch.delenv("TMUX_PANE", raising=False)
-
-    if tmux_env is not None:
-        monkeypatch.setenv("TMUX", tmux_env)
-    else:
-        monkeypatch.delenv("TMUX", raising=False)
-
-    result = _build_instructions(safety_level=safety_level)
-
-    # Base instructions are always present
-    assert _BASE_INSTRUCTIONS in result
-
-    if expect_agent_context:
-        assert "Agent context" in result
-    else:
-        assert "Agent context" not in result
-
-    if expect_pane_id_in_text is not None:
-        assert expect_pane_id_in_text in result
-
-    if expect_socket_name is not None:
-        assert expect_socket_name in result
-
-    if expect_safety_in_text is not None:
-        assert f"Safety level: {expect_safety_in_text}" in result
-
-
-@pytest.mark.parametrize(
-    SafetyLevelFixture._fields,
-    SAFETY_LEVEL_FIXTURES,
-    ids=[f.test_id for f in SAFETY_LEVEL_FIXTURES],
-)
-def test_resolve_safety_level(
+def test_resolve_toolsets(
     test_id: str,
     env_value: str | None,
-    expected_level: str,
+    expected: frozenset[str],
 ) -> None:
-    """Safety env values resolve to the server's effective tier."""
-    from libtmux_mcp.server import _resolve_safety_level
+    """``LIBTMUX_TOOLSETS`` selects an unordered surface."""
+    from libtmux_mcp.server import _resolve_toolsets
 
     assert test_id
-    assert _resolve_safety_level(env_value) == expected_level
+    assert _resolve_toolsets(env_value) == expected
 
 
-def test_invalid_safety_env_hides_mutating_tools() -> None:
-    """Invalid ``LIBTMUX_SAFETY`` values expose readonly tools only."""
+def test_an_unknown_toolset_fails_startup() -> None:
+    """A typo must not silently widen or narrow the surface."""
+    from libtmux_mcp.server import _resolve_toolsets
+
+    with pytest.raises(RuntimeError, match="unknown toolsets: bogus"):
+        _resolve_toolsets("inspect,bogus")
+
+
+def test_the_retired_safety_variable_fails_startup() -> None:
+    """`LIBTMUX_SAFETY` is gone; ignoring it could widen a surface."""
     code = textwrap.dedent(
         """
-        import asyncio
-        import json
-
-        from libtmux_mcp.server import build_mcp_server
-
-        async def main():
-            tools = await build_mcp_server().list_tools()
-            names = {tool.name for tool in tools}
-            print(json.dumps({
-                "list_sessions": "list_sessions" in names,
-                "send_keys": "send_keys" in names,
-                "send_keys_batch": "send_keys_batch" in names,
-                "kill_pane": "kill_pane" in names,
-            }))
-
-        asyncio.run(main())
+        import libtmux_mcp.server
         """
     )
-    env = {**os.environ, "LIBTMUX_SAFETY": "read"}
+    env = {**os.environ, "LIBTMUX_SAFETY": "destructive"}
     proc = subprocess.run(
         [sys.executable, "-c", code],
-        check=True,
+        check=False,
         capture_output=True,
-        env=env,
         text=True,
+        env=env,
     )
-    result = json.loads(proc.stdout)
 
-    assert result == {
-        "list_sessions": True,
-        "send_keys": False,
-        "send_keys_batch": False,
-        "kill_pane": False,
-    }
+    assert proc.returncode != 0
+    assert "LIBTMUX_SAFETY has been removed" in proc.stderr
+    assert "LIBTMUX_TOOLSETS" in proc.stderr
 
 
 def test_run_server_pins_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -385,24 +337,30 @@ def test_build_instructions_documents_is_caller_workflow_inside_tmux(
     # Outside tmux: the workflow sentence must NOT appear.
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TMUX", raising=False)
-    outside = _build_instructions(safety_level=TAG_MUTATING)
+    outside = _build_instructions(toolsets=frozenset({TOOLSET_MANAGE}))
     assert "whoami tool" not in outside
     assert "is_caller=true" not in outside
 
     # Inside tmux: the workflow sentence appears.
     monkeypatch.setenv("TMUX_PANE", "%42")
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
-    inside = _build_instructions(safety_level=TAG_MUTATING)
+    inside = _build_instructions(toolsets=frozenset({TOOLSET_MANAGE}))
     assert "is_caller=true" in inside
     assert "whoami tool" in inside
     assert "list_panes" in inside
 
 
-def test_build_instructions_always_includes_safety() -> None:
-    """_build_instructions always includes the safety level."""
-    result = _build_instructions(safety_level=TAG_MUTATING)
-    assert "Safety level:" in result
-    assert "LIBTMUX_SAFETY" in result
+def test_build_instructions_always_names_the_toolsets() -> None:
+    """Instructions name the enabled toolsets and how to change them.
+
+    They also say what hiding one does not do, because a model reading a
+    short list is otherwise free to infer that the rest is unreachable.
+    """
+    result = _build_instructions(toolsets=frozenset({TOOLSET_MANAGE}))
+
+    assert "Toolsets: manage" in result
+    assert "LIBTMUX_TOOLSETS" in result
+    assert "not what a pane can run" in result
 
 
 @pytest.mark.parametrize(
@@ -441,12 +399,12 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
 @pytest.mark.parametrize(
     ("tier", "tmux_pane", "tmux_env"),
     [
-        (TAG_READONLY, "%42", "/tmp/tmux-1000/default,12345,0"),
-        (TAG_MUTATING, "%42", "/tmp/tmux-1000/default,12345,0"),
-        (TAG_DESTRUCTIVE, "%42", "/tmp/tmux-1000/default,12345,0"),
-        (TAG_READONLY, "", ""),
-        (TAG_MUTATING, "", ""),
-        (TAG_DESTRUCTIVE, "", ""),
+        (TOOLSET_INSPECT, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TOOLSET_MANAGE, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TOOLSET_TEARDOWN, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TOOLSET_INSPECT, "", ""),
+        (TOOLSET_MANAGE, "", ""),
+        (TOOLSET_TEARDOWN, "", ""),
         # Variable-length stress: longer socket name + multi-digit pane id.
         # Guards against future text additions tipping a realistic case
         # over the 2KB budget. Exercises BOTH axes — a multi-digit pane id
@@ -455,7 +413,7 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
         # further or fall back to a tighter compression form (drop spaces
         # around ``/`` in HOOKS, drop spaces after colons in the safety
         # paragraph) for additional bytes of margin.
-        (TAG_READONLY, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
+        (TOOLSET_INSPECT, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
     ],
 )
 def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
@@ -488,7 +446,7 @@ def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
         monkeypatch.delenv("TMUX", raising=False)
 
     instructions = _build_instructions(
-        safety_level=tier,
+        toolsets=frozenset({tier}),
         suppress_history=suppress_history,
     )
     size = len(instructions.encode())
@@ -512,7 +470,7 @@ def test_instruction_budget_drops_oversized_socket_before_required_text(
     monkeypatch.setenv("TMUX", f"/tmp/tmux-1000/{socket_name},12345,0")
 
     instructions = _build_instructions(
-        safety_level=TAG_READONLY,
+        toolsets=frozenset({TOOLSET_INSPECT}),
         suppress_history=True,
     )
 
@@ -536,7 +494,7 @@ def test_instruction_budget_can_drop_all_oversized_optional_context(
     monkeypatch.setenv("TMUX", f"/tmp/tmux-1000/{'s' * 4096},12345,0")
 
     instructions = _build_instructions(
-        safety_level=TAG_READONLY,
+        toolsets=frozenset({TOOLSET_INSPECT}),
         suppress_history=False,
     )
 
@@ -591,8 +549,8 @@ def test_scope_segment_carries_anti_triggers() -> None:
     assert "clarifying question" in _INSTR_SCOPE
 
 
-@pytest.mark.parametrize("tier", [TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE])
-def test_readonly_hint_visible_only_on_readonly_tier(
+@pytest.mark.parametrize("tier", [TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN])
+def test_probe_hint_visible_only_on_an_inspect_only_surface(
     monkeypatch: pytest.MonkeyPatch, tier: str
 ) -> None:
     """The 'Readonly mode:' investigation hint appears only on readonly.
@@ -604,11 +562,11 @@ def test_readonly_hint_visible_only_on_readonly_tier(
     """
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TMUX", raising=False)
-    instructions = _build_instructions(safety_level=tier)
-    if tier == TAG_READONLY:
-        assert "Readonly mode:" in instructions
+    instructions = _build_instructions(toolsets=frozenset({tier}))
+    if tier == TOOLSET_INSPECT:
+        assert "Probe snapshot_pane" in instructions
     else:
-        assert "Readonly mode:" not in instructions
+        assert "Probe snapshot_pane" not in instructions
 
 
 # ---------------------------------------------------------------------------

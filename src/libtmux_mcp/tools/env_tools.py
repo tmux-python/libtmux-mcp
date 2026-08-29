@@ -86,7 +86,7 @@ def set_environment(
        disk/memory until tmux is restarted. Prefer ``env VAR=value
        command`` via :func:`~libtmux_mcp.tools.pane_tools.send_keys`
        when you only need the override for a single command. See
-       :doc:`/topics/safety`.
+       :doc:`/topics/trust`.
 
     Parameters
     ----------

@@ -11,7 +11,7 @@ best-effort no-disk controls, opt in with `suppress_persistent_history=true`.
 
 Neither control makes a command secret. Shell configuration can override the
 request, in-memory history can remain available, and terminal output or other
-observers can still record the command. See {ref}`safety` before handling
+observers can still record the command. See {ref}`trust` before handling
 credentials.
 
 ## Why raw input stays explicit
@@ -139,5 +139,5 @@ History suppression does not clear pane echo, scrollback, in-memory history,
 process arguments, tmux environment state, MCP client transcripts, hooks, or
 logs. Prefer credential references that the child process resolves over
 literal credentials in `command`, `keys`, `text`, `shell`, or `environment`.
-See {ref}`safety` for the full observation boundary and {ref}`logging` for
+See {ref}`trust` for the full observation boundary and {ref}`logging` for
 audit-record behavior.

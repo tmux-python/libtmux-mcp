@@ -186,7 +186,7 @@ def test_the_read_batch_carries_its_members_open_world_hint(
     advertised_tools: dict[str, t.Any],
 ) -> None:
     """A batch advertises the worst case of what it can invoke."""
-    batch = advertised_tools["call_readonly_tools_batch"]
+    batch = advertised_tools["call_read_tools_batch"]
     assert wire_annotations(batch)["openWorldHint"] is True
 
 

@@ -292,12 +292,7 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
 #: discovery-style tool, append it here AND update the prose in
 #: ``_BASE_INSTRUCTIONS`` so the two stay in lockstep.
 SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
-    {
-        "call_destructive_tools_batch",
-        "call_mutating_tools_batch",
-        "call_readonly_tools_batch",
-        "list_servers",
-    }
+    {"call_read_tools_batch", "list_servers"}
 )
 
 

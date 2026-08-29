@@ -10,10 +10,11 @@ from fastmcp.exceptions import ToolError
 from libtmux import exc
 
 from libtmux_mcp._utils import (
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
-    VALID_SAFETY_LEVELS,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
+    VALID_TOOLSETS,
     _apply_filters,
     _get_server,
     _invalidate_server,
@@ -636,13 +637,20 @@ def test_serialize_pane_is_caller_requires_tmux_env_not_just_pane(
 
 def test_tag_constants() -> None:
     """Safety tier tag constants are distinct strings."""
-    tags = {TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE}
+    tags = {TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN}
     assert len(tags) == 3
 
 
-def test_valid_safety_levels_matches_tags() -> None:
-    """VALID_SAFETY_LEVELS contains all tag constants."""
-    assert {TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE} == VALID_SAFETY_LEVELS
+def test_valid_toolsets_lists_every_toolset() -> None:
+    """The advertised set is exactly the four toolset constants."""
+    assert set(VALID_TOOLSETS) == {
+        TOOLSET_INSPECT,
+        TOOLSET_MANAGE,
+        TOOLSET_EXECUTE,
+        TOOLSET_TEARDOWN,
+    }
+    # Order is reported at startup, so it is part of the contract.
+    assert VALID_TOOLSETS[0] == TOOLSET_INSPECT
 
 
 # ---------------------------------------------------------------------------

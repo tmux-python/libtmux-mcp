@@ -225,7 +225,7 @@ def _effective_socket_path(server: Server) -> str | None:
        server — authoritative because tmux itself reports the path it
        is actually using, regardless of our process environment.
        Necessary on macOS where ``$TMUX_TMPDIR`` under launchd diverges
-       from the interactive shell (see ``docs/topics/safety.md`` for
+       from the interactive shell (see ``docs/topics/trust.md`` for
        the self-kill guard gap this closes).
     3. Fallback: reconstruct from ``$TMUX_TMPDIR`` + euid + socket name.
        This path is reached only when the target server is unreachable
