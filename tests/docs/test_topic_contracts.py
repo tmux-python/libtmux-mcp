@@ -377,7 +377,7 @@ def test_a17_changelog_summarizes_history_features(
     assert "`suppress_persistent_history=true`" in history_entry
     assert "Session controls reach the initial and future panes" in history_entry
     assert "{ref}`history-hygiene`" in history_entry
-    assert "{ref}`safety`" in history_entry
+    assert "{ref}`trust`" in history_entry
     assert "space-prefixed" not in history_entry
 
     assert "{tooliconl}`create-window`" in environment_entry
@@ -389,7 +389,7 @@ def test_a17_changelog_summarizes_history_features(
     assert "{tooliconl}`respawn-pane`" in environment_entry
     assert "same JSON object form" in environment_entry
     assert "credential references, not literal credentials" in environment_entry
-    assert "{ref}`safety`" in environment_entry
+    assert "{ref}`trust`" in environment_entry
 
 
 def test_annotation_table_matches_the_registered_surface(
