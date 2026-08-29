@@ -777,8 +777,13 @@ def test_a_typed_filter_matches_what_its_string_form_matches(
     window = mcp_pane.window
     window.split(attach=False)
     socket_name = mcp_server.socket_name
-    pane_width = mcp_pane.pane_width or "80"
     window_index = window.window_index or "0"
+    # Read back rather than off the Pane object: splitting the window
+    # changes pane geometry, and the cached attribute is whatever it was
+    # when the object was built. A stale width matches nothing, which
+    # trips the "matched nothing" guard below rather than the assertion
+    # the test is about.
+    pane_width = list_panes(socket_name=socket_name)[0].pane_width or "80"
 
     table: list[tuple[t.Callable[..., t.Any], dict[str, t.Any], dict[str, t.Any]]] = [
         (list_panes, {"pane_width": int(pane_width)}, {"pane_width": pane_width}),

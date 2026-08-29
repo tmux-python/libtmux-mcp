@@ -17,6 +17,7 @@ from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
+from libtmux_mcp import _progress as _progress_module
 from libtmux_mcp._utils import ExpectedToolError
 from libtmux_mcp.models import (
     CaptureSinceResult,
@@ -5125,7 +5126,9 @@ def test_wait_for_text_matches_pattern_across_wrap(
     assert any(marker in line for line in result.matched_lines)
 
 
-def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> None:
+def test_wait_for_text_reports_progress(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """wait_for_text calls ``ctx.report_progress`` at each poll tick.
 
     Uses a minimal async stub Context so the test stays independent
@@ -5150,13 +5153,21 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
         async def warning(self, message: str) -> None:
             return  # log notifications not asserted in this test
 
+    # Drive the ticker fast rather than waiting on its shipped 1 s
+    # cadence. A test that needs N ticks of a wall-clock second inside a
+    # fixed window is load-fragile in one direction -- ticks are dropped,
+    # never added -- so widening the window only lengthens the odds.
+    # At 0.1 s the window holds ~10 ticks and needs 2, while per-iteration
+    # reporting at interval=0.01 would be ~100.
+    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.1)
+
     stub = _StubContext()
     result = asyncio.run(
         wait_for_text(
             patterns=["WILL_NEVER_MATCH_aBcDeF"],
             pane_id=mcp_pane.pane_id,
-            timeout=2.5,
-            interval=0.05,
+            timeout=1.0,
+            interval=0.01,
             socket_name=mcp_server.socket_name,
             ctx=t.cast("t.Any", stub),
         )
@@ -5173,13 +5184,13 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
     # count runs the other way: 2.5 s at a 1 s cadence cannot exceed
     # three, and reporting per 0.05 s iteration would be about fifty.
     assert progress_calls, "no progress reported at all"
-    assert len(progress_calls) <= 5, (
-        f"{len(progress_calls)} reports in 2.5s; cadence is the poll "
-        "interval's, not the ticker's"
+    assert len(progress_calls) <= 30, (
+        f"{len(progress_calls)} reports in 1.0s at a 0.1s cadence; "
+        "the rate is the poll interval's, not the ticker's"
     )
     first_progress, first_total, first_msg = progress_calls[0]
     assert first_progress >= 0.0
-    assert first_total == 2.5
+    assert first_total == 1.0
     assert mcp_pane.pane_id is not None
     assert mcp_pane.pane_id in first_msg
     # The message must carry the BUDGET, not just restate the pane. A
@@ -5194,7 +5205,7 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
 
 
 def test_wait_for_text_propagates_unexpected_progress_error(
-    mcp_server: Server, mcp_pane: Pane
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Non-transport exceptions from ``ctx.report_progress`` propagate.
 
@@ -5224,16 +5235,18 @@ def test_wait_for_text_propagates_unexpected_progress_error(
     # original type + message preserved in the translated text. The
     # point of this regression guard is that the error reaches the
     # error handler at all — previously the broad ``suppress`` ate it.
-    # Longer than one ticker interval. Progress is reported on its own
-    # 1 s cadence rather than once per poll, so a sub-second wait now
-    # reports nothing at all -- as its siblings already did -- and would
-    # never reach the faulty context.
+    # The faulty context is only reached when the ticker fires, so this
+    # needs at least one tick inside the window. Driven fast rather than
+    # sized to the shipped 1 s cadence: ~10 chances instead of one, and
+    # a fifth of the wall clock.
+    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.05)
+
     with pytest.raises(ToolError, match="synthetic bug"):
         asyncio.run(
             wait_for_text(
                 patterns=["WILL_NEVER_MATCH_PROPAGATE_q2rj"],
                 pane_id=mcp_pane.pane_id,
-                timeout=1.5,
+                timeout=0.5,
                 interval=0.05,
                 socket_name=mcp_server.socket_name,
                 ctx=t.cast("t.Any", _FaultyContext()),

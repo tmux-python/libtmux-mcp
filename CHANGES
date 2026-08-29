@@ -1996,8 +1996,10 @@ rather than that it passed the wrong type.
 
 Progress was emitted once per poll iteration, so the notification rate
 was set by `interval` -- about nine notifications a second at the
-default and nominally ~12,000 over a full-length wait at the 0.01
-floor, each carrying the same sentence with a different decimal.
+default, and nominally ~3,000 over a full-length wait at the 0.01
+floor, each carrying the same sentence with a different decimal. (The
+wait ceiling is 30 s by default; 120 s is only what the environment
+variable can raise it to.)
 
 It now uses the same one-second ticker as `run_command` and
 `wait_for_channel`, so the wait family is consistent and the rate no
