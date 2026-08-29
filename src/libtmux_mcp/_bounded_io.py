@@ -53,7 +53,9 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
 #: coroutine, so neither bounds the work. The wait path spawns tmux itself
 #: as a killable async subprocess -- not a thread, since a worker stuck in
 #: ``Popen.communicate()`` cannot be cancelled and ``_python_exit`` joins
-#: pool workers untimed, so one wedged tmux hangs process exit and Ctrl-C.
+#: pool workers untimed, so one wedged tmux hangs process exit and Ctrl-C
+#: forever -- recognisable by a 300 s pause and a ``RuntimeWarning`` from
+#: ``shutdown_default_executor``.
 #:
 #: A CEILING on a single call; :func:`_call_budget` lowers it to what
 #: remains of the caller's deadline, so a wait cannot overshoot by a whole

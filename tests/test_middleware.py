@@ -1055,14 +1055,11 @@ def test_audit_records_safety_denial(
     audit = AuditMiddleware()
     ctx = _fake_context(name="kill_server", arguments={})
 
-    # SafetyMiddleware.on_call_tool consults
-    # context.fastmcp_context.fastmcp.get_tool(...). With
-    # fastmcp_context=None the safety check short-circuits, so we
-    # simulate the denial more directly: ``call_next`` is a coroutine
-    # that raises the same ``ExpectedToolError`` SafetyMiddleware
-    # would when blocking an over-tier call. The test's invariant is
-    # that the AuditMiddleware sitting *outside* Safety still records
-    # the attempt with outcome=error.
+    # With fastmcp_context=None the safety check short-circuits, so the
+    # denial is simulated: ``call_next`` raises the same
+    # ``ExpectedToolError`` SafetyMiddleware would on an over-tier call.
+    # The invariant is that AuditMiddleware, sitting OUTSIDE Safety, still
+    # records the attempt with outcome=error.
     msg = "Tool 'kill_server' is not available at the current safety level."
 
     async def _safety_denial(_ctx: t.Any) -> None:
@@ -1736,12 +1733,10 @@ def _limiter_probe_server(
             suggestion="Call list_panes to discover valid pane ids.",
         )
 
-    # output_schema=None: fastmcp wraps even plain-str returns in a
-    # result schema, and the stock truncation path drops structured
-    # content — the MCP SDK client then rejects ANY truncated success
-    # from a schema'd tool. That pre-existing upstream gap is not what
-    # this probe tests; disable the schema so the success case
-    # exercises only the is_error handling.
+    # output_schema=None: fastmcp wraps even plain-str returns in a result
+    # schema, and the stock truncation path drops structured content, so
+    # an SDK client rejects ANY truncated success from a schema'd tool.
+    # That upstream gap is not what this probe tests.
     @probe.tool(output_schema=None)
     def limited_ok() -> str:
         return "y" * 5000

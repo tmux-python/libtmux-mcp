@@ -126,11 +126,10 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
             socket_name=mcp_server.socket_name,
         )
         # The invariant holds WITHIN a scope, so the default listing is
-        # compared against the default lookup. Comparing it against
-        # show_hook(scope="server") instead is what the old assertion
-        # did, and the only way to satisfy that was to staple global
-        # hooks onto a session-scope listing -- a set corresponding to
-        # no tmux scope.
+        # compared against the default lookup. Comparing against
+        # show_hook(scope="server") is only satisfiable by stapling global
+        # hooks onto a session-scope listing -- a set corresponding to no
+        # tmux scope.
         defaulted = show_hooks(socket_name=mcp_server.socket_name)
         defaulted_singular = show_hook(
             hook_name="pane-focus-in", socket_name=mcp_server.socket_name
@@ -238,13 +237,10 @@ def test_show_hooks_reports_the_scope_it_was_asked_for(
     assert marks(scope="window", target=window.window_id) == {"WINDOW_MARK"}
 
     # The untargeted listing must contain exactly what a name-targeted
-    # lookup finds with the same defaults -- the invariant its own
-    # docstring promises, previously broken in both directions.
-    #
-    # The default is the OLDEST session on the server, which need not be
-    # this fixture's, so the marks go where the tool says it will look.
-    # Asserting against mcp_session instead would pass vacuously the
-    # moment both sides came back empty.
+    # lookup finds with the same defaults. The default is the OLDEST
+    # session on the server, not necessarily this fixture's, so the marks
+    # go where the tool says it will look -- asserting against
+    # mcp_session would pass vacuously once both sides came back empty.
     default_target = show_hooks(socket_name=mcp_server.socket_name).resolved_target
     default_session = next(
         s for s in mcp_server.sessions if s.session_id == default_target

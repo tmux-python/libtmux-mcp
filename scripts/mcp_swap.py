@@ -129,12 +129,10 @@ ALL_CLIS: tuple[CLIName, ...] = (
 #: than hardcoded so adding a longer name cannot silently misalign it.
 _CLI_COLUMN = max(len(name) for name in ALL_CLIS) + 1
 
-#: Claude config scope: ``"user"`` targets the user/system-level top-level
-#: ``mcpServers`` fallback that applies to every project without its own
-#: override; ``"project"`` targets the project-level per-project
-#: ``projects.<abs>.mcpServers`` node. Non-Claude CLIs have no
-#: per-project scope in their config files, so for those CLIs the scope
-#: is always normalised to ``"user"`` regardless of what was passed.
+#: Claude config scope. ``"user"`` targets the top-level ``mcpServers``
+#: fallback applying to every project without its own override;
+#: ``"project"`` targets ``projects.<abs>.mcpServers``. Other CLIs have no
+#: per-project scope, so theirs normalises to ``"user"``.
 Scope = t.Literal["user", "project"]
 ALL_SCOPES: tuple[Scope, ...] = ("user", "project")
 
@@ -226,15 +224,13 @@ BACKUP_SUFFIX_PREFIX = ".bak.mcp-swap-"
 # ---------------------------------------------------------------------------
 
 
-#: Per-entry shape a CLI expects under its server map. ``standard`` is
-#: the Claude-Desktop lineage every CLI here started from — scalar
-#: ``command``, sibling ``args`` list, optional ``env`` table.
-#: ``claude`` is that shape plus an explicit ``type``/``env`` that
-#: Claude writes even when empty. ``opencode`` packs argv into a single
-#: ``command`` array and spells the environment table ``environment``.
-#: Dialects exist because the shape is not implied by the file format:
-#: two CLIs sharing ``fmt="json"`` can still disagree about how one
-#: entry is spelled.
+#: Per-entry shape a CLI expects under its server map. ``standard`` is the
+#: Claude-Desktop lineage: scalar ``command``, sibling ``args``, optional
+#: ``env``. ``claude`` adds an explicit ``type``/``env`` written even when
+#: empty. ``opencode`` packs argv into a ``command`` array and spells the
+#: environment table ``environment``. A dialect is needed because the
+#: shape is not implied by the format -- two CLIs sharing ``fmt="json"``
+#: still disagree about how an entry is spelled.
 Dialect = t.Literal["standard", "claude", "opencode"]
 
 
@@ -349,13 +345,11 @@ CLIS: dict[CLIName, CLIInfo] = {
 #: keeps the swap from being followed by a surprise rewrite.
 OPENCODE_SCHEMA_URL = "https://opencode.ai/config.json"
 
-#: pi ships no MCP client — its README says "No MCP" outright, and the
-#: released build contains no MCP code at all. MCP reaches pi only
-#: through the third-party ``pi-mcp-adapter`` extension, which is what
-#: reads ``~/.pi/agent/mcp.json``. The swap writes that file because it
-#: is the one pi-family location with a settled schema, but until the
-#: adapter is installed pi does not read it, so ``detect`` says so
-#: instead of reporting a swap that cannot take effect.
+#: pi ships no MCP client; MCP reaches it only through the third-party
+#: ``pi-mcp-adapter`` extension, which reads ``~/.pi/agent/mcp.json``. The
+#: swap writes that file as the one pi-family location with a settled
+#: schema, but until the adapter is installed pi does not read it -- so
+#: ``detect`` says so rather than report a swap that cannot take effect.
 PI_ADAPTER_DIR = (
     pathlib.Path.home() / ".pi" / "agent" / "npm" / "node_modules" / "pi-mcp-adapter"
 )
@@ -443,13 +437,10 @@ class SwapEntry:
     #: separately via :attr:`seq_no` so this field stays purely
     #: descriptive.
     swapped_at: str
-    #: Monotonic registration counter — the primary LIFO sort key for
-    #: ``cmd_revert``. ``cmd_use_local`` computes the next value as
-    #: ``max(existing seq_nos, default=-1) + 1`` so it strictly
-    #: increases per swap regardless of wall-clock collisions or dict
-    #: iteration order. Same explicit-counter pattern CPython's
-    #: ``Lib/sched.py`` uses to break ties on ``Event(time, priority,
-    #: sequence, …)``.
+    #: Monotonic registration counter, the primary LIFO sort key for
+    #: ``cmd_revert``. ``cmd_use_local`` takes ``max(existing seq_nos,
+    #: default=-1) + 1``, so it increases strictly per swap whatever the
+    #: wall clock or dict iteration order does.
     seq_no: int
     #: Exact destination changed by the swap. ``config_path`` may be a
     #: symlink that is later repointed, so it is not sufficient recovery
@@ -467,16 +458,14 @@ class SwapStateError(RuntimeError):
 # ---------------------------------------------------------------------------
 #
 # tomlkit gives TOML a format-preserving round trip; JSONC has no
-# equivalent on PyPI that is safe to depend on here. ``json-five`` was
-# measured first and rejected: it raises on ``"C:\\x"`` and silently
-# decodes the literal six characters ``\u0041`` to ``"A"`` — both valid
-# JSON that stdlib reads correctly, and the second is exactly the silent
-# rewrite this script exists to avoid.
+# equivalent on PyPI safe to depend on here. ``json-five`` raises on
+# ``"C:\\x"`` and silently decodes the literal ``\u0041`` to ``"A"`` --
+# both valid JSON that stdlib reads correctly, and the second is the
+# silent rewrite this script exists to avoid.
 #
-# So values come from stdlib ``json`` (correct escape semantics) and
-# edits are applied as text splices located by an offset-preserving
-# scanner. Every byte outside a replaced value survives untouched, which
-# is the same technique opencode's own config writer uses via
+# So values come from stdlib ``json`` and edits are text splices located
+# by an offset-preserving scanner, leaving every byte outside a replaced
+# value untouched -- the technique opencode's own writer uses through
 # ``jsonc-parser``'s ``modify()``.
 
 _JSON_WS = " \t\n\r"
@@ -1763,13 +1752,10 @@ def _cmd_use_local(args: argparse.Namespace) -> int:
             continue
         target_path = info.config_path.resolve()
         target_info = dataclasses.replace(info, config_path=target_path)
-        # Wrap the read + shape-guarded mutation so an unreadable config
-        # surfaces as a clean per-CLI error instead of an uncaught traceback.
-        # The three arms are the three ways it fails: a shape this script
-        # rejects raises RuntimeError, an unparseable one raises ValueError
-        # (JSON, TOML and UTF-8 decode errors all derive from it), and an
-        # unopenable one raises OSError. Same trio ``doctor`` catches, and
-        # the same per-CLI continuation the write-failure handler below uses.
+        # The three arms are the three ways the read fails: a rejected
+        # shape raises RuntimeError, an unparseable config ValueError (JSON,
+        # TOML and UTF-8 decode errors all derive from it), an unopenable
+        # one OSError. Same trio ``doctor`` catches.
         try:
             original_bytes = target_path.read_bytes()
             config = load_config(target_info)
@@ -1813,13 +1799,11 @@ def _cmd_use_local(args: argparse.Namespace) -> int:
             continue
 
         # Re-swapping a layer that was never reverted must NOT re-back-up:
-        # ``original_bytes`` is this script's own earlier output, so
-        # recording it would make ``revert`` restore a swapped config and
-        # strand the pristine one. Keep the first backup — it is the only
-        # copy of what the user had — and leave its ``seq_no`` /
-        # ``swapped_at`` untouched so the LIFO unwind order (which is
-        # pinned by what each backup captured, not by when it was last
-        # rewritten) stays correct.
+        # ``original_bytes`` would be this script's own earlier output, so
+        # ``revert`` would restore a swapped config and strand the pristine
+        # one. The first backup is the only copy of what the user had, and
+        # its ``seq_no``/``swapped_at`` stay put so the LIFO order keeps
+        # tracking what each backup captured.
         prior = state.get((cli, scope))
         prior_backup = pathlib.Path(prior.backup_path) if prior is not None else None
         if prior_backup is not None and prior_backup.exists():
@@ -1964,18 +1948,13 @@ def _cmd_revert(args: argparse.Namespace) -> int:
             label = f"{cli}:{args.scope}" if args.scope and cli == "claude" else cli
             print(f"[{label}] no state entry — skip")
             continue
-        # Unwind in reverse-registration order (LIFO) — sort by the
-        # explicit ``SwapEntry.seq_no`` counter so order is independent
-        # of JSON parse order, dict iteration, and wall-clock
-        # collisions. ``seq_no`` is coerced to ``int`` at load time by
-        # ``_parse_state_entry``; entries with a non-coercible value
-        # are dropped before they reach this sort, so the comparison
-        # is always int vs int. When two scopes back the same physical
-        # file (Claude user + project), the later swap's backup
-        # contains the earlier swap's modifications, so each backup
-        # must restore its own layer before the prior one is restored.
-        # Same explicit counter pattern CPython's ``Lib/sched.py`` uses
-        # to break ties on ``Event(time, priority, sequence, …)``.
+        # Unwind LIFO by the explicit ``SwapEntry.seq_no``, so order does
+        # not depend on JSON parse order, dict iteration or the wall clock.
+        # ``_parse_state_entry`` coerces it to ``int`` and drops entries
+        # that cannot be, so this compares int to int. When two scopes back
+        # the same physical file (Claude user + project), the later swap's
+        # backup contains the earlier swap's modifications, so each layer
+        # must restore before the one under it.
         cli_keys.sort(key=lambda k: state[k].seq_no, reverse=True)
         for key in cli_keys:
             sc_cli, sc_scope = key

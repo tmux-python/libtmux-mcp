@@ -86,6 +86,7 @@ async def progress_ticker(
 #: ``ClosedResourceError`` is the send side closing (our shutdown),
 #: ``BrokenResourceError`` the receive side (peer disconnect),
 #: ``BrokenPipeError`` stdio, ``ConnectionError`` socket families.
+#: Anything else propagates so the caller sees it.
 _TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     anyio.ClosedResourceError,
     anyio.BrokenResourceError,

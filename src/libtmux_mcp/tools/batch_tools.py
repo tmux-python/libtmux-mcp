@@ -133,8 +133,9 @@ async def _get_allowed_tool_tier(
         return
 
     # ``max_tier`` is a CEILING, so a readonly tool is reachable through
-    # every batch wrapper. The loop is serial with no aggregate deadline,
-    # so a self-bounded wait batched N times costs N x its ceiling.
+    # every batch wrapper. The loop is serial with no aggregate deadline
+    # and ``MAX_BATCH_OPERATIONS`` is 1000, so a self-bounded wait batched
+    # N times costs N x its ceiling.
     # Rejected per-operation, not pre-loop, so the raise becomes a
     # ``success=False`` row and ``on_error='continue'`` still isolates.
     if TAG_SELF_BOUNDED in tool.tags:

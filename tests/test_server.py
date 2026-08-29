@@ -631,14 +631,12 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
         (TAG_READONLY, "", ""),
         (TAG_MUTATING, "", ""),
         (TAG_DESTRUCTIVE, "", ""),
-        # Variable-length stress: longer socket name + multi-digit pane id.
-        # Guards against future text additions tipping a realistic case
-        # over the 2KB budget. Exercises BOTH axes — a multi-digit pane id
-        # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET). Margin
-        # ~2 bytes; if a future text addition trips this, either trim
-        # further or fall back to a tighter compression form (drop spaces
-        # around ``/`` in HOOKS, drop spaces after colons in the safety
-        # paragraph) for additional bytes of margin.
+        # Variable-length stress on BOTH axes -- a multi-digit pane id
+        # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET) -- so a
+        # future text addition cannot tip a realistic case over the 2KB
+        # budget. The margin is a couple of bytes: buy more by dropping
+        # spaces around ``/`` in HOOKS or after colons in the safety
+        # paragraph.
         (TAG_READONLY, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
     ],
 )
@@ -801,14 +799,11 @@ def test_readonly_hint_visible_only_on_readonly_tier(
 
 #: Tools whose title must include the word ``tmux``. Hierarchy nouns
 #: (window, session, server, option, environment, hook, buffer, channel)
-#: collide with browser / editor / WM / OS-channel domains; the qualifier
-#: is load-bearing for display surfaces (Claude Code's tool catalog UI,
-#: ``claude mcp list`` outputs). Title is NOT in BM25's search corpus
-#: (verified vs FastMCP's _extract_searchable_text), so this lever is
-#: purely human-readable disambiguation. ``display_message`` is included
-#: because its title was pre-qualified as "Evaluate tmux Format String"
-#: by an earlier rename — pinning it here guards against silent
-#: regression to "Evaluate Format String".
+#: collide with browser, editor, WM and OS-channel domains, so the
+#: qualifier disambiguates display surfaces such as a tool-catalog UI.
+#: Title is NOT in the search corpus, so the lever is human-readable
+#: only. ``display_message`` is pinned here to hold its title at
+#: "Evaluate tmux Format String".
 _TMUX_QUALIFIED_TOOLS = frozenset(
     [
         # 5 server-level

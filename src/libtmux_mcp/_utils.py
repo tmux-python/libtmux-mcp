@@ -446,8 +446,9 @@ VALID_SAFETY_LEVELS = frozenset({TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE})
 #:
 #: * :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` skips it --
 #:   the deadline lives in the tool body, so a retry doubles the ceiling.
-#: * The ``call_*_tools_batch`` wrappers reject it per-operation, the
-#:   batch loop being serial with no aggregate deadline.
+#: * The ``call_*_tools_batch`` wrappers reject it per-operation: the
+#:   batch loop is serial with no aggregate deadline and
+#:   ``MAX_BATCH_OPERATIONS`` is 1000.
 #:
 #: A tag rather than a name list because ``add_tool_transformation`` can
 #: rename a tool out from under a name. Tier resolution reads only the
@@ -498,11 +499,13 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
 }
 
 #: Per-tool MCP ``meta`` hinting that a client keep this tool visible
-#: rather than deferred. FastMCP passes ``meta`` opaquely; honouring it
-#: is the client's business, so this is a safe no-op for one that does
-#: not index the ``anthropic/*`` namespace.
+#: rather than deferred. FastMCP passes ``meta`` opaquely and honouring it
+#: is the client's business, so this is a safe no-op for one that does not
+#: index the ``anthropic/*`` namespace. ``alwaysLoad`` is documented at
+#: https://code.claude.com/docs/en/mcp, honoured from Claude Code 2.1.121.
 #:
-#: Apply only to read-tier discovery anchors: each always-loaded tool
+#: Apply only to read-tier discovery anchors -- ``list_panes``,
+#: ``list_windows``, ``snapshot_pane`` -- because each always-loaded tool
 #: spends a fixed schema budget in clients that do honour the hint.
 DISCOVERY_META: dict[str, t.Any] = {
     "anthropic/alwaysLoad": True,
@@ -513,8 +516,9 @@ DISCOVERY_META: dict[str, t.Any] = {
 #: canonical users: shell recovery and scrollback cleanup are ordinary
 #: agent work, while the hints keep disclosing the cost.
 #:
-#: Hint values match :data:`ANNOTATIONS_DESTRUCTIVE`; only the paired
-#: tier tag differs.
+#: Hint values match :data:`ANNOTATIONS_DESTRUCTIVE`, which is paired with
+#: ``TAG_DESTRUCTIVE`` where this one is paired with ``TAG_MUTATING``. Two
+#: names for identical hints, so the call site states which it means.
 ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
@@ -1116,7 +1120,8 @@ def _get_server(
 
     # Probed before it is handed out: nothing downstream is bounded, as
     # ``server.panes`` and friends reach ``Server.cmd``, which has no
-    # timeout. Costs one round trip per socket per process.
+    # timeout. One extra round trip on the uncached path; the cached path
+    # above already pays one on every call.
     _, reason = _probe_liveness(server)
     _raise_if_socket_hung(server, reason)
 
@@ -1843,9 +1848,9 @@ def _serialize_session(session: Session) -> SessionInfo:
     from libtmux_mcp.models import SessionInfo
 
     assert session.session_id is not None
-    # ``Session.active_pane`` may raise rather than return ``None`` for a
-    # session mid-teardown, so a missing attribute or pane id reads as
-    # ``None`` and ``list_sessions`` still serialises.
+    # ``getattr`` so a build without ``Session.active_pane``, or a session
+    # mid-teardown with none, reads as ``None`` and ``list_sessions`` still
+    # serialises.
     active_pane = getattr(session, "active_pane", None)
     active_pane_id = active_pane.pane_id if active_pane is not None else None
 

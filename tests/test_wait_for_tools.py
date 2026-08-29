@@ -157,14 +157,12 @@ SERVER_DEATH_FIXTURES: list[ServerDeathFixture] = [
     ServerDeathFixture(
         test_id="server_sigkill",
         kill_mode="sigkill",
-        # Two honest outcomes, unlike the clean paths. tmux reports an
-        # abrupt death itself (8/8 on a quiet box), but if the wait-for
-        # child sees a zero exit first, the liveness re-probe catches it
-        # instead and says so differently. Both prove the tool did not
-        # claim a signal, and accepting both hides nothing: this case
-        # never exercised the re-probe -- with the re-probe removed it
-        # still passes on tmux's own error, which is why the clean
-        # fixtures above are the ones that keep the mechanism honest.
+        # Two honest outcomes: tmux reports an abrupt death itself, but if
+        # the wait-for child sees a zero exit first the liveness re-probe
+        # catches it and words it differently. Both prove no signal was
+        # claimed. Accepting both hides nothing, since this case passes on
+        # tmux's own error even with the re-probe removed -- the clean
+        # fixtures above are what keep the mechanism honest.
         expected_message="server exited unexpectedly|no longer running",
     ),
 ]
@@ -219,15 +217,13 @@ def test_wait_for_channel_detects_a_vanished_server(
             thread.join()
 
     message = str(excinfo.value)
-    # Two honest paths describe a vanished server, and which one arrives
-    # is a race this test cannot control: if the kill lands before the
-    # wait-for child connects, tmux reports the absence ITSELF and the
-    # liveness re-probe -- the thing under test -- never runs. Both
-    # raise, so the tool never claims a signal either way; but only one
-    # exercises the mechanism, so the other is an unestablished
-    # precondition rather than a pass. Reproduced deterministically:
-    # killing before the call gives "no server running on <path>",
-    # killing during it gives "no longer running".
+    # Two honest paths describe a vanished server and which arrives is a
+    # race: if the kill lands before the wait-for child connects, tmux
+    # reports the absence ITSELF and the re-probe under test never runs.
+    # Both raise, but only one exercises the mechanism, so the other is an
+    # unestablished precondition rather than a pass. Killing before the
+    # call gives "no server running on <path>", during it "no longer
+    # running".
     if "no server running" in message:
         pytest.skip(
             "the server died before the wait-for child connected, so tmux "
@@ -377,12 +373,10 @@ def test_wait_for_channel_does_not_block_event_loop(mcp_server: Server) -> None:
         await asyncio.gather(_ticker(), _waiter())
         return ticks
 
-    # A blocked loop yields EXACTLY one tick however long the block
-    # lasts and however many times you look; a STARVED loop yields one
-    # too, which is the only reason to retry. Counting to 20 instead
-    # assumed the loop ticks at ~100 Hz, and parallel load breaks that
-    # -- the same assumption already measured failing on the
-    # capture_since sibling.
+    # A blocked loop yields EXACTLY one tick however long the block lasts;
+    # a STARVED loop yields one too, which is the only reason to retry.
+    # Counting to 20 instead assumes the loop ticks at ~100 Hz, which
+    # parallel load breaks.
     attempts = []
     for _ in range(3):
         attempts.append(asyncio.run(_drive()))
@@ -570,12 +564,10 @@ def test_the_silent_waits_now_report_progress(
                     raise_on_error=False,
                 )
             )
-            # Wait for the first tick rather than for a fixed window.
-            # Load can only DELAY ticks, never add them, so a sleep is a
-            # race this test loses in one direction only -- it was
-            # observed failing at loadavg 60+ with zero ticks in 0.6 s.
-            # The ceiling is a bound, not a spend: it returns the moment
-            # a tick lands.
+            # Wait for the first tick, not a fixed window: load can only
+            # DELAY ticks, so a sleep loses this race in one direction --
+            # zero ticks in 0.6 s at loadavg 60+. The ceiling is a bound,
+            # not a spend; it returns the moment a tick lands.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(first_tick.wait(), timeout=5.0)
             mcp_server.cmd("wait-for", "-S", channel)

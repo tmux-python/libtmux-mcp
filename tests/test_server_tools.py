@@ -603,13 +603,10 @@ def test_list_servers_survives_a_socket_that_never_answers(
 
     from libtmux_mcp.tools.server_tools import _PROBE_TIMEOUT_SECONDS
 
-    # Scan an EMPTY TMUX_TMPDIR so the measurement is of this code and
-    # not of the machine's accumulated socket litter. Unisolated, the
-    # scan also probed every socket in the shared directory -- 1785 of
-    # them on the development box. Quiet those are ~1 ms each and
-    # invisible; under load their per-probe cost inflates and 1785 of
-    # them push the wall clock past any fixed bound. The sibling test
-    # below isolates for a related reason.
+    # An EMPTY TMUX_TMPDIR, so the measurement is of this code and not of
+    # the machine's socket litter. Unisolated, the scan probes every
+    # socket in the shared directory -- ~1 ms each when quiet, but the
+    # per-probe cost inflates under load and pushes past any fixed bound.
     with (
         tempfile.TemporaryDirectory(prefix="lsq-") as empty_dir,
         tempfile.TemporaryDirectory() as tmpdir,
@@ -646,12 +643,10 @@ def test_list_servers_survives_a_socket_that_never_answers(
                 conn.close()
             thread.join(timeout=2)
 
-    # Derived from the product's constant rather than a human-scale
-    # number, so it moves when the constant does. One silent socket
-    # costs one probe timeout; the multiple is headroom, because this is
-    # a CEILING that a working scan returns from in about 2 s. A literal
-    # 10.0 was asserting the machine's speed -- it failed at loadavg 90,
-    # once by 28 ms.
+    # Derived from the product's constant, so it moves when that does. One
+    # silent socket costs one probe timeout and the multiple is headroom:
+    # this is a CEILING a working scan returns from in about 2 s. A
+    # literal 10.0 asserts the machine's speed, and failed at loadavg 90.
     ceiling = _PROBE_TIMEOUT_SECONDS * 5
     assert elapsed < ceiling, (
         f"list_servers took {elapsed:.1f}s against a silent socket "

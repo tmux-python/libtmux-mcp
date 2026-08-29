@@ -2275,15 +2275,15 @@ def test_preflight_passes_spec_env_to_the_process(tmp_path: pathlib.Path) -> Non
 # JSON writer fidelity
 #
 # The swap edits one entry inside a file the user owns, so bytes it did
-# not set out to change must survive the rewrite. ``load_config`` ->
+# not set out to change must survive. ``load_config`` ->
 # ``dump_config_bytes`` is the whole write path, so an unmodified config
-# has to come back byte-identical.
+# comes back byte-identical.
 #
-# Out of scope, and normalized rather than preserved: indent width, CRLF,
-# `\/` and `\uXXXX` escapes of characters that need none, duplicate keys,
-# and number spelling (`1e5` -> `100000.0`). None appear in what the JSON
-# CLIs write — they all emit `JSON.stringify(x, null, 2)` — and none
-# change what a CLI reads, only the bytes a dotfile diff shows.
+# Normalized rather than preserved: indent width, CRLF, `\/` and
+# `\uXXXX` escapes of characters needing none, duplicate keys, and number
+# spelling (`1e5` -> `100000.0`). None appear in what the JSON CLIs write
+# -- all emit `JSON.stringify(x, null, 2)` -- and none change what a CLI
+# reads, only what a dotfile diff shows.
 # ---------------------------------------------------------------------------
 
 
@@ -2989,12 +2989,12 @@ def test_revert_uses_the_original_target_when_a_config_link_is_replaced(
 # ---------------------------------------------------------------------------
 # opencode and pi
 #
-# These two exercise axes the first six never did. opencode is the first
-# JSONC config, the first container key that is not ``mcpServers`` or
-# ``mcp_servers``, and the first entry dialect that packs argv into one
-# array; pi is the first CLI whose config is read by an extension rather
-# than by the agent itself. The comment-fidelity cases are the point of
-# the JSONC codec, so they are asserted on bytes, not on parsed values.
+# These two exercise axes the others do not: opencode is the only JSONC
+# config, the only container key that is neither ``mcpServers`` nor
+# ``mcp_servers``, and the only dialect packing argv into one array; pi
+# is the only CLI whose config an extension reads rather than the agent.
+# Comment fidelity is the point of the JSONC codec, so those cases assert
+# on bytes, not parsed values.
 # ---------------------------------------------------------------------------
 
 
@@ -3330,13 +3330,11 @@ def test_detect_reports_the_pi_adapter_prerequisite(
 # ---------------------------------------------------------------------------
 # JSONC writer fidelity
 #
-# The JSON writer reserializes the whole document, so it can only promise
-# to preserve values. The JSONC writer splices text and therefore promises
-# bytes: anything it did not deliberately change must come back identical,
-# including the comments, the trailing comma, the indent width and the
-# absence of a final newline. The string cases exist because a
-# comment-stripper that is not string-aware corrupts a URL or a Windows
-# path silently, which is the worst failure this codec could have.
+# The JSON writer reserializes the whole document, so it promises values.
+# The JSONC writer splices text, so it promises BYTES: comments, the
+# trailing comma, the indent width and the absent final newline all come
+# back identical. The string cases are there because a comment-stripper
+# that is not string-aware silently corrupts a URL or a Windows path.
 # ---------------------------------------------------------------------------
 
 

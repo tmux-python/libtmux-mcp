@@ -1197,12 +1197,11 @@ def test_run_command_kills_tmux_child_on_cancel(
     socket_name = mcp_server.socket_name
     assert socket_name is not None
 
-    # One constant governs both the call's budget and the window the
-    # probe waits in, so they cannot drift apart: the cancel has to land
-    # while the call is still in flight. Both are ceilings -- the wait
-    # below exits the moment a child appears -- so a generous value is
-    # free except on the loaded box that needs it. Measured: the
-    # pre-child work exceeded 6 s at loadavg 37.
+    # One constant governs both the call's budget and the probe's window
+    # so they cannot drift: the cancel must land while the call is in
+    # flight. Both are ceilings -- the wait exits the moment a child
+    # appears -- so a generous value costs nothing. Pre-child work has
+    # exceeded 6 s at loadavg 37.
     call_budget = 20.0
 
     async def _drive() -> list[int]:
@@ -1231,12 +1230,10 @@ def test_run_command_kills_tmux_child_on_cancel(
         while time.monotonic() < deadline and not task.done() and not await _pids():
             await asyncio.sleep(0.05)
         if not await _pids():
-            # Two different failures used to read as one. The call
-            # giving up before it ever spawned a wait child is a fact
-            # about run_command under load; the probe not seeing a child
-            # that exists is a fact about the probe. Reporting the first
-            # as "the probe is broken" sent me looking in the wrong
-            # place at loadavg 43.
+            # Two different failures, kept apart: the call giving up
+            # before it spawned a wait child is a fact about run_command
+            # under load, while the probe missing a child that exists is a
+            # fact about the probe.
             if task.done():
                 # The call FINISHED without ever spawning a wait child.
                 # That is a fact about run_command, not about the box,
@@ -1249,12 +1246,10 @@ def test_run_command_kills_tmux_child_on_cancel(
                     "would be vacuous either way."
                 )
             # Still running: the pre-child work -- resolve, busy guard,
-            # occupant read, send -- is ~8 tmux round trips, and on a
-            # box under heavy parallel load it can outrun the window.
-            # Nothing was cancelled, so there is no property left to
-            # assert; skipping says that, where failing would report a
-            # loaded machine as a defect. Measured 3 runs in 12 at
-            # loadavg 30+, and never once in isolation.
+            # occupant read, send -- is ~8 tmux round trips and can outrun
+            # the window under parallel load. Nothing was cancelled, so no
+            # property is left to assert; failing here would report a
+            # loaded machine as a defect.
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -1781,12 +1776,10 @@ def test_capture_pane_truncates_tail_preserving(
     for i in range(20):
         mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
 
-    # Derive the cap from what the pane actually holds, in the SAME
-    # observation the assertions run against. A literal cap carries an
-    # unasserted precondition -- max_lines=5 needs six visible rows,
-    # which put the assertion exactly on the boundary of a pane split
-    # three times -- and a cap read from an earlier capture than the one
-    # asserted on compares two states that were never simultaneous.
+    # Derive the cap from what the pane holds, in the SAME observation the
+    # assertions run against. A literal cap hides a precondition
+    # (max_lines=5 needs six visible rows), and a cap read from an earlier
+    # capture compares two states that were never simultaneous.
     settled: list[list[str]] = []
 
     def _captured_with_marker() -> bool:
@@ -2186,13 +2179,11 @@ def test_wait_for_text_matches_a_reprinted_line(
     marker = "BUILD_OK_REPRINT"
 
     def run(reprint: bool, timeout: float) -> WaitForTextResult:
-        # The output is GATED on a channel rather than on a timer. With
-        # `sleep 1` the reprint landed 1.6 s after the shell started, so
-        # respawn plus the marker poll had to finish inside that window
-        # -- and under load they do not, leaving the wait to start after
-        # the reprint it exists to catch. Observed failing at loadavg
-        # 60+. The shell now blocks until the wait is running, so
-        # ordering is established rather than raced for.
+        # GATED on a channel, not a timer: with `sleep 1` the reprint
+        # lands 1.6 s in, so respawn plus the marker poll must finish
+        # inside that window, and under load they do not -- leaving the
+        # wait to start after the reprint it exists to catch. Blocking the
+        # shell until the wait runs establishes the order instead.
         gate = f"reprint_gate_{uuid.uuid4().hex[:8]}"
         tail = f"printf '{marker}\\n'; " if reprint else ""
         mcp_pane.respawn(
@@ -2211,13 +2202,11 @@ def test_wait_for_text_matches_a_reprinted_line(
         )
 
         async def _wait_then_release() -> WaitForTextResult:
-            # Release on OBSERVING the entry snapshot, not on assuming
-            # it. Yielding once and hoping was not enough at loadavg 85:
-            # the reprint landed first, so it counted as entry text and
-            # `found` came back False with the marker sitting in `rows`.
-            # wait_for_text reads pane state and then captures, so the
-            # first capture-pane means the baseline is being taken --
-            # and the three noise lines still give 0.6 s after that.
+            # Release on OBSERVING the entry snapshot, not on assuming it:
+            # yielding once and hoping lets the reprint land first, where
+            # it counts as entry text and `found` is False with the marker
+            # in `rows`. wait_for_text reads pane state then captures, so
+            # the first capture-pane means the baseline is being taken.
             snapshotting = asyncio.Event()
             real_exec = asyncio.create_subprocess_exec
 
@@ -2309,12 +2298,10 @@ def test_run_command_allows_a_slow_shell(
         )
     )
     if result.timed_out:
-        # A REFUSAL is the defect this guards against, and it raises --
-        # so it fails this test whatever the load. A plain timeout is a
-        # different outcome: 6 s of it is the hook, leaving under 4 s
-        # for everything else, which parallel load can eat. Nothing was
-        # refused, so the property was not disproven and there is
-        # nothing left to assert. Measured at 6.6-7.8 s in isolation.
+        # A REFUSAL is the defect guarded against, and it raises, so it
+        # fails whatever the load. A plain timeout is a different outcome:
+        # 6 s of it is the hook, leaving under 4 s that parallel load can
+        # eat. Nothing was refused, so the property was not disproven.
         pytest.skip(
             "the slow shell plus load outran the 10s budget; no refusal "
             "happened, so there is nothing to assert about one"
@@ -2830,14 +2817,10 @@ def test_capture_since_rejects_dead_pane_cursor(
         window.cmd("set-option", "-wu", "remain-on-exit")
 
 
-#: Helpers that reach tmux. Called INLINE from an async body they run on
-#: the loop and every concurrent caller waits with them; awaited, they
-#: yield. Names stay here after being converted to an async bounded
-#: form, so reintroducing a synchronous one is caught.
 #: libtmux METHODS that make a tmux round trip. ``Pane.cmd`` and friends
-#: are the same hazard as the helpers below and are invisible to a
-#: name-based check, because the offending call is an attribute access
-#: on whatever object is in hand.
+#: are the same hazard as the helpers below, and are invisible to a
+#: name-based check because the offending call is an attribute access on
+#: whatever object is in hand.
 _BLOCKING_TMUX_METHODS = frozenset(
     {"cmd", "capture_pane", "display_message", "refresh"}
 )
@@ -2856,6 +2839,10 @@ _BLOCKING_MODULE_CALLS = frozenset(
     }
 )
 
+#: Helpers that reach tmux. Called INLINE from an async body they run on
+#: the loop and every concurrent caller waits with them; awaited, they
+#: yield. A name stays here after conversion to an async bounded form, so
+#: reintroducing a synchronous one is caught.
 _BLOCKING_TMUX_HELPERS = frozenset(
     {
         "_resolve_pane",
@@ -3322,12 +3309,11 @@ def test_respawn_pane_kill_false_on_dead_pane_succeeds(
     flip of the default.
     """
     window = mcp_session.active_window
-    # remain-on-exit=on keeps the pane around after its process exits so
-    # we can drive a kill=False respawn on a confirmed-dead process.
-    # Without it, tmux removes the pane the moment its child exits and
-    # the respawn call fails with PaneNotFound instead of exercising
-    # the kill=False branch. Set the option on the window *before*
-    # splitting so the new pane inherits it.
+    # remain-on-exit=on keeps the pane after its process exits, so a
+    # kill=False respawn can run against a confirmed-dead process; without
+    # it tmux removes the pane and the call raises PaneNotFound instead of
+    # reaching that branch. Set on the window BEFORE splitting, so the new
+    # pane inherits it.
     window.cmd("set-option", "-w", "remain-on-exit", "on")
     new_pane = window.split(shell="true")
     assert new_pane.pane_id is not None
@@ -4253,16 +4239,12 @@ class WaitForTextFixture(t.NamedTuple):
     """Test fixture for wait_for_text."""
 
     test_id: str
-    #: Command sent BEFORE ``wait_for_text`` is called. Its output is
-    #: expected to be present in the pane scrollback (and therefore
-    #: above the baseline) by the time the wait begins. Used to verify
-    #: that stale scrollback no longer matches (#45). The positive
-    #: "text appears after baseline" case lives in
-    #: ``test_wait_for_text_matches_new_output_after_baseline`` rather
-    #: than this fixture because it needs ``asyncio.create_task`` plus
-    #: a sequenced ``await`` to coordinate emission against the running
-    #: poll loop — synchronous setup races the shell's enter-processing
-    #: on CI and shifts the baseline past single-line output.
+    #: Command sent BEFORE ``wait_for_text``, so its output is in
+    #: scrollback above the baseline by the time the wait begins -- the
+    #: negative case, where stale scrollback must not match. The positive
+    #: case needs ``asyncio.create_task`` and a sequenced ``await`` to
+    #: coordinate against the running poll loop, so it lives in
+    #: ``test_wait_for_text_matches_new_output_after_baseline``.
     pre_command: str | None
     patterns: list[str]
     timeout: float
@@ -4308,27 +4290,16 @@ def test_wait_for_text(
 
     if pre_command is not None:
         mcp_pane.send_keys(pre_command, enter=True)
-        # Wait until the pane has fully settled before measuring the
-        # baseline. "Settled" means:
+        # Settled means two things:
         #
-        #   (a) the OUTPUT line is present — ``line.strip() == pattern``,
-        #       distinguishing the shell's actual output from the typed
-        #       echo line that contains ``pattern`` as a substring (and
-        #       which would otherwise trip a naive ``pattern in capture``
-        #       predicate while keys are still buffered pre-enter), and
-        #   (b) ``(history_size, cursor_y)`` is unchanged across two
-        #       consecutive polls — zsh prints async prompt-redraw
-        #       lines (vcs_info, precmd hooks) some milliseconds after
-        #       the initial prompt, and those redraws keep growing
-        #       hsize *during* ``wait_for_text``'s window, pulling
-        #       pre-baseline rows back into the visible-relative
-        #       ``start_line`` capture. Waiting them out anchors the
-        #       baseline below all async output.
-        #
-        # A fixed ``time.sleep`` would do the same job but couples the
-        # test to a wall-clock value (the project's idiom for
-        # tmux-state waits is ``retry_until`` — used throughout this
-        # file).
+        #   (a) the OUTPUT line is present -- ``line.strip() == pattern``
+        #       separates the shell's output from the typed echo line,
+        #       which contains ``pattern`` as a substring while keys are
+        #       still buffered pre-enter, and
+        #   (b) ``(history_size, cursor_y)`` is unchanged across two polls
+        #       -- zsh's async prompt redraws (vcs_info, precmd) keep
+        #       growing hsize during ``wait_for_text``'s window, pulling
+        #       pre-baseline rows into the visible-relative capture.
         last_state: tuple[int, int] = (-1, -1)
 
         def _stale_settled() -> bool:
@@ -4364,22 +4335,6 @@ def test_wait_for_text(
 
     if expected_found:
         assert len(result.matched_lines) >= 1
-
-
-#: How long the tests that coordinate against a running wait sleep
-#: before writing their marker.
-#:
-#: This is a race, and it only fails in one direction: if the wait has
-#: not locked its entry baseline yet, the marker is PRE-EXISTING content
-#: by the time it does, gets correctly suppressed, and the test fails
-#: for a reason unrelated to the code under test. Locking the baseline
-#: costs five tmux round trips, a few tens of milliseconds at idle —
-#: but this whole cluster went red together on a box at load ~30 with
-#: 20 CPUs, and ``--reruns`` did not save it because the load outlived
-#: the retries.
-#:
-#: 1 s buys roughly an order of magnitude of headroom for a fraction of
-#: a second per test. There is no event to wait on instead: the baseline
 
 
 def test_wait_for_text_matches_new_output_after_baseline(
@@ -4495,12 +4450,11 @@ class EntryRowFixture(t.NamedTuple):
 
 
 ENTRY_ROW_FIXTURES: list[EntryRowFixture] = [
-    # The regression. On a quiescent pane the cursor sits at the end of
-    # the prompt, so an unprefixed line lands on the entry cursor row.
-    # That row used to be excluded by index and the marker was
-    # unmatchable — the tool's headline case (a daemon printing one
-    # ``ready`` line) always burned the full budget and then reported
-    # ``saw_new_output=false``.
+    # On a quiescent pane the cursor sits at the end of the prompt, so an
+    # unprefixed line lands on the entry cursor row. Excluding that row by
+    # index makes the marker unmatchable, and the tool's headline case -- a
+    # daemon printing one ``ready`` line -- burns the full budget and
+    # reports ``saw_new_output=false``.
     EntryRowFixture(
         test_id="bare_line_lands_on_entry_row",
         payload="ENTRY_ROW_MARKER\n",
@@ -4755,12 +4709,10 @@ def test_wait_for_text_ignores_stale_below_cursor(
     """
     import asyncio
 
-    # Print STALE_BELOW, then move the cursor back to the top-left so
-    # row 1 holds stale content that wait_for_text would otherwise
-    # match on the first poll. The trailing sleep keeps the pane state
-    # frozen for the wait's duration. Double-quote the sh -c argument
-    # so the inner single-quoted printf format strings don't break the
-    # outer quoting.
+    # Print STALE_BELOW, then return the cursor to the top-left so row 1
+    # holds stale content wait_for_text would otherwise match on the first
+    # poll; the trailing sleep freezes pane state for the wait. The sh -c
+    # argument is double-quoted so the inner printf formats keep theirs.
     paint_and_park = (
         "printf 'TOP\\nSTALE_BELOW\\n'; "  # write 2 rows; cursor lands on row 2
         "printf '\\033[H'; "  # ESC[H = move cursor to (0,0)
@@ -4807,12 +4759,10 @@ def test_wait_for_text_does_not_match_bottom_row_clip(
     """
     import asyncio
 
-    # Replace the default shell with a single sh invocation: emit
-    # filler rows to push the cursor to the bottom of the visible
-    # region, print the marker without a trailing newline so it
-    # stays on the cursor row, then sleep so nothing else scrolls
-    # into history. Fixture teardown kills the pane (and the sleep)
-    # at test exit.
+    # A single sh invocation: filler rows push the cursor to the bottom of
+    # the visible region, the marker prints without a trailing newline so
+    # it stays on the cursor row, then a sleep keeps anything else out of
+    # history. Teardown kills the pane and the sleep with it.
     fill_and_park = (
         "for i in $(seq 1 30); do echo filler; done; "
         "printf STALE_BOTTOM_MARKER; sleep 60"
@@ -5310,19 +5260,14 @@ def test_wait_for_text_propagates_unexpected_progress_error(
             msg = "synthetic bug in progress-notification path"
             raise RuntimeError(msg)
 
-    # The error surfaces through ``handle_tool_errors_async``, which
-    # maps any unexpected ``Exception`` to ``ToolError`` with the
-    # original type + message preserved in the translated text. The
-    # point of this regression guard is that the error reaches the
-    # error handler at all — previously the broad ``suppress`` ate it.
-    # The faulty context is only reached when the ticker fires, so this
-    # needs at least one tick. Margin on both axes, because the failure
-    # is one-directional -- load removes ticks, never adds them:
+    # The guard is that the error reaches ``handle_tool_errors_async`` at
+    # all, rather than being swallowed. The faulty context is only reached
+    # when the ticker fires, so this needs at least one tick, with margin
+    # on both axes -- load removes ticks, never adds them:
     #
     #   cadence 0.001s, so a tick lands as soon as the loop is scheduled
     #   timeout 1.5s, because pane resolution and the entry capture run
-    #   BEFORE the ticker starts, and a short budget can be spent
-    #   entirely on them, leaving the ticker no window at all
+    #   BEFORE the ticker starts and can consume a short budget entirely
     #
     # At 0.05s/0.5s this flaked 2 runs in 10 under `-n auto`.
     monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.001)
@@ -7375,14 +7320,12 @@ def test_a_mutating_tool_answers_with_a_freshly_read_record(
     answered, later = returned.model_dump(), fresh.model_dump()
     differing = {key for key in answered if answered[key] != later[key]}
     if differing and differing <= _SETTLING_FIELDS:
-        # Two reads of a MOVING system are not evidence of staleness.
-        # lifecycle.py measures pane_current_command lagging pane_pid by
-        # a median of 14 ms after a respawn, and under load that lag can
-        # outlast the settle loop -- so the tool and this read can
-        # legitimately disagree. pane_pid is NOT in that set and changes
-        # the instant respawn-pane returns, so it remains the witness
-        # for respawn freshness and a genuinely stale record still
-        # fails here.
+        # Two reads of a MOVING system are not evidence of staleness:
+        # pane_current_command lags pane_pid by a median 14 ms after a
+        # respawn, and under load that outlasts the settle loop, so the
+        # tool and this read can legitimately disagree. pane_pid changes
+        # the instant respawn-pane returns, so it stays the witness and a
+        # genuinely stale record still fails.
         pytest.skip(f"{name}: still settling, {sorted(differing)} in flight")
     assert not differing, f"{name} answered with a stale record: {sorted(differing)}"
 

@@ -221,9 +221,8 @@ def enter_copy_mode(
         session_id=session_id,
         window_id=window_id,
     )
-    # Validated before entering, not after: a rejected scroll_up used to
-    # leave the pane in copy mode anyway, so the error described a call
-    # that had already half-happened.
+    # Validated before entering, or a rejected scroll_up leaves the pane
+    # in copy mode and the error describes a half-finished call.
     if scroll_up is not None and scroll_up < 0:
         msg = f"scroll_up must be zero or greater (received {scroll_up})"
         raise ExpectedToolError(msg)

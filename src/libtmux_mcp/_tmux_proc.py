@@ -114,9 +114,10 @@ async def _run_tmux_bounded(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    # Not ``wait_for(proc.communicate())``: a wedged tmux can leave a
-    # grandchild holding the pipe write ends, so ``proc.wait()`` after
-    # ``kill()`` deadlocks. ``asyncio.wait`` kills first, cancels after.
+    # Not ``wait_for(proc.communicate())``: it cancels the reader on
+    # timeout, and a wedged tmux can leave a grandchild holding the pipe
+    # write ends, so that cancel hangs. ``asyncio.wait`` returns without
+    # cancelling, so the kill can go first.
     task = asyncio.ensure_future(proc.communicate())
     try:
         done, _pending = await asyncio.wait({task}, timeout=timeout)

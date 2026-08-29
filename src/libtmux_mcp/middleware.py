@@ -599,9 +599,10 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: surface in the OS process table and ``pane_current_command`` until the
 #: spawned shell takes over -- see ``docs/topics/safety.md``.
 #:
-#: Paths and names are logged on purpose. This set defaults to "log it",
-#: so a free-text argument added later is exposed by omission unless it
-#: is added here.
+#: ``output_path``, ``start_directory`` and the name arguments are
+#: decided: a path is legitimate audit content. This set defaults to "log
+#: it", so a free-text argument added later is exposed by omission unless
+#: it is weighed against those two registers and added here.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {
         "keys",

@@ -330,8 +330,9 @@ mcp = FastMCP(
     ),
     website_url="https://libtmux-mcp.git-pull.com/",
     lifespan=_lifespan,
-    # Middleware runs outermost-first, and every position is load-bearing:
-    #   1. Timing — outermost, so the clock covers middleware cost.
+    # Middleware runs outermost-first, and positions 2-6 are load-bearing:
+    #   1. Timing — a neutral observer, outermost so the clock covers
+    #      middleware cost too.
     #   2. TailPreservingResponseLimiting — truncation preserves an
     #      is_error result instead of making it a schema error.
     #   3. ToolErrorResult — must stay OUTSIDE audit/retry/safety: all
@@ -388,7 +389,8 @@ def _enable_allowed_tools() -> None:
     # The ENFORCEMENT gate: it holds even for a call that skips the
     # middleware chain (``call_tool`` accepts ``run_middleware=False``).
     # ``SafetyMiddleware`` is the EXPLANATION gate -- disabling makes
-    # ``get_tool`` answer None, so FastMCP reports ``Unknown tool``.
+    # ``get_tool`` answer None, so FastMCP would otherwise report a gated
+    # tool as ``Unknown tool``.
     allowed_tags = {TAG_READONLY}
     if _safety_level in {TAG_MUTATING, TAG_DESTRUCTIVE}:
         allowed_tags.add(TAG_MUTATING)
