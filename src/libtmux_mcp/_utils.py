@@ -353,35 +353,47 @@ def _caller_is_strictly_on_server(
 
 
 # ---------------------------------------------------------------------------
-# Safety tier tags
+# Toolsets
 # ---------------------------------------------------------------------------
 
-TAG_READONLY = "readonly"
-TAG_MUTATING = "mutating"
-TAG_DESTRUCTIVE = "destructive"
+#: Read tmux state and terminal output. Starts no process and hands no
+#: caller input to one: what a client supplies is IDs, names, bounded
+#: patterns, and validated variable names.
+#:
+#: Reading is not "safe" — a capture returns whatever a pane holds,
+#: including credentials and text written by a remote process — so this
+#: names what the tools *do*, not how much they are trusted.
+TOOLSET_INSPECT = "inspect"
 
-VALID_SAFETY_LEVELS = frozenset({TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE})
+#: Change tmux structure or presentation: names, sizes, layouts,
+#: selections, modes. Starts no process, and takes no caller input that
+#: anything later executes.
+TOOLSET_MANAGE = "manage"
 
-#: Non-tier marker tag for tools that enforce their own wall-clock
-#: ceiling internally and whose cost is therefore *duration*, not
-#: side effects.
+#: Start a pane process, deliver input to one, or store a value tmux
+#: later runs. The product lives here.
+TOOLSET_EXECUTE = "execute"
+
+#: Delete tmux objects or retained scrollback. Irreversible at the tmux
+#: level.
+TOOLSET_TEARDOWN = "teardown"
+
+#: The four toolsets, in the order startup reports them.
 #:
-#: A tagged tool must never be re-driven by machinery that assumes a
-#: call is cheap:
-#:
-#: * :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` skips it,
-#:   because the deadline is computed inside the tool body — a retry
-#:   restarts the clock and doubles the ceiling.
-#: * The ``call_*_tools_batch`` wrappers reject it per-operation,
-#:   because the batch loop is serial with no aggregate deadline and
-#:   ``MAX_BATCH_OPERATIONS`` is 1000.
-#:
-#: A TAG rather than a tool-name list on purpose: a name string is
-#: exactly what ``add_tool_transformation`` can rename out from under
-#: the exclusion. Tier resolution
-#: (:meth:`~libtmux_mcp.middleware.SafetyMiddleware._is_allowed`,
-#: ``batch_tools._tool_tier``) inspects only the three tier tags, so
-#: carrying this extra tag is inert everywhere else.
+#: An unordered set, deliberately. The tiers this replaced accumulated
+#: upward, so the kill tools could not be enabled without also enabling
+#: the typing tools; ``LIBTMUX_TOOLSETS=inspect,teardown`` is a legal
+#: surface. They group tools by what they do, for inventory
+#: configuration, context reduction, and client routing. They are not
+#: permissions, and filtering them is not containment: an enabled
+#: execute tool can type the equivalent of anything hidden.
+VALID_TOOLSETS: tuple[str, ...] = (
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_EXECUTE,
+    TOOLSET_TEARDOWN,
+)
+
 TAG_SELF_BOUNDED = "self-bounded"
 
 # ---------------------------------------------------------------------------
@@ -389,7 +401,7 @@ TAG_SELF_BOUNDED = "self-bounded"
 # ---------------------------------------------------------------------------
 
 #: Annotations for tools that only read tmux or pane state.
-ANNOTATIONS_RO: dict[str, bool] = {
+ANNOTATIONS_OBSERVE: dict[str, bool] = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "idempotentHint": True,
@@ -400,7 +412,7 @@ ANNOTATIONS_RO: dict[str, bool] = {
 #: but ``openWorldHint`` is ``True``: a pane holds whatever was printed
 #: into it — remote sessions, package managers, other agents — so the
 #: text reaching the caller crossed a trust boundary on its way in.
-ANNOTATIONS_RO_CONTENT: dict[str, bool] = {
+ANNOTATIONS_OBSERVE_CONTENT: dict[str, bool] = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "idempotentHint": True,
@@ -412,7 +424,7 @@ ANNOTATIONS_RO_CONTENT: dict[str, bool] = {
 #: means additive-only, which a replacement is not, so these advertise
 #: ``True`` even though nothing is destroyed. Repeating the same call lands
 #: on the same state, so ``idempotentHint`` stays ``True``.
-ANNOTATIONS_MUTATING: dict[str, bool] = {
+ANNOTATIONS_CHANGE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": True,
@@ -464,13 +476,13 @@ ANNOTATIONS_DEFERRED_EXEC: dict[str, bool] = {
 #:
 #: Contrast :data:`ANNOTATIONS_SPAWN`, which starts the pane's *configured*
 #: process and carries no payload.
-ANNOTATIONS_SHELL: dict[str, bool] = {
+ANNOTATIONS_PANE_INPUT: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": False,
     "openWorldHint": True,
 }
-ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
+ANNOTATIONS_DELETE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": False,

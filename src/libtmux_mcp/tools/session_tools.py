@@ -8,14 +8,15 @@ from libtmux.constants import WindowDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
+    ANNOTATIONS_CHANGE,
+    ANNOTATIONS_DELETE,
+    ANNOTATIONS_OBSERVE,
     ANNOTATIONS_SPAWN,
     DISCOVERY_META,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
@@ -354,28 +355,32 @@ def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Windows",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(list_windows)
     mcp.tool(
-        title="Get tmux Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="Get tmux Session Info",
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(get_session_info)
     mcp.tool(
-        title="Create tmux Window", annotations=ANNOTATIONS_SPAWN, tags={TAG_MUTATING}
+        title="Create tmux Window",
+        annotations=ANNOTATIONS_SPAWN,
+        tags={TOOLSET_EXECUTE},
     )(create_window)
     mcp.tool(
         title="Rename tmux Session",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(rename_session)
     mcp.tool(
         title="Kill tmux Session",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_TEARDOWN},
     )(kill_session)
     mcp.tool(
         title="Select tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(select_window)

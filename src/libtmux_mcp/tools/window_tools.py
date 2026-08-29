@@ -8,14 +8,15 @@ from libtmux.constants import PaneDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
-    ANNOTATIONS_SHELL,
+    ANNOTATIONS_CHANGE,
+    ANNOTATIONS_DELETE,
+    ANNOTATIONS_OBSERVE,
+    ANNOTATIONS_PANE_INPUT,
     DISCOVERY_META,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
@@ -502,38 +503,42 @@ def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Panes",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(list_panes)
     mcp.tool(
-        title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="Get tmux Window Info",
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(get_window_info)
     mcp.tool(
-        title="Split tmux Window", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING}
+        title="Split tmux Window",
+        annotations=ANNOTATIONS_PANE_INPUT,
+        tags={TOOLSET_EXECUTE},
     )(split_window)
     mcp.tool(
         title="Rename tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(rename_window)
     mcp.tool(
         title="Kill tmux Window",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_TEARDOWN},
     )(kill_window)
     mcp.tool(
         title="Select tmux Layout",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(select_layout)
     mcp.tool(
         title="Resize tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(resize_window)
     mcp.tool(
         title="Move tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(move_window)

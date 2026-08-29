@@ -6,9 +6,9 @@ import typing as t
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_DEFERRED_EXEC,
-    ANNOTATIONS_RO,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_OBSERVE,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
     _get_server,
     _resolve_session,
     handle_tool_errors,
@@ -125,11 +125,11 @@ def register(mcp: FastMCP) -> None:
     """Register environment tools with the MCP instance."""
     mcp.tool(
         title="Show tmux Environment",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(show_environment)
     mcp.tool(
         title="Set tmux Environment",
         annotations=ANNOTATIONS_DEFERRED_EXEC,
-        tags={TAG_MUTATING},
+        tags={TOOLSET_EXECUTE},
     )(set_environment)

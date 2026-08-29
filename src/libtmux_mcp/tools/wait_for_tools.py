@@ -42,9 +42,9 @@ import typing as t
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DESTRUCTIVE,
-    TAG_MUTATING,
+    ANNOTATIONS_DELETE,
     TAG_SELF_BOUNDED,
+    TOOLSET_MANAGE,
     ExpectedToolError,
     _get_server,
     _tmux_argv,
@@ -320,11 +320,11 @@ def register(mcp: FastMCP) -> None:
     # which is what the tag asserts.
     mcp.tool(
         title="Wait For tmux Channel",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_MUTATING, TAG_SELF_BOUNDED},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_MANAGE, TAG_SELF_BOUNDED},
     )(wait_for_channel)
     mcp.tool(
         title="Signal tmux Channel",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_MANAGE},
     )(signal_channel)

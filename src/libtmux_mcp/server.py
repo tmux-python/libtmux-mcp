@@ -23,10 +23,10 @@ from libtmux_mcp._history import (
     _resolve_suppress_history,
 )
 from libtmux_mcp._utils import (
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
-    VALID_SAFETY_LEVELS,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    VALID_TOOLSETS,
     _server_cache,
 )
 from libtmux_mcp._wait_policy import (
@@ -37,10 +37,10 @@ from libtmux_mcp._wait_policy import (
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
     AuditMiddleware,
-    ReadonlyRetryMiddleware,
-    SafetyMiddleware,
+    InspectRetryMiddleware,
     TailPreservingResponseLimitingMiddleware,
     ToolErrorResultMiddleware,
+    ToolsetMiddleware,
     install_fastmcp_validation_log_filter,
 )
 from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
@@ -140,9 +140,16 @@ _BASE_INSTRUCTIONS = (
 
 _INSTRUCTIONS_MAX_BYTES = 2048
 
+#: Enabled when ``LIBTMUX_TOOLSETS`` is unset. ``teardown`` is not in it:
+#: this server still reaches whichever tmux server the environment points
+#: at, so deletion stays something an operator asks for by name.
+DEFAULT_TOOLSETS: frozenset[str] = frozenset(
+    {TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_EXECUTE}
+)
+
 
 def _build_instructions(
-    safety_level: str = TAG_MUTATING,
+    toolsets: frozenset[str] = DEFAULT_TOOLSETS,
     suppress_history: bool = True,
 ) -> str:
     """Build server instructions with agent context and safety level.
@@ -153,8 +160,8 @@ def _build_instructions(
 
     Parameters
     ----------
-    safety_level : str
-        Active safety tier (readonly, mutating, or destructive).
+    toolsets : frozenset of str
+        Enabled toolsets.
     suppress_history : bool
         Effective MCP default for semantic shell-command suppression.
 
@@ -167,9 +174,11 @@ def _build_instructions(
 
     # Safety tier context
     parts.append(
-        f"\n\nSafety level: {safety_level} "
-        "(values: readonly, mutating, destructive). "
-        "Set LIBTMUX_SAFETY; off-tier tools are hidden."
+        "\n\nToolsets enabled: "
+        + (", ".join(sorted(toolsets)) or "(none)")
+        + f" (of {', '.join(VALID_TOOLSETS)}). Set LIBTMUX_TOOLSETS; tools "
+        "outside them are hidden. This shapes what is advertised, not what "
+        "tmux or a pane's shell can do."
     )
     history_default = "true" if suppress_history else "false"
     parts.append(
@@ -182,7 +191,7 @@ def _build_instructions(
     # expensive on mutating/destructive (where kill_* is one mis-routed
     # query away). Reuse the existing safety axis instead of shipping a
     # separate LIBTMUX_DISCOVERABILITY knob.
-    if safety_level == TAG_READONLY:
+    if toolsets == frozenset({TOOLSET_INSPECT}):
         parts.append(
             "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
         )
@@ -263,21 +272,69 @@ def _build_instructions(
     return instructions
 
 
-def _resolve_safety_level(value: str | None) -> str:
-    """Return the effective safety level for a ``LIBTMUX_SAFETY`` value."""
+def _resolve_toolsets(value: str | None) -> frozenset[str]:
+    """Return the enabled toolsets for a ``LIBTMUX_TOOLSETS`` value.
+
+    Parameters
+    ----------
+    value : str or None
+        Comma-separated toolset names. ``None`` takes the default; an
+        empty string enables none, which is legal.
+
+    Returns
+    -------
+    frozenset of str
+        Enabled toolsets.
+
+    Raises
+    ------
+    RuntimeError
+        If a name is not a toolset. A typo silently falling back is how
+        a narrowed surface quietly becomes a wider one.
+    """
     if value is None:
-        return TAG_MUTATING
-    if value in VALID_SAFETY_LEVELS:
-        return value
-    logger.warning(
-        "invalid LIBTMUX_SAFETY=%r, falling back to %s",
-        value,
-        TAG_READONLY,
+        return DEFAULT_TOOLSETS
+    names = [part.strip() for part in value.split(",") if part.strip()]
+    unknown = [name for name in names if name not in VALID_TOOLSETS]
+    if unknown:
+        msg = (
+            f"LIBTMUX_TOOLSETS names unknown toolsets: {', '.join(unknown)}. "
+            f"Valid toolsets: {', '.join(VALID_TOOLSETS)}."
+        )
+        raise RuntimeError(msg)
+    return frozenset(names)
+
+
+def _resolve_tool_names(value: str | None) -> frozenset[str]:
+    """Return a comma-separated tool-name list as a set."""
+    if not value:
+        return frozenset()
+    return frozenset(part.strip() for part in value.split(",") if part.strip())
+
+
+def _reject_retired_safety_env() -> None:
+    """Fail startup when ``LIBTMUX_SAFETY`` is still set.
+
+    The tiers it selected were an ordered ladder that read as a
+    permission system and was not one. Ignoring the variable would
+    silently widen a surface an operator believes is narrow.
+    """
+    if "LIBTMUX_SAFETY" not in os.environ:
+        return
+    msg = (
+        "LIBTMUX_SAFETY has been removed. Tools are grouped into the "
+        f"unordered toolsets {', '.join(VALID_TOOLSETS)}; select them with "
+        "LIBTMUX_TOOLSETS. The nearest equivalents are "
+        "LIBTMUX_TOOLSETS=inspect, LIBTMUX_TOOLSETS=inspect,manage,execute, "
+        "and LIBTMUX_TOOLSETS=inspect,manage,execute,teardown."
     )
-    return TAG_READONLY
+    raise RuntimeError(msg)
 
 
-_safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
+_reject_retired_safety_env()
+_toolsets = _resolve_toolsets(os.environ.get("LIBTMUX_TOOLSETS"))
+_extra_tools = _resolve_tool_names(os.environ.get("LIBTMUX_TOOLS"))
+_excluded_tools = _resolve_tool_names(os.environ.get("LIBTMUX_EXCLUDE_TOOLS"))
 _suppress_history = _resolve_suppress_history(
     os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
 )
@@ -357,7 +414,7 @@ mcp = FastMCP(
     name="tmux",
     version=__version__,
     instructions=_build_instructions(
-        safety_level=_safety_level,
+        toolsets=_toolsets,
         suppress_history=_suppress_history,
     ),
     website_url="https://libtmux-mcp.git-pull.com/",
@@ -378,16 +435,16 @@ mcp = FastMCP(
     #      denials must propagate as exceptions for audit to record
     #      them), so converting the exception to a result any deeper
     #      would silently break all three.
-    #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
+    #   4. AuditMiddleware — outside ToolsetMiddleware so a refusal
     #      events (which raise ExpectedToolError before call_next inside
     #      Safety) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.
-    #   5. ReadonlyRetryMiddleware — inside Audit so retries are
+    #   5. InspectRetryMiddleware — inside Audit so retries are
     #      audited once each, outside Safety so tier-denied tools
     #      never reach retry. Only readonly tools are retried;
     #      mutating/destructive tools pass straight through.
-    #   6. SafetyMiddleware — innermost gate (fail-closed). Denials
+    #   6. ToolsetMiddleware — innermost gate (fail-closed). Refusals
     #      never reach the tool, but the audit record above captures
     #      them for forensic review.
     middleware=[
@@ -398,8 +455,8 @@ mcp = FastMCP(
         ),
         ToolErrorResultMiddleware(transform_errors=True),
         AuditMiddleware(),
-        ReadonlyRetryMiddleware(),
-        SafetyMiddleware(max_tier=_safety_level),
+        InspectRetryMiddleware(),
+        ToolsetMiddleware(_toolsets, _extra_tools, _excluded_tools),
     ],
     on_duplicate="error",
 )
@@ -431,20 +488,20 @@ def _register_all() -> None:
 
 
 def _enable_allowed_tools() -> None:
-    """Apply the native FastMCP visibility gate for the active safety tier."""
+    """Apply FastMCP's visibility gate for the enabled toolsets."""
     global _mcp_visibility_configured
     if _mcp_visibility_configured:
         return
 
-    # Use FastMCP's native visibility system as primary gate,
-    # with the SafetyMiddleware as a secondary layer for clear error messages.
-    allowed_tags = {TAG_READONLY}
-    if _safety_level in {TAG_MUTATING, TAG_DESTRUCTIVE}:
-        allowed_tags.add(TAG_MUTATING)
-    if _safety_level == TAG_DESTRUCTIVE:
-        allowed_tags.add(TAG_DESTRUCTIVE)
+    # FastMCP's tag visibility is the primary filter; ToolsetMiddleware
+    # repeats the decision so a direct call gets an error naming the
+    # variable rather than an unknown-tool error.
     mcp.disable(components={"tool"})
-    mcp.enable(tags=allowed_tags, components={"tool"})
+    if _toolsets:
+        mcp.enable(tags=set(_toolsets), components={"tool"})
+    for name in _extra_tools:
+        with contextlib.suppress(Exception):
+            mcp.enable(components={"tool"}, names={name})
     _mcp_visibility_configured = True
 
 

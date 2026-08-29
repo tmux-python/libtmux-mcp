@@ -8,9 +8,9 @@ from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_DEFERRED_EXEC,
-    ANNOTATIONS_RO,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_OBSERVE,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
     ExpectedToolError,
     _escape_tmux_format,
     _get_server,
@@ -151,11 +151,13 @@ def set_option(
 
 def register(mcp: FastMCP) -> None:
     """Register option tools with the MCP instance."""
-    mcp.tool(title="Show tmux Option", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_option
-    )
+    mcp.tool(
+        title="Show tmux Option",
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
+    )(show_option)
     mcp.tool(
         title="Set tmux Option",
         annotations=ANNOTATIONS_DEFERRED_EXEC,
-        tags={TAG_MUTATING},
+        tags={TOOLSET_EXECUTE},
     )(set_option)

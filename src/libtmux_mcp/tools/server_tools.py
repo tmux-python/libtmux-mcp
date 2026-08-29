@@ -13,12 +13,12 @@ from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_RO,
+    ANNOTATIONS_DELETE,
+    ANNOTATIONS_OBSERVE,
     ANNOTATIONS_SPAWN,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
@@ -367,21 +367,27 @@ def list_servers(
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
     mcp.tool(
-        title="List tmux Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="List tmux Sessions",
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(list_sessions)
     mcp.tool(
-        title="List tmux Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="List tmux Servers",
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(list_servers)
     mcp.tool(
         title="Create tmux Session",
         annotations=ANNOTATIONS_SPAWN,
-        tags={TAG_MUTATING},
+        tags={TOOLSET_EXECUTE},
     )(create_session)
     mcp.tool(
         title="Kill tmux Server",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_TEARDOWN},
     )(kill_server)
     mcp.tool(
-        title="Get tmux Server Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="Get tmux Server Info",
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(get_server_info)

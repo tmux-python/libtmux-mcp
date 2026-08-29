@@ -12,16 +12,17 @@ from __future__ import annotations
 import typing as t
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
-    ANNOTATIONS_RO_CONTENT,
-    ANNOTATIONS_SHELL,
+    ANNOTATIONS_CHANGE,
+    ANNOTATIONS_DELETE,
+    ANNOTATIONS_OBSERVE,
+    ANNOTATIONS_OBSERVE_CONTENT,
+    ANNOTATIONS_PANE_INPUT,
     DISCOVERY_META,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
     TAG_SELF_BOUNDED,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
 )
 from libtmux_mcp.tools.pane_tools.capture_since import capture_since
 from libtmux_mcp.tools.pane_tools.copy_mode import enter_copy_mode, exit_copy_mode
@@ -82,13 +83,13 @@ __all__ = [
 
 def register(mcp: FastMCP) -> None:
     """Register pane-level tools with the MCP instance."""
-    mcp.tool(title="Send Keys", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
-        send_keys
-    )
+    mcp.tool(
+        title="Send Keys", annotations=ANNOTATIONS_PANE_INPUT, tags={TOOLSET_EXECUTE}
+    )(send_keys)
     mcp.tool(
         title="Send Keys Batch",
-        annotations=ANNOTATIONS_SHELL,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_PANE_INPUT,
+        tags={TOOLSET_EXECUTE},
     )(send_keys_batch)
     # run_command blocks on ``tmux wait-for`` under the same wait
     # ceiling as the wait tools, so TAG_SELF_BOUNDED excludes it from
@@ -96,84 +97,90 @@ def register(mcp: FastMCP) -> None:
     # the operation count. Use send_keys_batch for command sequences.
     mcp.tool(
         title="Run Command",
-        annotations=ANNOTATIONS_SHELL,
-        tags={TAG_MUTATING, TAG_SELF_BOUNDED},
+        annotations=ANNOTATIONS_PANE_INPUT,
+        tags={TOOLSET_EXECUTE, TAG_SELF_BOUNDED},
     )(run_command)
     mcp.tool(
-        title="Capture Pane", annotations=ANNOTATIONS_RO_CONTENT, tags={TAG_READONLY}
+        title="Capture Pane",
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT},
     )(capture_pane)
     mcp.tool(
-        title="Capture Since", annotations=ANNOTATIONS_RO_CONTENT, tags={TAG_READONLY}
+        title="Capture Since",
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT},
     )(capture_since)
     mcp.tool(
-        title="Resize Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Resize Pane", annotations=ANNOTATIONS_CHANGE, tags={TOOLSET_MANAGE}
     )(resize_pane)
     mcp.tool(
         title="Kill Pane",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_TEARDOWN},
     )(kill_pane)
     mcp.tool(
         title="Respawn Pane",
-        annotations=ANNOTATIONS_SHELL,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_PANE_INPUT,
+        tags={TOOLSET_EXECUTE},
     )(respawn_pane)
     mcp.tool(
-        title="Set Pane Title", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Set Pane Title", annotations=ANNOTATIONS_CHANGE, tags={TOOLSET_MANAGE}
     )(set_pane_title)
-    mcp.tool(title="Get Pane Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        get_pane_info
-    )
+    mcp.tool(
+        title="Get Pane Info", annotations=ANNOTATIONS_OBSERVE, tags={TOOLSET_INSPECT}
+    )(get_pane_info)
     mcp.tool(
         title="Find Pane By Position",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE,
+        tags={TOOLSET_INSPECT},
     )(find_pane_by_position)
     mcp.tool(
         title="Clear Pane",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_TEARDOWN},
     )(clear_pane)
     mcp.tool(
-        title="Search Panes", annotations=ANNOTATIONS_RO_CONTENT, tags={TAG_READONLY}
+        title="Search Panes",
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT},
     )(search_panes)
     # TAG_SELF_BOUNDED excludes this tool from retry and from batch
     # wrappers: both would multiply the wait ceiling it enforces.
     mcp.tool(
         title="Wait For Text",
-        annotations=ANNOTATIONS_RO_CONTENT,
-        tags={TAG_READONLY, TAG_SELF_BOUNDED},
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT, TAG_SELF_BOUNDED},
     )(wait_for_text)
     mcp.tool(
         title="Snapshot Pane",
-        annotations=ANNOTATIONS_RO_CONTENT,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(snapshot_pane)
     mcp.tool(
-        title="Select Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Select Pane", annotations=ANNOTATIONS_CHANGE, tags={TOOLSET_MANAGE}
     )(select_pane)
-    mcp.tool(
-        title="Swap Pane", annotations=ANNOTATIONS_DESTRUCTIVE, tags={TAG_MUTATING}
-    )(swap_pane)
-    mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
-        pipe_pane
+    mcp.tool(title="Swap Pane", annotations=ANNOTATIONS_DELETE, tags={TOOLSET_MANAGE})(
+        swap_pane
     )
     mcp.tool(
+        title="Pipe Pane", annotations=ANNOTATIONS_PANE_INPUT, tags={TOOLSET_EXECUTE}
+    )(pipe_pane)
+    mcp.tool(
         title="Evaluate tmux Format String",
-        annotations=ANNOTATIONS_RO_CONTENT,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT},
     )(display_message)
     mcp.tool(
         title="Enter Copy Mode",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_MANAGE},
     )(enter_copy_mode)
     mcp.tool(
         title="Exit Copy Mode",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_CHANGE,
+        tags={TOOLSET_MANAGE},
     )(exit_copy_mode)
-    mcp.tool(title="Paste Text", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
-        paste_text
-    )
+    mcp.tool(
+        title="Paste Text", annotations=ANNOTATIONS_PANE_INPUT, tags={TOOLSET_EXECUTE}
+    )(paste_text)

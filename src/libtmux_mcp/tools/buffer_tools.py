@@ -36,11 +36,13 @@ import uuid
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_ALLOCATE,
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_RO_CONTENT,
-    ANNOTATIONS_SHELL,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_DELETE,
+    ANNOTATIONS_OBSERVE_CONTENT,
+    ANNOTATIONS_PANE_INPUT,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _get_server,
     _resolve_pane,
@@ -386,20 +388,22 @@ def register(mcp: FastMCP) -> None:
     content to a pane's program, and carries the hints for it.
     """
     mcp.tool(
-        title="Load tmux Buffer", annotations=ANNOTATIONS_ALLOCATE, tags={TAG_MUTATING}
+        title="Load tmux Buffer",
+        annotations=ANNOTATIONS_ALLOCATE,
+        tags={TOOLSET_MANAGE},
     )(load_buffer)
     mcp.tool(
         title="Paste tmux Buffer",
-        annotations=ANNOTATIONS_SHELL,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_PANE_INPUT,
+        tags={TOOLSET_EXECUTE},
     )(paste_buffer)
     mcp.tool(
         title="Show tmux Buffer",
-        annotations=ANNOTATIONS_RO_CONTENT,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        tags={TOOLSET_INSPECT},
     )(show_buffer)
     mcp.tool(
         title="Delete tmux Buffer",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_DELETE,
+        tags={TOOLSET_TEARDOWN},
     )(delete_buffer)

@@ -34,8 +34,8 @@ from libtmux import exc as libtmux_exc
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
-    TAG_READONLY,
+    ANNOTATIONS_OBSERVE,
+    TOOLSET_INSPECT,
     ExpectedToolError,
     _get_server,
     _resolve_pane,
@@ -261,9 +261,9 @@ def show_hook(
 
 def register(mcp: FastMCP) -> None:
     """Register read-only hook tools with the MCP instance."""
-    mcp.tool(title="Show tmux Hooks", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_hooks
-    )
-    mcp.tool(title="Show tmux Hook", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_hook
-    )
+    mcp.tool(
+        title="Show tmux Hooks", annotations=ANNOTATIONS_OBSERVE, tags={TOOLSET_INSPECT}
+    )(show_hooks)
+    mcp.tool(
+        title="Show tmux Hook", annotations=ANNOTATIONS_OBSERVE, tags={TOOLSET_INSPECT}
+    )(show_hook)

@@ -2,9 +2,9 @@
 
 Provides the project's middleware infrastructure, in definition order:
 
-* :class:`SafetyMiddleware` gates tools by safety tier based on the
-  ``LIBTMUX_SAFETY`` environment variable. Tools tagged above the
-  configured tier are hidden from listing and blocked from execution.
+* :class:`ToolsetMiddleware` filters tools by toolset, from
+  ``LIBTMUX_TOOLSETS``. A tool outside the enabled toolsets is hidden
+  from listing and refused on call.
 * :class:`ToolErrorResultMiddleware` converts tool-call failures into
   ``ToolResult(is_error=True)`` results that carry the clean error
   message plus a structured ``meta`` payload, instead of fastmcp's
@@ -14,9 +14,9 @@ Provides the project's middleware infrastructure, in definition order:
   invocation (name, duration, outcome, client/request ids, and a
   summary of arguments with payload-bearing fields redacted to a
   length + SHA-256 prefix).
-* :class:`ReadonlyRetryMiddleware` retries transient libtmux failures,
-  but only for readonly tools — re-running a mutating tool would
-  silently double side effects.
+* :class:`InspectRetryMiddleware` retries transient libtmux failures,
+  but only for ``inspect`` tools — re-running anything else would
+  silently repeat its effect.
 * :class:`TailPreservingResponseLimitingMiddleware` is a backstop cap
   for oversized tool output. Unlike FastMCP's stock
   ``ResponseLimitingMiddleware`` it preserves the **tail** of the
@@ -44,71 +44,79 @@ from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
 from libtmux_mcp._utils import (
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
     TAG_SELF_BOUNDED,
+    TOOLSET_INSPECT,
+    VALID_TOOLSETS,
     ExpectedToolError,
 )
 
-_TIER_LEVELS: dict[str, int] = {
-    TAG_READONLY: 0,
-    TAG_MUTATING: 1,
-    TAG_DESTRUCTIVE: 2,
-}
 
+class ToolsetMiddleware(Middleware):
+    """Filter tools to the enabled toolsets.
 
-class SafetyMiddleware(Middleware):
-    """Gate tools by safety tier.
+    Filtering shapes what this server advertises. It is not a permission
+    system: an enabled ``execute`` tool can type the equivalent of any
+    tool this hides, so dropping a toolset reduces accidents, not
+    authority.
 
     Parameters
     ----------
-    max_tier : str
-        Maximum allowed tier. One of ``TAG_READONLY``, ``TAG_MUTATING``,
-        or ``TAG_DESTRUCTIVE``.
+    toolsets : set of str
+        Enabled toolsets. A tool tagged with none of them is refused.
+    tools : set of str
+        Tool names enabled regardless of toolset.
+    exclude_tools : set of str
+        Tool names refused regardless of every enable above.
     """
 
-    def __init__(self, max_tier: str = TAG_MUTATING) -> None:
-        self.max_level = _TIER_LEVELS.get(max_tier, 0)
+    def __init__(
+        self,
+        toolsets: t.AbstractSet[str],
+        tools: t.AbstractSet[str] = frozenset(),
+        exclude_tools: t.AbstractSet[str] = frozenset(),
+    ) -> None:
+        self.toolsets = frozenset(toolsets)
+        self.tools = frozenset(tools)
+        self.exclude_tools = frozenset(exclude_tools)
 
-    def _is_allowed(self, tags: set[str]) -> bool:
-        """Return True if the tool's tags fall within the allowed tier.
+    def _is_enabled(self, name: str, tags: set[str]) -> bool:
+        """Return whether a tool is part of the advertised surface.
 
-        Fail-closed: tools without a recognized tier tag are denied.
+        Fail-closed: a tool carrying no recognized toolset is refused,
+        so adding one without classifying it cannot expose it.
         """
-        found_tier = False
-        for tier, level in _TIER_LEVELS.items():
-            if tier in tags:
-                found_tier = True
-                if level > self.max_level:
-                    return False
-        return found_tier
+        if name in self.exclude_tools:
+            return False
+        if name in self.tools:
+            return True
+        return bool(self.toolsets & (tags & set(VALID_TOOLSETS)))
 
     async def on_list_tools(
         self,
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Filter tools above the safety tier from the listing."""
+        """Drop tools outside the enabled surface from the listing."""
         tools = await call_next(context)
-        return [tool for tool in tools if self._is_allowed(tool.tags)]
+        return [tool for tool in tools if self._is_enabled(tool.name, tool.tags)]
 
     async def on_call_tool(
         self,
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Block execution of tools above the safety tier."""
+        """Refuse a tool outside the enabled surface."""
         if context.fastmcp_context:
-            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and not self._is_allowed(tool.tags):
+            name = context.message.name
+            tool = await context.fastmcp_context.fastmcp.get_tool(name)
+            if tool and not self._is_enabled(name, tool.tags):
+                enabled = ", ".join(sorted(self.toolsets)) or "(none)"
                 msg = (
-                    f"Tool '{context.message.name}' is not available at the "
-                    f"current safety level. Set LIBTMUX_SAFETY=destructive "
-                    f"to enable destructive tools."
+                    f"Tool {name!r} is not in this server's enabled "
+                    f"toolsets ({enabled}). Set LIBTMUX_TOOLSETS to include "
+                    f"it, or LIBTMUX_TOOLS to enable it by name."
                 )
                 raise ExpectedToolError(msg)
-        return await call_next(context)
 
 
 # ---------------------------------------------------------------------------
@@ -719,7 +727,7 @@ class _SkipDeterministicFailures(RetryMiddleware):
         return super()._should_retry(error)
 
 
-class ReadonlyRetryMiddleware(Middleware):
+class InspectRetryMiddleware(Middleware):
     """Retry transient libtmux failures, but only for readonly tools.
 
     Wraps fastmcp's :class:`fastmcp.server.middleware.error_handling.RetryMiddleware`
@@ -801,7 +809,11 @@ class ReadonlyRetryMiddleware(Middleware):
         """
         if context.fastmcp_context:
             tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and TAG_READONLY in tool.tags and TAG_SELF_BOUNDED not in tool.tags:
+            if (
+                tool
+                and TOOLSET_INSPECT in tool.tags
+                and TAG_SELF_BOUNDED not in tool.tags
+            ):
                 return await self._retry.on_request(context, call_next)
         return await call_next(context)
 
