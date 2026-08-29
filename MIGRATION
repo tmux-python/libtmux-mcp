@@ -21,6 +21,51 @@ for the full release log.
 
 ## libtmux-mcp 0.1.x (unreleased)
 
+### A name or title argument is stored literally
+
+`rename_window`, `rename_session`, `set_pane_title`, `create_window` and
+`create_session` passed your name straight to tmux, which expands `#{...}` in
+it. A name containing one silently became something else.
+
+Nothing changes for an ordinary name. If you were relying on the expansion,
+ask for the value and pass the result:
+
+#### Before
+
+```json
+{"tool": "rename_window", "arguments": {"new_name": "#{pane_current_path}"}}
+```
+
+That stored `/home/you/src`, not the text you wrote.
+
+#### After
+
+```json
+{"tool": "display_message", "arguments": {"format_string": "#{pane_current_path}"}}
+```
+
+```json
+{"tool": "rename_window", "arguments": {"new_name": "/home/you/src"}}
+```
+
+`display_message` is the one tool that still expands formats, by design. For a
+window that should track its own state, tmux's own `automatic-rename-format`
+option is a better fit than renaming on a timer.
+
+The same applies to `start_directory` on `create_session`, `create_window`,
+`split_window` and `respawn_pane`: a `#` in the path was expanded, the result
+did not exist, and the shell silently started in `$HOME` instead.
+
+### An option name containing `#` is refused
+
+`set_option` and `show_option` now raise for an option NAME containing a `#`,
+rather than addressing a different option than the one you named.
+
+Option *values* are unaffected and always were. Only the name is checked, and
+only user options (`@name`) can contain a `#` in the first place, so an
+ordinary call is unchanged. If you need one, use `run_command` with a raw tmux
+command line.
+
 ### Tools that deliver input require an explicit target
 
 `send_keys`, `send_keys_batch`, `paste_text`, `paste_buffer` and
