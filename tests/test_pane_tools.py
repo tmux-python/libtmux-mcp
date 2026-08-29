@@ -1182,12 +1182,24 @@ def test_run_command_kills_tmux_child_on_cancel(
         # the call's budget leaves room for the cancel to land
         # mid-flight.
         deadline = time.monotonic() + call_budget * 0.75
-        while time.monotonic() < deadline and not await _pids():
+        while time.monotonic() < deadline and not task.done() and not await _pids():
             await asyncio.sleep(0.05)
-        assert await _pids(), (
-            "no tmux wait-for child observed before the cancel — the probe "
-            "is broken, so a later 'no survivors' result would be vacuous"
-        )
+        if not await _pids():
+            # Two different failures used to read as one. The call
+            # giving up before it ever spawned a wait child is a fact
+            # about run_command under load; the probe not seeing a child
+            # that exists is a fact about the probe. Reporting the first
+            # as "the probe is broken" sent me looking in the wrong
+            # place at loadavg 43.
+            outcome = "still running"
+            if task.done():
+                outcome = f"already finished: {task.exception() or task.result()!r}"
+                task.cancel()
+            pytest.fail(
+                f"no tmux wait-for child observed before the cancel; the "
+                f"call was {outcome}. A later 'no survivors' result would "
+                "be vacuous either way."
+            )
 
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
