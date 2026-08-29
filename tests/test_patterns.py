@@ -54,13 +54,39 @@ ORDINARY = [
     r"(?=.*ERROR)^\[",
     r"(?!DEBUG)\w+$",
     r"(x)(?(1)yes|no)",
-    r"(?<=ERROR: )\\w+",
+    r"(?<=ERROR: )\w+",
+    # Large repeats whose body is FIXED width: exactly one way to split,
+    # so nothing backtracks.
+    r"(\d{2}){20}",
+    r"\s{0,20}X",
+    r"(?:ab){50}$",
+]
+
+
+#: Refused although CPython happens to finish them quickly. The screen
+#: models the PATTERN, not the engine's empty-match loop break, so a
+#: variable-width body under a large repeat goes whether or not this
+#: version prunes it. Costing a caller ``(a?)*`` -- which is ``a*``
+#: written the long way -- is what buys refusing ``(a{0,3})*``, which
+#: does not finish.
+CONSERVATIVELY_REFUSED = [
+    r"(a?)*b",
+    r"(a?)+b",
+    r"(a?){1,20}b",
+    r"(ab?){20}c",
 ]
 
 
 @pytest.mark.parametrize("pattern", CATASTROPHIC)
 def test_compile_pattern_refuses_uninterruptible_patterns(pattern: str) -> None:
     """An ambiguous repeat is refused before it can run."""
+    with pytest.raises(ExpectedToolError, match="exponential time"):
+        compile_pattern(pattern, regex=True, flags=0, label="test")
+
+
+@pytest.mark.parametrize("pattern", CONSERVATIVELY_REFUSED)
+def test_compile_pattern_refuses_a_variable_width_body(pattern: str) -> None:
+    """Width, not the engine's pruning, decides. See the list's comment."""
     with pytest.raises(ExpectedToolError, match="exponential time"):
         compile_pattern(pattern, regex=True, flags=0, label="test")
 

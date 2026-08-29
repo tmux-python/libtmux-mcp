@@ -1,4 +1,4 @@
-"""Caller-supplied regex compilation with a backtracking bound.
+r"""Caller-supplied regex compilation with a backtracking bound.
 
 ``search_panes`` and ``wait_for_text`` both take a regex from the
 caller and run it over pane content. Python's ``re`` backtracks, has no
@@ -14,14 +14,17 @@ reaches the check -- so the caller who defends themselves with a small
 timeout is exactly the one it does not protect.
 
 The bound has to be the pattern, because neither a deadline nor a
-worker cap can reclaim a thread stuck inside ``re``. So the screen
-refuses three shapes before they run: a repeat inside a repeat, a
-repeat over alternatives that can start on the same character, and a
-body that can match nothing owed many iterations.
+worker cap can reclaim a thread stuck inside ``re``. A repeat that can
+iterate freely is refused when its body can match one string more than
+one way -- a body of varying width (``(a+)+``, ``(a{0,3})*``,
+``(a?){20}``), or alternatives that can begin on the same character
+(``(a|a)+``). ``(cat|dog)+`` and ``(\d{2}){3}`` are fixed-width and
+stay.
 
-Those three are a MODEL of catastrophic backtracking, not a proof of
-its absence. A pattern the screen accepts is one it could not show to
-be exponential.
+That is a MODEL of catastrophic backtracking, not a proof of its
+absence, and it is deliberately coarser than the engine: ``(a?)*`` is
+refused although CPython prunes it, because a screen that leaned on
+that pruning would also have to know when it does not apply.
 """
 
 from __future__ import annotations
@@ -64,27 +67,15 @@ _ZERO_WIDTH = frozenset({_re_constants.AT, _ASSERT, _ASSERT_NOT})
 #: bomb with a number in front of it.
 _LARGE_REPEAT = 20
 
-#: Minimum iteration count past which a repeat over a body that can match
-#: NOTHING becomes exponential. The engine owes that many iterations and
-#: each one may consume or not, so the cost is 2**minimum. The minimum is
-#: what decides it, not the maximum: measured on a 27-character subject,
-#: ``(a?)*b`` and ``(a?){1,20}b`` finish in 0.00s because ``re`` breaks a
-#: loop that matched nothing, while ``(a?){15}b`` takes 0.03s,
-#: ``(a?){20}b`` 0.76s and ``(a?){20,}b`` does not finish. 2**8 leaves
-#: three orders of magnitude of headroom.
-_LARGE_MINIMUM = 8
-
-#: Ops that always consume input, so a sequence containing one cannot
-#: match the empty string. Anything else is treated as nullable, which
-#: only ever refuses more -- and is consulted only under an already
-#: suspicious repeat.
-_CONSUMING = frozenset(
+#: Ops that consume exactly one character. Everything else either
+#: consumes nothing, nests, or is unmodelled -- and an unmodelled op is
+#: given an unknown width, which only ever refuses more.
+_ONE_CHARACTER = frozenset(
     {
         _LITERAL,
         _re_constants.NOT_LITERAL,
         _re_constants.IN,
         _re_constants.ANY,
-        _re_constants.GROUPREF,
     }
 )
 
@@ -116,36 +107,45 @@ def _subpatterns(op: t.Any, av: t.Any) -> list[Iterable[t.Any]]:
     return []
 
 
-def _contains_large_repeat(node: Iterable[t.Any]) -> bool:
-    """Return True when any repeat inside *node* can iterate freely."""
-    for op, av in node:
-        if op in _REPEAT_OPS and _repeat_is_large(av[0], av[1]):
-            return True
-        if any(_contains_large_repeat(child) for child in _subpatterns(op, av)):
-            return True
-    return False
+def _width_range(node: Iterable[t.Any]) -> tuple[int, int | None]:
+    """How many characters *node* can match, as ``(minimum, maximum)``.
 
-
-def _matches_empty(node: Iterable[t.Any]) -> bool:
-    """Whether *node* can match without consuming any input."""
+    ``None`` as the maximum means unbounded. A node whose two ends
+    differ can match one string in more than one way, and that is what
+    an enclosing repeat has to backtrack through.
+    """
+    low, high = 0, t.cast("int | None", 0)
     for op, av in node:
-        if op in _CONSUMING:
-            return False
         if op in _ZERO_WIDTH:
             continue
-        if op in _REPEAT_OPS and av[0] == 0:
-            continue
-        children = _subpatterns(op, av)
-        if not children:
-            continue
-        nullable = (
-            any(_matches_empty(alt) for alt in children)
-            if op is _BRANCH or op is _GROUPREF_EXISTS
-            else all(_matches_empty(alt) for alt in children)
-        )
-        if not nullable:
-            return False
-    return True
+        if op in _ONE_CHARACTER:
+            lo, hi = 1, t.cast("int | None", 1)
+        elif op in _REPEAT_OPS:
+            body_lo, body_hi = _width_range(av[2])
+            lo = av[0] * body_lo
+            hi = None if body_hi is None or av[1] is _MAXREPEAT else av[1] * body_hi
+        else:
+            children = _subpatterns(op, av)
+            if not children:
+                # A backreference, or an op this screen does not model.
+                lo, hi = 0, None
+            else:
+                spans = [_width_range(child) for child in children]
+                lo = min(span[0] for span in spans)
+                hi = (
+                    None
+                    if any(span[1] is None for span in spans)
+                    else max(t.cast("int", span[1]) for span in spans)
+                )
+        low += lo
+        high = None if high is None or hi is None else high + hi
+    return low, high
+
+
+def _is_variable_width(node: Iterable[t.Any]) -> bool:
+    """Whether *node* can match differing numbers of characters."""
+    low, high = _width_range(node)
+    return high is None or high != low
 
 
 def _first_characters(branch: Iterable[t.Any]) -> set[t.Any] | None:
@@ -194,26 +194,18 @@ def _ambiguous_repeat(node: Iterable[t.Any]) -> str | None:
     Two shapes, both meaning "the body can match the same input more
     than one way, so failing forces the engine to try every split":
 
-    * a large repeat inside a large repeat -- ``(a+)+``, ``(a*)*``
-    * a large repeat over alternatives that can begin with the same
-      character -- ``(a|a)+``, ``(a|ab)+``. ``(cat|dog)+`` is fine,
-      since no input can take both branches.
-
-    Plus a third shape that is about the repeat's MINIMUM rather than
-    its body's structure: a body that can match nothing, owed many
-    iterations -- ``(a?){20}``. ``(a?)*`` is fine, because ``re`` breaks
-    a loop whose body matched nothing and an unbounded repeat can take
-    that exit.
+    * a body of varying width -- ``(a+)+``, ``(a{0,3})*``, ``(a?){20}``.
+      A nested repeat is the common case, but the predicate is the
+      width, which also catches ``(a?a?){1,20}``.
+    * alternatives that can begin with the same character --
+      ``(a|a)+``. ``(cat|dog)+`` is fine, since no input takes both.
     """
     for op, av in node:
-        if op in _REPEAT_OPS:
-            if av[0] >= _LARGE_MINIMUM and _matches_empty(av[2]):
-                return "a group repeated many times over a body that can match nothing"
-            if _repeat_is_large(av[0], av[1]):
-                if _contains_large_repeat(av[2]):
-                    return "a repeated group that already contains a repeat"
-                if _branch_is_ambiguous(av[2]):
-                    return "a repeated group whose alternatives overlap"
+        if op in _REPEAT_OPS and _repeat_is_large(av[0], av[1]):
+            if _is_variable_width(av[2]):
+                return "a repeated group whose body can match a varying width"
+            if _branch_is_ambiguous(av[2]):
+                return "a repeated group whose alternatives overlap"
         for child in _subpatterns(op, av):
             found = _ambiguous_repeat(child)
             if found is not None:
