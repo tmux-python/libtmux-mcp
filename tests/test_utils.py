@@ -1157,3 +1157,30 @@ def test_map_exception_suggestion_policy(
     else:
         assert suggestion is not None
         assert expected_suggestion_fragment in suggestion
+
+
+def test_resolve_session_does_not_call_an_unreachable_server_empty(
+    monkeypatch: pytest.MonkeyPatch, mcp_server: Server, mcp_session: Session
+) -> None:
+    """An empty enumeration is not evidence the session is gone.
+
+    ``server.sessions`` swallows a query failure and yields ``[]``, so
+    the resolver turning "not in the list" into "does not exist"
+    asserted the session was GONE when the server merely could not be
+    asked. ``rename_session`` reported a running session missing, which
+    invites recreating it under the same name.
+    """
+    from libtmux_mcp import _utils
+
+    # Control first: a genuinely absent session must still be absent.
+    with pytest.raises(exc.TmuxObjectDoesNotExist):
+        _resolve_session(mcp_server, session_name="definitely-not-here")
+
+    monkeypatch.setattr(
+        _utils, "_probe_liveness", lambda _server: (False, "server exited")
+    )
+    with pytest.raises(ToolError, match="could not be queried"):
+        _resolve_session(mcp_server, session_name="definitely-not-here")
+
+    # And a session that IS there still resolves without probing.
+    assert _resolve_session(mcp_server, session_name=mcp_session.session_name)

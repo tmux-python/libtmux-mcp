@@ -27,6 +27,26 @@ it. That is why the surface had been checked and the case had not.
 An ABSENT server still returns an empty list, because there it is the
 true answer.
 
+**A live session was reported as not existing.** The same empty
+enumeration reached the RESOLVER, which turned "not in the list" into
+"does not exist" -- so against a server that could not be queried:
+
+    get_session_info / list_windows / list_panes / show_option
+    rename_session          -> "Could not find session_name=live"
+
+An empty list is ambiguous and could honestly mean nothing is there. A
+"not found" is a positive assertion about a session that was running.
+The worst is `rename_session`: an agent told the session is gone may
+recreate it under the same name while work continues in the original.
+
+It splits by resolver, which made it one fix rather than eleven.
+Everything keyed on a session NAME went through the session resolver
+and got the false negative; everything keyed on `pane_id` or
+`window_id` surfaced tmux's own error -- untidy, and the only ones not
+lying. The resolver now rules out "could not ask" before concluding
+"is not there", and a genuinely missing session on a reachable server
+still reports not-found, as does an absent socket.
+
 All six templates carry the check, not just the listing that surfaced
 it. The other five resolve a specific object, so an unreachable server
 made them answer "Could not find session_name=alpha" for a session that

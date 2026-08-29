@@ -642,6 +642,31 @@ def _invalidate_server(
             del _server_cache[key]
 
 
+def _raise_if_server_unreachable(server: Server) -> None:
+    """Refuse to read an empty enumeration as an absence.
+
+    ``server.sessions`` swallows a query failure and yields an empty
+    list, so a resolver turning "not in the list" into "does not exist"
+    asserts the object is GONE when the truth is that the server could
+    not be asked. Measured against a live 3.7c server queried by a 3.2a
+    client: ``rename_session`` reported the session missing while it was
+    running, which invites recreating it under the same name.
+
+    Only the session resolver needed this. Resolvers keyed on
+    ``pane_id`` or ``window_id`` let tmux's own error through, which is
+    untidy but never false -- they are the ones already telling the
+    truth.
+    """
+    alive, reason = _probe_liveness(server)
+    if not alive and reason is not None:
+        msg = (
+            f"tmux server exists but could not be queried: {reason}. "
+            "Reporting the object as missing would be wrong rather than "
+            "merely unhelpful."
+        )
+        raise ExpectedToolError(msg)
+
+
 def _resolve_session(
     server: Server,
     session_name: str | None = None,
@@ -670,6 +695,7 @@ def _resolve_session(
     if session_id is not None:
         session = server.sessions.get(session_id=session_id, default=None)
         if session is None:
+            _raise_if_server_unreachable(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="session_id",
                 obj_id=session_id,
@@ -681,6 +707,7 @@ def _resolve_session(
     if session_name is not None:
         session = server.sessions.get(session_name=session_name, default=None)
         if session is None:
+            _raise_if_server_unreachable(server)
             raise exc.TmuxObjectDoesNotExist(
                 obj_key="session_name",
                 obj_id=session_name,
@@ -691,6 +718,7 @@ def _resolve_session(
 
     sessions = server.sessions
     if not sessions:
+        _raise_if_server_unreachable(server)
         raise exc.TmuxObjectDoesNotExist(
             obj_key="session",
             obj_id="(any)",
