@@ -161,7 +161,7 @@ def register(mcp: FastMCP) -> None:
     )
     mcp.tool(
         title="Evaluate tmux Format String",
-        annotations=ANNOTATIONS_RO,
+        annotations=ANNOTATIONS_RO_CONTENT,
         tags={TAG_READONLY},
     )(display_message)
     mcp.tool(

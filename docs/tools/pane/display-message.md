@@ -19,6 +19,10 @@ yourself.
 
 **Side effects:** None. Readonly.
 
+Accepts literal text and `#{variable}` references only. Modifiers such as
+`#{E:...}` re-expand a variable's *value*, which can arrive from a pane
+rather than from you, so they are refused rather than filtered.
+
 **Example:**
 
 ```json

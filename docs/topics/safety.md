@@ -160,7 +160,7 @@ user's authority, and a pane holds whatever was printed into it.
 | {toolref}`call-readonly-tools-batch` | {badge}`readonly` | true | false | true | true |
 | {toolref}`capture-pane` | {badge}`readonly` | true | false | true | true |
 | {toolref}`capture-since` | {badge}`readonly` | true | false | true | true |
-| {toolref}`display-message` | {badge}`readonly` | true | false | true | false |
+| {toolref}`display-message` | {badge}`readonly` | true | false | true | true |
 | {toolref}`find-pane-by-position` | {badge}`readonly` | true | false | true | false |
 | {toolref}`get-pane-info` | {badge}`readonly` | true | false | true | false |
 | {toolref}`get-server-info` | {badge}`readonly` | true | false | true | false |

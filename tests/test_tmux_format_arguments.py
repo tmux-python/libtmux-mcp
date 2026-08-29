@@ -232,3 +232,51 @@ def test_create_window_stores_the_name_given(
     )
 
     assert created.window_name == text
+
+
+@pytest.mark.parametrize(
+    "format_string",
+    [
+        "#(touch /tmp/evil)",
+        "#{E:@opt}",
+        "#{E:pane_current_path}",
+        "#{T:status-left}",
+        "#S",
+        "##",
+    ],
+)
+def test_display_message_accepts_only_variable_references(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    format_string: str,
+) -> None:
+    """Anything but ``#{name}`` is refused, including a second expansion.
+
+    ``#{E:...}`` re-expands a variable's *value*, and a pane's own working
+    directory reaches ``pane_current_path`` unsanitized, so a blocklist on
+    the caller's text cannot see what would run.
+    """
+    from libtmux_mcp.tools.pane_tools import display_message
+
+    with pytest.raises(ExpectedToolError):
+        display_message(
+            format_string=format_string,
+            pane_id=t.cast("str", mcp_pane.pane_id),
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_display_message_expands_plain_variables(
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """A format of bare ``#{name}`` references still works."""
+    from libtmux_mcp.tools.pane_tools import display_message
+
+    result = display_message(
+        format_string="id=#{pane_id} zoomed=#{window_zoomed_flag}",
+        pane_id=t.cast("str", mcp_pane.pane_id),
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert result == f"id={mcp_pane.pane_id} zoomed=0"
