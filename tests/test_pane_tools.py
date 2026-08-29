@@ -1071,6 +1071,10 @@ def _armed_after_baseline(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
     capture; the second is issued after its rows have been stored, so
     arming is complete by then.
     """
+    # wait.py imports ``_bounded_capture`` into its own namespace, so the
+    # patch has to land THERE. Patching it in _bounded_io leaves the name
+    # wait.py actually calls untouched, the event never fires, and the
+    # test waits out its ceiling instead of failing.
     from libtmux_mcp.tools.pane_tools import wait as wait_module
 
     event = asyncio.Event()
@@ -5559,7 +5563,10 @@ def test_wait_tools_do_not_block_event_loop(
     """
     import asyncio
 
-    from libtmux_mcp.tools.pane_tools import wait as _wait_mod
+    # Patched where the argv is BUILT and where the per-call bound is
+    # READ -- both live in _bounded_io. wait.py calls into it, so
+    # patching wait's namespace would leave the real tmux running.
+    from libtmux_mcp import _bounded_io as _wait_mod
 
     stub = tmp_path / "tmux"
     stub.write_text("#!/bin/sh\nsleep 60\n")
@@ -5927,7 +5934,7 @@ def test_wait_for_text_never_interpolates_pattern_into_tmux_format(
     """
     import asyncio
 
-    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+    from libtmux_mcp import _bounded_io as wait_mod
 
     recorded: list[tuple[str, ...]] = []
     original = wait_mod._run_tmux_lines
@@ -6044,7 +6051,7 @@ def test_wait_for_text_wedged_tmux_raises_instead_of_hanging(
     """
     import asyncio
 
-    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+    from libtmux_mcp import _bounded_io as wait_mod
 
     stub = tmp_path / "tmux"
     stub.write_text("#!/bin/sh\nsleep 60\n")
@@ -6083,7 +6090,7 @@ def test_run_tmux_lines_cancel_reaps_child(
     import asyncio
     import os
 
-    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+    from libtmux_mcp import _bounded_io as wait_mod
 
     pidfile = tmp_path / "pid"
     stub = tmp_path / "tmux"
@@ -6158,7 +6165,7 @@ def test_run_tmux_lines_happy_path_returns_without_kill(
     """
     import asyncio
 
-    from libtmux_mcp.tools.pane_tools import wait as wait_mod
+    from libtmux_mcp import _bounded_io as wait_mod
 
     stub = tmp_path / "tmux"
     stub.write_text("#!/bin/sh\nprintf 'alpha\\nbeta\\n'\n")
