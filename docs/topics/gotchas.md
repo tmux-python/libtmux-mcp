@@ -74,6 +74,25 @@ Pane IDs like `%0`, `%5`, `%12` are unique across all sessions and windows withi
 
 However, they reset when the tmux **server** restarts. Do not cache pane IDs across server restarts. After killing and recreating a session, re-discover pane IDs with {tooliconl}`list-panes`.
 
+## Omitting the target means two different things
+
+Tools that DELIVER input — {tooliconl}`send-keys`, {tooliconl}`send-keys-batch`,
+{tooliconl}`paste-text`, {tooliconl}`paste-buffer`, {tooliconl}`run-command` —
+require a target and refuse without one. There is no safe default for a call
+that types something: the pane it would pick is unrelated to what the call is
+for, and the destination reaches the caller only after the keystrokes have
+landed.
+
+Reads still default, to the **oldest** surviving object by tmux id. Not the
+first listed — tmux lists sessions by name, so renaming one would move where
+later untargeted calls went — and not the most recently active, which moves
+whenever any pane produces output. {tooliconl}`show-option`,
+{tooliconl}`show-hooks` and {tooliconl}`show-hook` report `resolved_target` so
+an untargeted read says which object answered.
+
+`create_session`, `create_window` and `split_window` return the new pane's id,
+so an agent that made the pane never needs to look one up.
+
 ## Shell-history suppression is best effort
 
 MCP calls to {tooliconl}`run-command` request lightweight suppression by
