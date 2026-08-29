@@ -660,16 +660,19 @@ That broke two different promises:
   `stop` takes caller regex on the same terms as `patterns`.
 
 Neither a deadline nor a worker cap can help, because a thread inside
-`re` cannot be reclaimed. So the bound is the pattern: a repeat whose
-body can match the same input more than one way is refused before it
-runs -- a repeat nested in a repeat (`(a+)+`), or a repeat over
-alternatives that can start on the same character (`(a|a)+`,
-`(a|ab)+`).
+`re` cannot be reclaimed. So the bound is the pattern, and three shapes
+are refused before they run: a repeat nested in a repeat (`(a+)+`), a
+repeat over alternatives that can start on the same character
+(`(a|a)+`, `(a|ab)+`), and a body that can match nothing owed many
+iterations (`(a?){20}`). Each is refused wherever it appears, including
+inside a lookahead or a conditional. They are a model of catastrophic
+backtracking rather than a proof of its absence: a pattern that
+compiles is one the screen could not show to be exponential.
 
 Ordinary patterns are unaffected, which is the half that matters:
-`(cat|dog)+`, `(\d{2}){3}`, `^\[(INFO|WARN|ERROR)\]`, `https?://\S+`
-and `a+b+c+$` all still compile. A literal (`regex=false`) is escaped
-and never screened.
+`(cat|dog)+`, `(\d{2}){3}`, `^\[(INFO|WARN|ERROR)\]`, `https?://\S+`,
+`a+b+c+$`, `(?=.*ERROR)^\[` and `(a?)*` all still compile. A literal
+(`regex=false`) is escaped and never screened.
 
 Reported by the QA instance, which also established that the tools keep
 their contracts under adversarial input everywhere else -- `run_command`
