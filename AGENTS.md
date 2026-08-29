@@ -139,13 +139,24 @@ tmux hierarchy: Server > Session > Window > Pane
    - Builds server instructions with agent context
    - Safety tier validation from `LIBTMUX_SAFETY` env var
 
-3. **Utils** (`src/libtmux_mcp/_utils.py`)
-   - Thread-safe server caching by (socket_name, socket_path, tmux_bin) tuple
-   - Object resolvers: `_resolve_session()`, `_resolve_window()`, `_resolve_pane()`
-   - Serializers: `_serialize_session()`, `_serialize_window()`, `_serialize_pane()`
-   - QueryList filter application with validation
-   - `handle_tool_errors` decorator for standardized error handling
-   - Safety tier tags and annotation presets
+3. **Internals** (`src/libtmux_mcp/_*.py`), in dependency order
+   - `_errors.py` - `ExpectedToolError` and the `handle_tool_errors`
+     decorators that shape every tool's failures
+   - `_safety.py` - safety tier tags and the MCP annotation presets
+   - `_guards.py` - argument preconditions refused before tmux is reached
+   - `_exec.py` - tmux argv, the wall-clock-bounded `tmux_cmd`, exec failures
+   - `_caller.py` - which pane the caller is talking to us from
+   - `_servers.py` - the server cache, keyed by
+     `(socket_name, socket_path, tmux_bin)`, and its liveness probe
+   - `_resolve.py` - `_resolve_session()`, `_resolve_window()`, `_resolve_pane()`
+   - `_pane_state.py` - pane grid and lifecycle state in one round trip
+   - `_filters.py` - QueryList field lookups with validation
+   - `_serialize.py` - `_serialize_session()`, `_serialize_window()`,
+     `_serialize_pane()`
+   - `_tmux_proc.py`, `_bounded_io.py`, `_progress.py`, `_patterns.py`,
+     `_history.py`, `_wait_policy.py` - the async wait and capture path
+
+   No module here may import from `libtmux_mcp.tools`; a test enforces it.
 
 4. **Models** (`src/libtmux_mcp/models.py`)
    - Pydantic models for all tool outputs
@@ -155,14 +166,21 @@ tmux hierarchy: Server > Session > Window > Pane
 5. **Middleware** (`src/libtmux_mcp/middleware.py`)
    - `SafetyMiddleware` gates tools by tier (readonly/mutating/destructive)
    - Fail-closed: tools without a recognized tier tag are denied
+   - Audit, readonly-retry, and tail-preserving response limiting
 
 6. **Tools** (`src/libtmux_mcp/tools/`)
-   - `server_tools.py` - list_sessions, create_session, kill_server, get_server_info
+   - `server_tools.py` - list_servers, list_sessions, create_session, kill_server
    - `session_tools.py` - list_windows, create_window, rename_session, kill_session
-   - `window_tools.py` - list_panes, split_window, rename_window, kill_window, select_layout, resize_window
-   - `pane_tools.py` - send_keys, capture_pane, resize_pane, kill_pane, set_pane_title, get_pane_info, clear_pane, search_panes, wait_for_text
+   - `window_tools.py` - list_panes, split_window, break_pane, join_pane, move_window
+   - `pane_tools/` - a package: `io` (send_keys, run_command, capture_pane),
+     `wait`, `capture_since`, `copy_mode`, `search`, `layout`, `lifecycle`,
+     `meta`, `pipe`
+   - `buffer_tools.py` - load_buffer, paste_buffer, show_buffer, delete_buffer
+   - `hook_tools.py` - show_hooks, show_hook
    - `option_tools.py` - show_option, set_option
    - `env_tools.py` - show_environment, set_environment
+   - `wait_for_tools.py` - wait_for_channel, signal_channel
+   - `batch_tools.py` - call_{readonly,mutating,destructive}_tools_batch
 
 7. **Resources** (`src/libtmux_mcp/resources/`)
    - `hierarchy.py` - 6 `tmux://` URI resources for browsing tmux hierarchy
