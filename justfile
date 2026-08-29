@@ -85,6 +85,17 @@ ruff-format:
 ruff:
     uv run ruff check .
 
+# Run the lint gates exactly as CI runs them.
+#
+# `ruff-format` rewrites files and `mypy` takes a find-derived file list, so
+# neither can reproduce a CI lint failure locally: the first fixes what CI
+# rejects, the second checks a different set than `mypy .` does.
+[group: 'lint']
+lint-ci:
+    uv run ruff check .
+    uv run ruff format . --check
+    uv run mypy .
+
 # Watch files and run ruff on change
 [group: 'lint']
 watch-ruff:
