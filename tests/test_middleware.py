@@ -2114,3 +2114,79 @@ def test_a_sensitive_list_is_redacted_whatever_its_items_are() -> None:
     # Control: a non-sensitive argument is still readable, so "absent"
     # above means redacted rather than "there is no summary".
     assert summary["format_string"] == "#{pane_id}"
+
+
+#: String arguments the audit log carries verbatim, by deliberate
+#: decision: routing metadata, object names, paths and enums. The
+#: sensitive set is a deny-list, so a new free-text argument is exposed
+#: by OMISSION -- it has to be triaged into one of the two sets, and
+#: this test is what forces that.
+_AUDIT_LOGGED_STRING_ARGS = frozenset(
+    {
+        # Routing.
+        "socket_name",
+        "session_name",
+        "session_id",
+        "window_id",
+        "window_index",
+        "pane_id",
+        "target_window_id",
+        "source_pane_id",
+        "target_pane_id",
+        "destination_index",
+        "destination_session",
+        # Names an operator needs to read the trail.
+        "window_name",
+        "new_name",
+        "logical_name",
+        "buffer_name",
+        "title",
+        "option",
+        "name",
+        "channel",
+        "hook_name",
+        # Paths, decided as legitimate audit content.
+        "start_directory",
+        "output_path",
+        # Enums and fixed vocabularies.
+        "direction",
+        "scope",
+        "target",
+        "on_error",
+        "corner",
+        "layout",
+        "size",
+        # Opaque round-trip token, and a tmux format expression that
+        # names what to READ rather than carrying a payload.
+        "cursor",
+        "format_string",
+    }
+)
+
+
+def test_every_string_argument_is_triaged_for_the_audit_log() -> None:
+    """A new free-text argument must be classified before it ships.
+
+    ``_SENSITIVE_ARG_NAMES`` is a deny-list over a log that defaults to
+    recording what it is given, so the failure mode is silence: an
+    argument nobody weighed is written out in full.
+    """
+    from libtmux_mcp.middleware import _SENSITIVE_ARG_NAMES
+    from libtmux_mcp.server import build_mcp_server
+
+    tools = asyncio.run(build_mcp_server().list_tools())
+    untriaged = {
+        name
+        for tool in tools
+        for name, spec in (tool.parameters.get("properties") or {}).items()
+        if "string"
+        in {spec.get("type")} | {alt.get("type") for alt in spec.get("anyOf", [])}
+        and name not in _SENSITIVE_ARG_NAMES
+        and name not in _AUDIT_LOGGED_STRING_ARGS
+    }
+
+    assert not untriaged, (
+        f"string argument(s) {sorted(untriaged)} reach the audit log without a "
+        "decision; add to _SENSITIVE_ARG_NAMES to digest, or to "
+        "_AUDIT_LOGGED_STRING_ARGS to record verbatim"
+    )
