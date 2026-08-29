@@ -45,6 +45,7 @@ from fastmcp import Context
 from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
+    _LIVENESS_TIMEOUT_SECONDS as _CALL_TIMEOUT_SECONDS,
     ANNOTATIONS_MUTATING,
     TAG_MUTATING,
     TAG_SELF_BOUNDED,
@@ -67,13 +68,15 @@ if t.TYPE_CHECKING:
 _CHANNEL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 #: Cap on ``signal_channel`` subprocess. ``wait-for -S`` is a short
-#: server-local operation; 5 s is a generous ceiling that still bounds
-#: pathological hangs (e.g. tmux server deadlock).
-_SIGNAL_TIMEOUT_SECONDS = 5.0
-
-#: Cap on the post-wait liveness re-probe. Same reasoning as
-#: ``_SIGNAL_TIMEOUT_SECONDS``, and it runs at most once per wait.
-_LIVENESS_TIMEOUT_SECONDS = 5.0
+#: server-local operation, so this is the ordinary per-call bound; the
+#: post-wait liveness re-probe below runs at most once per wait and
+#: takes the same one.
+#:
+#: Note this module does NOT bound the wait itself that way: ``wait-for``
+#: blocks until signalled, so that call legitimately runs to the wait
+#: ceiling. See ``_run_tmux_bounded``.
+_SIGNAL_TIMEOUT_SECONDS = _CALL_TIMEOUT_SECONDS
+_LIVENESS_TIMEOUT_SECONDS = _CALL_TIMEOUT_SECONDS
 
 
 async def _server_is_alive(server: Server) -> bool:

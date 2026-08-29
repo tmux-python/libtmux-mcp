@@ -1606,6 +1606,22 @@ def _raise_if_path_unresolvable(
     raise ExpectedToolError(msg)
 
 
+def _as_tmux_text(value: str | bool | int) -> str | bool | int:
+    """Render a typed filter value the way tmux reports the field.
+
+    tmux-derived attributes are always STRINGS -- ``pane_width`` is
+    ``"80"``, ``pane_active`` is ``"1"``. Comparing them against a real
+    ``80`` or ``True`` matches nothing, so accepting typed values in the
+    schema without this would trade a validation error for a confident
+    empty result. Booleans first: ``bool`` is a subclass of ``int``.
+    """
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, int):
+        return str(value)
+    return value
+
+
 def _apply_filters(
     items: t.Any,
     filters: dict[str, str | bool | int] | str | None,
@@ -1677,9 +1693,11 @@ def _apply_filters(
             _raise_if_path_unresolvable(
                 probe, field_path, key, valid_ops, operator_parsed=bool(op)
             )
-            attr_filters[key] = value
+            attr_filters[key] = _as_tmux_text(value)
         elif field in _MODEL_FIELD_ALIASES:
-            attr_filters[_MODEL_FIELD_ALIASES[field] + key[len(field) :]] = value
+            attr_filters[_MODEL_FIELD_ALIASES[field] + key[len(field) :]] = (
+                _as_tmux_text(value)
+            )
         elif field in model_fields:
             annotation = model_fields[field].annotation
             if _admits_bool(annotation) and op and op not in _BOOL_OPERATORS:

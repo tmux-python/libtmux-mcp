@@ -22,6 +22,7 @@ from libtmux_mcp.tools.window_tools import (
 )
 
 if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
 
@@ -742,3 +743,58 @@ def test_filters_validate_the_same_through_both_transports() -> None:
         assert asyncio.run(_validates(value)), f"rejected {value!r}"
 
     assert schema, "filters must stay a declared parameter for this to mean anything"
+
+
+def test_a_typed_filter_matches_what_its_string_form_matches(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Accepting a type is not the same as comparing it.
+
+    Every tmux-derived attribute is a STRING -- ``pane_width`` is
+    ``"80"``, ``pane_active`` is ``"1"`` -- so widening the schema
+    without coercing at the comparison boundary turned a validation
+    error into a confident empty result. That is the worse of the two:
+    an agent filtering for pane 0 is told there is no such pane rather
+    than that it passed the wrong type.
+
+    ``is_caller`` is deliberately NOT the field under test here, and
+    that is the point: it is computed in Python as a real bool, so it
+    is the one field where a bool works without any coercion. A test
+    holding only that field passes straight over this regression, which
+    is what the first version of this test did. It cannot join the
+    table either -- outside a real tmux caller it is ``None`` for every
+    pane, so both encodings would match nothing and agree vacuously.
+    Its transports are covered by the test above.
+
+    Asserts identical RESULT SETS per row. Validation is what passed
+    while matching was broken, and every row asserts its string form
+    matched something so a vacuous pair cannot read as agreement.
+    """
+    from libtmux_mcp.tools.server_tools import list_sessions
+    from libtmux_mcp.tools.session_tools import list_windows
+    from libtmux_mcp.tools.window_tools import list_panes
+
+    window = mcp_pane.window
+    window.split(attach=False)
+    socket_name = mcp_server.socket_name
+    pane_width = mcp_pane.pane_width or "80"
+    window_index = window.window_index or "0"
+
+    table: list[tuple[t.Callable[..., t.Any], dict[str, t.Any], dict[str, t.Any]]] = [
+        (list_panes, {"pane_width": int(pane_width)}, {"pane_width": pane_width}),
+        (list_panes, {"pane_active": True}, {"pane_active": "1"}),
+        (
+            list_windows,
+            {"window_index": int(window_index)},
+            {"window_index": window_index},
+        ),
+        (list_sessions, {"session_windows": 1}, {"session_windows": "1"}),
+    ]
+
+    for fn, typed, text in table:
+        got = fn(filters=typed, socket_name=socket_name)
+        want = fn(filters=text, socket_name=socket_name)
+        assert want, f"{fn.__name__}{text} matched nothing; the row proves nothing"
+        assert got == want, (
+            f"{fn.__name__}: {typed} matched {len(got)}, {text} matched {len(want)}"
+        )

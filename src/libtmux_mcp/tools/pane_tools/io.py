@@ -64,8 +64,9 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
 
 #: Bound on a single untimed ``send-keys``. libtmux runs tmux through
 #: ``Popen.communicate()`` with no timeout, so an unresponsive server
-#: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
-_SEND_KEYS_TIMEOUT_SECONDS = 5.0
+#: would wedge the tool call. The same policy as every other per-call
+#: bound, so it derives rather than repeating the number.
+_SEND_KEYS_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
 
 #: How long to give a shell to acknowledge that it began the payload,
 #: as a fraction of the caller's own budget with a floor. Paid only
@@ -1341,7 +1342,12 @@ def paste_text(
         load_args = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
 
         try:
-            subprocess.run(load_args, check=True, capture_output=True, timeout=5.0)
+            subprocess.run(
+                load_args,
+                check=True,
+                capture_output=True,
+                timeout=_LIVENESS_TIMEOUT_SECONDS,
+            )
         except subprocess.TimeoutExpired as e:
             msg = (
                 f"tmux load-buffer did not return within "
