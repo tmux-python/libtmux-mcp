@@ -2068,3 +2068,35 @@ def test_filters_is_redacted_in_both_shapes_it_arrives_in() -> None:
     # redacts which pane was targeted is not an audit trail.
     routing = _summarize_args({"pane_id": "%1", "socket_name": "dev"})
     assert routing == {"pane_id": "%1", "socket_name": "dev"}
+
+
+def test_a_sensitive_list_is_redacted_whatever_its_items_are() -> None:
+    """Redaction must not depend on a list's item type.
+
+    Every sensitive list argument is ``list[str]`` today, so redacting
+    only ``str`` items worked -- and would keep working silently until
+    an annotation widened, at which point values would start reaching
+    the audit log with nothing failing. ``filters`` widened from
+    ``dict[str, str]`` to admit bools and ints for exactly the reasons
+    that make it plausible here.
+
+    The non-sensitive control matters as much as the sensitive case: a
+    summariser that redacted everything would satisfy the absence check
+    on its own.
+    """
+    from libtmux_mcp.middleware import _summarize_args
+
+    summary = _summarize_args(
+        {
+            "patterns": ["secret-text", 42, True, None],
+            "format_string": "#{pane_id}",
+        }
+    )
+
+    rendered = str(summary["patterns"])
+    for leaked in ("secret-text", "42", "True", "None"):
+        assert leaked not in rendered, f"{leaked!r} survived redaction"
+    assert len(summary["patterns"]) == 4, "items must not be dropped"
+    # Control: a non-sensitive argument is still readable, so "absent"
+    # above means redacted rather than "there is no summary".
+    assert summary["format_string"] == "#{pane_id}"

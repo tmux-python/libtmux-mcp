@@ -16,6 +16,7 @@ import uuid
 import pytest
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp import _progress as _progress_module
 from libtmux_mcp.tools.wait_for_tools import (
     _validate_channel_name,
     signal_channel,
@@ -506,7 +507,9 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
 
 
 @pytest.mark.usefixtures("mcp_session")
-def test_the_silent_waits_now_report_progress(mcp_server: Server) -> None:
+def test_the_silent_waits_now_report_progress(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Two of the three waits told the client nothing until they returned.
 
     ``wait_for_text`` polls, so it reports from inside its own loop.
@@ -522,6 +525,7 @@ def test_the_silent_waits_now_report_progress(mcp_server: Server) -> None:
     socket_name = mcp_server.socket_name
     assert socket_name is not None
     channel = f"pgt_{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.05)
     seen: list[str] = []
 
     async def _on_progress(
@@ -538,9 +542,11 @@ def test_the_silent_waits_now_report_progress(mcp_server: Server) -> None:
                     raise_on_error=False,
                 )
             )
-            # Long enough for at least one tick, short enough to stay an
-            # inner-loop test.
-            await asyncio.sleep(1.5)
+            # Many chances at a fast cadence rather than one chance at the
+            # shipped 1 s. Needing N ticks in a fixed window is fragile in
+            # exactly one direction -- load drops ticks, never adds them --
+            # so margin has to come from the cadence, not the window.
+            await asyncio.sleep(0.6)
             mcp_server.cmd("wait-for", "-S", channel)
             await waiter
 

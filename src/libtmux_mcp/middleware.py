@@ -765,10 +765,15 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             # ``patterns`` and ``stop`` are lists. Naming them sensitive
             # without handling the container would have left them
             # verbatim, which is the shape of the bug being fixed.
-            summary[key] = [
-                _redact_digest(item) if isinstance(item, str) else item
-                for item in value
-            ]
+            #
+            # Coerced like the dict branch rather than redacting only
+            # ``str`` items. Every sensitive list is ``list[str]`` today,
+            # so a type test would work -- and would keep working
+            # silently until an annotation widened, at which point values
+            # start appearing in the audit log and nothing fails. A
+            # sensitive argument does not become safe by not being a
+            # string.
+            summary[key] = [_redact_digest(str(item)) for item in value]
         elif key in _NESTED_ARG_LIST_NAMES:
             if isinstance(value, list):
                 summary[key] = [
