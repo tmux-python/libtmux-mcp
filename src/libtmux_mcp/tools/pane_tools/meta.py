@@ -45,7 +45,9 @@ def display_message(
     Accepts literal text and '#{variable}' references. Format modifiers,
     conditionals, and jobs are refused: tmux expands '#{E:x}' by running
     x's *value* through the expander again, and a value can arrive from a
-    pane rather than from the caller.
+    pane rather than from the caller. For raw format syntax, run
+    'tmux display-message -p' through run_command, where the caller
+    supplies it on a surface labelled execution.
 
     Returned values can carry text a pane chose, such as a working
     directory or a running command.

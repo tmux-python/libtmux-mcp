@@ -1,13 +1,12 @@
-# Evaluate tmux format string (display_message)
+# Read tmux variables (display_message)
 
 ```{fastmcp-tool} pane_tools.display_message
 ```
 
-**Use when** you need to query arbitrary tmux variables — zoom state, pane
-dead flag, client activity, or any `#{format}` string that isn't covered by
-other tools. Despite the historical name (`display_message` is the tmux verb
-it wraps), this tool does **not** display anything to the user; it expands
-the format string with `display-message -p` and returns the value.
+**Use when** you need to read a tmux variable no dedicated tool covers —
+zoom state, pane dead flag, client activity. Despite the historical name
+(`display_message` is the tmux verb it wraps), this tool does **not** display
+anything to the user; it substitutes the variables and returns the value.
 
 **Avoid when** a dedicated tool already provides the information — e.g. use
 {tooliconl}`snapshot-pane` for cursor position and mode,
@@ -22,6 +21,11 @@ yourself.
 Accepts literal text and `#{variable}` references only. Modifiers such as
 `#{E:...}` re-expand a variable's *value*, which can arrive from a pane
 rather than from you, so they are refused rather than filtered.
+
+Modifiers, conditionals, and padding are therefore no longer available here.
+Run `tmux display-message -p` through {tooliconl}`run-command` for those: raw
+format syntax belongs on the surface labelled execution, where the caller is
+the one supplying it.
 
 **Example:**
 
