@@ -1086,6 +1086,41 @@ unusual entry shape.
 
 ### Development
 
+**Every tmux behaviour this branch rests on is measured on all nine supported builds**
+
+3.2a, 3.3a, 3.4, 3.5, 3.6, 3.7, 3.7a, 3.7b, 3.7c. None needs a version
+gate, and the CI matrix has not seen any of this work.
+
+| behaviour | result |
+|---|---|
+| `wait-for -S` latches an unwaited signal | 9/9, 4-12 ms; a never-signalled channel still blocks |
+| `--` terminates flag parsing for `display-message` | 9/9 |
+| `list-clients -F` | 9/9 |
+| `top` holds `alternate_on=0` | 9/9 |
+| `set-hook` readable back at `-g`/`-t`/`-w`/`-gw` | 9/9 |
+| narrowing a pane grows `history_size` | 9/9 |
+
+The latch is the one that had to be checked. `run_command` now always
+waits its started channel first, so on a build that dropped an unwaited
+signal a fast command would intermittently report as never-started --
+the double-execution lie, reintroduced per version.
+
+
+**Undiagnosed: `test_capture_pane_truncates_tail_preserving` fails rarely, serially only**
+
+Recorded rather than absorbed, because absorbing it is how the parallel
+flakes above hid for so long.
+
+Seen twice in full serial runs (`-p no:randomly --reruns 0`), never in
+twelve runs of the parallel gate, and it passes 6 of 6 in isolation. So
+it is a cross-test interaction rather than a timing budget, and the
+usual reproduction recipe for this suite -- `-n auto --reruns 0` --
+is the one configuration that does NOT show it.
+
+Not diagnosed. The next step is a bisect over test order rather than a
+theory about the test.
+
+
 **A killed test run leaked a tmux daemon forever**
 
 Fixture finalizers do not run when pytest is `SIGKILL`ed, so an
