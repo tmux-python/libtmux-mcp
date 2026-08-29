@@ -1971,6 +1971,35 @@ builds one directly, and it is what `Window.panes` and
 `Session.windows` go through. A test walks the installed libtmux for
 call sites and fails if one appears outside the bound set.
 
+#### `filters` works the same whichever way your client sends it
+
+`filters` takes a dict or a JSON string, and the docs said the two were
+interchangeable. They were not: the dict form was validated as
+`dict[str, str]` and rejected a boolean, while the JSON-string form was
+decoded into a dict holding a real boolean that nothing re-checked.
+
+The example that diverged is the one that matters most.
+`list_panes(filters={"is_caller": true})` is how an agent answers
+"which pane am I in?" -- there is deliberately no whoami tool, and the
+server instructions point at it three times. Clients that send objects
+got a validation error on first contact; clients that send strings
+never saw it.
+
+Both forms now validate identically.
+
+#### One sentence for an unresponsive tmux server
+
+Every tool that gives up on a tmux server now says the same thing:
+
+    tmux <subcommand> did not return within 5.00s; the tmux server is unresponsive
+
+`load_buffer`, `show_buffer` and `delete_buffer` reported the same
+condition as `show-buffer timeout after 5s` because they reach tmux
+directly rather than through libtmux. They were always bounded -- they
+never had the hang above -- but an agent or a doc matching on the
+phrase got it right for 57 tools and wrong for three. The buffer name
+is still named.
+
 #### `paste_buffer` takes `delete_after`
 
 `delete_buffer`'s description told agents not to bother after
