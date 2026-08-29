@@ -18,6 +18,7 @@ from libtmux_mcp.tools.server_tools import (
 )
 
 if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
 
@@ -661,3 +662,125 @@ def _assert_scan_is_ordered_and_complete(TestServer: type[Server]) -> None:
     names = [row.socket_name for row in listed if row.socket_name is not None]
     assert names == sorted(names)
     assert len(names) == len(servers)
+
+
+def test_a_tool_is_bounded_past_the_liveness_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """The sibling of the never-answers case, and the one that bit.
+
+    A socket that never answers is caught by the 5s liveness probe, so
+    the call *behind* the probe never runs -- that fixture is
+    structurally incapable of producing this defect. A socket that
+    answers the probe and stalls afterwards reaches it: ``break_pane``
+    makes eleven round trips, and every one after the first went
+    through libtmux's untimed ``Popen.communicate()``. Measured before
+    the fix: still running at 150s.
+
+    ``break_pane`` stands in for the class. The bound is installed once
+    at ``tmux_cmd``, so a per-tool test here would say nothing the
+    ``tmux_cmd`` tests do not already say.
+    """
+    import socket as socket_module
+    import threading
+    import time
+
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp import _utils
+    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp.tools.window_tools import break_pane
+
+    # Exercise the mechanism, not the shipped constant: a 5s bound would
+    # spend 5s of suite time proving what 0.5s proves.
+    monkeypatch.setattr(_utils, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
+    upstream = (
+        pathlib.Path("/tmp")
+        / f"tmux-{os.geteuid()}"
+        / (mcp_server.socket_name or "default")
+    )
+    assert upstream.is_socket(), "fixture socket must exist for the test"
+
+    with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+        monkeypatch.setenv("TMUX_TMPDIR", tmpdir)
+        uid_dir = pathlib.Path(tmpdir) / f"tmux-{os.geteuid()}"
+        uid_dir.mkdir(mode=0o700)  # tmux refuses any other mode, instantly
+        _server_cache.clear()
+
+        listener = socket_module.socket(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        listener.bind(str(uid_dir / "halfwedge"))
+        listener.listen(16)
+        listener.settimeout(0.2)
+        stop = threading.Event()
+        held: list[socket_module.socket] = []
+        forwarded = 0
+
+        def pump(src: socket_module.socket, dst: socket_module.socket) -> None:
+            try:
+                while True:
+                    chunk = src.recv(65536)
+                    if not chunk:
+                        break
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+
+        def serve() -> None:
+            nonlocal forwarded
+            first = True
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except (TimeoutError, OSError):
+                    continue
+                if not first:
+                    held.append(conn)  # accept, never speak, never close
+                    continue
+                first = False
+                up = socket_module.socket(
+                    socket_module.AF_UNIX, socket_module.SOCK_STREAM
+                )
+                up.connect(str(upstream))
+                forwarded += 1
+                for a, b in ((conn, up), (up, conn)):
+                    threading.Thread(target=pump, args=(a, b), daemon=True).start()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        outcome: dict[str, BaseException | None] = {}
+
+        pane_id = mcp_pane.pane_id
+        assert pane_id is not None
+
+        def call() -> None:
+            try:
+                break_pane(pane_id=pane_id, socket_name="halfwedge")
+            except BaseException as err:  # noqa: BLE001
+                outcome["error"] = err
+            else:
+                outcome["error"] = None
+
+        worker = threading.Thread(target=call, daemon=True)
+        started = time.monotonic()
+        worker.start()
+        worker.join(timeout=20.0)
+        elapsed = time.monotonic() - started
+        try:
+            assert not worker.is_alive(), f"still running after {elapsed:.1f}s"
+            assert forwarded == 1, (
+                "the probe was never forwarded, so the call behind it never ran"
+            )
+            error = outcome["error"]
+            assert isinstance(error, ToolError)
+            assert "did not return within" in str(error)
+        finally:
+            stop.set()
+            listener.close()
+            for conn in held:
+                conn.close()
+            thread.join(timeout=2)
+            _server_cache.clear()

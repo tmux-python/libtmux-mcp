@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import functools
+import importlib
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ import typing as t
 from fastmcp.exceptions import ToolError
 from libtmux import exc
 from libtmux._internal.query_list import LOOKUP_NAME_MAP, QueryList
+from libtmux.common import tmux_cmd
 from libtmux.server import Server
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded as _run_tmux_async
@@ -828,6 +830,135 @@ def _server_cache_key(
     if socket_path is None:
         socket_path = os.environ.get("LIBTMUX_SOCKET_PATH")
     return (socket_name, socket_path, os.environ.get("LIBTMUX_TMUX_BIN"))
+
+
+#: Hard bound on ONE tmux call made through a synchronous tool. Same
+#: value as the liveness probe's budget, and safe to be wrong for the
+#: same reason: expiry yields a disclosed error naming the subcommand,
+#: never a confident wrong answer, so a too-small value cannot mislead.
+_SYNC_CALL_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
+
+
+#: Stock ``tmux_cmd`` logs on this logger and callers read dispatched
+#: argv off its records, so the bounded replacement must use it too
+#: rather than its own module logger.
+_LIBTMUX_COMMON_LOGGER = logging.getLogger("libtmux.common")
+
+
+def _tmux_subcommand(argv: list[str]) -> str:
+    """Name the tmux subcommand in an argv, for error messages.
+
+    ``argv[1]`` may be ``-Lname``: libtmux joins the socket flag to its
+    value, so the first non-flag element is the subcommand.
+    """
+    for part in argv[1:]:
+        if not part.startswith("-"):
+            return part
+    return "command"
+
+
+class _BoundedTmuxCmd(tmux_cmd):
+    """A ``tmux_cmd`` that cannot outlive its timeout.
+
+    libtmux runs every tmux command through an untimed
+    ``Popen.communicate()`` (``libtmux/common.py``), so a server that
+    accepts the connection and then says nothing hangs its caller
+    forever. A tool's liveness probe bounds only the FIRST round trip:
+    ``break_pane`` makes eleven and held for 150s at the second.
+
+    Bounding at ``tmux_cmd`` rather than ``Server.cmd`` is deliberate.
+    ``Server.cmd`` is not the only funnel -- ``neo.fetch_objs`` builds a
+    ``tmux_cmd`` directly, and that is the path behind ``window.panes``
+    and ``session.windows``, so a ``Server`` subclass leaves the busiest
+    caller unbounded. See :func:`_install_bounded_tmux_cmd`.
+    """
+
+    def __init__(self, *args: t.Any, tmux_bin: str | None = None) -> None:
+        resolved = tmux_bin or shutil.which("tmux")
+        if not resolved:
+            raise exc.TmuxCommandNotFound
+        argv = [resolved, *(str(arg) for arg in args)]
+        self.cmd = argv
+        # Stock tmux_cmd emits these two records on libtmux.common, and
+        # they are a contract, not decoration: callers read the argv of
+        # every dispatched command out of them. Replacing __init__
+        # without them silently blinds that.
+        emit_debug = _LIBTMUX_COMMON_LOGGER.isEnabledFor(logging.DEBUG)
+        cmd_str = shlex.join(argv) if emit_debug else ""
+        if emit_debug:
+            _LIBTMUX_COMMON_LOGGER.debug(
+                "tmux command dispatched", extra={"tmux_cmd": cmd_str}
+            )
+        try:
+            completed = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_SYNC_CALL_TIMEOUT_SECONDS,
+                encoding="utf-8",
+                errors="backslashreplace",
+            )
+        except FileNotFoundError:
+            raise exc.TmuxCommandNotFound from None
+        except subprocess.TimeoutExpired as err:
+            # NOT a LibTmuxException: Server._fetch_or_empty catches
+            # those and returns [] for a not-yet-started daemon, which
+            # would report a WEDGED server as having no sessions.
+            #
+            # subprocess.run kills and reaps the child before raising,
+            # so a stalled call leaves no tmux client behind -- the leak
+            # measured when a cancelled coroutine left the untimed
+            # communicate() running until the server died.
+            msg = (
+                f"tmux {_tmux_subcommand(argv)} did not return within "
+                f"{_SYNC_CALL_TIMEOUT_SECONDS:.2f}s; the tmux server is unresponsive"
+            )
+            raise ExpectedToolError(msg) from err
+
+        self.returncode = completed.returncode
+        stdout_split = (completed.stdout or "").split("\n")
+        while stdout_split and stdout_split[-1] == "":
+            stdout_split.pop()
+        self.stderr = list(filter(None, (completed.stderr or "").split("\n")))
+        # libtmux surfaces has-session's failure through stdout; mirrored
+        # so Server.has_session reads the same either way.
+        if "has-session" in argv and self.stderr and not stdout_split:
+            self.stdout = [self.stderr[0]]
+        else:
+            self.stdout = stdout_split
+
+        if emit_debug:
+            _LIBTMUX_COMMON_LOGGER.debug(
+                "tmux command completed",
+                extra={
+                    "tmux_cmd": cmd_str,
+                    "tmux_exit_code": self.returncode,
+                    "tmux_stdout": self.stdout[:100],
+                    "tmux_stderr": self.stderr[:100],
+                    "tmux_stdout_len": len(self.stdout),
+                    "tmux_stderr_len": len(self.stderr),
+                },
+            )
+
+
+#: Every libtmux module that constructs a ``tmux_cmd``. Each resolves
+#: the name as a module global at call time, so rebinding it here bounds
+#: the call. Kept in sync by a test that AST-walks the installed libtmux
+#: for ``tmux_cmd`` calls: a new call site in a new module fails loudly
+#: instead of silently reintroducing an unbounded path.
+_PATCHED_LIBTMUX_MODULES = ("libtmux.common", "libtmux.neo", "libtmux.server")
+
+
+def _install_bounded_tmux_cmd() -> None:
+    """Point libtmux's ``tmux_cmd`` references at the bounded subclass."""
+    for name in _PATCHED_LIBTMUX_MODULES:
+        module = importlib.import_module(name)
+        if getattr(module, "tmux_cmd", None) is not _BoundedTmuxCmd:
+            module.tmux_cmd = _BoundedTmuxCmd  # type: ignore[attr-defined]
+
+
+_install_bounded_tmux_cmd()
 
 
 def _build_server(*, socket_name: str | None, socket_path: str | None) -> Server:
