@@ -20,16 +20,22 @@ thread-based arrangement avoids it (a private pool with
 
 A subprocess we own can simply be killed, so this module owns it.
 
-``wait_for_text`` and ``wait_for_channel`` are converted. ``capture_since``
-and ``run_command`` are NOT: their tmux reads still go through
-``asyncio.to_thread``, so a tmux server that answers once and then stops
-answering leaves those two calls unable to return and the process unable
-to exit. Measured with a socket that forwards the first connection and
-stalls the rest -- the event loop keeps ticking, so a loop-blocking test
-cannot see it. Named here rather than left as a principle, because
-"neither arrangement is fixable while a thread is involved" reads as
-settled policy and invites the inference that the tree already complies
-everywhere.
+Every async tool now reaches tmux this way -- ``wait_for_text``,
+``wait_for_channel``, ``capture_since`` and ``run_command``. The last
+two were converted after a socket that forwards its FIRST connection
+and stalls the rest showed them unable to return AND the process unable
+to exit; a socket that never answers cannot show it, because the
+bounded liveness probe catches that one before the unbounded call is
+reached. The event loop keeps ticking throughout, so no loop-blocking
+test can see this class either.
+
+``asyncio.to_thread`` remains correct for BOUNDED work -- see
+``_run_send_keys``, whose every argv runs under a timeout, so its worker
+always returns. The hazard is the untimed call, not the thread.
+
+``tests/test_pane_tools.py`` enforces this structurally: it reads the
+tree for a tmux call made inline from an async body, and for a
+libtmux method called on any receiver.
 """
 
 from __future__ import annotations
