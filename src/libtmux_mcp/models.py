@@ -886,6 +886,16 @@ class HookListResult(BaseModel):
     """
 
     entries: list[HookEntry] = Field(default_factory=list)
+    resolved_target: str | None = Field(
+        default=None,
+        description=(
+            "tmux id the query was answered for, or ``null`` for a "
+            "server-scope query, which has no target. Present so an "
+            "untargeted call says which object it picked -- the default "
+            "is the oldest session on the server, which need not be the "
+            "one the caller has in mind."
+        ),
+    )
 
 
 class BufferRef(BaseModel):

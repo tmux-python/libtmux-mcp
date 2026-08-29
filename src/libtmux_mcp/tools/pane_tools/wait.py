@@ -19,6 +19,7 @@ from libtmux_mcp._utils import (
     _get_server,
     _tmux_argv,
     handle_tool_errors_async,
+    tmux_id_sort_key,
 )
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 from libtmux_mcp.models import WaitForTextResult
@@ -337,7 +338,9 @@ async def _resolve_pane_bounded(
     )
     if not windows:
         raise exc.NoWindowsExist
-    return await _first_pane_of_window(server, windows[0], deadline=deadline)
+    return await _first_pane_of_window(
+        server, min(windows, key=tmux_id_sort_key), deadline=deadline
+    )
 
 
 async def _resolve_session_native(
@@ -388,24 +391,24 @@ async def _resolve_session_native(
             list_cmd="list-sessions",
             list_extra_args=(),
         )
-    return rows[0]
+    return min(rows, key=tmux_id_sort_key)
 
 
 async def _first_pane_of_window(
     server: Server, window_id: str, *, deadline: float | None
 ) -> str:
-    """Return the window's FIRST listed pane, matching ``panes[0]``.
+    """Return the window's oldest pane, matching ``_resolve_pane``.
 
-    Deliberately not the active pane: ``_resolve_pane`` indexes the
-    list, and swapping in ``#{?pane_active,...}`` would change which
-    pane an existing caller gets.
+    Deliberately not the active pane: the canonical resolver keys on
+    the immutable id so two untargeted calls agree, and focus is
+    something any client can move between them.
     """
     rows = await _run_tmux_lines(
         server, "list-panes", "-t", window_id, "-F", "#{pane_id}", deadline=deadline
     )
     if not rows:
         raise exc.PaneNotFound
-    return rows[0]
+    return min(rows, key=tmux_id_sort_key)
 
 
 # ---------------------------------------------------------------------------

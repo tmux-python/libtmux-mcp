@@ -58,6 +58,19 @@ def _resolve_option_target(
             return _resolve_window(server, window_id=target), opt_scope
         if opt_scope == OptionScope.Pane:
             return _resolve_pane(server, pane_id=target), opt_scope
+    # An omitted target used to return the SERVER object, so the command
+    # went out with no -t and tmux applied its own rule -- picking by
+    # activity_time, which moves whenever a pane produces output. Every
+    # other read tool resolved in Python. Two rules for "no target" in
+    # one server, selected by whether the caller happened to name one.
+    # Resolving the default here means no read path ever emits a tmux
+    # command with an omitted target, so tmux's rule cannot run.
+    if opt_scope in (None, OptionScope.Session):
+        return _resolve_session(server), opt_scope
+    if opt_scope == OptionScope.Window:
+        return _resolve_window(server), opt_scope
+    if opt_scope == OptionScope.Pane:
+        return _resolve_pane(server), opt_scope
     return server, opt_scope
 
 

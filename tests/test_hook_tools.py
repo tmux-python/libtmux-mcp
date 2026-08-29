@@ -240,11 +240,29 @@ def test_show_hooks_reports_the_scope_it_was_asked_for(
     # The untargeted listing must contain exactly what a name-targeted
     # lookup finds with the same defaults -- the invariant its own
     # docstring promises, previously broken in both directions.
-    listed = marks()
-    assert listed == {"SESSION_MARK", "WINDOW_MARK"}
-    for hook_name in ("alert-activity", "pane-focus-in"):
-        found = show_hook(hook_name=hook_name, socket_name=mcp_server.socket_name)
-        assert found.entries, f"{hook_name} listed but not findable by name"
+    #
+    # The default is the OLDEST session on the server, which need not be
+    # this fixture's, so the marks go where the tool says it will look.
+    # Asserting against mcp_session instead would pass vacuously the
+    # moment both sides came back empty.
+    default_target = show_hooks(socket_name=mcp_server.socket_name).resolved_target
+    default_session = next(
+        s for s in mcp_server.sessions if s.session_id == default_target
+    )
+    default_session.cmd("set-hook", "alert-silence", "display-message DEFAULT_SESSION")
+    default_session.active_window.cmd(
+        "set-hook", "-w", "pane-set-clipboard", "display-message DEFAULT_WINDOW"
+    )
+    try:
+        listed = marks()
+        assert {"DEFAULT_SESSION", "DEFAULT_WINDOW"} <= listed
+        for hook_name in ("alert-silence", "pane-set-clipboard"):
+            found = show_hook(hook_name=hook_name, socket_name=mcp_server.socket_name)
+            assert found.entries, f"{hook_name} listed but not findable by name"
+            assert found.resolved_target == default_target
+    finally:
+        default_session.cmd("set-hook", "-u", "alert-silence")
+        default_session.active_window.cmd("set-hook", "-wu", "pane-set-clipboard")
 
     # global_=True has to reach the GLOBAL window tree. Carrying only
     # scope=="server" into the merge stapled the CURRENT window's hooks

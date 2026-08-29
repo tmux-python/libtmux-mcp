@@ -547,9 +547,7 @@ def test_search_panes_refuses_a_pattern_it_could_not_interrupt(
         10,
         raises=True,
     )
-    found = search_panes(
-        pattern=r"a+X", regex=True, socket_name=mcp_server.socket_name
-    )
+    found = search_panes(pattern=r"a+X", regex=True, socket_name=mcp_server.socket_name)
     assert found.matches
     assert (
         search_panes(pattern=r"(a+)+$", regex=False, socket_name=mcp_server.socket_name)

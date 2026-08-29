@@ -849,6 +849,38 @@ def _raise_if_server_unreachable(server: Server) -> None:
         raise ExpectedToolError(msg)
 
 
+def tmux_id_sort_key(raw: str | None) -> tuple[int, str]:
+    """Sort key placing tmux ids in creation order.
+
+    ``$10`` is newer than ``$9``; a string sort says otherwise, and only
+    once ids pass nine -- on a long-lived server, which is exactly where
+    it would go unnoticed longest.
+    """
+    text = raw or ""
+    digits = text[1:] if text[:1] in "$@%" else text
+    return (int(digits), text) if digits.isdigit() else (2**62, text)
+
+
+def _oldest(objects: list[t.Any], id_field: str) -> t.Any:
+    """Return the object with the lowest tmux id, oldest surviving first.
+
+    The untargeted default has to key on something a later call cannot
+    move. It used to be list order, and tmux lists sessions BY NAME --
+    so ``rename_session`` silently redirected every later untargeted
+    call into a DIFFERENT session's pane, and nothing about that session
+    had changed. tmux's own rule for an omitted ``-t`` is no better: it
+    picks by ``activity_time``, which moves whenever any pane produces
+    output.
+
+    tmux ids never move. They are sorted NUMERICALLY, not
+    lexicographically: after ``$0``..``$8`` are killed, a string sort
+    calls ``$10`` the lowest of ``$9``, ``$10``, ``$11`` -- wrong, and
+    only past nine, which is exactly where it would go unnoticed
+    longest.
+    """
+    return min(objects, key=lambda obj: tmux_id_sort_key(getattr(obj, id_field, None)))
+
+
 def _resolve_session(
     server: Server,
     session_name: str | None = None,
@@ -907,7 +939,7 @@ def _resolve_session(
             list_cmd="list-sessions",
             list_extra_args=(),
         )
-    return sessions[0]
+    return t.cast("Session", _oldest(list(sessions), "session_id"))
 
 
 def _resolve_window(
@@ -976,7 +1008,7 @@ def _resolve_window(
     windows = session.windows
     if not windows:
         raise exc.NoWindowsExist()
-    return windows[0]
+    return t.cast("Window", _oldest(list(windows), "window_id"))
 
 
 def _resolve_pane(
@@ -1039,7 +1071,7 @@ def _resolve_pane(
     panes = window.panes
     if not panes:
         raise exc.PaneNotFound()
-    return panes[0]
+    return t.cast("Pane", _oldest(list(panes), "pane_id"))
 
 
 M = t.TypeVar("M")

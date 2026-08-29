@@ -8,6 +8,38 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### "No target" now means one thing, and it stays put
+
+An untargeted read was resolved by two different rules in the same
+server, chosen by whether the caller happened to name something:
+
+    show_option / show_hooks / show_hook   omitted -t; tmux resolved
+    everything else                        first LISTED object
+
+Neither rule holds still. tmux's picks by `activity_time`, so the
+destination moved whenever any pane produced output. Ours took the
+first listed session, and tmux lists sessions BY NAME -- so
+`rename_session` silently redirected every later untargeted call into a
+*different* session, with nothing about that session having changed.
+
+The default is now the oldest surviving object by tmux id, which no
+later call can move, and the option and hook tools resolve it through
+the same resolver as everything else -- so no read path emits a tmux
+command with the target omitted, and tmux's rule cannot run at all.
+This is one rule by construction rather than two implementations that
+currently agree.
+
+tmux ids sort NUMERICALLY here. After `$0`..`$8` are gone, a string
+sort calls `$10` the oldest of `$9`, `$10`, `$11` -- wrong, and only
+past nine, which is where it would go unnoticed longest.
+
+`show_hooks` and `show_hook` now report `resolved_target`, matching
+`show_option`. A stable default is still a guess, and an untargeted
+call should say which object it answered about.
+
+Mapped by the QA instance, which measured the split tool by tool and
+established that it was one boundary rather than a scattered defect.
+
 #### A caller's regex can no longer run forever
 
 `search_panes` and `wait_for_text` compiled a caller-supplied pattern

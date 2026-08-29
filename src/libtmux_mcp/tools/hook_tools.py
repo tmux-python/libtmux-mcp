@@ -32,6 +32,9 @@ import typing as t
 
 from libtmux import exc as libtmux_exc
 from libtmux.constants import OptionScope
+from libtmux.pane import Pane
+from libtmux.session import Session
+from libtmux.window import Window
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_RO,
@@ -108,7 +111,34 @@ def _resolve_hook_target(
             return _resolve_window(server, window_id=target), opt_scope
         if opt_scope == OptionScope.Pane:
             return _resolve_pane(server, pane_id=target), opt_scope
+    # Same seam the option tools had: an omitted target returned the
+    # SERVER object, the command went out with no -t, and tmux resolved
+    # it by activity_time while every other read tool resolved in
+    # Python. Server scope genuinely has no target and keeps the server.
+    if opt_scope in (None, OptionScope.Session):
+        return _resolve_session(server), None
+    if opt_scope == OptionScope.Window:
+        return _resolve_window(server), opt_scope
+    if opt_scope == OptionScope.Pane:
+        return _resolve_pane(server), opt_scope
     return server, opt_scope
+
+
+def _target_label(obj: t.Any) -> str | None:
+    """Tmux id the query was answered for, or None for the server.
+
+    Dispatched on TYPE, not on which attribute happens to exist: a
+    libtmux ``Session`` carries ``window_id`` and ``pane_id`` too, so
+    taking the first attribute present reported ``%0`` for a
+    session-scope query.
+    """
+    if isinstance(obj, Pane):
+        return obj.pane_id
+    if isinstance(obj, Window):
+        return obj.window_id
+    if isinstance(obj, Session):
+        return obj.session_id
+    return None
 
 
 def _split_indexed_hook_name(key: str) -> tuple[str, int | None]:
@@ -239,7 +269,7 @@ def show_hooks(
     entries: list[HookEntry] = []
     for name, value in sorted(raw.items()):
         entries.extend(_flatten_hook_value(name, value))
-    return HookListResult(entries=entries)
+    return HookListResult(entries=entries, resolved_target=_target_label(obj))
 
 
 @handle_tool_errors
@@ -281,9 +311,12 @@ def show_hook(
         # can correct their input instead of silently getting an empty
         # list they read as "hook is unset".
         if "too many arguments" in str(e):
-            return HookListResult(entries=[])
+            return HookListResult(entries=[], resolved_target=_target_label(obj))
         raise
-    return HookListResult(entries=_flatten_hook_value(hook_name, value))
+    return HookListResult(
+        entries=_flatten_hook_value(hook_name, value),
+        resolved_target=_target_label(obj),
+    )
 
 
 def register(mcp: FastMCP) -> None:
