@@ -86,10 +86,12 @@ elevated risk even though they share the default tier:
 
 {tool}`run-command` and {tool}`send-keys` execute text in a pane, and a pane's shell can run `tmux`. Measured at `LIBTMUX_SAFETY=mutating`, where {toolref}`kill-window` is not in the tool list at all:
 
-```console
-$ run_command(command="tmux -L <socket> kill-window -t @1")
-exit_status 0 — the window is gone
+```json
+{"tool": "run_command", "arguments": {
+  "command": "tmux -L <socket> kill-window -t @1", "pane_id": "%1"}}
 ```
+
+Returns `exit_status: 0`, and the window is gone.
 
 The tier gates which **tools** are exposed, not what a shell can do once you type into it. That is not a hole to be closed: a verb-level guard on command text is bypassed by `t=tmux; $t kill-window`, and refusing it would break the tool's actual purpose.
 
