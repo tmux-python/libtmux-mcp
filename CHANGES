@@ -6,6 +6,19 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+- **Tools that deliver input require an explicit target.** `send_keys`,
+  `send_keys_batch`, `paste_text`, `paste_buffer` and `run_command` no
+  longer choose a pane. See MIGRATION for the one-field fix.
+- **An untargeted read resolves to the OLDEST object**, not the first
+  listed, and the option and hook tools stop using tmux's
+  activity-based rule. A destination that used to follow renames or
+  pane output now holds still.
+- **Prompt arguments that name an object are validated.** `pane_id`
+  must match `%N`; `session_name` may not be empty or hold control
+  characters, `:` or `.`.
+
 ### What's new
 
 #### Prompt identifier arguments can no longer write prompt lines
