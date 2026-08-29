@@ -243,9 +243,10 @@ async def wait_for_channel(
         raise ExpectedToolError(msg)
     # A zero exit does NOT mean "signalled". ``tmux wait-for`` also exits
     # 0 when the server goes away without ever signalling the channel,
-    # and it is silent about it. Measured on tmux 3.7b, all three of
-    # these are rc=0 with empty stderr and therefore indistinguishable
-    # from each other by exit status alone:
+    # and it is silent about it. Three of these are rc=0 with empty
+    # stderr and therefore indistinguishable by exit status alone --
+    # identical on every supported tmux, 3.2a through 3.7c, so there was
+    # never a version where the exit status could be relied on:
     #
     # ==================  ====  ==================================
     # how the wait ended  rc    stderr
