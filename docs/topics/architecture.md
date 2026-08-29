@@ -122,6 +122,35 @@ fixture built the obvious way comes back confidently clean.
 by measurement — it reads the tree for a blocking call made inline from
 an async body.
 
+### The bound under the synchronous tools
+
+Most tools are plain `def`, which FastMCP runs on a worker thread. That
+keeps the event loop alive but does nothing about the wait: libtmux
+still reaches tmux through an untimed `Popen.communicate()`, so a tool
+that touched a stalled server never returned at all. `break_pane` makes
+eleven round trips and was measured still running at 150 seconds.
+
+The liveness probe does not help here. It bounds the FIRST round trip
+and nothing after it, so a socket that answers the probe and stalls
+afterwards walks straight past it.
+
+The bound is installed at `tmux_cmd` itself, in `_utils`, and rebound
+into every libtmux module that constructs one. `Server.cmd` is not the
+only funnel — `neo.fetch_objs` builds a `tmux_cmd` directly and is the
+engine behind `Window.panes` and `Session.windows`, so bounding
+`Server.cmd` alone leaves the busiest path unbounded. A test AST-walks
+the installed libtmux and fails if a call site appears outside the
+bound set, because a rebind that stops applying does so silently.
+
+Why it matters more than one slow call: a hung call never returned its
+worker, and cancelling the coroutine did not interrupt it. Forty
+accumulated hung calls — concurrently, or one at a time with a cancel
+between each — exhaust anyio's default thread limiter, and the server
+then stops answering everything, including healthy sockets. Forty is
+reached by an agent behaving correctly: call, give up, retry. The bound
+returns the worker, and `subprocess.run` kills and reaps the tmux
+client, so neither threads nor processes accumulate.
+
 ### Safety middleware
 
 {class}`~libtmux_mcp.middleware.SafetyMiddleware` implements

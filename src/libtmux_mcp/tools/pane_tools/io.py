@@ -715,6 +715,13 @@ async def run_command(
         value is not an error — the wait returns at the ceiling and
         the timeout actually enforced is reported on
         ``RunCommandResult.effective_timeout``.
+
+        It bounds the wait, not the call. The pane reads around it are
+        bounded separately, so a tmux server that stops answering
+        mid-call can push the total to roughly ``timeout`` plus one
+        per-call bound before the error arrives — measured at 11.8s for
+        ``timeout=6.0``. Bounds do not stack: the first stalled read
+        raises rather than continuing.
     max_lines : int or None
         Maximum pane output lines to return. Defaults to all captured
         visible output; pass a small value for a tail-only summary.

@@ -123,11 +123,24 @@ difference is what makes it awkward — a dead socket refuses instantly,
 which every tool reports correctly, while a wedged one answers nothing
 at all.
 
-Every MCP tool is bounded against this and refuses in five seconds
-naming the cause. What is **not** bounded is a FastMCP `Client` context
-exiting while pointed at such a socket: measured, `Client.__aexit__`
-hangs against a wedged server and returns cleanly against a healthy or
-a killed one.
+Every MCP tool is bounded against this at **every** round trip, not
+just the first, and refuses in five seconds naming the tmux subcommand
+that stalled:
+
+```
+tmux list-panes did not return within 5.00s; the tmux server is unresponsive
+```
+
+The distinction is the whole difficulty. A tool's liveness probe bounds
+its first round trip only, and most tools make several — `break_pane`
+makes eleven. A socket that answers the probe and then stalls walks
+past the guard, so testing this needs a relay that forwards the first
+connection to a real server and stalls the rest. One that never answers
+is caught by the probe and reports a clean, confident, useless pass.
+
+What is **not** bounded is a FastMCP `Client` context exiting while
+pointed at such a socket: measured, `Client.__aexit__` hangs against a
+wedged server and returns cleanly against a healthy or a killed one.
 
 That matters for test suites rather than for the server. A run that
 hangs with **no failing test and no output** is the signature — there
