@@ -101,6 +101,55 @@ def test_split_window_with_direction(mcp_server: Server, mcp_session: Session) -
     assert result.pane_id is not None
 
 
+def test_split_window_reports_what_it_did_to_the_pane_it_split(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Each split's SOURCE geometry is the next split's input constraint.
+
+    ``size`` names the new pane, and the result described only the new
+    pane -- so building three equal columns across 236 needs the
+    157-column remainder, and that number was the one thing missing.
+    Without it a chain of N splits needs N-1 ``list_panes`` round trips
+    to recover a value the server already had, and a caller who does not
+    know to make them gets the wrong layout SILENTLY, because every
+    individual response was true.
+    """
+    mcp_session.cmd("resize-window", "-x", "236", "-y", "90")
+    socket = mcp_server.socket_name
+    first = mcp_session.active_window.active_pane
+    assert first is not None
+
+    row = split_window(
+        pane_id=first.pane_id, direction="below", size=31, socket_name=socket
+    )
+    left = split_window(
+        pane_id=row.pane_id, direction="right", size=78, socket_name=socket
+    )
+    assert left.source_pane is not None
+    assert left.source_pane.pane_width == "157"
+
+    # Chained off source_pane alone, with no intervening read.
+    right = split_window(
+        pane_id=left.source_pane.pane_id,
+        direction="right",
+        size=78,
+        socket_name=socket,
+    )
+    assert right.source_pane is not None
+    # The finished layout is readable from the responses alone. ``row``
+    # is deliberately NOT used: it is the snapshot from split A and is
+    # stale by now, which is the whole reason source_pane has to be
+    # re-read rather than echoed back.
+    widths = sorted(
+        int(pane.pane_width or 0) for pane in (left, right, right.source_pane)
+    )
+    assert widths == [78, 78, 78], widths
+
+    # Additive: every field a caller already read is still top-level.
+    assert right.pane_id is not None
+    assert right.pane_width == "78"
+
+
 def test_split_window_refuses_a_size_tmux_would_silently_clamp(
     mcp_server: Server, mcp_session: Session
 ) -> None:

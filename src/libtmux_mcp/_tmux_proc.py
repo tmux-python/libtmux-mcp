@@ -19,6 +19,17 @@ thread-based arrangement avoids it (a private pool with
 ``shutdown(wait=False)`` is joined by that same hook).
 
 A subprocess we own can simply be killed, so this module owns it.
+
+``wait_for_text`` and ``wait_for_channel`` are converted. ``capture_since``
+and ``run_command`` are NOT: their tmux reads still go through
+``asyncio.to_thread``, so a tmux server that answers once and then stops
+answering leaves those two calls unable to return and the process unable
+to exit. Measured with a socket that forwards the first connection and
+stalls the rest -- the event loop keeps ticking, so a loop-blocking test
+cannot see it. Named here rather than left as a principle, because
+"neither arrangement is fixable while a thread is involved" reads as
+settled policy and invites the inference that the tree already complies
+everywhere.
 """
 
 from __future__ import annotations

@@ -219,6 +219,32 @@ class ServerInfo(BaseModel):
     )
 
 
+class SplitResult(PaneInfo):
+    """The new pane, plus what the split did to the pane it split.
+
+    Extends :class:`PaneInfo` rather than nesting it, so every field a
+    caller already read stays exactly where it was.
+
+    ``size`` names the NEW pane, so the source's post-split extent is
+    the number a caller needs to plan the NEXT split -- and it was the
+    one thing the response did not carry. Building three equal panes
+    across 236 columns means splitting the 157-column remainder, not
+    the 78-column pane that is already right; without ``source_pane``
+    that choice needs a ``list_panes`` round trip between every pair of
+    splits, and a caller who does not know to make it gets the wrong
+    layout silently, because each individual response was true.
+    """
+
+    source_pane: PaneInfo | None = Field(
+        default=None,
+        description=(
+            "The pane that was split, as it stands AFTER the split. "
+            "Its extent is what constrains the next split of the same "
+            "region. ``null`` only if tmux stopped reporting it."
+        ),
+    )
+
+
 class OptionResult(BaseModel):
     """Result of a show_option call."""
 

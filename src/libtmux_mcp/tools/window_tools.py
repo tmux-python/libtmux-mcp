@@ -35,7 +35,7 @@ from libtmux_mcp._utils import (
     _serialize_window,
     handle_tool_errors,
 )
-from libtmux_mcp.models import PaneInfo, PaneMoveResult, WindowInfo
+from libtmux_mcp.models import PaneInfo, PaneMoveResult, SplitResult, WindowInfo
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -245,7 +245,7 @@ def split_window(
     *,
     environment: dict[str, str] | str | None = None,
     suppress_persistent_history: bool = False,
-) -> PaneInfo:
+) -> SplitResult:
     """Split a tmux window to create a new pane.
 
     Creates a new pane by splitting an existing one. Use direction to choose
@@ -292,8 +292,11 @@ def split_window(
 
     Returns
     -------
-    PaneInfo
-        Serialized pane object.
+    SplitResult
+        The new pane, with every ``PaneInfo`` field where it was, plus
+        ``source_pane``: the pane that was split, as it stands after
+        the split. That extent is what constrains the next split of the
+        same region.
     """
     _raise_if_shell_unrunnable(
         shell,
@@ -345,7 +348,19 @@ def split_window(
     except exc.TmuxObjectDoesNotExist:
         _raise_spawned_pane_gone(shell)
     _raise_if_spawned_pane_is_gone(new_pane, shell)
-    return _serialize_pane(new_pane)
+    source = target if isinstance(target, Pane) else target.active_pane
+    source_info: PaneInfo | None = None
+    if source is not None:
+        # Re-read: the in-hand object still describes the pre-split
+        # geometry, which is the number the caller must NOT plan with.
+        try:
+            source.refresh()
+            source_info = _serialize_pane(source)
+        except exc.TmuxObjectDoesNotExist:
+            source_info = None
+    return SplitResult(
+        **_serialize_pane(new_pane).model_dump(), source_pane=source_info
+    )
 
 
 @handle_tool_errors

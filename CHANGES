@@ -21,6 +21,34 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `split_window` says what it did to the pane it split
+
+`size` names the NEW pane, and the result described only the new pane.
+So each split's SOURCE geometry -- the number that constrains the next
+split of the same region -- was the one thing the response did not
+carry.
+
+Building three equal columns across 236 needs the 157-column remainder,
+not the 78-column pane that is already right:
+
+    split B  size=78  ->  new pane 78, source_pane 157   <- was missing
+
+Without it a chain of N splits needs N-1 `list_panes` round trips to
+recover a value the server already had in hand, and a caller who does
+not know to make them gets the wrong layout SILENTLY, because every
+individual response was true.
+
+`SplitResult` extends `PaneInfo` rather than nesting it, so every field
+a caller already reads stays exactly where it was. `source_pane` is
+re-read after the split, not echoed: the in-hand object still describes
+the pre-split geometry, which is the number a caller must not plan
+with.
+
+Argued by the same agent session, after the pre-flight below had
+already obsoleted its first argument for this. The second one does not
+overlap with it at all -- it is about planning the next call in the
+range where nothing is wrong and nothing gets refused.
+
 #### A split that flattens the pane it splits is refused
 
 `size` names the NEW pane, the way tmux's `-l` does, and `split_window`
