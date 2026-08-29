@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import tempfile
 import typing as t
 
 import pytest
@@ -497,17 +498,25 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
 
 
 def test_list_servers_is_ordered_and_complete_under_concurrency(
-    TestServer: type[Server], monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    TestServer: type[Server], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The scan probes sockets in parallel; order must not depend on timing.
 
     ``ThreadPoolExecutor.map`` preserves input order, so the listing
     stays sorted by socket name however the probes interleave.
-    """
-    tmpdir = tmp_path / "sockets"
-    tmpdir.mkdir()
-    monkeypatch.setenv("TMUX_TMPDIR", str(tmpdir))
 
+    Not ``tmp_path``: a UNIX socket path is capped at 108 bytes, and
+    under ``pytest-xdist`` the worker and test-name components push
+    ``<tmp_path>/tmux-<uid>/libtmux_test<rand>`` past it. The failure is
+    invisible in a serial run.
+    """
+    with tempfile.TemporaryDirectory(prefix="lsq-") as short_dir:
+        monkeypatch.setenv("TMUX_TMPDIR", short_dir)
+        _assert_scan_is_ordered_and_complete(TestServer)
+
+
+def _assert_scan_is_ordered_and_complete(TestServer: type[Server]) -> None:
+    """Body of the scan test, split out to keep the tmpdir scope tight."""
     servers = [TestServer() for _ in range(4)]
     for server in servers:
         server.new_session(session_name="probe")

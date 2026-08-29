@@ -33,6 +33,15 @@ is also why this is a pre-flight rather than a check after the fact:
 the answer is available synchronously, and polling would spend latency
 on every call to be less correct.
 
+It says nothing about the destination AFTER the pipe starts, and the
+docstring now says so, because "it actually opens the file" reads like
+a stronger guarantee than it is. Delete the file, remove its directory,
+or replace it with a directory mid-capture: the writer keeps its fd on
+the unlinked inode, so the capture grows in `/proc/<pid>/fd` while the
+path is gone and `#{pane_pipe}` correctly reads 1 throughout. Log
+rotation is the realistic way to hit it. The polled check considered
+here would not have caught any of those three either.
+
 
 #### Hook queries answer about the object you named
 
@@ -63,6 +72,18 @@ broke it: `"server"` queries the global session tree, so the global
 window tree pairs with it; `None` queries this session's tree, so this
 window's does. `show_hooks()` and `show_hook(name)` now agree at every
 scope, which is the invariant the merge existed to protect.
+
+An explicit `global_=True` had the same shape: it made the base query
+global while the merge still fetched the CURRENT window's tree, so
+`show_hooks(global_=True)` returned a real global-session hook stapled
+to a non-global window hook, and omitted the global-window hook that
+belonged there. The two ways of asking for "the globals" now agree.
+
+One difference is tmux's own and is documented rather than removed:
+`show_hooks` ENUMERATES the hooks set at a scope, while
+`show_hook(name)` RESOLVES with inheritance, so the latter can answer
+with a session hook when asked at window or pane scope while the former
+reports nothing there.
 
 
 #### `wait_for_text` sees a status line printed again

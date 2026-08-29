@@ -173,6 +173,13 @@ def show_hooks(
 ) -> HookListResult:
     """List configured tmux hooks at the given scope.
 
+    Enumerates the hooks SET at the requested scope. A name-targeted
+    :func:`show_hook` resolves with tmux's inheritance instead, so it
+    can answer with a session hook when asked at window or pane scope
+    while this returns nothing there. Both are tmux's own semantics --
+    the difference is enumerate-versus-resolve, not a disagreement
+    about what is in force.
+
     ``scope="server"`` enumerates hooks installed via
     ``tmux set-hook -g ...``. tmux splits those globals across two
     options trees by hook category: session-level hooks
@@ -219,8 +226,13 @@ def show_hooks(
         #
         # scope="server" queries the global session tree, so the global
         # window tree is its counterpart. scope=None queries THIS
-        # session's tree, so the counterpart is this window's.
-        raw_window = obj.show_hooks(global_=scope == "server", scope=OptionScope.Window)
+        # session's tree, so the counterpart is this window's. An
+        # explicit global_=True makes the base global whatever the
+        # scope says, so it has to be carried too -- otherwise the
+        # listing stapled the CURRENT window's hooks onto the globals.
+        raw_window = obj.show_hooks(
+            global_=global_ or scope == "server", scope=OptionScope.Window
+        )
         for name, value in raw_window.items():
             raw.setdefault(name, value)
 

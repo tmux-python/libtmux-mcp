@@ -245,3 +245,13 @@ def test_show_hooks_reports_the_scope_it_was_asked_for(
     for hook_name in ("alert-activity", "pane-focus-in"):
         found = show_hook(hook_name=hook_name, socket_name=mcp_server.socket_name)
         assert found.entries, f"{hook_name} listed but not findable by name"
+
+    # global_=True has to reach the GLOBAL window tree. Carrying only
+    # scope=="server" into the merge stapled the CURRENT window's hooks
+    # onto the globals, so the two ways of asking for "the globals"
+    # disagreed with each other.
+    mcp_server.cmd("set-hook", "-gw", "pane-died", "display-message GLOBALWIN_MARK")
+    try:
+        assert marks(global_=True) == marks(scope="server")
+    finally:
+        mcp_server.cmd("set-hook", "-gw", "-u", "pane-died")
