@@ -256,7 +256,7 @@ Join with `'; '`, or use `send_keys` / `paste_text` for raw multi-line
 input. The error says so.
 
 
-#### `list_servers` is 6.7x faster, and concurrent calls stop queueing
+#### `list_servers` is 6.7x faster
 
 `list_servers` probed each live socket with its own tmux subprocess,
 serially. It is strictly linear in live servers -- about 12 ms each --
@@ -270,14 +270,11 @@ sorted by socket name however the probes interleave.
 
 That alone only bought 2x, and the reason was somewhere else entirely.
 `_get_server` held the module's cache lock across `Server.is_alive()`
--- a tmux subprocess round trip -- so every concurrent tool call in the
-process queued behind one another for the duration of a subprocess. The
-liveness check now happens outside the lock, and two threads racing to
-cache the same key agree via `setdefault`.
-
-That second fix matters inside the scan's own pool -- sixteen threads,
-sixteen distinct socket names, sixteen cache misses, each holding the
-lock across a subprocess.
+-- a tmux subprocess round trip -- so a thread that missed the cache
+held the lock for the length of a subprocess. That is exactly the
+scan's own pool: sixteen threads, sixteen distinct socket names,
+sixteen cache misses. The liveness check now happens outside the lock,
+and two threads racing to cache the same key agree via `setdefault`.
 
 It does NOT generalise beyond multi-socket work, and an earlier draft
 of this entry claimed it did. Measured against that claim: sixteen
