@@ -272,7 +272,14 @@ addopts = [
   "--showlocals",
   "--doctest-modules",
   "--doctest-docutils-modules",
-  "--reruns=2"
+  "--reruns=2",
+  # Name every rerun. Without R, an absorbed failure is invisible: the
+  # run reports "passed" and a test that failed once says nothing.
+  # "Green" then means "did not fail three times consecutively", which
+  # is exactly the camouflage a load-sensitivity hunt cannot afford --
+  # six single failures were absorbed in silence across one series.
+  # f and E are pytest's own defaults, kept because -r replaces them.
+  "-rfER",
 ]
 doctest_optionflags = [
   "ELLIPSIS",

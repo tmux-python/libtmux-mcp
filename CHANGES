@@ -2384,6 +2384,53 @@ unusual entry shape.
 
 ### Development
 
+**Every test gets its own tmux socket directory**
+
+`list_servers` probes every socket in `TMUX_TMPDIR`, so a test that
+scans without isolating pays for the machine's accumulated debris --
+1785 sockets on one development box. Quiet, each is about a
+millisecond and invisible; under load their cost inflates and there are
+1785 of them.
+
+The release note above fixed the ONE test that noticed. It was the only
+one with a duration assertion, so it failed visibly at loadavg 90 while
+two siblings paid the same cost in silence, asserting only presence and
+liveness. Measured by the QA instance with 48 planted silent listeners
+and an A/B null control to establish the noise floor:
+
+    list_servers_reports_a_complete_identity_and_dedups   +12.00s
+    list_servers_finds_live_socket                         +6.00s
+
++6.00 is exactly `ceil(48/16) x 2.0`; +12.00 is twice that because
+that test scans twice. Under real load with only the machine's own
+litter and nothing planted, they reached 16.9 s and 40.4 s against
+0.10 s and 0.25 s quiet.
+
+So the assertion was what made one visible, not the defect, and the
+population is "tests that touch the scan" rather than "tests that
+failed". Nothing isolated `TMUX_TMPDIR` suite-wide -- it was per-test
+opt-in and three tests opted in. An autouse fixture now gives every
+test its own directory, which closes it for tests that do not exist
+yet. After: 0.01 s and 0.02 s, with the machine's 1781 sockets still in
+place, because passing on a tidied directory would prove nothing.
+
+Two tests had hardcoded `/tmp/tmux-<uid>/` for the fixture socket and
+now read `TMUX_TMPDIR`, which is where it has always actually been.
+
+**An absorbed failure names itself**
+
+`--reruns=2` is in `addopts`, so a green summary meant "did not fail
+three times consecutively". Six single failures were absorbed in
+silence across one QA series -- including one of the very tests whose
+fix that series was verifying. A retry policy is reasonable for flaky
+infrastructure and it is also load-sensitivity's perfect camouflage,
+switched on during a hunt for exactly that.
+
+`-rfER` is now in `addopts`, so each rerun prints its nodeid even when
+the run passes. Verified against a test that fails once and then
+passes: the run reports `1 passed` AND `RERUN <nodeid>`, where before
+it reported only the first.
+
 **The silent-socket test measured the machine, not the code**
 
 `test_list_servers_survives_a_socket_that_never_answers` asserted the
