@@ -118,31 +118,6 @@ async def _maybe_report_progress(
         return
 
 
-_LogLevel = t.Literal["debug", "info", "warning", "error"]
-
-
-async def _maybe_log(
-    ctx: Context | None,
-    *,
-    level: _LogLevel,
-    message: str,
-) -> None:
-    """Call the matching ``ctx.{level}`` if a Context is available.
-
-    Sibling to :func:`_maybe_report_progress` for client-visible log
-    notifications (``notifications/message`` in MCP). Same suppression
-    contract: silent only when the transport is gone, propagating
-    everything else so programming errors stay loud.
-    """
-    if ctx is None:
-        return
-    method = getattr(ctx, level)
-    try:
-        await method(message)
-    except _TRANSPORT_CLOSED_EXCEPTIONS:
-        return
-
-
 # ---------------------------------------------------------------------------
 # Timeout-bounded tmux reads
 # ---------------------------------------------------------------------------
@@ -412,13 +387,12 @@ async def _first_pane_of_window(
 # ---------------------------------------------------------------------------
 
 
-async def _compile_patterns(
+def _compile_patterns(
     values: list[str],
     *,
     label: str,
     regex: bool,
     match_case: bool,
-    ctx: Context | None,
 ) -> list[re.Pattern[str]]:
     """Compile one pattern list, raising ``ExpectedToolError`` on bad input."""
     flags = 0 if match_case else re.IGNORECASE
@@ -431,7 +405,7 @@ async def _compile_patterns(
             compiled.append(re.compile(value if regex else re.escape(value), flags))
         except re.error as e:
             msg = f"Invalid regex pattern: {e}"
-            await _maybe_log(ctx, level="warning", message=msg)
+            logger.warning(msg)
             raise ExpectedToolError(msg) from e
     return compiled
 
@@ -556,8 +530,8 @@ async def wait_for_text(
     ``hsize`` shrinks below the entry value (``clear-history``, and any
     rollover whose dip is observable between polls). It does not
     reliably detect ``grid_collect_history`` trim during continuous
-    output; a runtime ``ctx.warning`` fires when sampled state enters
-    the trim-risk band. Use ``wait_for_channel`` when correctness
+    output; a runtime warning is logged to stderr when sampled state
+    enters the trim-risk band. Use ``wait_for_channel`` when correctness
     matters more than convenience.
     """
     ceiling = _wait_ceiling_seconds()
@@ -578,19 +552,17 @@ async def wait_for_text(
     # compute, and a field the agent never branches on is permanent
     # weight in ``outputSchema``.
 
-    compiled_patterns = await _compile_patterns(
+    compiled_patterns = _compile_patterns(
         patterns or [],
         label="patterns",
         regex=regex,
         match_case=match_case,
-        ctx=ctx,
     )
-    compiled_stop = await _compile_patterns(
+    compiled_stop = _compile_patterns(
         stop or [],
         label="stop",
         regex=regex,
         match_case=match_case,
-        ctx=ctx,
     )
 
     server = _get_server(socket_name=socket_name)
@@ -727,18 +699,15 @@ async def wait_for_text(
                 trim_batch = max(baseline_hlimit // 10, 1)
                 risk_floor = baseline_hlimit - trim_batch
                 if state.history_size >= risk_floor:
-                    await _maybe_log(
-                        ctx,
-                        level="warning",
-                        message=(
-                            f"pane {target} is polling in the "
-                            "history-limit trim-risk band "
-                            f"(history_size {state.history_size} / "
-                            f"history_limit {baseline_hlimit}); "
-                            "wait_for_text correctness is best-effort "
-                            "here. For deterministic synchronization "
-                            "use wait_for_channel."
-                        ),
+                    logger.warning(
+                        "pane %s is polling in the history-limit "
+                        "trim-risk band (history_size %s / "
+                        "history_limit %s); wait_for_text correctness "
+                        "is best-effort here. For deterministic "
+                        "synchronization use wait_for_channel.",
+                        target,
+                        state.history_size,
+                        baseline_hlimit,
                     )
                     warned_risk_band = True
             # Anchored ON the entry cursor row, not below it. That row is
@@ -835,10 +804,8 @@ async def wait_for_text(
         # is a different fix — read the screen, don't retry the wait.
         outcome = "alternate_screen"
     if not found:
-        await _maybe_log(
-            ctx,
-            level="warning",
-            message=f"No match in pane {target} before {effective_timeout}s timeout",
+        logger.warning(
+            "No match in pane %s before %ss timeout", target, effective_timeout
         )
 
     limited_tail = _limit_lines(
