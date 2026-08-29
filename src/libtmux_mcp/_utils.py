@@ -427,17 +427,6 @@ ANNOTATIONS_ALLOCATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
-#: Annotations for tools that hand a caller-supplied payload to a program
-#: that runs it — typed keys, a pasted buffer, an authored shell command,
-#: or the command ``pipe_pane`` feeds.
-#:
-#: ``destructiveHint`` is ``True`` because MCP defines ``False`` as a claim
-#: of additive-only updates, and such a payload can overwrite a file, end a
-#: process, or leave a shell mid-line. ``openWorldHint`` is ``True`` because
-#: the effect extends into whatever the payload runs.
-#:
-#: Contrast :data:`ANNOTATIONS_SPAWN`, which starts the pane's *configured*
-#: process and carries no payload.
 #: Annotations for tools that start a pane's configured process without a
 #: caller-supplied command. Additive at the tmux level, but ``openWorldHint``
 #: is ``True``: the new process runs with the user's authority and reaches
@@ -449,6 +438,17 @@ ANNOTATIONS_SPAWN: dict[str, bool] = {
     "openWorldHint": True,
 }
 
+#: Annotations for tools that hand a caller-supplied payload to a program
+#: that runs it — typed keys, a pasted buffer, an authored shell command,
+#: or the command ``pipe_pane`` feeds.
+#:
+#: ``destructiveHint`` is ``True`` because MCP defines ``False`` as a claim
+#: of additive-only updates, and such a payload can overwrite a file, end a
+#: process, or leave a shell mid-line. ``openWorldHint`` is ``True`` because
+#: the effect extends into whatever the payload runs.
+#:
+#: Contrast :data:`ANNOTATIONS_SPAWN`, which starts the pane's *configured*
+#: process and carries no payload.
 ANNOTATIONS_SHELL: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
