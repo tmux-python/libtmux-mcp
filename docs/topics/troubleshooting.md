@@ -133,17 +133,25 @@ That matters for test suites rather than for the server. A run that
 hangs with **no failing test and no output** is the signature — there
 is nothing to grep for, because nothing failed.
 
-If you hit it, the cheap first question is whether this machine has
-hosted a wedged tmux server:
+If you hit it, the cheap first question is whether this machine is
+hosting a wedged tmux server. A wedged one burns CPU proportional to
+its age; an idle one uses almost none, however old it is:
 
 ```console
-$ ps -o pid=,etimes=,cputimes=,args= -C tmux
+$ ps -eo pid=,etimes=,cputimes=,comm=,args= \
+  | awk '$4=="tmux:" && $5=="server" && $3>10 && $3>$2*0.5 {print $1, $2"s age", $3"s cpu"}'
 ```
 
-A tmux process burning CPU proportional to its age is the one. tmux
-renames the server process, so match on `/proc/<pid>/cmdline` rather
-than on `comm`, which reads `tmux: server` and will not match a plain
-`tmux`.
+Anything it prints is a candidate; silence means no wedged server here.
+
+Match on `comm` fields, not with `ps -C`. tmux renames the server
+process to `tmux: server`, and `ps -C` selects on the command name — so
+`ps -C tmux` finds **no tmux servers at all**. Measured on a box
+hosting 1,248 of them it returned exactly one row, and that row was an
+unrelated shell script that happened to be named `tmux`: a false
+negative and a false positive in one command. `ps -C 'tmux: server'`
+does not work either, because `-C` cannot match a name containing a
+space.
 
 This project's own tests are on the safe side by construction: they
 *kill* servers rather than wedging them, and the two that do build a
