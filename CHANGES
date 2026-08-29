@@ -1182,6 +1182,29 @@ unusual entry shape.
 
 ### Development
 
+**An in-flight wait does not slow a concurrent tool call**
+
+Measured rather than asserted, because a test probe in this branch
+turned out to violate exactly this property and went unnoticed for as
+long as that test existed.
+
+At loadavg 26, a `show_option` issued while a wait is in progress, in
+each of the three waiting shapes:
+
+| concurrent with | median | vs idle |
+|---|---|---|
+| nothing (baseline) | 15.7 ms | - |
+| `wait_for_text` polling at a 10 ms interval | 16.1 ms | 1.03x |
+| `wait_for_channel` blocked | 15.4 ms | 0.98x |
+| `run_command` in flight | 15.7 ms | 1.00x |
+
+Unaffected, including at the minimum permitted poll interval. A static
+check alone would not have settled it -- `asyncio.to_thread` still
+blocks when the pool is exhausted -- so the measurement is under load
+with the waits actually running. The only blocking-shaped calls inside
+`async def` in the source are two `asyncio.sleep` poll intervals.
+
+
 **Every tmux behaviour this branch rests on is measured on all nine supported builds**
 
 3.2a, 3.3a, 3.4, 3.5, 3.6, 3.7, 3.7a, 3.7b, 3.7c. None needs a version
