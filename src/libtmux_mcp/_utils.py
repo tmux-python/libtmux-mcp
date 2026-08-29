@@ -537,8 +537,8 @@ def _prepare_start_directory(start_directory: str | None) -> str | None:
     """Resolve a caller path to the directory tmux will actually use.
 
     tmux expands ``-c`` as a format before using it as a working
-    directory, and silently falls back to the client's directory when the
-    result does not exist — so an unresolvable path lands the pane
+    directory, then silently falls back to ``$HOME``, or ``/``, when the
+    result cannot be entered — so an unresolvable path starts the pane
     somewhere else instead of failing. Resolving here leaves no format for
     tmux to run and turns a bad path into an error the caller can correct.
 

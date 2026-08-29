@@ -1,4 +1,9 @@
-"""Tests for ``start_directory`` handling across the tmux spawn tools."""
+"""Tests for caller text reaching a tmux argument that tmux expands.
+
+tmux expands several argument values as formats, where ``#H`` becomes the
+hostname and ``#(cmd)`` runs a shell job. Every such argument is covered
+here, so a new one cannot be added without a matching row.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
+    from libtmux.window import Window
 
 #: Spawn tools keyed by name, each called with only ``start_directory``
 #: and the target it needs, and each returning the resulting pane ID.
@@ -113,3 +119,116 @@ def test_start_directory_rejects_a_missing_directory(
             start_directory=str(tmp_path / "absent"),
             socket_name=mcp_server.socket_name,
         )
+
+
+#: Text exercising each way a tmux format rewrites an argument: a
+#: single-character alias, a variable, and a command job.
+FORMAT_BEARING_NAMES = ["plain", "host#Hname", "sess#Sname", "job#(id)"]
+
+
+@pytest.mark.parametrize("text", FORMAT_BEARING_NAMES)
+def test_rename_session_stores_the_name_given(
+    mcp_server: Server,
+    mcp_session: Session,
+    text: str,
+) -> None:
+    """``tmux rename-session`` expands its argument; the stored name matches."""
+    from libtmux_mcp.tools.session_tools import rename_session
+
+    renamed = rename_session(
+        new_name=text,
+        session_id=mcp_session.session_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert renamed.session_name == text
+
+
+@pytest.mark.parametrize("text", FORMAT_BEARING_NAMES)
+def test_rename_window_stores_the_name_given(
+    mcp_server: Server,
+    mcp_window: Window,
+    text: str,
+) -> None:
+    """``tmux rename-window`` expands its argument; the stored name matches."""
+    from libtmux_mcp.tools.window_tools import rename_window
+
+    renamed = rename_window(
+        new_name=text,
+        window_id=mcp_window.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert renamed.window_name == text
+
+
+@pytest.mark.parametrize("text", FORMAT_BEARING_NAMES)
+def test_set_pane_title_stores_the_title_given(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    text: str,
+) -> None:
+    """``tmux select-pane -T`` expands its argument; the stored title matches."""
+    from libtmux_mcp.tools.pane_tools import set_pane_title
+
+    set_pane_title(
+        title=text,
+        pane_id=t.cast("str", mcp_pane.pane_id),
+        socket_name=mcp_server.socket_name,
+    )
+
+    mcp_pane.refresh()
+    assert mcp_pane.pane_title == text
+
+
+def test_set_option_stores_the_option_named(
+    mcp_server: Server,
+    mcp_session: Session,
+) -> None:
+    """``set-option`` and ``show-options`` both expand the option name."""
+    from libtmux_mcp.tools.option_tools import set_option
+
+    name = "@probe#Hopt"
+    set_option(
+        option=name,
+        value="1",
+        global_=True,
+        socket_name=mcp_server.socket_name,
+    )
+
+    stored = mcp_server.cmd("show-options", "-g").stdout
+    assert any(line.startswith(f"{name} ") for line in stored), stored
+
+
+@pytest.mark.parametrize("text", FORMAT_BEARING_NAMES)
+def test_create_session_stores_the_names_given(
+    mcp_server: Server,
+    text: str,
+) -> None:
+    """``new-session`` expands both ``-s`` and ``-n``."""
+    created = create_session(
+        session_name=text,
+        window_name=text,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert created.session_name == text
+    session = mcp_server.sessions.get(session_id=created.session_id)
+    assert session is not None
+    assert session.active_window.window_name == text
+
+
+@pytest.mark.parametrize("text", FORMAT_BEARING_NAMES)
+def test_create_window_stores_the_name_given(
+    mcp_server: Server,
+    mcp_session: Session,
+    text: str,
+) -> None:
+    """``new-window`` expands ``-n``."""
+    created = create_window(
+        session_id=mcp_session.session_id,
+        window_name=text,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert created.window_name == text

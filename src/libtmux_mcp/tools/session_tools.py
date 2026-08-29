@@ -19,6 +19,7 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
     _prepare_start_directory,
@@ -170,7 +171,7 @@ def create_window(
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
     if window_name is not None:
-        kwargs["window_name"] = window_name
+        kwargs["window_name"] = _escape_tmux_format(window_name)
     prepared_start_directory = _prepare_start_directory(start_directory)
     if prepared_start_directory is not None:
         kwargs["start_directory"] = prepared_start_directory
@@ -222,7 +223,7 @@ def rename_session(
     """
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
-    session = session.rename_session(new_name)
+    session = session.rename_session(_escape_tmux_format(new_name))
     return _serialize_session(session)
 
 

@@ -8,6 +8,7 @@ from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _caller_is_on_server,
+    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
     _prepare_start_directory,
@@ -217,7 +218,7 @@ def set_pane_title(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.set_title(title)
+    pane.set_title(_escape_tmux_format(title))
     return _serialize_pane(pane)
 
 

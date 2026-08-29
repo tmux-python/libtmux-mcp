@@ -12,6 +12,7 @@ from libtmux_mcp._utils import (
     TAG_MUTATING,
     TAG_READONLY,
     ExpectedToolError,
+    _escape_tmux_format,
     _get_server,
     _resolve_pane,
     _resolve_session,
@@ -94,7 +95,9 @@ def show_option(
         Option name and its value.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
-    value = obj.show_option(option, global_=global_, scope=opt_scope)
+    value = obj.show_option(
+        _escape_tmux_format(option), global_=global_, scope=opt_scope
+    )
     return OptionResult(option=option, value=value)
 
 
@@ -135,7 +138,7 @@ def set_option(
         Confirmation with option name, value, and status.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
-    obj.set_option(option, value, global_=global_, scope=opt_scope)
+    obj.set_option(_escape_tmux_format(option), value, global_=global_, scope=opt_scope)
     return OptionSetResult(option=option, value=value, status="set")
 
 

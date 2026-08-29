@@ -200,6 +200,15 @@ def search_panes(
     SearchPanesResult
         Paginated match list with ``truncated`` / ``truncated_panes``
         / ``total_panes_matched`` / ``offset`` / ``limit`` fields.
+
+    Raises
+    ------
+    ExpectedToolError
+        If ``pattern`` does not compile, or if matching it against the
+        captured lines exceeds ``SEARCH_MATCH_MAX_SECONDS`` in total. A
+        pattern with nested quantifiers such as ``(a+)+`` can backtrack
+        for hours on one ordinary line; anchor it or search for a
+        literal.
     """
     search_pattern = pattern if regex else regex_engine.escape(pattern)
     flags = 0 if match_case else regex_engine.IGNORECASE
