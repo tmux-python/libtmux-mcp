@@ -116,7 +116,7 @@ Mitigations:
 
 Mitigations:
 
-- The server audit record replaces the `value` argument with a `{len, sha256_prefix}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
+- The server audit record replaces the `value` argument with a `{len, sha256_prefix}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. The digest is keyed with a random per-process secret: identical payloads correlate across lines within one server run, and someone reading the log cannot test a guess against it. (An unkeyed hash would not be enough — a recorded length fixes the search space, and a four-digit PIN was recovered from such an entry in 25 ms.) That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
 - If only a single command needs a non-sensitive env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child. For credentials, pass a reference that the child resolves instead of a literal value through tmux.
 
 ### Respawning panes

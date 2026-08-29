@@ -28,7 +28,9 @@ Provides the project's middleware infrastructure, in definition order:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
+import secrets
 import time
 import typing as t
 
@@ -666,23 +668,42 @@ _SEND_KEYS_OPERATION_ARG_TYPES: dict[str, tuple[type[t.Any], ...]] = {
 _MAX_LOGGED_STR_LEN: int = 200
 
 
-def _redact_digest(value: str) -> dict[str, t.Any]:
-    """Return a length + SHA-256 prefix summary of ``value``.
+#: Keyed per PROCESS, not per payload. A plain SHA-256 beside an exact
+#: length is reversible for anything short: the length fixes the search
+#: space, so ``{'len': 4, ...}`` for a PIN typed into a pane was
+#: recovered by brute force in 25 ms from the audit record alone. The
+#: values named sensitive are sensitive precisely because agents type
+#: PINs, 2FA codes and short confirmations into panes.
+#:
+#: Correlation was the point of a deterministic digest and it survives:
+#: identical payloads still match within a server run, which is the
+#: scope an operator reads a log at. What is lost is correlation ACROSS
+#: runs, and what is gained is that a log reader cannot test a guess.
+_REDACTION_KEY: bytes = secrets.token_bytes(32)
 
-    The digest is stable and deterministic, which lets operators
-    correlate the same payload across log lines without ever recording
-    the payload itself.
+
+def _redact_digest(value: str) -> dict[str, t.Any]:
+    """Return a length + keyed-digest summary of ``value``.
+
+    Stable within one server run, so operators can correlate the same
+    payload across log lines. NOT reproducible from the payload alone —
+    see :data:`_REDACTION_KEY` for why that matters.
 
     Examples
     --------
-    >>> _redact_digest("hello")
-    {'len': 5, 'sha256_prefix': '2cf24dba5fb0'}
-    >>> _redact_digest("")
-    {'len': 0, 'sha256_prefix': 'e3b0c44298fc'}
+    >>> summary = _redact_digest("hello")
+    >>> summary["len"], len(summary["sha256_prefix"])
+    (5, 12)
+    >>> _redact_digest("hello") == summary  # correlates within the run
+    True
+    >>> _redact_digest("hellp") == summary  # and only for equal payloads
+    False
     """
     return {
         "len": len(value),
-        "sha256_prefix": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12],
+        "sha256_prefix": hmac.new(
+            _REDACTION_KEY, value.encode("utf-8"), hashlib.sha256
+        ).hexdigest()[:12],
     }
 
 

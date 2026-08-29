@@ -320,11 +320,28 @@ def test_safety_denies_tool_with_no_tier_tag() -> None:
 
 
 def test_redact_digest_shape() -> None:
-    """_redact_digest reports length and a 12-char sha256 prefix."""
+    """The digest correlates within a run and is not reversible from it.
+
+    A plain SHA-256 beside an exact length is reversible for anything
+    short, because the length fixes the search space: a four-digit PIN
+    typed into a pane was recovered from its audit entry by brute force
+    in 25 ms. The values named sensitive are sensitive precisely because
+    agents type PINs, 2FA codes and short confirmations into panes.
+
+    Correlation is the reason the digest is deterministic and it
+    survives -- the key is per PROCESS, not per payload, so equal
+    payloads still match within the run an operator reads a log at.
+    """
     payload = "rm -rf /"
     digest = _redact_digest(payload)
     assert digest["len"] == len(payload)
-    assert digest["sha256_prefix"] == hashlib.sha256(payload.encode()).hexdigest()[:12]
+    assert len(digest["sha256_prefix"]) == 12
+
+    # Keyed: a log reader who knows the payload cannot reproduce the
+    # entry, which is what makes guessing untestable.
+    assert digest["sha256_prefix"] != hashlib.sha256(payload.encode()).hexdigest()[:12]
+    assert _redact_digest(payload) == digest, "must correlate within the run"
+    assert _redact_digest("rm -rf .") != digest, "distinct payloads must differ"
 
 
 def test_summarize_args_redacts_sensitive_keys() -> None:
@@ -2093,10 +2110,16 @@ def test_a_sensitive_list_is_redacted_whatever_its_items_are() -> None:
         }
     )
 
-    rendered = str(summary["patterns"])
-    for leaked in ("secret-text", "42", "True", "None"):
-        assert leaked not in rendered, f"{leaked!r} survived redaction"
-    assert len(summary["patterns"]) == 4, "items must not be dropped"
+    # Asserted structurally, not by substring. The digest is a random
+    # 12-char hex string, and a short needle like "42" turns up inside
+    # one often enough to fail a few runs in a hundred -- a test that
+    # goes red for the reason it is checking against is worse than none.
+    items = summary["patterns"]
+    assert len(items) == 4, "items must not be dropped"
+    for original, redacted in zip(["secret-text", 42, True, None], items, strict=True):
+        assert isinstance(redacted, dict), f"{original!r} passed through raw"
+        assert set(redacted) == {"len", "sha256_prefix"}
+        assert redacted["len"] == len(str(original))
     # Control: a non-sensitive argument is still readable, so "absent"
     # above means redacted rather than "there is no summary".
     assert summary["format_string"] == "#{pane_id}"
