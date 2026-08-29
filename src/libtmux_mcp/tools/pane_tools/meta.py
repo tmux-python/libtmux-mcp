@@ -176,6 +176,10 @@ def snapshot_pane(
         "#{pane_pid}",
         "#{pane_dead}",
         "#{alternate_on}",
+        "#{session_id}",
+        "#{window_id}",
+        "#{pane_index}",
+        "#{pane_active}",
     ]
     fmt = _SEP.join(_FMT_VARS)
     stdout = pane.display_message(fmt, get_text=True)
@@ -183,41 +187,53 @@ def snapshot_pane(
     # Pad defensively to guarantee one slot per format var even if tmux
     # drops an unknown variable on older versions.
     parts = (raw.split(_SEP) + [""] * len(_FMT_VARS))[: len(_FMT_VARS)]
+    # Keyed by name, not position. Positional indexing here silently
+    # shifted every field below an inserted format var -- measured, a
+    # newly added #{session_id} read back the pane index.
+    values = {name[2:-1]: part for name, part in zip(_FMT_VARS, parts, strict=False)}
 
     raw_lines = pane.capture_pane()
     kept_lines, truncated, dropped = _truncate_lines_tail(raw_lines, max_lines)
     content = "\n".join(kept_lines)
 
-    pane_in_mode = parts[4] == "1"
-    pane_mode_raw = parts[5]
-    scroll_raw = parts[6]
+    pane_in_mode = values["pane_in_mode"] == "1"
+    pane_mode_raw = values["pane_mode"]
+    scroll_raw = values["scroll_position"]
 
     return PaneSnapshot(
         pane_id=pane.pane_id or "",
+        session_id=values["session_id"] or None,
+        window_id=values["window_id"] or None,
+        pane_index=values["pane_index"] or None,
+        pane_active=_coerce_bool(values["pane_active"]),
         content=content,
-        cursor_x=int(parts[0]) if parts[0] else 0,
-        cursor_y=int(parts[1]) if parts[1] else 0,
-        pane_width=int(parts[2]) if parts[2] else 0,
-        pane_height=int(parts[3]) if parts[3] else 0,
+        cursor_x=int(values["cursor_x"]) if values["cursor_x"] else 0,
+        cursor_y=int(values["cursor_y"]) if values["cursor_y"] else 0,
+        pane_width=int(values["pane_width"]) if values["pane_width"] else 0,
+        pane_height=int(values["pane_height"]) if values["pane_height"] else 0,
         pane_in_mode=pane_in_mode,
         pane_mode=pane_mode_raw if pane_mode_raw else None,
         scroll_position=int(scroll_raw) if scroll_raw else None,
-        history_size=int(parts[7]) if parts[7] else 0,
-        title=parts[8] if parts[8] else None,
-        pane_current_command=parts[9] if parts[9] else None,
-        pane_current_path=parts[10] if parts[10] else None,
-        pane_left=_coerce_int(parts[11]),
-        pane_top=_coerce_int(parts[12]),
-        pane_right=_coerce_int(parts[13]),
-        pane_bottom=_coerce_int(parts[14]),
-        pane_at_left=_coerce_bool(parts[15]),
-        pane_at_right=_coerce_bool(parts[16]),
-        pane_at_top=_coerce_bool(parts[17]),
-        pane_at_bottom=_coerce_bool(parts[18]),
-        pane_tty=parts[19] if parts[19] else None,
-        pane_pid=parts[20] if parts[20] else None,
-        pane_dead=_coerce_bool(parts[21]),
-        alternate_on=_coerce_bool(parts[22]),
+        history_size=int(values["history_size"]) if values["history_size"] else 0,
+        title=values["pane_title"] if values["pane_title"] else None,
+        pane_current_command=values["pane_current_command"]
+        if values["pane_current_command"]
+        else None,
+        pane_current_path=values["pane_current_path"]
+        if values["pane_current_path"]
+        else None,
+        pane_left=_coerce_int(values["pane_left"]),
+        pane_top=_coerce_int(values["pane_top"]),
+        pane_right=_coerce_int(values["pane_right"]),
+        pane_bottom=_coerce_int(values["pane_bottom"]),
+        pane_at_left=_coerce_bool(values["pane_at_left"]),
+        pane_at_right=_coerce_bool(values["pane_at_right"]),
+        pane_at_top=_coerce_bool(values["pane_at_top"]),
+        pane_at_bottom=_coerce_bool(values["pane_at_bottom"]),
+        pane_tty=values["pane_tty"] if values["pane_tty"] else None,
+        pane_pid=values["pane_pid"] if values["pane_pid"] else None,
+        pane_dead=_coerce_bool(values["pane_dead"]),
+        alternate_on=_coerce_bool(values["alternate_on"]),
         is_caller=_compute_is_caller(pane),
         content_truncated=truncated,
         content_truncated_lines=dropped,

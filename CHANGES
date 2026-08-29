@@ -8,6 +8,32 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `snapshot_pane` reports which session and window the pane is in
+
+The server instructions recommend `snapshot_pane` over `capture_pane` +
+`get_pane_info`. That substitution was lossy: `session_id`,
+`window_id`, `pane_index` and `pane_active` existed only on the
+latter, so an agent following the recommendation could not learn where
+a pane is.
+
+That contradicted the other thing this branch shipped. `break_pane` can
+move a pane to a different SESSION, the docstring now warns about it,
+and the natural way to check afterwards is a snapshot -- which could
+not answer.
+
+The parse was positional, so adding four format variables shifted every
+field below them: `session_id` read back the pane index, `window_id`
+read the session, and so on for every existing field. Caught by
+checking against raw tmux rather than against the model. Fields are
+keyed by NAME now, so an inserted variable cannot shift anything, and
+the test compares each one against `display-message` output.
+
+`pane_title` is exposed here as `title`. Same tmux format, two names
+across two models; left alone because renaming is a breaking model
+change, and the test states the mapping rather than leaving it as a
+trap.
+
+
 #### The audit log redacted a secret going in and logged it coming out
 
 `set_environment(value=...)` is digested. The natural next step --

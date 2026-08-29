@@ -1974,6 +1974,40 @@ def test_run_command_reports_a_command_that_never_ran(
     assert not any(marker in line for line in mcp_pane.capture_pane())
 
 
+def test_snapshot_pane_reports_its_location(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """The snapshot must say which session and window the pane is in.
+
+    The server instructions recommend this tool over ``capture_pane`` +
+    ``get_pane_info``, and without these the substitution cannot answer
+    where a pane ended up -- which ``break_pane`` can change.
+
+    Checked against raw tmux rather than against the model, because the
+    fields were parsed BY POSITION and inserting a format var silently
+    shifted every field below it: a newly added ``session_id`` read back
+    the pane index. They are keyed by name now.
+    """
+    window = mcp_session.active_window
+    pane = window.active_pane
+    assert pane is not None
+    window.split()
+
+    snapshot = snapshot_pane(pane_id=pane.pane_id, socket_name=mcp_server.socket_name)
+    fields = ("session_id", "window_id", "pane_index", "pane_active", "pane_title")
+    raw = pane.display_message(
+        "|".join(f"#{{{name}}}" for name in fields), get_text=True
+    )[0].split("|")
+
+    assert snapshot.session_id == raw[0]
+    assert snapshot.window_id == raw[1]
+    assert snapshot.pane_index == raw[2]
+    assert snapshot.pane_active is (raw[3] == "1")
+    # Exposed as ``title`` here and ``pane_title`` on PaneInfo -- same
+    # tmux format, two names.
+    assert snapshot.title == raw[4]
+
+
 def test_run_command_refuses_a_pane_in_copy_mode(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -2418,7 +2452,7 @@ def test_capture_since_does_not_block_event_loop(
 
     monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
 
-    async def _drive() -> int:
+    async def _drive() -> tuple[int, float]:
         ticks = 0
         stop = asyncio.Event()
 
@@ -2437,12 +2471,24 @@ def test_capture_since_does_not_block_event_loop(
             finally:
                 stop.set()
 
+        started = _time.monotonic()
         await asyncio.gather(_ticker(), _capture())
-        return ticks
+        return ticks, _time.monotonic() - started
 
-    ticks = asyncio.run(_drive())
-    assert ticks >= 8, (
-        f"ticker advanced only {ticks} times — capture_since is blocking the event loop"
+    ticks, elapsed = asyncio.run(_drive())
+
+    # The capture really was slow, so the ticker had time to run.
+    assert elapsed >= 0.15, (
+        f"capture finished in {elapsed:.3f}s; the stub did not apply"
+    )
+    # A blocked loop yields EXACTLY one tick however long the block
+    # lasts: the ticker runs once, awaits, and cannot be resumed until
+    # the blocking call returns. Counting to a larger number instead
+    # assumed the loop ticks at ~100 Hz, which parallel load breaks --
+    # measured, this failed at 1 tick short of an arbitrary 8.
+    assert ticks >= 2, (
+        f"ticker advanced only {ticks} times in {elapsed:.3f}s — "
+        "capture_since is blocking the event loop"
     )
 
 

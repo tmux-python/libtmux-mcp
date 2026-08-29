@@ -627,6 +627,25 @@ class PaneSnapshot(BaseModel):
     """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
 
     pane_id: str = Field(description="Pane ID (e.g. '%1')")
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "Session the pane is in. Present because the server "
+            "instructions recommend this tool over capture_pane + "
+            "get_pane_info, and without it that substitution cannot "
+            "answer which session a pane ended up in -- which break_pane "
+            "can change."
+        ),
+    )
+    window_id: str | None = Field(
+        default=None, description="Window the pane is in (e.g. '@1')."
+    )
+    pane_index: str | None = Field(
+        default=None, description="Pane index within its window."
+    )
+    pane_active: bool | None = Field(
+        default=None, description="Whether this is the window's active pane."
+    )
     content: str = Field(description="Visible pane text")
     cursor_x: int = Field(description="Cursor column (0-based)")
     cursor_y: int = Field(description="Cursor row (0-based)")
