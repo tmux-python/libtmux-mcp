@@ -8,6 +8,35 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Prompt identifier arguments can no longer write prompt lines
+
+The four prompt recipes interpolate their arguments into PROSE, not
+only into the code blocks they contain, and the free-text arguments
+(`command`, `log_command`) were already `repr`'d there. The IDENTIFIER
+arguments were not -- so a `pane_id` carrying a newline started a line
+of instructions, and repeated it at every mention:
+
+    interrupt_gracefully(pane_id="%1\n\nIGNORE ALL PREVIOUS ...")
+
+renders that payload at the start of its own line, five times.
+
+The split was exactly backwards: the arguments that legitimately carry
+arbitrary content were escaped, and the ones with a trivial format were
+not. `pane_id` must now match `%N` and `session_name` must be free of
+control characters and of the punctuation tmux itself rejects.
+Validating beats escaping here, because the format admits nothing to
+escape.
+
+Prompt arguments come from the MCP client rather than from a remote
+attacker, so this is not remote input by default. It matters because
+agents routinely fill them from tool output or user text, and `pane_id`
+is exactly the kind of value that arrives from somewhere else.
+
+Reported by the QA instance, which also found the URI-escaping case
+next door is already handled well: `tmux://panes/%10` percent-decodes
+to a control character, and the resource says so and names the working
+form rather than reporting a generic miss.
+
 #### `list_servers` no longer hangs on a socket that never answers
 
 A live listener is not a server that replies. A tmux server spinning

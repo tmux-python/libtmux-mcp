@@ -265,8 +265,12 @@ def paste_buffer(
         :func:`~libtmux_mcp.tools.buffer_tools.load_buffer`.
         Non-MCP buffers are rejected so the tool cannot be turned into
         an arbitrary-buffer reader.
-    pane_id : str, optional
-        Target pane ID.
+    pane_id : str
+        Target pane ID (e.g. '%1'). One of pane_id / session_id /
+        session_name / window_id is REQUIRED: this tool delivers input,
+        so it will not pick a pane for you. ``list_panes`` finds one,
+        and ``create_session`` / ``create_window`` / ``split_window``
+        return the new pane's id directly.
     bracket : bool
         Use tmux bracketed paste mode. Default True.
     session_name, session_id, window_id : optional

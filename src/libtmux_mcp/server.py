@@ -74,7 +74,7 @@ _ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 _INSTR_HIERARCHY = (
     "libtmux MCP server for tmux. "
     "tmux hierarchy: Server > Session > Window > Pane. "
-    "Prefer pane_id (e.g. '%1') for targeting. "
+    "Target with pane_id (e.g. '%1'); input tools require one. "
     "Targeted tmux tools accept socket_name (defaults to LIBTMUX_SOCKET); "
     "list_servers discovers sockets via TMUX_TMPDIR plus extra_socket_paths."
 )
@@ -124,8 +124,7 @@ _INSTR_HOOKS_GAP = (
 #: buffers can include OS clipboard history. See module comment above.
 _INSTR_BUFFERS_GAP = (
     "BUFFERS: load_buffer stages, paste_buffer delivers, delete_buffer "
-    "removes via returned BufferRef. No list_buffers: tmux buffers may include "
-    "clipboard history."
+    "removes by BufferRef. No list_buffers: they may hold clipboard history."
 )
 
 _BASE_INSTRUCTIONS = (

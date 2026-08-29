@@ -497,7 +497,11 @@ class SendKeysOperation(BaseModel):
     keys: str = Field(description="Keys or text to send.")
     pane_id: str | None = Field(
         default=None,
-        description="Pane ID (e.g. '%1').",
+        description=(
+            "Pane ID (e.g. '%1'). Each operation must name its own target "
+            "-- one of pane_id / session_id / session_name / window_id -- "
+            "and is refused individually if it does not."
+        ),
     )
     session_name: str | None = Field(
         default=None,

@@ -10,6 +10,58 @@ recipes. Keep the set small and deliberate.
 
 from __future__ import annotations
 
+import re
+
+#: A tmux pane id is ``%`` followed by digits and nothing else, so a
+#: value that is not one cannot name a pane.
+_PANE_ID_RE = re.compile(r"^%\d+$")
+
+#: Characters a renderer treats as structure rather than as a name.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _validated_pane_id(value: str) -> str:
+    """Return *value* if it is a pane id, else refuse.
+
+    Prompt arguments are interpolated into PROSE, not only into the
+    code blocks, and the free-text arguments are already ``repr``'d
+    there. The identifier arguments were not -- so a ``pane_id``
+    carrying a newline put its own text at the start of a line of
+    instructions, and repeated it at every mention. The split was
+    backwards: the arguments that legitimately carry arbitrary content
+    were escaped, and the ones with a trivial format were not.
+
+    Validating beats escaping here because the format admits nothing to
+    escape.
+    """
+    if not _PANE_ID_RE.match(value):
+        msg = (
+            f"pane_id must look like '%1' (got {value!r}). Prompt text is "
+            "rendered as instructions, so a value that is not a pane id "
+            "would be read as part of them."
+        )
+        raise ValueError(msg)
+    return value
+
+
+def _validated_session_name(value: str) -> str:
+    """Return *value* if it can name a session, else refuse.
+
+    Looser than :func:`_validated_pane_id`, because session names are
+    nearly free-form. The line is drawn at characters that would
+    restructure the rendered text rather than name anything; tmux
+    itself refuses ``:`` and ``.``.
+    """
+    if not value or _CONTROL_RE.search(value) or {":", "."} & set(value):
+        msg = (
+            f"session_name may not be empty or contain control characters, "
+            f"':' or '.' (got {value!r}). tmux rejects the punctuation, and "
+            "prompt text is rendered as instructions, so a newline would "
+            "start a line of them."
+        )
+        raise ValueError(msg)
+    return value
+
 
 def run_and_wait(
     command: str,
@@ -34,6 +86,7 @@ def run_and_wait(
     timeout : float
         Maximum seconds to wait for command completion. Default 60.
     """
+    pane_id = _validated_pane_id(pane_id)
     multiline = "\n" in command or "\r" in command
     history_argument = "    suppress_history=False,\n" if multiline else ""
     history_warning = (
@@ -85,6 +138,7 @@ def diagnose_failing_pane(pane_id: str) -> str:
     pane_id : str
         The pane to diagnose.
     """
+    pane_id = _validated_pane_id(pane_id)
     return f"""Something went wrong in tmux pane {pane_id}. Diagnose it:
 
 1. Call `snapshot_pane(pane_id="{pane_id}")` to get content,
@@ -119,6 +173,7 @@ def build_dev_workspace(
         paths. Pass e.g. ``"tail -f /var/log/syslog"`` on Linux or
         ``"log stream --level info"`` on macOS.
     """
+    session_name = _validated_session_name(session_name)
     return f"""Set up a 3-pane development workspace named
 {session_name!r} with editor on top, a shell on the bottom-left, and
 a logs tail on the bottom-right:
@@ -165,6 +220,7 @@ def interrupt_gracefully(pane_id: str) -> str:
     pane_id : str
         Target pane.
     """
+    pane_id = _validated_pane_id(pane_id)
     return f"""Interrupt whatever is running in pane {pane_id} and
 verify that control returns to the shell:
 

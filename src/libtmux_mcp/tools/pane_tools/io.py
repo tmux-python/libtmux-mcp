@@ -346,8 +346,12 @@ def send_keys(
     ----------
     keys : str
         The keys or text to send.
-    pane_id : str, optional
-        Pane ID (e.g. '%1').
+    pane_id : str
+        Pane ID (e.g. '%1'). One of pane_id / session_id / session_name /
+        window_id is REQUIRED: this tool delivers input, so it will not
+        pick a pane for you. ``list_panes`` finds one, and
+        ``create_session`` / ``create_window`` / ``split_window`` return
+        the new pane's id directly.
     session_name : str, optional
         Session name for pane resolution.
     session_id : str, optional
@@ -420,7 +424,11 @@ def send_keys_batch(
     Parameters
     ----------
     operations : list of SendKeysOperation
-        Ordered raw-input operations to send.
+        Ordered raw-input operations to send. Each one must name its own
+        target -- pane_id / session_id / session_name / window_id -- and
+        is refused individually if it does not, so one untargeted entry
+        among targeted ones fails alone rather than being sent somewhere
+        arbitrary.
     on_error : {"stop", "continue"}
         Whether to stop at the first failed operation or keep attempting
         later operations. Default "stop".
@@ -609,8 +617,12 @@ async def run_command(
         Shell command to run in the target pane. Single-line only: join
         with ``'; '``, or use ``send_keys``/``paste_text`` for raw
         multi-line input.
-    pane_id : str, optional
-        Pane ID (e.g. '%1').
+    pane_id : str
+        Pane ID (e.g. '%1'). One of pane_id / session_id / session_name /
+        window_id is REQUIRED: this tool delivers input, so it will not
+        pick a pane for you. ``list_panes`` finds one, and
+        ``create_session`` / ``create_window`` / ``split_window`` return
+        the new pane's id directly.
     session_name : str, optional
         Session name for pane resolution.
     session_id : str, optional
@@ -1134,8 +1146,12 @@ def paste_text(
     ----------
     text : str
         The text to paste.
-    pane_id : str, optional
-        Pane ID (e.g. '%1').
+    pane_id : str
+        Pane ID (e.g. '%1'). One of pane_id / session_id / session_name /
+        window_id is REQUIRED: this tool delivers input, so it will not
+        pick a pane for you. ``list_panes`` finds one, and
+        ``create_session`` / ``create_window`` / ``split_window`` return
+        the new pane's id directly.
     bracket : bool
         Whether to use bracketed paste mode. Default True.
         Bracketed paste wraps the text in escape sequences that tell
