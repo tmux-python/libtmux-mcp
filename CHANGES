@@ -116,6 +116,18 @@ one cannot empty it.
 over it: moving a session's last window elsewhere destroyed that
 session and the result named only the destination. Also refused.
 
+The audit covered all 33 tools at that tier. `select_layout`,
+`resize_window`, `clear_pane` and `set_pane_title` leave every count
+unchanged. Two routes remain open by construction and are recorded
+rather than guarded: `send_keys` and `run_command` can type `exit`,
+which is inherent to sending input, and `respawn_pane` with a command
+that exits immediately kills the pane -- and its window and session if
+it was the last. `respawn_pane` already refuses and names that cascade,
+so the consequence is disclosed; closing it would mean either refusing
+every respawn on a single-pane server or predicting that a command will
+exit, which tmux only reveals afterwards. Whether that tool belongs at
+`destructive` is a decision about what the tier permits.
+
 `join_pane` reports whether the move DESTROYED the source window.
 tmux removes a window left with no panes, so consolidating panes
 deletes windows the caller never named -- measured, moving the last
