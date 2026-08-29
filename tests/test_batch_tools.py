@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import typing as t
 
 import pytest
+from fastmcp import Client
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
@@ -573,3 +575,66 @@ def test_batch_wrappers_advertise_worst_case_annotations(
     assert wire_annotations(tool).get("destructiveHint") is destructive_hint
     assert wire_annotations(tool).get("idempotentHint") is idempotent_hint
     assert wire_annotations(tool).get("openWorldHint") is open_world_hint
+
+
+def test_batch_honours_an_aggregate_timeout() -> None:
+    """A batch had no deadline, and a client that gives up does not stop it.
+
+    The cap is 1000 operations, and 1000 mutations measured 67 seconds:
+    a window in which the caller can be gone and the work keeps landing.
+    A loop-level deadline is enough here, unlike a caller-supplied regex
+    -- the time is genuinely in this loop, between operations.
+
+    The stopped_at index has to match what actually ran, or the report
+    is the more dangerous half of the bug.
+    """
+    ran: list[int] = []
+
+    mcp = _batch_probe_server()
+
+    @mcp.tool(title="Slow Probe", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})
+    def slow_probe(index: int) -> dict[str, int]:
+        ran.append(index)
+        time.sleep(0.02)
+        return {"index": index}
+
+    operations = [{"tool": "slow_probe", "arguments": {"index": i}} for i in range(50)]
+
+    async def _exercise() -> t.Any:
+        async with Client(mcp) as client:
+            return await client.call_tool(
+                "call_readonly_tools_batch",
+                {"operations": operations, "on_error": "continue", "timeout": 0.2},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_exercise())
+    assert result.is_error is False
+    data = result.data
+    assert data.stopped_at is not None, "the deadline never fired"
+    assert data.stopped_at < len(operations), "nothing was actually skipped"
+    assert len(ran) == data.stopped_at, (
+        f"reported stopping at {data.stopped_at} but ran {len(ran)} operations"
+    )
+    assert "exceeded timeout" in (data.results[-1].error or "")
+
+
+def test_batch_rejects_a_nonpositive_timeout() -> None:
+    """Zero is not "no cap"; null is. A silent no-op cap is the worse read."""
+
+    async def _exercise() -> t.Any:
+        async with Client(_batch_probe_server()) as client:
+            return await client.call_tool(
+                "call_readonly_tools_batch",
+                {
+                    "operations": [
+                        {"tool": "readonly_probe", "arguments": {"value": "x"}}
+                    ],
+                    "timeout": 0,
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_exercise())
+    assert result.is_error is True
+    assert "timeout must be positive" in result.content[0].text

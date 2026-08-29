@@ -265,8 +265,12 @@ async def _call_tools_batch(
     on_error: _OnError,
     max_tier: str,
     ctx: Context | None,
+    timeout: float | None = None,
 ) -> ToolCallBatchResult:
     """Execute nested MCP tool calls serially through FastMCP."""
+    if timeout is not None and timeout <= 0:
+        msg = f"timeout must be positive, or null for no cap (received {timeout})"
+        raise ExpectedToolError(msg)
     if not operations:
         msg = "operations must contain at least one tool call"
         raise ExpectedToolError(msg)
@@ -282,7 +286,30 @@ async def _call_tools_batch(
 
     results: list[ToolCallOperationResult] = []
     stopped_at: int | None = None
+    deadline = time.monotonic() + timeout if timeout is not None else None
     for index, operation in enumerate(operations):
+        # Checked BETWEEN operations, which is enough here and would not
+        # have been for a caller-supplied regex: the time is genuinely
+        # in this loop. A thousand operations is the cap and a thousand
+        # mutations took 67 seconds, and a client that gives up does not
+        # stop the server -- 617 further mutations landed after the
+        # caller was gone, with no report of where it stopped.
+        if deadline is not None and time.monotonic() > deadline:
+            assert timeout is not None
+            results.append(
+                ToolCallOperationResult(
+                    index=index,
+                    tool=operation.tool,
+                    success=False,
+                    error=(
+                        f"batch execution exceeded timeout of {timeout}s; "
+                        "operations from this index onward did not run"
+                    ),
+                    elapsed_seconds=0.0,
+                )
+            )
+            stopped_at = index
+            break
         result = await _call_one_tool(
             fastmcp=ctx.fastmcp,
             operation=operation,
@@ -310,6 +337,7 @@ async def _call_tools_batch(
 async def call_readonly_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    timeout: float | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
     """Call readonly MCP tools serially and return per-tool results.
@@ -327,10 +355,16 @@ async def call_readonly_tools_batch(
     operations are individually expensive: a mixed read of
     ``get_pane_info`` + ``list_panes`` + ``show_option`` + ``capture_pane``
     measured 65 ms batched against 120 ms serial.
+
+    ``timeout`` bounds the WHOLE batch, checked between operations.
+    Without it a batch runs to completion, and the cap is 1000 calls:
+    a client that gives up does not stop the server, so the work keeps
+    applying after the caller is gone.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
+        timeout=timeout,
         max_tier=TAG_READONLY,
         ctx=ctx,
     )
@@ -340,6 +374,7 @@ async def call_readonly_tools_batch(
 async def call_mutating_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    timeout: float | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
     """Call readonly or mutating MCP tools serially and return per-tool results.
@@ -347,10 +382,16 @@ async def call_mutating_tools_batch(
     Use for ordered tmux workflows where every step is still an existing
     typed MCP tool. Destructive tools are rejected regardless of the
     process-wide safety tier.
+
+    ``timeout`` bounds the WHOLE batch, checked between operations.
+    Without it a batch runs to completion, and the cap is 1000 calls:
+    a client that gives up does not stop the server, so the work keeps
+    applying after the caller is gone.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
+        timeout=timeout,
         max_tier=TAG_MUTATING,
         ctx=ctx,
     )
@@ -360,6 +401,7 @@ async def call_mutating_tools_batch(
 async def call_destructive_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    timeout: float | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
     """Call readonly, mutating, or destructive MCP tools serially.
@@ -367,10 +409,16 @@ async def call_destructive_tools_batch(
     This wrapper preserves the normal per-tool schemas and middleware
     but its tier permits destructive nested operations. Prefer the
     narrower readonly or mutating wrappers whenever possible.
+
+    ``timeout`` bounds the WHOLE batch, checked between operations.
+    Without it a batch runs to completion, and the cap is 1000 calls:
+    a client that gives up does not stop the server, so the work keeps
+    applying after the caller is gone.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
+        timeout=timeout,
         max_tier=TAG_DESTRUCTIVE,
         ctx=ctx,
     )

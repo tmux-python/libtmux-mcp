@@ -21,6 +21,34 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### The tool batches take a `timeout`
+
+`call_readonly_tools_batch`, `call_mutating_tools_batch` and
+`call_destructive_tools_batch` took only `operations` and `on_error`.
+The cap is 1000 operations and 1000 is not cheap:
+
+    100 ops    4.2s
+   1000 ops   67.0s     <- inside the cap, nothing a caller could bound
+   5000 ops   refused
+
+A client that gives up does not stop the server: killing the caller
+five seconds into a 1000-operation mutating batch left it running, and
+617 further mutations landed on the user's tmux server after the caller
+was gone, with no report of where it stopped.
+
+Checked between operations, which suffices here and would not have for
+a caller-supplied regex -- the time is genuinely in this loop. The
+report and the state agree: at `timeout=1.0` a 400-operation batch
+stopped at index 78 and the pane's own counter read 0077, so nothing
+ran past the index it named. `timeout=0` is refused rather than read as
+"no cap"; `null` means no cap.
+
+`send_keys_batch` already carried this parameter, which is the same
+in-tree precedent that settled the target and spawn-argument questions.
+
+Reported by the QA instance, which measured both the cost curve and the
+orphaned work.
+
 #### Prompt identifier arguments can no longer write prompt lines
 
 The four prompt recipes interpolate their arguments into PROSE, not
