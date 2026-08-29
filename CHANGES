@@ -2452,6 +2452,30 @@ unusual entry shape.
 
 ### Development
 
+**Which mutation falsifies which assertion**
+
+"The test failed when I broke it" is a claim about the mutation
+chosen, not about the test. A multi-assertion test needs one mutation
+per line, because the first failing assertion stops the test and the
+lines after it are never reached.
+
+Shown on `kill_server`'s refusal test by the QA instance: disabling
+the guard falsifies the `raises` block and never reaches
+`assert mcp_server.is_alive()`. Only a guard that raises the RIGHT
+error and kills anyway falsifies that one -- so the liveness check is
+load-bearing, catching a tool that refuses in words and kills in fact.
+Per-test mutation would have called it covered after the first.
+
+Applied to the nested self-kill test in turn, which has three rows:
+removing the nesting check falsifies the OUTER row; making it return
+True unconditionally falsifies the CONTROL row, so that control really
+does catch a guard that has stopped answering. Breaking the primary
+realpath match falsifies NOTHING -- the inner row is satisfied by a
+fallback route and does not isolate that path, which
+`test_caller_is_on_server_matches_realpath` covers instead. Both
+docstrings now record this rather than leaving a reader to assume each
+assertion earns its place.
+
 **`kill_server` gets a functional test**
 
 The tool that destroys every session on a server had no test of what it

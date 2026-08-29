@@ -1460,6 +1460,15 @@ def test_caller_is_on_server_blocks_a_nested_self_kill(
 
     The control matters as much as the case: an unrelated third server
     must still be killable, or the guard has simply stopped answering.
+
+    Which row each mutation falsifies, since "it failed when I broke
+    it" is a claim about the mutation chosen:
+
+    * nesting check removed        -> the OUTER row fails
+    * nesting check always True    -> the CONTROL row fails
+    * primary realpath match broken -> nothing fails; the inner row is
+      satisfied by a fallback route, so it does not isolate that path.
+      ``test_caller_is_on_server_matches_realpath`` is what covers it.
     """
     from libtmux_mcp._utils import (
         CallerIdentity,

@@ -845,6 +845,13 @@ def test_kill_server_refuses_the_caller_s_own_server(
     ``mcp_session`` is what BOOTS the daemon; the bare ``mcp_server``
     fixture only constructs an unstarted ``Server``, so asserting it is
     still alive afterwards would fail whether or not the kill happened.
+
+    The two assertions need two different mutations. Disabling the
+    guard falsifies the ``raises`` block and never reaches the second
+    line; only a guard that raises the right error and kills anyway
+    falsifies ``is_alive``. So the liveness check is load-bearing
+    rather than belt-and-braces -- it catches a tool that refuses in
+    words and kills in fact.
     """
     from libtmux_mcp._utils import _effective_socket_path
 
