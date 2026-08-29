@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import hashlib
@@ -11,10 +10,15 @@ import time
 import typing as t
 from dataclasses import dataclass
 
+from libtmux_mcp._bounded_io import (
+    _bounded_history_limit,
+    _bounded_pane_state,
+    _resolve_pane_bounded,
+    _run_tmux_lines,
+)
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server_async,
-    _resolve_pane,
     handle_tool_errors_async,
 )
 from libtmux_mcp.models import CaptureSinceResult
@@ -22,12 +26,10 @@ from libtmux_mcp.tools.pane_tools.io import CAPTURE_DEFAULT_MAX_LINES
 from libtmux_mcp.tools.pane_tools.state import (
     _PaneState,
     _raise_if_pane_lifecycle_changed,
-    _read_history_limit,
-    _read_pane_state,
 )
 
-if t.TYPE_CHECKING:
-    from libtmux.pane import Pane
+if t.TYPE_CHECKING:  # pragma: no cover - typing only
+    from libtmux.server import Server
 
 
 CAPTURE_SINCE_DEFAULT_MAX_LINES = CAPTURE_DEFAULT_MAX_LINES
@@ -77,24 +79,38 @@ def _line_hash(line: str) -> str:
     return hashlib.sha256(line.encode("utf-8", "surrogateescape")).hexdigest()
 
 
-def _capture_rows(
-    pane: Pane,
+async def _capture_rows(
+    server: Server,
+    pane_id: str,
     *,
     start: t.Literal["-"] | int | None = None,
     end: t.Literal["-"] | int | None = None,
 ) -> list[str]:
-    """Return pane rows as a concrete list."""
-    rows = pane.capture_pane(start=start, end=end)
-    if rows is None:
-        return []
-    return list(rows)
+    """Return pane rows, bounded and killable.
+
+    Deliberately not ``pane.capture_pane``: libtmux reaches tmux through
+    an untimed ``Popen.communicate()``, and running that in a worker
+    thread cannot be cancelled -- a tmux server that stops answering
+    parks the worker, and ``_python_exit`` joins pool workers untimed at
+    shutdown, so the process can no longer exit. No ``-J`` here, unlike
+    the wait path: ``capture_since`` anchors on physical rows and
+    joining tmux's visual wraps would renumber them.
+    """
+    args = ["capture-pane", "-p", "-t", pane_id]
+    if start is not None:
+        args += ["-S", str(start)]
+    if end is not None:
+        args += ["-E", str(end)]
+    return await _run_tmux_lines(server, *args)
 
 
-def _capture_cursor_rows(pane: Pane, state: _PaneState) -> list[str]:
+async def _capture_cursor_rows(
+    server: Server, pane_id: str, state: _PaneState
+) -> list[str]:
     """Capture rows from the cursor through the visible bottom."""
     if state.cursor_y >= state.pane_height:
         return []
-    return _capture_rows(pane, start=state.cursor_y, end=None)
+    return await _capture_rows(server, pane_id, start=state.cursor_y, end=None)
 
 
 def _same_state(left: _PaneState, right: _PaneState) -> bool:
@@ -102,32 +118,33 @@ def _same_state(left: _PaneState, right: _PaneState) -> bool:
     return left == right
 
 
-def _raise_if_dead_without_baseline(pane: Pane, state: _PaneState) -> None:
+def _raise_if_dead_without_baseline(pane_id: str, state: _PaneState) -> None:
     """Raise a tool error for a dead pane before a cursor exists."""
     if state.pane_dead:
-        msg = f"pane {pane.pane_id} died during pane read"
+        msg = f"pane {pane_id} died during pane read"
         raise ExpectedToolError(msg)
 
 
-def _read_stable_visible(
-    pane: Pane,
+async def _read_stable_visible(
+    server: Server,
+    pane_id: str,
     *,
     baseline_pid: str | None = None,
 ) -> _PaneRead:
     """Capture the visible pane and cursor rows with a stable state snapshot."""
     for _attempt in range(_STABLE_READ_ATTEMPTS):
-        before = _read_pane_state(pane)
+        before = await _bounded_pane_state(server, pane_id)
         if baseline_pid is None:
-            _raise_if_dead_without_baseline(pane, before)
+            _raise_if_dead_without_baseline(pane_id, before)
             expected_pid = before.pane_pid
         else:
             expected_pid = baseline_pid
-            _raise_if_pane_lifecycle_changed(pane.pane_id, before, expected_pid)
+            _raise_if_pane_lifecycle_changed(pane_id, before, expected_pid)
 
-        lines = _capture_rows(pane)
-        cursor_rows = _capture_cursor_rows(pane, before)
-        after = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane.pane_id, after, expected_pid)
+        lines = await _capture_rows(server, pane_id)
+        cursor_rows = await _capture_cursor_rows(server, pane_id, before)
+        after = await _bounded_pane_state(server, pane_id)
+        _raise_if_pane_lifecycle_changed(pane_id, after, expected_pid)
         if _same_state(before, after):
             return _PaneRead(
                 state=after,
@@ -136,15 +153,15 @@ def _read_stable_visible(
                 lines_missed=False,
             )
 
-    state = _read_pane_state(pane)
+    state = await _bounded_pane_state(server, pane_id)
     if baseline_pid is None:
-        _raise_if_dead_without_baseline(pane, state)
+        _raise_if_dead_without_baseline(pane_id, state)
     else:
-        _raise_if_pane_lifecycle_changed(pane.pane_id, state, baseline_pid)
+        _raise_if_pane_lifecycle_changed(pane_id, state, baseline_pid)
     return _PaneRead(
         state=state,
-        cursor_rows=_capture_cursor_rows(pane, state),
-        lines=_capture_rows(pane),
+        cursor_rows=await _capture_cursor_rows(server, pane_id, state),
+        lines=await _capture_rows(server, pane_id),
         lines_missed=True,
     )
 
@@ -317,14 +334,18 @@ def _drop_previously_seen_rows(
     return output
 
 
-def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
+async def _read_delta(
+    server: Server, pane_id: str, cursor: _CaptureCursor
+) -> _PaneRead:
     """Capture rows since ``cursor`` or fall back to visible content on loss."""
-    history_limit = _read_history_limit(pane)
+    history_limit = await _bounded_history_limit(server, pane_id)
     for _attempt in range(_STABLE_READ_ATTEMPTS):
-        before = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane.pane_id, before, cursor.pane_pid)
+        before = await _bounded_pane_state(server, pane_id)
+        _raise_if_pane_lifecycle_changed(pane_id, before, cursor.pane_pid)
         if _cursor_anchor_lost(cursor, before):
-            missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+            missed = await _read_stable_visible(
+                server, pane_id, baseline_pid=cursor.pane_pid
+            )
             return _PaneRead(
                 state=missed.state,
                 cursor_rows=missed.cursor_rows,
@@ -334,25 +355,24 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
 
         trim_risk = _history_limit_trim_risk(cursor, before, history_limit)
         start = cursor.anchor_abs - before.history_size
-        rows = (
-            _capture_rows(pane, start="-", end=None)
-            if trim_risk
-            else (
-                []
-                if start >= before.pane_height
-                else _capture_rows(pane, start=start, end=None)
-            )
-        )
-        cursor_rows = _capture_cursor_rows(pane, before)
-        after = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane.pane_id, after, cursor.pane_pid)
+        if trim_risk:
+            rows = await _capture_rows(server, pane_id, start="-", end=None)
+        elif start >= before.pane_height:
+            rows = []
+        else:
+            rows = await _capture_rows(server, pane_id, start=start, end=None)
+        cursor_rows = await _capture_cursor_rows(server, pane_id, before)
+        after = await _bounded_pane_state(server, pane_id)
+        _raise_if_pane_lifecycle_changed(pane_id, after, cursor.pane_pid)
         if _same_state(before, after):
             if trim_risk:
                 match_index = _find_unique_cursor_match(
                     rows, cursor, before, history_limit
                 )
                 if match_index is None:
-                    missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+                    missed = await _read_stable_visible(
+                        server, pane_id, baseline_pid=cursor.pane_pid
+                    )
                     return _PaneRead(
                         state=missed.state,
                         cursor_rows=missed.cursor_rows,
@@ -367,7 +387,7 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
                 lines_missed=False,
             )
 
-    missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+    missed = await _read_stable_visible(server, pane_id, baseline_pid=cursor.pane_pid)
     return _PaneRead(
         state=missed.state,
         cursor_rows=missed.cursor_rows,
@@ -590,38 +610,38 @@ async def capture_since(
         pane_id = decoded.pane_id
 
     server = await _get_server_async(socket_name=socket_name)
-    # Off the loop for the same reason the server handle is: this
-    # is a tmux round trip through ``Server.cmd``, which has no
-    # timeout, so a server that answers the liveness probe and then
-    # wedges would block every concurrent caller here instead.
-    pane = await asyncio.to_thread(
-        _resolve_pane,
+    # Resolved and read through a killable subprocess, never a worker
+    # thread. libtmux reaches tmux with an untimed
+    # ``Popen.communicate()``: in a thread that cannot be cancelled, and
+    # ``concurrent.futures.thread._python_exit`` joins pool workers
+    # untimed at shutdown -- so a tmux server that answers once and then
+    # stops answering left this call unable to return AND the process
+    # unable to exit. Measured with a socket forwarding its first
+    # connection and stalling the rest; the event loop kept ticking
+    # throughout, which is why no loop-blocking test could see it.
+    resolved = await _resolve_pane_bounded(
         server,
         pane_id=pane_id,
         session_name=session_name,
         session_id=session_id,
         window_id=window_id,
     )
-    assert pane.pane_id is not None
 
-    if decoded is not None and pane.pane_id != decoded.pane_id:
-        msg = (
-            f"cursor pane {decoded.pane_id} does not match requested pane "
-            f"{pane.pane_id}"
-        )
+    if decoded is not None and resolved != decoded.pane_id:
+        msg = f"cursor pane {decoded.pane_id} does not match requested pane {resolved}"
         raise ExpectedToolError(msg)
 
     start_time = time.monotonic()
     if decoded is None:
-        read = await asyncio.to_thread(_read_stable_visible, pane)
+        read = await _read_stable_visible(server, resolved)
     else:
-        read = await asyncio.to_thread(_read_delta, pane, decoded)
+        read = await _read_delta(server, resolved, decoded)
 
     limited = _limit_lines(read.lines, max_lines=max_lines, max_bytes=max_bytes)
     elapsed = time.monotonic() - start_time
     return CaptureSinceResult(
-        pane_id=pane.pane_id,
-        cursor=_build_cursor(pane.pane_id, read.state, read.cursor_rows),
+        pane_id=resolved,
+        cursor=_build_cursor(resolved, read.state, read.cursor_rows),
         lines=limited.lines,
         elapsed_seconds=round(elapsed, 3),
         lines_missed=read.lines_missed,

@@ -21,6 +21,34 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `capture_since` can no longer take the process down with a wedged tmux
+
+A tmux server that answers once and then stops answering left
+`capture_since` unable to return AND the process unable to exit. Its
+tmux reads went through `asyncio.to_thread`, and a thread blocked in
+libtmux's untimed `Popen.communicate()` cannot be cancelled --
+`concurrent.futures.thread._python_exit` joins pool workers untimed at
+shutdown, so Ctrl-C and normal exit both hang.
+
+    before   killed at 120s, no output
+    after    returns, and the process exits
+
+Seeing it at all needs a socket that forwards its FIRST connection and
+stalls the rest: one that never answers is caught by the bounded
+liveness probe, so the unbounded call behind it is never reached and
+the fixture comes back confidently clean.
+
+No loop-gap test could have found it either. The event loop keeps
+ticking throughout -- 16,459 ticks across a 90-second hang, measured
+independently -- because nothing is blocked; the call simply never
+returns.
+
+Every read now goes through the killable subprocess the wait path
+already used, so this is the shape `wait_for_text` has had all along
+rather than a new mechanism. `run_command` still has the old one, and
+`_tmux_proc`'s docstring now names it rather than stating the
+constraint as though the tree already complied everywhere.
+
 #### `split_window` says what it did to the pane it split
 
 `size` names the NEW pane, and the result described only the new pane.

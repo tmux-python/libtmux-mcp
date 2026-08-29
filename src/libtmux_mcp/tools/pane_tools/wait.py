@@ -10,7 +10,6 @@ import typing as t
 
 import anyio
 from fastmcp import Context
-from libtmux import exc
 
 # Explicit re-export form: these are part of wait.py's surface as far
 # as its tests and their monkeypatches are concerned, and mypy's
@@ -19,6 +18,7 @@ from libtmux_mcp._bounded_io import (
     _bounded_capture as _bounded_capture,  # noqa: PLC0414
     _bounded_history_limit as _bounded_history_limit,  # noqa: PLC0414
     _bounded_pane_state as _bounded_pane_state,  # noqa: PLC0414
+    _resolve_pane_bounded as _resolve_pane_bounded,  # noqa: PLC0414
     _run_tmux_lines as _run_tmux_lines,  # noqa: PLC0414
 )
 from libtmux_mcp._patterns import compile_pattern
@@ -26,7 +26,6 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server_async,
     handle_tool_errors_async,
-    tmux_id_sort_key,
 )
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 from libtmux_mcp.models import WaitForTextResult
@@ -34,9 +33,6 @@ from libtmux_mcp.tools.pane_tools.capture_since import _limit_lines
 from libtmux_mcp.tools.pane_tools.state import (
     _raise_if_pane_lifecycle_changed,
 )
-
-if t.TYPE_CHECKING:
-    from libtmux.server import Server
 
 logger = logging.getLogger(__name__)
 
@@ -122,159 +118,6 @@ async def _maybe_log(
         await method(message)
     except _TRANSPORT_CLOSED_EXCEPTIONS:
         return
-
-
-async def _resolve_pane_bounded(
-    server: Server,
-    *,
-    pane_id: str | None,
-    session_name: str | None,
-    session_id: str | None,
-    window_id: str | None,
-    deadline: float | None = None,
-) -> str:
-    """Resolve a pane target natively, without libtmux and without threads.
-
-    libtmux's resolvers are synchronous and reach tmux through
-    ``Popen.communicate()`` with no timeout. Calling one bare from an
-    ``async def`` freezes the whole event loop; calling it through
-    ``asyncio.to_thread`` frees the loop but parks a pool worker that
-    cannot be cancelled — and
-    ``concurrent.futures.thread._python_exit`` joins every pool worker
-    untimed at interpreter shutdown, so a single wedged tmux hangs
-    process exit and Ctrl-C forever. Neither arrangement is fixable
-    while a thread is involved, so this reproduces the resolution
-    against :func:`_run_tmux_lines`, which owns a killable subprocess.
-
-    Mirrors :func:`libtmux_mcp._utils._resolve_pane` for exactly the
-    four targeting arguments this tool accepts, including which
-    argument wins and which exception each miss raises, so the
-    agent-visible error text is unchanged.
-    """
-    # 1. ``pane_id`` short-circuits everything else.
-    if pane_id is not None:
-        rows = await _run_tmux_lines(
-            server, "list-panes", "-a", "-F", "#{pane_id}", deadline=deadline
-        )
-        if pane_id not in rows:
-            raise exc.PaneNotFound(pane_id=pane_id)
-        return pane_id
-
-    # 2. ``window_id`` short-circuits session resolution.
-    if window_id is not None:
-        rows = await _run_tmux_lines(
-            server, "list-windows", "-a", "-F", "#{window_id}", deadline=deadline
-        )
-        matches = [row for row in rows if row == window_id]
-        if not matches:
-            raise exc.TmuxObjectDoesNotExist(
-                obj_key="window_id",
-                obj_id=window_id,
-                list_cmd="list-windows",
-                list_extra_args=("-a",),
-            )
-        if len(matches) > 1:
-            # ``list-windows -a`` emits a window once per session it is
-            # linked into, so a unique id can still match twice. libtmux
-            # raises here rather than guessing, and so must we — silently
-            # picking the first would be a behaviour change.
-            raise exc.MultipleObjectsReturned(
-                count=len(matches), query={"window_id": window_id}
-            )
-        return await _first_pane_of_window(server, window_id, deadline=deadline)
-
-    # 3. ``session_id`` wins over ``session_name``; with neither, the
-    #    first listed session is used.
-    target_session = await _resolve_session_native(
-        server, session_name=session_name, session_id=session_id, deadline=deadline
-    )
-    windows = await _run_tmux_lines(
-        server,
-        "list-windows",
-        "-t",
-        target_session,
-        "-F",
-        "#{window_id}",
-        deadline=deadline,
-    )
-    if not windows:
-        raise exc.NoWindowsExist
-    return await _first_pane_of_window(
-        server, min(windows, key=tmux_id_sort_key), deadline=deadline
-    )
-
-
-async def _resolve_session_native(
-    server: Server,
-    *,
-    session_name: str | None,
-    session_id: str | None,
-    deadline: float | None,
-) -> str:
-    """Return a session id, mirroring ``_resolve_session``'s precedence."""
-    if session_id is not None:
-        rows = await _run_tmux_lines(
-            server, "list-sessions", "-F", "#{session_id}", deadline=deadline
-        )
-        if session_id not in rows:
-            raise exc.TmuxObjectDoesNotExist(
-                obj_key="session_id",
-                obj_id=session_id,
-                list_cmd="list-sessions",
-                list_extra_args=(),
-            )
-        return session_id
-    if session_name is not None:
-        rows = await _run_tmux_lines(
-            server,
-            "list-sessions",
-            "-F",
-            "#{session_name}\t#{session_id}",
-            deadline=deadline,
-        )
-        for row in rows:
-            name, _, sid = row.partition("\t")
-            if name == session_name:
-                return sid
-        raise exc.TmuxObjectDoesNotExist(
-            obj_key="session_name",
-            obj_id=session_name,
-            list_cmd="list-sessions",
-            list_extra_args=(),
-        )
-    rows = await _run_tmux_lines(
-        server, "list-sessions", "-F", "#{session_id}", deadline=deadline
-    )
-    if not rows:
-        raise exc.TmuxObjectDoesNotExist(
-            obj_key="session",
-            obj_id="(any)",
-            list_cmd="list-sessions",
-            list_extra_args=(),
-        )
-    return min(rows, key=tmux_id_sort_key)
-
-
-async def _first_pane_of_window(
-    server: Server, window_id: str, *, deadline: float | None
-) -> str:
-    """Return the window's oldest pane, matching ``_resolve_pane``.
-
-    Deliberately not the active pane: the canonical resolver keys on
-    the immutable id so two untargeted calls agree, and focus is
-    something any client can move between them.
-    """
-    rows = await _run_tmux_lines(
-        server, "list-panes", "-t", window_id, "-F", "#{pane_id}", deadline=deadline
-    )
-    if not rows:
-        raise exc.PaneNotFound
-    return min(rows, key=tmux_id_sort_key)
-
-
-# ---------------------------------------------------------------------------
-# Pattern compilation
-# ---------------------------------------------------------------------------
 
 
 async def _compile_patterns(

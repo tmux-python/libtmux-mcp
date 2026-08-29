@@ -2715,10 +2715,10 @@ def test_capture_since_rejects_dead_pane_cursor(
         window.cmd("set-option", "-wu", "remain-on-exit")
 
 
-#: Helpers that make a tmux round trip through ``Server.cmd``, which has
-#: no timeout. Awaiting is not the same as yielding: a call to one of
-#: these inside an async body runs ON the loop and every concurrent
-#: caller waits with it.
+#: Helpers that reach tmux. Called INLINE from an async body they run on
+#: the loop and every concurrent caller waits with them; awaited, they
+#: yield. Names stay here after being converted to an async bounded
+#: form, so reintroducing a synchronous one is caught.
 _BLOCKING_TMUX_HELPERS = frozenset(
     {
         "_resolve_pane",
@@ -2749,6 +2749,14 @@ def test_no_async_tool_makes_a_blocking_tmux_call_on_the_loop() -> None:
 
     def walk(node: ast.AST, where: str, path: pathlib.Path) -> None:
         if isinstance(node, ast.FunctionDef):
+            return
+        # ``await f()`` yields; ``f()`` inline does not. Skipping only
+        # the awaited call itself -- not its arguments -- is what lets
+        # a helper be converted to an async bounded form and stay on
+        # the list, so a future sync reintroduction is still caught.
+        if isinstance(node, ast.Await) and isinstance(node.value, ast.Call):
+            for arg in ast.iter_child_nodes(node.value):
+                walk(arg, where, path)
             return
         if isinstance(node, ast.Call):
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
@@ -2817,72 +2825,39 @@ def test_async_tools_do_not_use_the_synchronous_server_resolver(
     assert called, "the spy never fired; the assertion above proved nothing"
 
 
-def test_capture_since_does_not_block_event_loop(
+def test_capture_since_uses_no_worker_threads(
     mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``capture_since`` runs blocking tmux captures off the event loop."""
+    """``capture_since`` must reach tmux through a killable subprocess.
+
+    The same invariant ``test_wait_path_uses_no_worker_threads`` holds
+    for the wait path, extended to the second tool that has it. A thread
+    blocked in libtmux's untimed ``Popen.communicate()`` cannot be
+    cancelled, and ``concurrent.futures.thread._python_exit`` joins pool
+    workers untimed at interpreter shutdown -- so a tmux server that
+    answered once and then stopped answering left this call unable to
+    return AND the process unable to exit. Measured against a socket
+    that forwards its first connection and stalls the rest: before,
+    killed at 120s with no output; after, it exits.
+
+    Asserted by presence rather than by timing. The event loop keeps
+    ticking throughout that hang -- 16,459 ticks across 90 seconds --
+    so no loop-gap measurement can see this class at all.
+    """
     import asyncio
-    import time as _time
 
-    from libtmux.pane import Pane as _LibtmuxPane
+    calls: list[t.Any] = []
+    original = asyncio.to_thread
 
-    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
-        _time.sleep(0.15)
-        return []
+    async def _spy(fn: t.Any, *args: t.Any, **kwargs: t.Any) -> t.Any:
+        calls.append(fn)
+        return await original(fn, *args, **kwargs)
 
-    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
-
-    async def _drive() -> tuple[int, float]:
-        ticks = 0
-        stop = asyncio.Event()
-
-        async def _ticker() -> None:
-            nonlocal ticks
-            while not stop.is_set():
-                ticks += 1
-                await asyncio.sleep(0.01)
-
-        async def _capture() -> None:
-            try:
-                await capture_since(
-                    pane_id=mcp_pane.pane_id,
-                    socket_name=mcp_server.socket_name,
-                )
-            finally:
-                stop.set()
-
-        started = _time.monotonic()
-        await asyncio.gather(_ticker(), _capture())
-        return ticks, _time.monotonic() - started
-
-    # A blocked loop yields EXACTLY one tick however long the block
-    # lasts, and however many times you look: the ticker runs once,
-    # awaits, and cannot be resumed until the blocking call returns.
-    # A STARVED loop also yields one tick, which is why the attempt is
-    # repeated -- at loadavg 28 the main thread went unscheduled for the
-    # whole 0.525s window and the single tick meant nothing about
-    # capture_since. Retrying removes that false negative without
-    # admitting a false positive, because no number of attempts can make
-    # a genuinely blocked loop tick twice.
-    #
-    # Counting to a larger number instead assumed the loop ticks at
-    # ~100 Hz, which parallel load breaks -- measured, that failed at 1
-    # tick short of an arbitrary 8.
-    attempts = []
-    for _ in range(3):
-        ticks, elapsed = asyncio.run(_drive())
-        attempts.append((ticks, elapsed))
-        if ticks >= 2:
-            break
-
-    # The capture really was slow, so the ticker had time to run.
-    assert all(elapsed >= 0.15 for _, elapsed in attempts), (
-        f"a capture finished too fast; the stub did not apply: {attempts}"
+    monkeypatch.setattr(asyncio, "to_thread", _spy)
+    asyncio.run(
+        capture_since(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
     )
-    assert max(ticks for ticks, _ in attempts) >= 2, (
-        f"ticker never advanced past one tick in {len(attempts)} attempts "
-        f"({attempts}) — capture_since is blocking the event loop"
-    )
+    assert calls == [], f"capture_since used worker threads for: {calls}"
 
 
 def test_get_pane_info(mcp_server: Server, mcp_pane: Pane) -> None:
