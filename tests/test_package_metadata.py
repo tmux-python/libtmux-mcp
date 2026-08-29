@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import graphlib
 import pathlib
 import typing as t
 
@@ -100,3 +101,28 @@ def test_core_modules_never_import_a_tool_module() -> None:
     )
 
     assert not offenders, f"core module depends on a tool module: {offenders}"
+
+
+def test_core_modules_form_an_acyclic_import_graph() -> None:
+    """Core modules must stay a DAG.
+
+    The workaround for a cycle is a function-level import, which costs
+    no linter or type checker anything, so the cycle then survives every
+    gate in the chain and is visible only to whoever next tries to hoist
+    it.
+    """
+    core = pathlib.Path(libtmux_mcp.__file__).parent
+    graph = {
+        path.stem: {
+            (node.module or "").split(".")[1]
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.ImportFrom)
+            and (node.module or "").startswith("libtmux_mcp._")
+        }
+        for path in core.glob("_*.py")
+    }
+
+    try:
+        graphlib.TopologicalSorter(graph).prepare()
+    except graphlib.CycleError as err:
+        pytest.fail(f"import cycle among core modules: {' -> '.join(err.args[1])}")
