@@ -511,6 +511,14 @@ def break_pane(
     scrollback and the pane id, and any cursor a caller is holding
     against that id.
 
+    The new window may land in a DIFFERENT SESSION. tmux puts it in the
+    current session, and "current" is the most recently active one, not
+    the pane's own -- so breaking a pane out of session A can move it to
+    session B. Measured. The returned ``session_name`` and
+    ``session_id`` are read back afterwards and say where it went, but
+    check them: this is a mutation that has already crossed a session
+    boundary by the time it reports.
+
     Parameters
     ----------
     pane_id : str

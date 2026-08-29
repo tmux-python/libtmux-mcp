@@ -20,6 +20,16 @@ rather than assumed from the request: `break_pane` returns the window
 the pane now lives in, and `join_pane` returns the pane with the
 `window_id` it actually landed in.
 
+`break_pane`'s docstring warns that the new window may land in a
+different SESSION. tmux puts it in the current session, and "current"
+is the most recently active one rather than the pane's own, so breaking
+a pane out of session A can move it to session B. The result carries
+the session it went to and matches reality, so this is disclosure
+rather than a defect -- but it is the same tmux rule as the untargeted
+`show_option` resolution with a much larger blast radius. A wrong READ
+can be re-asked; a MUTATION that relocated a pane across sessions has
+already happened.
+
 
 #### Four results now say what tmux actually did
 
@@ -1227,7 +1237,7 @@ Measured before and after, `pytest -n auto --reruns 0`, same box:
 | | runs failing | failures per run | loadavg at start |
 |---|---|---|---|
 | before | 6 of 6 | 3, 2, 2, 1, 1, 5 | 13 - 33 |
-| after | **0 of 6** | 0, 0, 0, 0, 0, 0 | 11 - 30 |
+| after | **0 of 6** | 0, 0, 0, 0, 0, 0 | 8 - 31 |
 
 The final run randomises test order, an axis the fixed-order runs never
 exercise. The "after" rows are the less favourable comparison, not the
