@@ -10,24 +10,40 @@ For contributors who need to understand the codebase internals.
 src/libtmux_mcp/
     __init__.py           # Entry point: main()
     __main__.py           # python -m libtmux_mcp support
-    server.py             # FastMCP instance and configuration
-    _utils.py             # Server caching, resolvers, serializers, error handling
+    server.py             # FastMCP instance, safety tier, instructions budget
     models.py             # Pydantic output models
     middleware.py         # Safety, audit, retry, and error-result middleware
+    _utils.py             # Server cache, resolvers, serializers, error handling
+    _tmux_proc.py         # Cancellable, bounded tmux subprocess (see below)
+    _bounded_io.py        # Bounded tmux reads shared by the async tools
+    _patterns.py          # Caller-regex screening
+    _progress.py          # Progress ticker for waits with no poll loop
+    _history.py           # Shell-history suppression
+    _wait_policy.py       # Wait ceiling resolution
     tools/
-        batch_tools.py    # call_readonly_tools_batch, call_mutating_tools_batch, call_destructive_tools_batch
-        server_tools.py   # list_servers, list_sessions, create_session, kill_server, get_server_info
-        session_tools.py  # list_windows, create_window, rename_session, kill_session
-        window_tools.py   # list_panes, split_window, rename_window, kill_window, select_layout, resize_window
-        pane_tools.py     # run_command, send_keys, send_keys_batch, capture_pane, capture_since, snapshot_pane, search_panes, wait_for_text
+        batch_tools.py    # call_{readonly,mutating,destructive}_tools_batch
+        server_tools.py   # list_servers, list_sessions, create_session, ...
+        session_tools.py  # list_windows, create_window, rename_session, ...
+        window_tools.py   # list_panes, split_window, break_pane, join_pane, ...
         buffer_tools.py   # load_buffer, paste_buffer, show_buffer, delete_buffer
         hook_tools.py     # show_hooks, show_hook
         option_tools.py   # show_option, set_option
-        env_tools.py      # show_environment, set_environment
-    resources/
-        hierarchy.py      # tmux:// URI resources
+        env_tools.py      # show_environment, set_environment, unset_environment
+        wait_for_tools.py # wait_for_channel, signal_channel
+        pane_tools/       # split by operation kind, not one file per tool
+            io.py         # send_keys, paste_text, run_command, capture_pane
+            wait.py       # wait_for_text
+            capture_since.py  # incremental capture and its cursor
+            state.py      # the one pane-state read every tool shares
+            meta.py       # get_pane_info, snapshot_pane, display_message
+            layout.py     # select_pane, resize_pane, swap_pane
+            lifecycle.py  # respawn_pane, kill_pane
+            copy_mode.py  # enter_copy_mode, exit_copy_mode
+            pipe.py       # pipe_pane
+            search.py     # search_panes, find_pane_by_position
+    prompts/recipes.py    # The four workflow prompts
+    resources/hierarchy.py  # tmux:// URI resources
 ```
-
 ## Request flow
 
 Middleware wraps tool calls outermost-first (full ordering rationale in
@@ -75,6 +91,36 @@ Tools use resolver functions ({func}`~libtmux_mcp._utils._resolve_session`,
 targeting parameters and resolve to the correct
 {external+libtmux:doc}`libtmux <index>` object. Resolution follows a
 priority chain: direct ID → name lookup → error.
+
+### Reaching tmux from an async tool
+
+Every async tool goes through `_tmux_proc`, which owns a tmux
+subprocess it can kill. Neither of the obvious alternatives works:
+
+- **Calling libtmux inline** blocks the event loop. It reaches tmux
+  through `Popen.communicate()` with no timeout, so every other
+  in-flight call waits, and against a server that has stopped
+  answering, waits indefinitely.
+- **Wrapping it in `asyncio.to_thread`** frees the loop and creates a
+  worse failure. The coroutine takes the cancellation immediately while
+  the worker stays blocked, and
+  `concurrent.futures.thread._python_exit` joins pool workers untimed
+  at shutdown — so one wedged tmux takes process exit and Ctrl-C with
+  it. The loop keeps ticking throughout, which is why no
+  loop-blocking test can see this.
+
+`asyncio.to_thread` stays correct for **bounded** work. `_run_send_keys`
+runs each argv under a timeout, so its worker always returns. The
+hazard is the untimed call, not the thread.
+
+Seeing the failure at all needs a socket that answers its FIRST
+connection and stalls the rest: one that never answers is caught by the
+bounded liveness probe before the unbounded call is reached, so a
+fixture built the obvious way comes back confidently clean.
+
+`tests/test_pane_tools.py` enforces the rule structurally rather than
+by measurement — it reads the tree for a blocking call made inline from
+an async body.
 
 ### Safety middleware
 

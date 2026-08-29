@@ -42,6 +42,19 @@ also leaves the `--` argv discipline untouched, which was the part
 least worth rewriting; the id-addressed builder delegates to the same
 body rather than copying it.
 
+Verified independently by the QA instance across fourteen rows and two
+variants, every one bounded, against a control where the same fixture
+hangs the pre-conversion code past 45 seconds. The bound names a
+different tmux command as the wedge is pushed later into the sequence
+-- `list-panes`, then `display-message`, then `send-keys` -- which is
+what advancing through the I/O actually looks like.
+
+Scope of that evidence, stated because it is easy to overstate: it
+covers the call no longer hanging. The other half -- that the PROCESS
+can now exit -- rests on one instrument, ours. A second one was built
+and turned out to hang unconditionally, including when it called no
+tool at all, so it can attribute nothing.
+
 The busy check split into the reads and the rules, so the async path
 takes the same rules over state it read safely rather than a second
 copy of them.
