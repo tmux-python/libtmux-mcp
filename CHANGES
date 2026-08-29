@@ -1971,6 +1971,26 @@ builds one directly, and it is what `Window.panes` and
 `Session.windows` go through. A test walks the installed libtmux for
 call sites and fails if one appears outside the bound set.
 
+#### The audit log's redaction survives a short secret
+
+Sensitive arguments are recorded as `{len, sha256_prefix}` rather than
+verbatim. The digest was an unsalted SHA-256, and the recorded length
+fixes the search space exactly — so a four-digit PIN typed into a pane
+was recoverable from its own audit entry by brute force in 25
+milliseconds. `keys`, `text` and `value` are treated as sensitive
+precisely because short secrets are what agents type into panes.
+
+The digest is now HMAC-SHA256 under a random per-process key. Identical
+payloads still correlate across log lines within one server run, which
+is the scope an operator reads a log at, and someone reading the log
+can no longer test a guess against it. Correlation across separate runs
+is what this costs.
+
+Sensitive list arguments are also redacted whatever their items are,
+rather than only their strings. Nothing leaked — every such argument is
+a list of strings today — but that was a property of the annotations
+rather than of the redaction.
+
 #### `filters` works the same whichever way your client sends it
 
 `filters` takes a dict or a JSON string, and the docs said the two were
