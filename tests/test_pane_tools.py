@@ -1902,6 +1902,54 @@ def test_capture_since_reports_a_narrowed_pane_as_missed(
     assert after.lines_missed is True
 
 
+def test_capture_since_does_not_report_a_taller_pane_as_missed(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Growing a pane pulls rows out of history without destroying any.
+
+    History SHRINKING normally means rows were trimmed, so the anchor is
+    gone. A resize-grow shrinks it for the opposite reason -- rows moved
+    back onto the visible screen -- and the ``pane_height`` guard is the
+    only thing telling the two apart. Deleting that guard left all
+    eighteen ``capture_since`` tests green while turning every taller
+    pane into ``lines_missed=True`` plus a full replay of scrollback the
+    caller had already read.
+    """
+    import asyncio
+
+    pane = mcp_session.active_window.active_pane
+    assert pane is not None
+    socket = mcp_server.socket_name
+    mcp_session.cmd("resize-window", "-x", "80", "-y", "10")
+    pane.send_keys("for i in $(seq 1 30); do printf 'G%03d\\n' $i; done", enter=True)
+    retry_until(
+        lambda: any("G030" in line for line in pane.capture_pane()),
+        10,
+        raises=True,
+    )
+    first = asyncio.run(capture_since(pane_id=pane.pane_id, socket_name=socket))
+
+    mcp_session.cmd("resize-window", "-y", "24")
+    retry_until(
+        lambda: pane.display_message("#{pane_height}", get_text=True)[0] == "24",
+        10,
+        raises=True,
+    )
+    pane.send_keys("printf 'AFTER_GROW\\n'", enter=True)
+    retry_until(
+        lambda: any("AFTER_GROW" in line for line in pane.capture_pane()),
+        10,
+        raises=True,
+    )
+
+    after = asyncio.run(
+        capture_since(pane_id=pane.pane_id, cursor=first.cursor, socket_name=socket)
+    )
+    assert after.lines_missed is False
+    assert any("AFTER_GROW" in line for line in after.lines)
+    assert not [line for line in after.lines if line.startswith("G0")]
+
+
 def test_wait_for_text_matches_a_reprinted_line(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

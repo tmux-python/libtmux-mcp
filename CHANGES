@@ -8,6 +8,58 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A split that destroys its own pane no longer reports success
+
+`split_window(shell=...)` returned a `PaneInfo` for a pane that no
+longer existed. tmux reports the split as successful, the process
+exits, and the pane is removed with it:
+
+    shell='/no/such/shell'    -> PaneInfo(pane_id='%7')   %7 does not exist
+    shell='#{session_name}'   -> PaneInfo(pane_id='%8')   %8 does not exist
+    shell='-k'                -> success, running the DEFAULT shell
+
+Two mechanisms are needed, because tmux passes a one-argument command
+to `$SHELL -c` rather than exec'ing it. A bare program that is not
+executable is decidable in advance and is now refused. Shell syntax is
+not: `#{session_name}` reaches sh as a comment, exits 0, and can only
+be caught after the fact -- so the pane is confirmed to exist before it
+is returned.
+
+The same pre-flight guards `respawn_pane`, where it now refuses far
+less. Checking `shlex.split(shell)[0]` against PATH rejected
+`cd /tmp && sleep 60`, `VAR=1 sleep 60` and `exec sleep 60` -- all
+three run -- while asserting the pane would die. Anything sh
+interprets is left to tmux.
+
+#### A start directory tmux cannot use is refused instead of ignored
+
+`create_session`, `create_window`, `split_window` and `respawn_pane`
+all accepted a `start_directory` that could not be honoured, reported
+success, and started the pane elsewhere:
+
+    '/no/such/dir/xyz'  ok   pane started in $HOME
+    '-k'                ok   pane started in $HOME
+    '~/'                ok   pane started in $HOME, not the path
+    ''                  ok   pane started in the MCP server's own cwd
+
+tmux never errors here: `spawn.c` tries the requested directory, then
+`$HOME`, then `/`. An agent that splits with a typo'd project path runs
+every later command somewhere else, and nothing in the result says so.
+
+An empty string is refused rather than treated as absent, because the
+two differ: omitting the argument inherits, and `''` hands the caller
+the server process's working directory.
+
+#### A taller pane is no longer reported as missed output
+
+`capture_since` treats history shrinking as proof the anchor was
+trimmed. A resize-grow shrinks it for the opposite reason -- rows move
+back onto the visible screen -- and one guard tells the two apart.
+Nothing covered it: deleting the guard left all eighteen
+`capture_since` tests green while turning every taller pane into
+`lines_missed=true` plus a replay of scrollback the caller had already
+read.
+
 #### A live server that will not answer is no longer reported as empty
 
 The resource path returned `[]` for a tmux server that exists, holds

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 import shlex
-import shutil
 import time
 import typing as t
 
@@ -20,6 +18,8 @@ from libtmux_mcp._utils import (
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
+    _raise_if_shell_unrunnable,
+    _raise_if_start_directory_unusable,
     _resolve_pane,
     _resolve_window,
     _serialize_pane,
@@ -156,39 +156,6 @@ def _settle_respawned_pane(pane: Pane, shell: str | None) -> None:
         time.sleep(_RESPAWN_SETTLE_INTERVAL)
 
 
-def _raise_if_shell_unrunnable(shell: str | None) -> None:
-    """Refuse a respawn command whose program is not executable.
-
-    Checked BEFORE respawning because the failure is destructive rather
-    than merely wrong: tmux reports success, the new process dies, and
-    the pane goes with it. Catching it afterwards can only report the
-    loss, and even that races -- ``refresh()`` often runs before the
-    doomed process has exited.
-
-    Only the program is checked, not its arguments. A relative name is
-    resolved through ``PATH`` the way a shell would; anything that
-    resolves is left to tmux, since a command can fail for reasons no
-    pre-flight can see.
-    """
-    if not shell:
-        return
-    try:
-        program = shlex.split(shell)[0]
-    except (ValueError, IndexError):
-        return
-    if "/" in program:
-        if os.access(program, os.X_OK):
-            return
-    elif shutil.which(program) is not None:
-        return
-    msg = (
-        f"{program!r} is not an executable command. Respawning with it "
-        "would kill the pane: tmux reports success, the new process "
-        "exits immediately, and the pane goes with it."
-    )
-    raise ExpectedToolError(msg)
-
-
 @handle_tool_errors
 def respawn_pane(
     pane_id: str,
@@ -288,7 +255,15 @@ def respawn_pane(
             "Use a manual tmux command if intended."
         )
         raise ExpectedToolError(msg)
-    _raise_if_shell_unrunnable(shell)
+    _raise_if_shell_unrunnable(
+        shell,
+        consequence=(
+            "Respawning with it would kill the pane: tmux reports "
+            "success, the new process exits immediately, and the pane "
+            "goes with it."
+        ),
+    )
+    _raise_if_start_directory_unusable(start_directory)
     pane.respawn(
         kill=kill,
         start_directory=start_directory,

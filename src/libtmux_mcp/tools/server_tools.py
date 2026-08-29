@@ -28,6 +28,7 @@ from libtmux_mcp._utils import (
     _get_server,
     _invalidate_server,
     _probe_liveness,
+    _raise_if_start_directory_unusable,
     _serialize_session,
     handle_tool_errors,
 )
@@ -149,6 +150,7 @@ def create_session(
         environment,
         suppress_persistent_history=suppress_persistent_history,
     )
+    _raise_if_start_directory_unusable(start_directory)
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}
     if session_name is not None:

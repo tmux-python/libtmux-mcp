@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import typing as t
 
+from libtmux import exc
 from libtmux.constants import PaneDirection
 from libtmux.pane import Pane
+from libtmux.window import Window
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -22,6 +24,10 @@ from libtmux_mcp._utils import (
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
+    _raise_if_shell_unrunnable,
+    _raise_if_spawned_pane_is_gone,
+    _raise_if_start_directory_unusable,
+    _raise_spawned_pane_gone,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -217,6 +223,15 @@ def split_window(
     PaneInfo
         Serialized pane object.
     """
+    _raise_if_shell_unrunnable(
+        shell,
+        consequence=(
+            "Splitting with it would report a new pane that no longer "
+            "exists: tmux reports success, the new process exits "
+            "immediately, and the pane goes with it."
+        ),
+    )
+    _raise_if_start_directory_unusable(start_directory)
     spawn_environment = _prepare_spawn_environment(
         environment,
         suppress_persistent_history=suppress_persistent_history,
@@ -231,30 +246,32 @@ def split_window(
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ExpectedToolError(msg)
 
+    target: Pane | Window
     if pane_id is not None:
-        pane = _resolve_pane(server, pane_id=pane_id)
-        new_pane = pane.split(
-            direction=pane_dir,
-            size=size,
-            start_directory=start_directory,
-            shell=shell,
-            environment=spawn_environment,
-        )
+        target = _resolve_pane(server, pane_id=pane_id)
     else:
-        window = _resolve_window(
+        target = _resolve_window(
             server,
             window_id=window_id,
             window_index=window_index,
             session_name=session_name,
             session_id=session_id,
         )
-        new_pane = window.split(
+    # A command that cannot run leaves tmux reporting success with no
+    # pane behind it. The window path notices while building the object
+    # and raises a bare "Could not find pane_id"; the pane path returns
+    # a stale object that only fails on the caller's NEXT call.
+    try:
+        new_pane = target.split(
             direction=pane_dir,
             size=size,
             start_directory=start_directory,
             shell=shell,
             environment=spawn_environment,
         )
+    except exc.TmuxObjectDoesNotExist:
+        _raise_spawned_pane_gone(shell)
+    _raise_if_spawned_pane_is_gone(new_pane, shell)
     return _serialize_pane(new_pane)
 
 

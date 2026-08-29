@@ -101,6 +101,71 @@ def test_split_window_with_direction(mcp_server: Server, mcp_session: Session) -
     assert result.pane_id is not None
 
 
+def test_split_window_never_returns_a_pane_that_is_already_gone(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A split whose command cannot run reported success for a dead pane.
+
+    tmux reports the split as successful, the process exits, and the
+    pane is removed -- so the caller received a ``PaneInfo`` whose
+    ``pane_id`` no longer resolved. Two mechanisms are needed because
+    a one-argument command reaches ``$SHELL -c`` rather than exec:
+    ``/no/such/shell`` is decidable in advance, while
+    ``#{session_name}`` becomes an sh comment that exits 0 and can only
+    be caught afterwards.
+    """
+    window = mcp_session.active_window
+    for bad in ("/no/such/shell-xyz", "#{session_name}"):
+        with pytest.raises(ToolError) as excinfo:
+            split_window(
+                window_id=window.window_id,
+                shell=bad,
+                socket_name=mcp_server.socket_name,
+            )
+        assert "exited immediately" in str(excinfo.value) or "not an executable" in str(
+            excinfo.value
+        )
+
+    # Control: a shell one-liner is undecidable in advance and must not
+    # be refused. Checking the program alone rejected 'cd /tmp && ...',
+    # 'VAR=1 ...' and 'exec ...', all of which tmux runs.
+    ok = split_window(
+        window_id=window.window_id,
+        shell="cd /tmp && sleep 60",
+        socket_name=mcp_server.socket_name,
+    )
+    assert ok.pane_id in [pane.pane_id for pane in window.panes]
+
+
+def test_split_window_refuses_a_start_directory_tmux_would_ignore(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Tmux falls back to $HOME for an unusable directory, silently.
+
+    ``spawn.c`` tries ``chdir(cwd)``, then ``chdir($HOME)``, then
+    ``chdir("/")`` and succeeds either way, so the pane started
+    somewhere that was never requested while the result said the split
+    worked. An empty string is included deliberately: it is not the
+    same as omitting the argument, and used to hand the caller the MCP
+    server's own working directory.
+    """
+    window = mcp_session.active_window
+    for bad in ("/no/such/dir/xyz", "-k", ""):
+        with pytest.raises(ToolError, match="not a usable directory"):
+            split_window(
+                window_id=window.window_id,
+                start_directory=bad,
+                socket_name=mcp_server.socket_name,
+            )
+
+    honoured = split_window(
+        window_id=window.window_id,
+        start_directory="/tmp",
+        socket_name=mcp_server.socket_name,
+    )
+    assert honoured.pane_current_path == "/tmp"
+
+
 def test_split_window_invalid_direction(
     mcp_server: Server, mcp_session: Session
 ) -> None:

@@ -22,6 +22,7 @@ from libtmux_mcp._utils import (
     _caller_is_on_server,
     _get_caller_identity,
     _get_server,
+    _raise_if_start_directory_unusable,
     _resolve_session,
     _serialize_session,
     _serialize_window,
@@ -167,6 +168,7 @@ def create_window(
         environment,
         suppress_persistent_history=suppress_persistent_history,
     )
+    _raise_if_start_directory_unusable(start_directory)
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
