@@ -1182,6 +1182,22 @@ gate, and the CI matrix has not seen any of this work.
 | `set-hook` readable back at `-g`/`-t`/`-w`/`-gw` | 9/9 |
 | narrowing a pane grows `history_size` | 9/9 |
 
+Everything this round ADDED was then swept the same way -- 45 checks
+across `list_clients`, the new snapshot location fields, `break_pane`,
+`join_pane` and `unset_environment`, on all nine builds, zero failures.
+`break_pane` and `join_pane` compare the REPORTED location against
+where the pane actually ended up, so a misreport fails without needing
+a crash.
+
+One row of that sweep initially proved nothing, and the correction is
+worth more than the result: every run used detached servers, so
+`list_clients` returned zero clients on all nine versions and never
+exercised its format parsing. Nine green rows for a path that did not
+execute. Re-run with a real attached client on the oldest, middle and
+newest builds, all six fields match exactly. An all-ok row means
+"works" or "never ran", and only a fixture that can produce the
+interesting case tells them apart.
+
 The latch is the one that had to be checked. `run_command` now always
 waits its started channel first, so on a build that dropped an unwaited
 signal a fast command would intermittently report as never-started --
