@@ -8,6 +8,19 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `break_pane` and `join_pane`
+
+Moving a pane between windows had no tool, so the only route was to
+kill it and start again somewhere else -- which loses the process, the
+scrollback, and the pane id, along with any `capture_since` cursor a
+caller holds against that id.
+
+Both report where the pane actually ended up, re-read after the move
+rather than assumed from the request: `break_pane` returns the window
+the pane now lives in, and `join_pane` returns the pane with the
+`window_id` it actually landed in.
+
+
 #### Four results now say what tmux actually did
 
 Each of these returned something true-but-uninformative, in a way that

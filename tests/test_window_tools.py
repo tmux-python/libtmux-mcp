@@ -8,7 +8,9 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from libtmux_mcp.tools.window_tools import (
+    break_pane,
     get_window_info,
+    join_pane,
     kill_window,
     list_panes,
     move_window,
@@ -369,3 +371,36 @@ def test_list_panes_filters_by_is_caller(
         )
     with pytest.raises(ToolError, match="takes a boolean"):
         list_panes(socket_name=mcp_server.socket_name, filters={"is_caller": "ture"})
+
+
+def test_break_and_join_pane_preserve_the_pane(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Moving a pane must keep the pane, not replace it.
+
+    The alternative to these tools is kill-and-recreate, which loses the
+    process, the scrollback and the pane id -- and any cursor a caller
+    holds against that id. Both report the location re-read after the
+    move rather than the one that was requested.
+    """
+    window = mcp_session.active_window
+    pane = window.split()
+    assert pane.pane_id is not None
+    other = mcp_session.new_window()
+    assert other.window_id is not None
+
+    broken = break_pane(
+        pane_id=pane.pane_id,
+        window_name="broken-out",
+        socket_name=mcp_server.socket_name,
+    )
+    assert broken.window_name == "broken-out"
+    assert broken.window_id != window.window_id
+
+    joined = join_pane(
+        pane_id=pane.pane_id,
+        target_window_id=other.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+    assert joined.pane_id == pane.pane_id
+    assert joined.window_id == other.window_id

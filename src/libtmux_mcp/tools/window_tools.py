@@ -498,6 +498,86 @@ def move_window(
     return _serialize_window(window)
 
 
+@handle_tool_errors
+def break_pane(
+    pane_id: str,
+    window_name: str | None = None,
+    socket_name: str | None = None,
+) -> WindowInfo:
+    """Move a pane out into a window of its own.
+
+    Keeps the pane and everything running in it. The alternative --
+    killing it and starting again elsewhere -- loses the process, the
+    scrollback and the pane id, and any cursor a caller is holding
+    against that id.
+
+    Parameters
+    ----------
+    pane_id : str
+        Pane to break out (e.g. '%1').
+    window_name : str, optional
+        Name for the new window. Defaults to tmux's choice.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    WindowInfo
+        The window the pane now lives in, re-read after the move rather
+        than assumed, so the reported id is the one that exists.
+    """
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(server, pane_id=pane_id)
+    pane.break_pane(window_name=window_name)
+    moved = server.panes.get(pane_id=pane.pane_id, default=None)
+    if moved is None or moved.window is None:
+        msg = f"pane {pane_id} did not survive break-pane"
+        raise ExpectedToolError(msg)
+    return _serialize_window(moved.window)
+
+
+@handle_tool_errors
+def join_pane(
+    pane_id: str,
+    target_window_id: str,
+    vertical: bool = True,
+    socket_name: str | None = None,
+) -> PaneInfo:
+    """Move an existing pane into another window, splitting it.
+
+    The counterpart to :func:`break_pane`, and the reason to prefer both
+    over kill-and-recreate: the process, the scrollback and the pane id
+    all survive the move.
+
+    Parameters
+    ----------
+    pane_id : str
+        Pane to move (e.g. '%1').
+    target_window_id : str
+        Window to move it into (e.g. '@2').
+    vertical : bool
+        Split the target vertically (stacked). False splits it
+        horizontally (side by side).
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    PaneInfo
+        The pane after the move, re-read so ``window_id`` reflects where
+        it actually landed.
+    """
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(server, pane_id=pane_id)
+    window = _resolve_window(server, window_id=target_window_id)
+    pane.join(window, vertical=vertical)
+    moved = server.panes.get(pane_id=pane.pane_id, default=None)
+    if moved is None:
+        msg = f"pane {pane_id} did not survive join-pane"
+        raise ExpectedToolError(msg)
+    return _serialize_pane(moved)
+
+
 def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(
@@ -509,6 +589,16 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(
         title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(get_window_info)
+    mcp.tool(
+        title="Break Pane Into Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
+    )(break_pane)
+    mcp.tool(
+        title="Join Pane Into Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
+    )(join_pane)
     mcp.tool(
         title="Split tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
     )(split_window)
