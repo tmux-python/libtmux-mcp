@@ -497,6 +497,85 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
     assert results == []
 
 
+def test_tools_refuse_a_wedged_server_instead_of_hanging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server that accepts and never answers used to hang every tool.
+
+    ``list_servers`` reports such a socket honestly, so the operator's
+    next call is aimed straight at it -- and ``get_server_info``,
+    ``list_sessions`` and ``capture_pane`` all blocked forever.
+    ``capture_pane`` is the one that shows it was never a
+    ``list_servers`` problem: it does not probe liveness at all, it
+    resolves a pane through ``Server.cmd``, which has no timeout.
+
+    The bound lives in ``_get_server``, which every tool funnels
+    through. A DEAD socket must be unaffected -- it answers immediately,
+    which is not a timeout -- so the control matters as much as the
+    case.
+    """
+    import socket as socket_module
+    import threading
+    import time
+
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp.tools.server_tools import get_server_info
+
+    # A short dir, not ``tmp_path``: UNIX socket paths cap at 108 bytes.
+    # Isolated from the real TMUX_TMPDIR so a parallel worker's scan
+    # cannot see this socket, and so a leak cannot outlive the test.
+    with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+        monkeypatch.setenv("TMUX_TMPDIR", tmpdir)
+        uid_dir = pathlib.Path(tmpdir) / f"tmux-{os.geteuid()}"
+        # 0700 or tmux refuses the directory outright, which answers
+        # instantly and would let this test pass without ever reaching
+        # the socket it built.
+        uid_dir.mkdir(mode=0o700)
+        _server_cache.clear()
+
+        listener = socket_module.socket(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        listener.bind(str(uid_dir / "silent"))
+        listener.listen(8)
+        listener.settimeout(0.2)
+        stop = threading.Event()
+        held: list[socket_module.socket] = []
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except (TimeoutError, OSError):
+                    continue
+                held.append(conn)  # accept, never speak, never close
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            started = time.monotonic()
+            with pytest.raises(ToolError, match="did not answer within"):
+                get_server_info(socket_name="silent")
+            elapsed = time.monotonic() - started
+
+            # Control: a socket with nothing behind it is NOT a timeout.
+            # Without it, a guard that refused every socket would pass.
+            _server_cache.clear()
+            absent = get_server_info(socket_name="absent")
+            assert absent.is_alive is False
+        finally:
+            stop.set()
+            listener.close()
+            for conn in held:
+                conn.close()
+            thread.join(timeout=2)
+            _server_cache.clear()
+
+    assert elapsed < 15.0, f"the refusal took {elapsed:.1f}s"
+
+
 def test_list_servers_survives_a_socket_that_never_answers() -> None:
     """A listener is not a server that replies, and one hung the scan.
 

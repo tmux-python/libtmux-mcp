@@ -116,7 +116,9 @@ downstream touches it. All three now return in 5.00s with a message
 saying the server is wedged rather than absent -- its sessions are not
 lost, but nothing can reach them until it is killed. A DEAD socket is
 unaffected: it answers "no server running" immediately and every tool
-reports it exactly as before.
+reports it exactly as before -- which the regression test asserts
+alongside the refusal, because a guard that refused every socket would
+satisfy the first half on its own.
 
 Found while chasing an unrelated 286-second test, which turned out to
 be measuring the QA instance's wedged tmux servers rather than anything
