@@ -2739,6 +2739,20 @@ _BLOCKING_TMUX_METHODS = frozenset(
     {"cmd", "capture_pane", "display_message", "refresh"}
 )
 
+#: ``module.attr`` calls that block whatever thread runs them. A
+#: synchronous subprocess or a ``time.sleep`` inline in an async body
+#: stops the loop for its whole duration, and neither is a tmux call, so
+#: neither name above would catch it.
+_BLOCKING_MODULE_CALLS = frozenset(
+    {
+        ("subprocess", "run"),
+        ("subprocess", "call"),
+        ("subprocess", "check_call"),
+        ("subprocess", "check_output"),
+        ("time", "sleep"),
+    }
+)
+
 _BLOCKING_TMUX_HELPERS = frozenset(
     {
         "_resolve_pane",
@@ -2753,7 +2767,7 @@ _BLOCKING_TMUX_HELPERS = frozenset(
 
 
 def test_no_async_tool_makes_a_blocking_tmux_call_on_the_loop() -> None:
-    """Async tools must not do tmux work inline.
+    """Async tools must not do blocking work inline.
 
     Measured before this was true: ``capture_since`` against a wedged
     socket held the loop for 5.01s and a ticker beside it advanced once.
@@ -2781,8 +2795,11 @@ def test_no_async_tool_makes_a_blocking_tmux_call_on_the_loop() -> None:
         if isinstance(node, ast.Call):
             name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
             attr = isinstance(node.func, ast.Attribute)
-            if name in _BLOCKING_TMUX_HELPERS or (
-                attr and name in _BLOCKING_TMUX_METHODS
+            module = getattr(getattr(node.func, "value", None), "id", "")
+            if (
+                name in _BLOCKING_TMUX_HELPERS
+                or (attr and name in _BLOCKING_TMUX_METHODS)
+                or (module, name) in _BLOCKING_MODULE_CALLS
             ):
                 offenders.append(f"{path.name}:{node.lineno} async {where} -> {name}()")
         for child in ast.iter_child_nodes(node):

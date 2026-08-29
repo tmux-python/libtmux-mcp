@@ -1874,6 +1874,24 @@ sleep. `exec sleep 60` makes the recorded pid the sleeping process:
 0.02s instead of 60.03s, and the assertion now covers the process that
 was surviving.
 
+**One structural guard replaces four audits**
+
+The async axis produced four separate defects on this branch, each
+found by a different ad-hoc scan. The guard now reads the tree for all
+of them at once: a known-blocking helper, a libtmux method on any
+receiver, a synchronous `subprocess` call, or a `time.sleep`, called
+INLINE from an async body.
+
+It distinguishes awaited from inline, so a helper converted to an async
+bounded form stays on the list and a future synchronous reintroduction
+is still caught. Nested `def`s are skipped deliberately -- those are
+what gets handed to `asyncio.to_thread`, which is the fix rather than
+the defect.
+
+The last two shapes were added after an audit found nothing, which is
+the point: a scan that comes back clean is worth keeping only if it
+runs again tomorrow.
+
 **Four timing probes measured the machine instead of the code**
 
 The parallel gate caught two flakes and a grep found two more of the
