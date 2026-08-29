@@ -2317,7 +2317,7 @@ long`, so its first run scored the unhandled path as handled.
 
 ### Documentation
 
-#### How to read a green run, and what to do about a loaded one
+#### How to read a green run, and what a loaded one costs
 
 Two instrument caveats are now in the contributing guide, because both
 cost real time to rediscover.
@@ -2327,30 +2327,32 @@ three times consecutively". The rerun lines now name absorbed failures
 (see Development), but the counts still say `passed`, and the way to
 hunt a flake is `--reruns 0`.
 
-And the shared bound behind a sparse population of load failures is
-libtmux's `RETRY_TIMEOUT_SECONDS`, default 8 s, consumed by
-`retry_until` at 65 call sites in one test module alone. The symptom is
-`libtmux.exc.WaitTimeout` at just over 10 s. It is a ceiling rather
-than a spend -- measured, the polls complete in 1.4-4.3 s, so raising
-it leaves the passing path unchanged -- and it is already
-env-configurable, so no code changed.
+Separately, a sparse population of failures under heavy parallel load
+shares one symptom: `libtmux.exc.WaitTimeout` at just over 10 s from
+libtmux's `retry_until`. There is no knob for it. libtmux exposes
+`RETRY_TIMEOUT_SECONDS`, and it is inert here -- all 77 call sites in
+this suite pass a timeout explicitly, 73 of them the literal `10`, so
+none reads the environment. Counted by walking the AST: a regex over
+these calls miscounts, because the predicate is usually a lambda
+carrying its own parentheses.
 
-Stated as mechanism-identified rather than remedy-proven. At loadavg
-213 roughly one run in six tipped one test, never the same one twice,
-so a clean run under a wider ceiling is what you would see anyway and
-is not evidence. The default is unchanged for that reason: CI runs at
-far lower parallelism and has never shown it.
+No change is indicated. The bound is a ceiling rather than a spend --
+the polls complete in 1.4-4.3 s, so 2-7x of margin -- and both observed
+failures needed loadavg above 200 on a 20-core box. CI runs at far
+lower parallelism and has never shown it.
 
-The variable must be set before pytest starts -- libtmux binds it as a
-default argument when `retry_until` is defined, and its pytest plugin
-imports that module before any `conftest.py` runs. That is why this is
-documentation rather than a fixture.
+Found by the QA instance, which then corrected its own attribution: it
+had reported the shared bound as the environment default of 8 s "plus
+overhead", and the rerun timings in its own table clustered at 10, not
+8. The AST count above was run to check the correction rather than
+accept it, and made it stronger -- the estimate was "at most 46 sites
+take the default"; the answer is none.
 
-Found by the QA instance, which also verified this release's
-`TMUX_TMPDIR` isolation against the detector that exposed the class
-rather than against a stopwatch: re-planting the 48 silent listeners
-that had produced +12.00 s and +6.00 s now produces 0.01 s and 0.01 s,
-with the machine's 1777 sockets still in place.
+The same instance also verified this release's `TMUX_TMPDIR` isolation
+against the detector that exposed the class rather than against a
+stopwatch: re-planting the 48 silent listeners that had produced
++12.00 s and +6.00 s now produces 0.01 s and 0.01 s, with the machine's
+1777 sockets still in place.
 
 #### The batch speed curve named a break-even that does not exist
 

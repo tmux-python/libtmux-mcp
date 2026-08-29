@@ -61,27 +61,25 @@ $ uv run pytest -n auto --reruns 0
 
 ### Timeouts under heavy parallel load
 
-Several tests poll with libtmux's `retry_until`, whose budget is
-`RETRY_TIMEOUT_SECONDS` (default 8 s). That is a ceiling, not a spend:
-measured, the polls it guards complete in 1.4–4.3 s, so there is
-normally 2–6x of margin and raising it changes nothing on the passing
-path.
+Many tests poll with libtmux's `retry_until`. On a heavily loaded
+machine one can exceed its budget, and the symptom is
+`libtmux.exc.WaitTimeout` at just over 10 s.
 
-On a heavily loaded machine the margin can close, and the symptom is
-`libtmux.exc.WaitTimeout` at just over 10 s. Measured at loadavg 213 on
-a 20-core box, roughly one run in six tipped one test — never the same
-one twice, because whichever wait-bounded test gets starved is the one
-that fails. CI runs at far lower parallelism and has not shown it.
+There is no knob for it. libtmux exposes `RETRY_TIMEOUT_SECONDS`, but
+it is inert here: all 77 `retry_until` call sites in this suite pass a
+timeout explicitly — 73 of them the literal `10` — so none reads the
+environment variable. Counted by walking the AST, because a regex over
+these calls miscounts: the predicate is usually a lambda containing its
+own parentheses.
 
-If you see it, widen the ceiling:
+The bound is a ceiling rather than a spend — the polls it guards
+complete in 1.4–4.3 s — so there is normally 2–7x of margin. Measured
+at loadavg 213 on a 20-core box, roughly one run in six tipped one
+test, and never the same one twice: whichever wait-bounded test gets
+starved is the one that fails. CI runs at far lower parallelism and has
+not shown it.
 
-```console
-$ RETRY_TIMEOUT_SECONDS=20 uv run pytest -n auto
-```
-
-The variable has to be set before pytest starts: libtmux binds it as a
-default argument when `retry_until` is defined, and its pytest plugin
-imports that module before any `conftest.py` runs.
+If you hit one, re-run it in isolation before treating it as a defect.
 
 ## Linting
 
