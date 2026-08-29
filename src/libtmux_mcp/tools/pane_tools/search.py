@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from libtmux_mcp._patterns import compile_pattern
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _coerce_bool,
@@ -152,13 +153,8 @@ def search_panes(
         Paginated match list with ``truncated`` / ``truncated_panes``
         / ``total_panes_matched`` / ``offset`` / ``limit`` fields.
     """
-    search_pattern = pattern if regex else re.escape(pattern)
     flags = 0 if match_case else re.IGNORECASE
-    try:
-        compiled = re.compile(search_pattern, flags)
-    except re.error as e:
-        msg = f"Invalid regex pattern: {e}"
-        raise ExpectedToolError(msg) from e
+    compiled = compile_pattern(pattern, regex=regex, flags=flags, label="search")
 
     # Reject nonsense pagination rather than answering with an empty
     # page: ``limit=0`` returned ``matches: []``, which an agent cannot

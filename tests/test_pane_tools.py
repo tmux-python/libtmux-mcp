@@ -525,6 +525,38 @@ def test_search_panes_rejects_nonsense_pagination(
         )
 
 
+def test_search_panes_refuses_a_pattern_it_could_not_interrupt(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A caller regex reached ``re`` with no bound of any kind.
+
+    ``search_panes`` is readonly-tier, so ``(a+)+$`` is reachable at the
+    lowest safety level; sixteen concurrent calls made every tool
+    unresponsive. Neither a deadline nor a worker cap can help, because
+    a thread inside ``re`` cannot be interrupted -- one 121-character
+    line does not finish in three minutes.
+    """
+    with pytest.raises(ToolError, match="exponential time"):
+        search_panes(pattern=r"(a+)+$", regex=True, socket_name=mcp_server.socket_name)
+
+    # Control: an ordinary regex still runs, and the same text passed
+    # as a literal is never screened.
+    mcp_pane.send_keys("printf 'aaaaX\\n'", enter=True)
+    retry_until(
+        lambda: any("aaaaX" in line for line in mcp_pane.capture_pane()),
+        10,
+        raises=True,
+    )
+    found = search_panes(
+        pattern=r"a+X", regex=True, socket_name=mcp_server.socket_name
+    )
+    assert found.matches
+    assert (
+        search_panes(pattern=r"(a+)+$", regex=False, socket_name=mcp_server.socket_name)
+        is not None
+    )
+
+
 class DashPayloadArgvFixture(t.NamedTuple):
     """Test fixture for ``--`` placement in the send-keys argv."""
 
@@ -1975,6 +2007,30 @@ def test_capture_since_does_not_report_a_taller_pane_as_missed(
     assert after.lines_missed is False
     assert any("AFTER_GROW" in line for line in after.lines)
     assert not [line for line in after.lines if line.startswith("G0")]
+
+
+def test_wait_for_text_screens_stop_patterns_too(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``wait_for_text`` promises a timeout it could not keep.
+
+    The deadline is checked BETWEEN poll iterations, and a
+    ``pattern.search(line)`` that never returns sits inside one -- so a
+    2-second wait ran for 30 and counting. ``stop`` takes caller regex
+    on the same terms as ``patterns``, so screening one and not the
+    other would leave the promise broken by the quieter argument.
+    """
+    for kwargs in ({"patterns": [r"(a+)+$"]}, {"patterns": ["x"], "stop": [r"(a+)+$"]}):
+        with pytest.raises(ToolError, match="exponential time"):
+            asyncio.run(
+                wait_for_text(
+                    pane_id=mcp_pane.pane_id,
+                    regex=True,
+                    timeout=2.0,
+                    socket_name=mcp_server.socket_name,
+                    **t.cast("t.Any", kwargs),
+                )
+            )
 
 
 def test_wait_for_text_matches_a_reprinted_line(

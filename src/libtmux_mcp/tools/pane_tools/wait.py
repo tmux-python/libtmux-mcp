@@ -12,6 +12,7 @@ import anyio
 from fastmcp import Context
 from libtmux import exc
 
+from libtmux_mcp._patterns import compile_pattern
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
     ExpectedToolError,
@@ -428,11 +429,12 @@ async def _compile_patterns(
             msg = f"{label} pattern must be a non-empty string"
             raise ExpectedToolError(msg)
         try:
-            compiled.append(re.compile(value if regex else re.escape(value), flags))
-        except re.error as e:
-            msg = f"Invalid regex pattern: {e}"
-            await _maybe_log(ctx, level="warning", message=msg)
-            raise ExpectedToolError(msg) from e
+            compiled.append(
+                compile_pattern(value, regex=regex, flags=flags, label=label)
+            )
+        except ExpectedToolError as e:
+            await _maybe_log(ctx, level="warning", message=str(e))
+            raise
     return compiled
 
 

@@ -8,6 +8,41 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### A caller's regex can no longer run forever
+
+`search_panes` and `wait_for_text` compiled a caller-supplied pattern
+and ran it over pane content with no bound. Python's `re` backtracks,
+has no step limit, and cannot be interrupted from another thread:
+`(a+)+$` against ONE 121-character line did not finish in three
+minutes.
+
+That broke two different promises:
+
+- `search_panes` is readonly-tier, so the pattern is reachable at the
+  lowest safety level. One in flight is survivable; sixteen exhausted
+  the worker pool and every tool stopped responding.
+- `wait_for_text` documents a `timeout` and checks it between poll
+  iterations. A match that never returns never reaches the check, so a
+  2-second wait ran for 30 and counting -- and the caller who defends
+  themselves by passing a small timeout is exactly the one it fails.
+  `stop` takes caller regex on the same terms as `patterns`.
+
+Neither a deadline nor a worker cap can help, because a thread inside
+`re` cannot be reclaimed. So the bound is the pattern: a repeat whose
+body can match the same input more than one way is refused before it
+runs -- a repeat nested in a repeat (`(a+)+`), or a repeat over
+alternatives that can start on the same character (`(a|a)+`,
+`(a|ab)+`).
+
+Ordinary patterns are unaffected, which is the half that matters:
+`(cat|dog)+`, `(\d{2}){3}`, `^\[(INFO|WARN|ERROR)\]`, `https?://\S+`
+and `a+b+c+$` all still compile. A literal (`regex=false`) is escaped
+and never screened.
+
+Reported by the QA instance, which also established that the tools keep
+their contracts under adversarial input everywhere else -- `run_command`
+holds its timeout even when zsh's line editor eats the command.
+
 #### `enter_copy_mode(scroll_up=...)` can no longer wedge the tmux server
 
 The repeat count went to tmux unbounded, and `window_copy_cmd_scroll_up`
