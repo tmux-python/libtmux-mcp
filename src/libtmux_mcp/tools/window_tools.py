@@ -536,6 +536,31 @@ def break_pane(
     """
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(server, pane_id=pane_id)
+
+    # tmux puts the new window in the CURRENT session, which is not
+    # necessarily the pane's own. If the pane is the last one in its
+    # session's last window, the source session is left with no windows
+    # and tmux destroys it -- measured: breaking alpha's only pane moved
+    # it to beta and alpha ceased to exist, while the result reported
+    # only where the pane went.
+    #
+    # Destroying a session is destructive-tier work and this tool is
+    # mutating, so refuse rather than disclose.
+    source_window = pane.window
+    if (
+        source_window is not None
+        and len(source_window.panes) == 1
+        and len(source_window.session.windows) == 1
+    ):
+        msg = (
+            f"pane {pane_id} is the only pane in the only window of session "
+            f"{source_window.session.session_name!r}, so breaking it out would "
+            "leave that session with no windows and tmux would destroy it. "
+            "Create another window in that session first, or move the pane "
+            "with join_pane, which never empties its source."
+        )
+        raise ExpectedToolError(msg)
+
     pane.break_pane(window_name=window_name)
     moved = server.panes.get(pane_id=pane.pane_id, default=None)
     if moved is None or moved.window is None:

@@ -404,3 +404,35 @@ def test_break_and_join_pane_preserve_the_pane(
     )
     assert joined.pane_id == pane.pane_id
     assert joined.window_id == other.window_id
+
+
+def test_break_pane_refuses_to_empty_its_source_session(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Breaking the last pane of the last window destroys the session.
+
+    tmux puts the new window in the CURRENT session, which need not be
+    the pane's own. When the pane was its session's last, that session
+    is left with no windows and tmux destroys it -- measured, breaking
+    alpha's only pane moved it to beta and alpha ceased to exist, while
+    the result reported only where the pane went.
+
+    Destroying a session is destructive-tier work and this tool is
+    mutating, so it refuses rather than discloses.
+    """
+    other = mcp_server.new_session(session_name="break_target")
+    window = mcp_session.active_window
+    pane = window.active_pane
+    assert pane is not None and pane.pane_id is not None
+
+    with pytest.raises(ToolError, match="would leave that session with no windows"):
+        break_pane(pane_id=pane.pane_id, socket_name=mcp_server.socket_name)
+
+    names = [s.session_name for s in mcp_server.sessions]
+    assert mcp_session.session_name in names
+    assert other.session_name in names
+
+    # A session with another window is not at risk, so the move proceeds.
+    mcp_session.new_window()
+    moved = break_pane(pane_id=pane.pane_id, socket_name=mcp_server.socket_name)
+    assert moved.window_id is not None

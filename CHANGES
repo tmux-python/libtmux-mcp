@@ -102,6 +102,16 @@ rather than assumed from the request: `break_pane` returns the window
 the pane now lives in, and `join_pane` returns the pane with the
 `window_id` it actually landed in.
 
+`break_pane` refuses when the pane is the last one in its session's
+last window. tmux puts the new window in the CURRENT session, so in
+that case the source session is left with no windows and tmux
+**destroys it** -- measured, breaking `alpha`'s only pane moved it to
+`beta` and `alpha` ceased to exist, while the result reported only
+where the pane went. Destroying a session is destructive-tier work and
+this tool is `mutating`, so it refuses rather than discloses. Found by
+running tool sequences rather than single calls: the failure surfaced
+as a later `new_window` reporting "can't find session".
+
 `break_pane`'s docstring warns that the new window may land in a
 different SESSION. tmux puts it in the current session, and "current"
 is the most recently active one rather than the pane's own, so breaking
