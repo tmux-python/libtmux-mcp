@@ -8,6 +8,7 @@ import tempfile
 import typing as t
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from libtmux_mcp.tools.server_tools import (
     create_session,
@@ -812,3 +813,47 @@ def test_a_tool_is_bounded_past_the_liveness_probe(
                 conn.close()
             thread.join(timeout=2)
             _server_cache.clear()
+
+
+def test_kill_server_kills_the_server(TestServer: type[Server]) -> None:
+    """The destructive path had no functional test, only tier checks.
+
+    Verified by asking the server rather than by trusting the return
+    string: a tool that returned "Server killed successfully" and killed
+    nothing would have passed on the message alone.
+    """
+    doomed = TestServer()
+    doomed.new_session(session_name="doomed", window_command="sh")
+    assert doomed.is_alive()
+
+    result = kill_server(socket_name=doomed.socket_name)
+
+    assert "killed" in result
+    assert not doomed.is_alive()
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_kill_server_refuses_the_caller_s_own_server(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-kill protection covers the whole server, not just a pane.
+
+    ``$TMUX`` is pointed at the target so the guard sees the caller as
+    living on it -- the situation the refusal exists for. The control
+    above proves the refusal is not simply a tool that never kills.
+
+    ``mcp_session`` is what BOOTS the daemon; the bare ``mcp_server``
+    fixture only constructs an unstarted ``Server``, so asserting it is
+    still alive afterwards would fail whether or not the kill happened.
+    """
+    from libtmux_mcp._utils import _effective_socket_path
+
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},1,$0")
+    monkeypatch.setenv("TMUX_PANE", "%0")
+
+    with pytest.raises(ToolError, match="Refusing to kill"):
+        kill_server(socket_name=mcp_server.socket_name)
+
+    assert mcp_server.is_alive()

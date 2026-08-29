@@ -2452,6 +2452,22 @@ unusual entry shape.
 
 ### Development
 
+**`kill_server` gets a functional test**
+
+The tool that destroys every session on a server had no test of what it
+does -- only middleware checks that its NAME is gated at the right
+safety tier. Both halves are covered now: it kills a throwaway server,
+verified by asking the server rather than by reading the return string
+(a tool that answered "Server killed successfully" and killed nothing
+would have passed on the message alone), and it refuses when the caller
+is on the target, verified by the server still being alive afterwards.
+
+The refusal test needs `mcp_session`, not just `mcp_server`: the bare
+fixture constructs an unstarted `Server`, so "is it still alive" would
+have answered False whether or not the kill happened. Closing one of
+the gaps the QA instance had declined -- correctly -- to test against
+its own live socket.
+
 **Every test gets its own tmux socket directory**
 
 `list_servers` probes every socket in `TMUX_TMPDIR`, so a test that
