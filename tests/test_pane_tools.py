@@ -1600,31 +1600,34 @@ def test_capture_pane_truncates_tail_preserving(
         raises=True,
     )
 
+    # Derive the cap from what the pane actually holds. A literal cap
+    # carries an unasserted precondition -- max_lines=5 needs at least
+    # six visible rows, which put the assertion exactly on the boundary
+    # of a pane split three times. Asking for one fewer line than is
+    # there tests the property at any geometry.
     raw = mcp_pane.capture_pane()
     geometry = mcp_pane.display_message(
         "#{pane_width}x#{pane_height} cursor_y=#{cursor_y} "
         "hsize=#{history_size} alt=#{alternate_on}",
         get_text=True,
     )
+    assert len(raw) >= 2, f"pane too short to truncate: {geometry}, {len(raw)} lines"
+    cap = len(raw) - 1
+
     result = capture_pane(
         pane_id=mcp_pane.pane_id,
-        max_lines=5,
+        max_lines=cap,
         socket_name=mcp_server.socket_name,
     )
     lines = result.split("\n")
-    # Truncation requires more visible content than max_lines, so a
-    # missing header means the pane held less than expected. Report the
-    # geometry: this fails rarely and only in full-suite runs, and a bare
-    # assertion has twice cost a reproduction cycle to learn nothing.
     assert lines[0].startswith("[... truncated "), (
         f"no truncation header; geometry {geometry}, "
-        f"raw visible lines {len(raw)}, returned {len(lines)}: {lines[:3]}"
+        f"raw visible {len(raw)}, cap {cap}, returned {len(lines)}: {lines[:3]}"
     )
     assert lines[0].endswith(" lines ...]")
-    assert len(lines) == 6  # header + exactly 5 preserved tail lines
-    assert "scrollback_line_19" in lines[-1] or any(
-        "scrollback_line_19" in line for line in lines[1:]
-    )
+    assert len(lines) == cap + 1  # header + exactly cap preserved tail lines
+    # Only the oldest row was dropped, so the newest marker must survive.
+    assert any("scrollback_line_19" in line for line in lines[1:])
 
 
 def test_capture_pane_max_lines_none_disables_truncation(

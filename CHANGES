@@ -1106,22 +1106,39 @@ signal a fast command would intermittently report as never-started --
 the double-execution lie, reintroduced per version.
 
 
-**Undiagnosed: `test_capture_pane_truncates_tail_preserving` fails rarely, serially only**
+**A test carried an unasserted precondition on pane height**
 
-Recorded rather than absorbed, because absorbing it is how the parallel
-flakes above hid for so long.
+`test_capture_pane_truncates_tail_preserving` failed about three times
+in eight full serial runs, never in twelve parallel gate runs, and
+passed 6 of 6 alone and 3 of 3 with its own module.
 
-Roughly three sightings in eight full serial runs
-(`-p no:randomly --reruns 0`), against zero in twelve runs of the
-parallel gate. It passes 6 of 6 alone and 3 of 3 with its whole module,
-so the interaction is CROSS-MODULE, and the usual reproduction recipe
-for this suite -- `-n auto --reruns 0` -- is the one configuration that
-does not show it.
+`max_lines=5` plus a truncation header means the assertion needs at
+least SIX visible rows, and it asserted a literal `len(lines) == 6`.
+That put it exactly on a boundary reachable by ordinary splits of a
+24-row window -- measured, three splits leave panes of 6, 5, 5, 5, and
+four splits leave 4, 4, 4, 4, 4:
 
-Not diagnosed, and deliberately not theorised about: every per-test
-explanation offered for the parallel flakes above turned out to be
-wrong, and this has the same shape. The next step is a bisect over
-module order, not a hypothesis about the test.
+| pane height | returned | header |
+|---|---|---|
+| 6 | 6 | yes |
+| 5 | 5 | **no** |
+| 4 | 4 | **no** |
+
+Serial-only follows from that: under `-n auto` each xdist worker gets
+its own tmux server, so a short pane cannot reach across; run serially,
+the modules share one server in sequence.
+
+The cap is now derived from what the pane actually holds -- ask for one
+fewer line than is there -- so the property is tested at any geometry
+rather than at a number tuned to one. Verified at pane heights 24, 8,
+6, 5, 4 and 3, including the three that used to fail. The assertion
+also reports pane geometry when it does fail, because two reproduction
+cycles were spent on a bare assertion that said only that the header
+was absent.
+
+Two hypotheses were ruled out by measurement and are worth recording:
+an attached 80x8 client does NOT shrink the pane, and a capture taken
+while the alternate screen is active still returns the header.
 
 
 **A killed test run leaked a tmux daemon forever**
