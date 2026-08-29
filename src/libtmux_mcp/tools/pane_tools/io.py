@@ -16,7 +16,11 @@ import uuid
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
-from libtmux_mcp._bounded_io import _run_tmux_lines
+from libtmux_mcp._bounded_io import (
+    _bounded_pane_state,
+    _resolve_pane_bounded,
+    _run_tmux_lines,
+)
 from libtmux_mcp._progress import progress_ticker
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
@@ -37,7 +41,7 @@ from libtmux_mcp.models import (
     SendKeysOperation,
     SendKeysOperationResult,
 )
-from libtmux_mcp.tools.pane_tools.state import _read_pane_state
+from libtmux_mcp.tools.pane_tools.state import _PaneState, _read_pane_state
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -111,15 +115,39 @@ def _send_keys_argvs(
     if pane_id is None:
         msg = "resolved pane has no pane_id"
         raise ExpectedToolError(msg)
+    return _send_keys_argvs_for(
+        pane.server,
+        pane_id,
+        keys,
+        enter=enter,
+        literal=literal,
+        suppress_history=suppress_history,
+    )
 
+
+def _send_keys_argvs_for(
+    server: Server,
+    pane_id: str,
+    keys: str,
+    *,
+    enter: bool,
+    literal: bool,
+    suppress_history: bool,
+) -> list[list[str]]:
+    """Build the same argv, addressed by id rather than by an object.
+
+    The async caller resolves through a killable subprocess and never
+    holds a ``Pane``. Splitting on the ARGUMENTS rather than copying the
+    body keeps the ``--`` discipline documented above in one place.
+    """
     tmux_args = ["send-keys", "-t", pane_id]
     if literal:
         tmux_args.append("-l")
     tmux_args.extend(("--", (" " if suppress_history else "") + keys))
 
-    argvs = [_tmux_argv(pane.server, *tmux_args)]
+    argvs = [_tmux_argv(server, *tmux_args)]
     if enter:
-        argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
+        argvs.append(_tmux_argv(server, "send-keys", "-t", pane_id, "Enter"))
     return argvs
 
 
@@ -187,8 +215,20 @@ def _raise_if_pane_is_busy(pane: Pane) -> None:
     is the deliberate trade -- see ``_PANE_OWNING_PROGRAMS`` for why a
     general test was rejected.
     """
-    occupant = _read_pane_current_command(pane)
-    state = _read_pane_state(pane)
+    _raise_if_busy_state(
+        pane.pane_id or "?",
+        _read_pane_state(pane),
+        _read_pane_current_command(pane),
+    )
+
+
+def _raise_if_busy_state(pane_id: str, state: _PaneState, occupant: str | None) -> None:
+    """Apply the busy rules to a state and occupant already read.
+
+    Split from the reads so the async path can take them through a
+    killable subprocess instead of a worker thread, without a second
+    copy of the rules.
+    """
     # Copy/view/clock mode owns the keyboard while alternate_on stays 0
     # and pane_current_command still reads as the shell, so both other
     # arms miss it. Measured with a client attached: the payload was
@@ -197,7 +237,7 @@ def _raise_if_pane_is_busy(pane: Pane) -> None:
     # the result claimed command_may_still_run.
     if state.in_mode:
         msg = (
-            f"pane {pane.pane_id} is in a tmux mode (copy, view or clock), "
+            f"pane {pane_id} is in a tmux mode (copy, view or clock), "
             "so keys go to that mode rather than to a shell. Exit it with "
             "exit_copy_mode first."
         )
@@ -206,7 +246,7 @@ def _raise_if_pane_is_busy(pane: Pane) -> None:
     if state.alternate_on:
         named = f" ({occupant})" if occupant else ""
         msg = (
-            f"pane {pane.pane_id} is running a full-screen program{named}, "
+            f"pane {pane_id} is running a full-screen program{named}, "
             "so it has no shell prompt to accept a command. Sending one "
             "would type this tool's exit-status wrapper into that program."
         )
@@ -214,12 +254,47 @@ def _raise_if_pane_is_busy(pane: Pane) -> None:
 
     if occupant is not None and occupant.lstrip("-") in _PANE_OWNING_PROGRAMS:
         msg = (
-            f"pane {pane.pane_id} is running {occupant!r}, which owns the "
+            f"pane {pane_id} is running {occupant!r}, which owns the "
             "keyboard, so it has no shell prompt to accept a command. "
             "Sending one would type this tool's exit-status wrapper into "
             "that program."
         )
         raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
+
+async def _bounded_current_command(server: Server, pane_id: str) -> str | None:
+    """Foreground command, read through a killable subprocess."""
+    out = await _run_tmux_lines(
+        server, "display-message", "-p", "-t", pane_id, "#{pane_current_command}"
+    )
+    return out[0] if out and out[0] else None
+
+
+def _run_send_keys_for(
+    server: Server,
+    pane_id: str,
+    keys: str,
+    *,
+    enter: bool,
+    literal: bool,
+    suppress_history: bool,
+) -> None:
+    """Send keys by id, raising if tmux rejected them.
+
+    Still synchronous, and safe in a worker thread: each argv runs under
+    ``_SEND_KEYS_TIMEOUT_SECONDS``, so the thread always returns. The
+    shutdown hazard is only libtmux's UNTIMED ``Popen.communicate()`` --
+    bounded work in a thread cannot park a pool worker forever.
+    """
+    for argv in _send_keys_argvs_for(
+        server,
+        pane_id,
+        keys,
+        enter=enter,
+        literal=literal,
+        suppress_history=suppress_history,
+    ):
+        _run_send_keys_argv(argv)
 
 
 def _read_pane_current_command(pane: Pane) -> str | None:
@@ -692,20 +767,20 @@ async def run_command(
     effective_timeout = min(timeout, _wait_ceiling_seconds())
 
     server = await _get_server_async(socket_name=socket_name)
-    # Off the loop for the same reason the server handle is: this
-    # is a tmux round trip through ``Server.cmd``, which has no
-    # timeout, so a server that answers the liveness probe and then
-    # wedges would block every concurrent caller here instead.
-    pane = await asyncio.to_thread(
-        _resolve_pane,
+    # Resolved and read through a killable subprocess, never a worker
+    # thread. libtmux reaches tmux with an untimed
+    # ``Popen.communicate()``, which cannot be cancelled from a thread,
+    # and ``concurrent.futures.thread._python_exit`` joins pool workers
+    # untimed at shutdown -- so a tmux server that answers once and then
+    # stops answering would leave this call unable to return AND the
+    # process unable to exit.
+    target_id = await _resolve_pane_bounded(
         server,
         pane_id=pane_id,
         session_name=session_name,
         session_id=session_id,
         window_id=window_id,
     )
-    target_id = pane.pane_id
-    assert target_id is not None
 
     # A full-screen program (less, vi, htop) owns the pane's keyboard,
     # so the wrapper below is consumed as ITS keystrokes rather than by
@@ -715,15 +790,16 @@ async def run_command(
     # fragments are commands that edit and write files. This tool means
     # "run a shell command and report its exit status", which requires
     # a shell, so refuse rather than type into whatever is there.
-    await asyncio.to_thread(_raise_if_pane_is_busy, pane)
+    _raise_if_busy_state(
+        target_id,
+        await _bounded_pane_state(server, target_id),
+        await _bounded_current_command(server, target_id),
+    )
 
     command_id = uuid.uuid4().hex[:10]
     channel = f"r_{command_id}"
     status_option = f"@s_{command_id}"
-    target_pane_id = pane.pane_id
-    if target_pane_id is None:
-        msg = "resolved pane has no pane_id"
-        raise ExpectedToolError(msg)
+    target_pane_id = target_id
     status_cmd = shlex.join(
         _tmux_argv(server, "set-option", "-p", "-t", target_pane_id, status_option)
     )
@@ -746,12 +822,16 @@ async def run_command(
 
     # Read before sending, so a later change is evidence the pane
     # accepted the line rather than a difference that predates it.
-    entry_occupant = await asyncio.to_thread(_read_pane_current_command, pane)
+    entry_occupant = await _bounded_current_command(server, target_id)
 
     started = time.monotonic()
+    # Still a thread, and safe: every argv runs under
+    # _SEND_KEYS_TIMEOUT_SECONDS, so the worker always returns. The
+    # hazard is only UNBOUNDED work in a thread.
     await asyncio.to_thread(
-        _run_send_keys,
-        pane,
+        _run_send_keys_for,
+        server,
+        target_id,
         payload,
         enter=True,
         literal=True,
@@ -774,7 +854,7 @@ async def run_command(
         server, started_channel, timeout=min(grace, effective_timeout)
     )
     if not started_ok and can_refuse:
-        occupant = await asyncio.to_thread(_read_pane_current_command, pane)
+        occupant = await _bounded_current_command(server, target_id)
         # A foreground process that CHANGED since the send is positive
         # evidence a shell read the line and is working -- slow, not
         # wedged. Extend rather than refuse: measured, a prompt hook
@@ -826,7 +906,7 @@ async def run_command(
                 ctx,
                 total=effective_timeout,
                 message=lambda elapsed, left: (
-                    f"Running in pane {pane.pane_id}: {elapsed:.1f}s elapsed, "
+                    f"Running in pane {target_id}: {elapsed:.1f}s elapsed, "
                     f"{left:.1f}s left"
                 ),
             ):
@@ -866,7 +946,9 @@ async def run_command(
     # join_wrapped keeps the per-call markers on one logical row so the
     # filter's exact-marker match survives a wide prompt; it also strips
     # sync fragments that still wrap across rows.
-    raw_lines = await asyncio.to_thread(pane.capture_pane, join_wrapped=True)
+    raw_lines = await _run_tmux_lines(
+        server, "capture-pane", "-p", "-J", "-t", target_id
+    )
     visible_lines = _filter_run_command_internal_lines(
         raw_lines,
         channel=channel,

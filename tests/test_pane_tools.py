@@ -314,9 +314,20 @@ def test_run_command_refuses_a_full_screen_program(
     from libtmux_mcp.tools.pane_tools.state import _read_pane_state
 
     state = _read_pane_state(mcp_pane)
+    stubbed = 0
+
+    async def _busy_state(_server: t.Any, _pane_id: str) -> t.Any:
+        nonlocal stubbed
+        stubbed += 1
+        return state._replace(alternate_on=True)
+
+    # Patched where run_command READS it. An earlier version stubbed
+    # ``_read_pane_state``, which this tool stopped calling when its
+    # reads moved to the killable subprocess -- and with no count to
+    # check, the stub silently stopped applying and the test reported
+    # only "DID NOT RAISE".
     monkeypatch.setattr(
-        "libtmux_mcp.tools.pane_tools.io._read_pane_state",
-        lambda _pane: state._replace(alternate_on=True),
+        "libtmux_mcp.tools.pane_tools.io._bounded_pane_state", _busy_state
     )
 
     with pytest.raises(ToolError, match="full-screen program"):
@@ -329,6 +340,7 @@ def test_run_command_refuses_a_full_screen_program(
             )
         )
 
+    assert stubbed, "the stub never applied; the refusal above proved nothing"
     assert not any("SHOULD_NOT_BE_SENT" in line for line in mcp_pane.capture_pane())
 
 

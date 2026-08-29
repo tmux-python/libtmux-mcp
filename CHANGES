@@ -21,6 +21,31 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `run_command` reaches tmux through a subprocess, not a thread
+
+The last instance of the class. Its reads went through
+`asyncio.to_thread`, and a thread blocked in libtmux's untimed
+`Popen.communicate()` cannot be cancelled -- so a tmux server that
+answered once and then stopped answering left the call unable to return
+and the process unable to exit.
+
+The resolve, the busy check, both foreground-command reads and the
+final capture are now the killable subprocess. Against a half-wedge it
+bounds and names the read that was outstanding:
+
+    tmux list-panes did not return within 5.00s
+
+`_run_send_keys` deliberately stays in a thread. It already runs each
+argv under a 5-second bound, so its worker always returns -- bounded
+work in a thread is safe, and the hazard is only the untimed call. That
+also leaves the `--` argv discipline untouched, which was the part
+least worth rewriting; the id-addressed builder delegates to the same
+body rather than copying it.
+
+The busy check split into the reads and the rules, so the async path
+takes the same rules over state it read safely rather than a second
+copy of them.
+
 #### `run_command` read its exit status on the event loop
 
 Two `Pane.cmd` calls sat inline in an async body -- reading the exit
