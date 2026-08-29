@@ -26,11 +26,18 @@ wins. The docstring now leads with the dependency and points at the
 per-operation `elapsed_seconds` already in the result, so a caller can
 settle it for its own mix.
 
-Reported with the measurements by the QA instance. An independent
-in-process run put the four tools within 1.4x of each other, against
-2.4x end-to-end, which locates the variance in the MCP layer rather than
-in the tmux work -- so "how expensive is the nested tool" means its
-whole round trip, response size included.
+Reported with the measurements by the QA instance, and then narrowed
+by both instances together. The tmux-facing work is near-uniform
+(7-10 ms, one subprocess round trip whichever tool it is), so the
+spread is not tmux. It is not response size either: holding everything
+else constant, 455x the returned bytes cost 18% more time, while
+`get_pane_info` returns 53x FEWER bytes than a large `capture_pane` and
+costs 2.3x MORE. And it is not stdio framing, which measured 0-4 ms --
+the same 2.7x spread is already present through an in-process client.
+What is left is FastMCP's own dispatch and output validation. Since
+neither instance could pin a rule finer than that, the docstring states
+the dependency and points at the measurement already in the result
+rather than predicting it.
 
 #### `show_option(scope=...)` pointed nowhere for tmux's `-g`
 
