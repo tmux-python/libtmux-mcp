@@ -458,12 +458,15 @@ def test_list_servers_extra_socket_paths_surfaces_custom_path(
     """
     from libtmux_mcp.models import ServerInfo
 
-    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+    # Where the fixture's socket actually is, read BEFORE the scan is
+    # repointed. Hardcoding /tmp assumed the ambient TMUX_TMPDIR, which
+    # stopped being true once the suite isolated it per test.
     fixture_socket = (
-        pathlib.Path("/tmp")
+        pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
         / f"tmux-{os.geteuid()}"
         / (mcp_server.socket_name or "default")
     )
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
     assert fixture_socket.is_socket(), "fixture socket must exist for the test"
 
     results = list_servers(extra_socket_paths=[str(fixture_socket)])
@@ -722,7 +725,7 @@ def test_a_tool_is_bounded_past_the_liveness_probe(
     # spend 5s of suite time proving what 0.5s proves.
     monkeypatch.setattr(_utils, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
     upstream = (
-        pathlib.Path("/tmp")
+        pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
         / f"tmux-{os.geteuid()}"
         / (mcp_server.socket_name or "default")
     )

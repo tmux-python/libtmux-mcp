@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import os
 import pathlib
+import shutil
+import tempfile
 import time
 import typing as t
 
@@ -63,6 +65,42 @@ def _clear_server_cache() -> t.Generator[None, None, None]:
     _server_cache.clear()
     yield
     _server_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tmux_tmpdir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> t.Generator[None, None, None]:
+    """Give every test its own tmux socket directory.
+
+    ``list_servers`` probes every socket in ``TMUX_TMPDIR``, so a test
+    that scans without isolating pays for the machine's accumulated
+    debris -- 1785 sockets on one development box. Quiet, each is about
+    a millisecond and invisible; under load their cost inflates and
+    there are 1785 of them. One such test asserted a duration and so
+    FAILED, visibly, at high load; two others assert only presence and
+    liveness, so they paid the same cost silently. Fixing the one that
+    failed did not fix the class, because the assertion is what made it
+    visible, not the defect.
+
+    Isolating here rather than per-test closes it for tests that do not
+    exist yet. Measured on the two silent ones: 0.10s and 0.25s quiet
+    against 15.8s and 40.4s under load, unisolated.
+
+    Function-scoped on purpose. Teardown runs in reverse, so the
+    ``server`` fixture has already killed its daemon by the time the
+    directory goes -- removing it first would unlink a live socket and
+    orphan the server, which is the leak this suite reaps at startup.
+
+    The prefix is short because a UNIX socket path is capped at 108
+    bytes and tmux appends ``tmux-<uid>/<socket name>`` to this.
+    """
+    root = tempfile.mkdtemp(prefix="ltm-", dir="/tmp")
+    monkeypatch.setenv("TMUX_TMPDIR", root)
+    try:
+        yield
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
