@@ -7,7 +7,7 @@ import typing as t
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
+    ANNOTATIONS_DEFERRED_EXEC,
     ANNOTATIONS_RO,
     TAG_MUTATING,
     TAG_READONLY,
@@ -112,6 +112,13 @@ def set_option(
 ) -> OptionSetResult:
     """Set a tmux option value.
 
+    Some option values are executable. tmux runs a ``#(...)`` job inside
+    the status formats when it draws them, and repeats it on the status
+    interval; ``default-command`` and ``default-shell`` decide what every
+    future pane runs, and ``command-alias`` rewrites later commands. The
+    value is stored verbatim, so an option that interprets it later runs
+    what is stored, not what this call did.
+
     Use to change tmux behavior at runtime. Common uses: adjusting
     history-limit, enabling mouse support, changing status bar format.
 
@@ -148,5 +155,7 @@ def register(mcp: FastMCP) -> None:
         show_option
     )
     mcp.tool(
-        title="Set tmux Option", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Set tmux Option",
+        annotations=ANNOTATIONS_DEFERRED_EXEC,
+        tags={TAG_MUTATING},
     )(set_option)

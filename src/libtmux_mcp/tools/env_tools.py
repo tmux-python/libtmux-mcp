@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing as t
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
+    ANNOTATIONS_DEFERRED_EXEC,
     ANNOTATIONS_RO,
     TAG_MUTATING,
     TAG_READONLY,
@@ -71,6 +71,10 @@ def set_environment(
     Use to set variables that will be inherited by new panes and windows.
     Changes do not affect already-running processes.
 
+    A shell reads some variables as code — ``BASH_ENV``, ``ENV`` and
+    ``PROMPT_COMMAND`` among them — so a value set here can run in a pane
+    started later.
+
     .. warning::
        Values set here propagate into **every** shell tmux later spawns
        in the targeted scope — including panes the user opens manually,
@@ -126,6 +130,6 @@ def register(mcp: FastMCP) -> None:
     )(show_environment)
     mcp.tool(
         title="Set tmux Environment",
-        annotations=ANNOTATIONS_MUTATING,
+        annotations=ANNOTATIONS_DEFERRED_EXEC,
         tags={TAG_MUTATING},
     )(set_environment)

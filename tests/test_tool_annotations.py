@@ -16,6 +16,13 @@ from libtmux_mcp.tools import register_tools
 
 from .conftest import wire_annotations
 
+#: Tools that store a value tmux runs later. `set-option` holds the
+#: status formats, `default-command` and `command-alias`, where a
+#: `#(...)` job runs when the value is used and can recur; a tmux
+#: environment value reaches a future shell that may execute it.
+#: Nothing runs during the call, so the reach is real but deferred.
+DEFERRED_EXECUTION_TOOLS = frozenset({"set_environment", "set_option"})
+
 #: Tools that start a process. The pane's program runs with the user's
 #: authority and reaches whatever that user reaches, so the effect does
 #: not stop at tmux.
@@ -181,3 +188,12 @@ def test_the_read_batch_carries_its_members_open_world_hint(
     """A batch advertises the worst case of what it can invoke."""
     batch = advertised_tools["call_readonly_tools_batch"]
     assert wire_annotations(batch)["openWorldHint"] is True
+
+
+@pytest.mark.parametrize("name", sorted(DEFERRED_EXECUTION_TOOLS))
+def test_deferred_execution_tools_are_advertised_open_world(
+    advertised_tools: dict[str, t.Any],
+    name: str,
+) -> None:
+    """A stored value that tmux runs later still reaches past tmux."""
+    assert wire_annotations(advertised_tools[name])["openWorldHint"] is True

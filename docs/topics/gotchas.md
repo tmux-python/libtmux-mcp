@@ -72,8 +72,12 @@ This server escapes each of them, so a window named `build #2` or a directory
 named `has#hash` is stored as written. Nothing has to be pre-escaped, and
 doubling a `#` yourself produces a literal doubled `#`.
 
-Values are the exception. {tooliconl}`set-option` stores an option's value
-unexpanded, so a status format keeps its `#{...}` and runs when tmux draws it.
+Values are the exception, and deliberately so. {tooliconl}`set-option` stores
+an option's value unexpanded, because a status format is *supposed* to keep
+its `#{...}`. tmux then runs it when it draws the status line, and again on
+every status interval. `default-command` and `default-shell` decide what
+future panes run. Setting an option is therefore a way to schedule
+execution, not only to configure.
 
 ## Window names are not unique across sessions
 

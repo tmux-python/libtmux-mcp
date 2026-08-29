@@ -201,8 +201,8 @@ user's authority, and a pane holds whatever was printed into it.
 | {toolref}`select-window` | {badge}`mutating` | false | true | true | false |
 | {toolref}`send-keys` | {badge}`mutating` | false | true | false | true |
 | {toolref}`send-keys-batch` | {badge}`mutating` | false | true | false | true |
-| {toolref}`set-environment` | {badge}`mutating` | false | true | true | false |
-| {toolref}`set-option` | {badge}`mutating` | false | true | true | false |
+| {toolref}`set-environment` | {badge}`mutating` | false | true | true | true |
+| {toolref}`set-option` | {badge}`mutating` | false | true | true | true |
 | {toolref}`set-pane-title` | {badge}`mutating` | false | true | true | false |
 | {toolref}`signal-channel` | {badge}`mutating` | false | true | false | false |
 | {toolref}`split-window` | {badge}`mutating` | false | true | false | true |

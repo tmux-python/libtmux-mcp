@@ -438,6 +438,21 @@ ANNOTATIONS_SPAWN: dict[str, bool] = {
     "openWorldHint": True,
 }
 
+#: Annotations for tools that store a value tmux runs later: the status
+#: formats, ``default-command`` and ``command-alias`` all execute a
+#: ``#(...)`` job when the stored value is used, and a tmux environment
+#: value reaches a future shell that may execute it.
+#:
+#: Nothing runs during the call, so ``idempotentHint`` stays ``True`` — the
+#: same call lands on the same stored state. ``openWorldHint`` is ``True``
+#: because what that state later reaches does not stop at tmux.
+ANNOTATIONS_DEFERRED_EXEC: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
 #: Annotations for tools that hand a caller-supplied payload to a program
 #: that runs it — typed keys, a pasted buffer, an authored shell command,
 #: or the command ``pipe_pane`` feeds.
