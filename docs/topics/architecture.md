@@ -149,7 +149,25 @@ between each — exhaust anyio's default thread limiter, and the server
 then stops answering everything, including healthy sockets. Forty is
 reached by an agent behaving correctly: call, give up, retry. The bound
 returns the worker, and `subprocess.run` kills and reaps the tmux
-client, so neither threads nor processes accumulate.
+client, so neither threads nor processes accumulate. Measured at 64
+concurrent stalled calls — 60% past the pool limit that used to be
+fatal — every one returns a bounded error and no client is left behind.
+
+Two consequences of a bounded pool, both real:
+
+- **Unrelated calls can wait for one bound.** While stalled calls hold
+  every worker, a call to a perfectly healthy socket waits for a worker
+  to come free, and the first one frees when the first stalled call
+  times out. Measured at 4.2s for the first such call, then ~25ms for
+  every one after. So a stalled tmux server costs other sockets up to
+  one timeout of latency, not zero.
+- **Cancellation does not reap; the bound does.** Cancelling the request
+  cannot interrupt a thread already inside `communicate()`, so the tmux
+  client dies when the bound fires, not when the caller gives up.
+  Measured: 16 cancelled calls still had 16 clients at +4s and zero at
+  +7s. An agent that cancels and retries immediately still stacks — but
+  the window is one bound wide instead of unbounded, which is the whole
+  difference between annoying and fatal.
 
 ### Safety middleware
 
