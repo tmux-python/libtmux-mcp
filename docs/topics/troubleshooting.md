@@ -115,6 +115,40 @@ what you expect.
 
 **Fix**: Check the configured tier. Default is `mutating`, which includes most tools. Only `destructive` enables kill commands. See {ref}`safety`.
 
+## A wedged tmux server, and a test run that hangs with nothing red
+
+A tmux server can end up *wedged*: the socket accepts connections and
+the server never answers. It is not the same as a dead one, and the
+difference is what makes it awkward — a dead socket refuses instantly,
+which every tool reports correctly, while a wedged one answers nothing
+at all.
+
+Every MCP tool is bounded against this and refuses in five seconds
+naming the cause. What is **not** bounded is a FastMCP `Client` context
+exiting while pointed at such a socket: measured, `Client.__aexit__`
+hangs against a wedged server and returns cleanly against a healthy or
+a killed one.
+
+That matters for test suites rather than for the server. A run that
+hangs with **no failing test and no output** is the signature — there
+is nothing to grep for, because nothing failed.
+
+If you hit it, the cheap first question is whether this machine has
+hosted a wedged tmux server:
+
+```console
+$ ps -o pid=,etimes=,cputimes=,args= -C tmux
+```
+
+A tmux process burning CPU proportional to its age is the one. tmux
+renames the server process, so match on `/proc/<pid>/cmdline` rather
+than on `comm`, which reads `tmux: server` and will not match a plain
+`tmux`.
+
+This project's own tests are on the safe side by construction: they
+*kill* servers rather than wedging them, and the two that do build a
+silent socket never open a `Client` against it.
+
 ## How to see logs
 
 The MCP server uses Python's standard {mod}`logging` module. To see debug
