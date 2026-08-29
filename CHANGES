@@ -546,6 +546,22 @@ happened.
 already makes. Refusing before sending is what preserves the scroll
 position; a probe would still have typed into it.
 
+All four refusal branches were then instrumented to confirm none is
+dead -- a guard branch that never fires is indistinguishable from one
+that works:
+
+| occupant | branch | latency |
+|---|---|---|
+| `less`, `vi`, `man`, `nano` | alternate screen | 26-353 ms |
+| `top`, `more` | deny-list | 19-26 ms |
+| copy mode | `pane_in_mode` | 17 ms |
+| `cat`, `python3`, `read`, unclosed quote, `sleep` | started channel | ~5000 ms |
+
+That also settles what the deny-list is worth. `top` and `more` both
+hold `alternate_on=0`, so only the deny-list catches them; without it
+they fall through to the started channel and cost ~5000 ms instead of
+~20 ms. Each cheap layer is roughly 250x on its own cases.
+
 Without an attached client the same call fails benignly with "no
 current client" and copy mode survives, so a test written on a detached
 fixture sees the mild version and misses this one.
