@@ -36,6 +36,7 @@ from libtmux_mcp.tools.pane_tools import (
     capture_pane,
     capture_since,
     clear_pane,
+    copy_mode as copy_mode_module,
     copy_selection,
     display_message,
     enter_copy_mode,
@@ -7142,3 +7143,43 @@ def test_copy_selection_rejects_an_overlong_label(
             logical_name="x" * 64,
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_copy_selection_refuses_a_tmux_that_would_crash(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Below 3.4, copy-selection kills the tmux server, so the tool refuses.
+
+    The refusal must land BEFORE anything reaches the pane. This pane is
+    not even in copy mode, so a guard running in the wrong order would
+    report that instead -- and on a real 3.2a the command that follows
+    takes every session on the server with it.
+    """
+    monkeypatch.setattr(copy_mode_module, "has_gte_version", lambda *a, **k: False)
+    monkeypatch.setattr(copy_mode_module, "get_version_str", lambda **k: "3.2a")
+
+    with pytest.raises(ToolError) as excinfo:
+        copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+    message = str(excinfo.value)
+    assert "3.4 or newer" in message
+    assert "3.2a" in message
+    assert "not in copy mode" not in message
+
+
+@pytest.mark.parametrize(
+    ("supported", "expected"),
+    [
+        pytest.param(True, ("-C",), id="suppresses-the-clipboard-write"),
+        pytest.param(False, (), id="flag-does-not-exist-yet"),
+    ],
+)
+def test_copy_selection_passes_dash_c_only_where_it_exists(
+    monkeypatch: pytest.MonkeyPatch, supported: bool, expected: tuple[str, ...]
+) -> None:
+    """``-C`` stops the copy overwriting the user's system clipboard.
+
+    Before 3.6 the copy-mode commands parse by arity, so a ``-C`` would
+    be taken as the buffer-name prefix rather than as a flag.
+    """
+    monkeypatch.setattr(copy_mode_module, "has_gte_version", lambda *a, **k: supported)
+    assert copy_mode_module._copy_selection_flags(None) == expected

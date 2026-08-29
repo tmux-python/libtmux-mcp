@@ -3,6 +3,10 @@
 ```{fastmcp-tool} pane_tools.copy_selection
 ```
 
+**Requires tmux >= 3.4.** On 3.2a and 3.3a `copy-selection` kills the
+tmux server and every session on it; the tool refuses there rather than
+risking it. See {doc}`/reference/compatibility`.
+
 **Use when** a person attached to the session has highlighted something
 and you are being asked about *that highlight* rather than about the
 pane. This is the one case {tooliconl}`capture-pane` cannot reach: it
@@ -45,9 +49,10 @@ Response:
 }
 ```
 
-Two refusals, both loud on purpose:
+Three refusals, all loud on purpose:
 
 ```text
+copy_selection requires tmux 3.4 or newer (this server runs 3.2a)
 pane %0 is not in copy mode
 pane %0 is in copy mode but nothing is selected
 ```

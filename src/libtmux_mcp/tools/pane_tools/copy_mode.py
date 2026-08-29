@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import typing as t
 
+from libtmux.common import get_version_str, has_gte_version
+
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
@@ -23,6 +25,63 @@ from libtmux_mcp.tools.buffer_tools import (
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
+
+
+#: Floor for :func:`copy_selection`. Below this, ``copy-selection``
+#: kills the tmux SERVER -- not the pane, not the command -- taking
+#: every session on it. Four conditions, each varied independently
+#: across the supported matrix, and ALL of them hold in a default
+#: install:
+#:
+#:     tmux 3.2a or 3.3a       3.4+ is unaffected
+#:     a client attached       detached survives
+#:     set-clipboard on        the default is ``external`` on 3.2a..3.7c
+#:     clipboard-capable TERM  xterm-256color dies, screen-256color does not
+#:
+#: The conjunction IS this tool's use case: it exists to read a human's
+#: selection, and a human means an attached client in a real terminal at
+#: default settings. So the crash cannot be avoided by documenting it --
+#: the configurations that survive are the ones with nobody in them.
+#:
+#: Refusing rather than working around it. ``set-clipboard off`` for the
+#: duration does prevent the crash, but it mutates a server-global,
+#: user-visible option around every call, and two concurrent calls would
+#: race to restore it.
+_COPY_SELECTION_MIN_VERSION = "3.4"
+
+#: From this version ``copy-selection`` takes ``-C``, which suppresses
+#: the OSC 52 write. Worth passing wherever it exists: an agent reading
+#: a person's selection should not also overwrite that person's system
+#: clipboard. On 3.4 and 3.5 the flag does not exist -- their copy-mode
+#: commands still parse by minargs/maxargs -- and ``-C`` would be taken
+#: as the buffer-name prefix.
+_COPY_SELECTION_NO_CLIPBOARD_VERSION = "3.6"
+
+
+def _copy_selection_flags(tmux_bin: str | None) -> tuple[str, ...]:
+    """Return the ``copy-selection`` flags the driven tmux supports."""
+    if has_gte_version(_COPY_SELECTION_NO_CLIPBOARD_VERSION, tmux_bin=tmux_bin):
+        return ("-C",)
+    return ()
+
+
+def _raise_if_copy_selection_unsupported(tmux_bin: str | None) -> None:
+    """Refuse on a tmux where copying a selection kills the server."""
+    if has_gte_version(_COPY_SELECTION_MIN_VERSION, tmux_bin=tmux_bin):
+        return
+    msg = (
+        f"copy_selection requires tmux {_COPY_SELECTION_MIN_VERSION} or newer "
+        f"(this server runs {get_version_str(tmux_bin=tmux_bin)})"
+    )
+    raise ExpectedToolError(
+        msg,
+        suggestion=(
+            "On tmux 3.2a and 3.3a, copy-selection kills the tmux server "
+            "-- and every session on it -- when a client is attached with "
+            "a clipboard-capable terminal, which is the default. Use "
+            "capture_pane to read the pane's text instead."
+        ),
+    )
 
 
 #: ``pane_mode`` for copy mode. Distinct from ``pane_in_mode``, which
@@ -73,6 +132,7 @@ def _run_copy_mode_cmd(
     command: str,
     *,
     repeat: int | None = None,
+    flags: tuple[str, ...] = (),
     argument: str | None = None,
 ) -> None:
     """Send one ``-X`` copy-mode command, raising if tmux rejected it.
@@ -116,6 +176,7 @@ def _run_copy_mode_cmd(
     if repeat is not None:
         args.extend(("-N", str(min(repeat, _scrollable_rows(pane)))))
     args.extend(("-X", command))
+    args.extend(flags)
     if argument is not None:
         args.append(argument)
     result = pane.cmd(*args)
@@ -294,6 +355,12 @@ def copy_selection(
         fields -- the same shape ``show_buffer`` returns.
     """
     server = _get_server(socket_name=socket_name)
+    # Checked against the binary THIS server drives, not the system one:
+    # LIBTMUX_TMUX_BIN can point the whole stack at another build, and a
+    # guard that read a different tmux than it protects would be the
+    # exact failure it exists to prevent.
+    tmux_bin: str | None = getattr(server, "tmux_bin", None)
+    _raise_if_copy_selection_unsupported(tmux_bin)
     pane = _resolve_pane(
         server,
         pane_id=pane_id,
@@ -321,7 +388,9 @@ def copy_selection(
         )
     # tmux EXITS 0 for copy-selection with nothing selected and creates
     # no buffer at all, so without this the tool would report success
-    # and hand back a buffer name that does not exist.
+    # and hand back a buffer name that does not exist. Compared against
+    # "1" rather than against "0": on the floor an absent selection
+    # reads as the empty string, not "0".
     if selection != "1":
         msg = f"pane {pane.pane_id} is in copy mode but nothing is selected"
         raise ExpectedToolError(
@@ -334,7 +403,12 @@ def copy_selection(
         )
 
     prefix = _allocate_buffer_name(_validate_copy_label(logical_name))
-    _run_copy_mode_cmd(pane, "copy-selection-no-clear", argument=prefix)
+    _run_copy_mode_cmd(
+        pane,
+        "copy-selection-no-clear",
+        flags=_copy_selection_flags(tmux_bin),
+        argument=prefix,
+    )
     # tmux appends an index to the prefix. The name is not assumed:
     # reading it back is also what proves the prefix argument was
     # honoured, rather than the copy landing in an unnamed buffer

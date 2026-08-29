@@ -39,9 +39,32 @@ tmux EXITS 0 for it and creates no buffer at all -- without the check
 the tool would report success and hand back a buffer name that does not
 exist.
 
+`copy_selection` requires **tmux >= 3.4** and refuses below it. On
+3.2a and 3.3a, `copy-selection` kills the tmux SERVER -- not the
+command, not the pane -- taking every session on it. Four conditions
+have to hold together and all four hold in a default install: tmux
+3.2a/3.3a, an attached client, `set-clipboard` on (the default is
+`external` on every version 3.2a..3.7c), and a terminal that advertises
+clipboard support. That conjunction is precisely this tool's use case,
+since reading a person's selection means an attached client in a real
+terminal at default settings -- so the configurations that survive are
+the ones with nobody in them, and documenting the hazard would not
+avoid it.
+
+Refusing rather than working around it. `set-clipboard off` for the
+duration of the copy does prevent the crash, but it mutates a
+server-global, user-visible option around every call and two concurrent
+calls would race to restore it. From tmux 3.6 the copy passes `-C`
+instead, which suppresses the clipboard write outright -- worth doing
+on its own account, since an agent reading a person's selection should
+not also overwrite that person's system clipboard.
+
 Prompted by the QA instance, which also established the persistence
 property from inside a real attached client, something the headless test
-suite structurally cannot observe.
+suite structurally cannot observe -- and then caught the crash on the
+shipped commit by running it against all nine supported tmux versions,
+which is the check neither the test suite nor a source reading could
+have made.
 
 ### Fixes
 
