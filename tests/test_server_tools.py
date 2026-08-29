@@ -497,6 +497,63 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
     assert results == []
 
 
+def test_list_servers_survives_a_socket_that_never_answers() -> None:
+    """A listener is not a server that replies, and one hung the scan.
+
+    ``_is_tmux_socket_live`` proves only that the connection was
+    accepted. A tmux server spinning inside its own event loop does
+    exactly that and never answers, and ``Server.cmd`` has no timeout --
+    so ONE such socket made ``list_servers`` never return. Measured on a
+    real directory: 2.03s before the silent listener was added, and not
+    finished 85 seconds after.
+
+    The socket is REPORTED rather than dropped. Dropping it would be the
+    same "empty means absent" claim the resource path was fixed for, and
+    a wedged server is the thing an operator is looking for.
+    """
+    import socket as socket_module
+    import threading
+    import time
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = pathlib.Path(tmpdir) / "silent.sock"
+        listener = socket_module.socket(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        listener.bind(str(path))
+        listener.listen(8)
+        listener.settimeout(0.2)
+        stop = threading.Event()
+        held: list[socket_module.socket] = []
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except (TimeoutError, OSError):
+                    continue
+                held.append(conn)  # accept, never speak, never close
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            started = time.monotonic()
+            found = list_servers(extra_socket_paths=[str(path)])
+            elapsed = time.monotonic() - started
+        finally:
+            stop.set()
+            listener.close()
+            for conn in held:
+                conn.close()
+            thread.join(timeout=2)
+
+    assert elapsed < 10.0, f"list_servers took {elapsed:.1f}s against a silent socket"
+    rows = [row for row in found if row.socket_name == "silent.sock"]
+    assert rows, "the unreachable socket was dropped instead of reported"
+    assert rows[0].is_alive is False
+    assert "did not answer" in (rows[0].unreachable_reason or "")
+
+
 def test_list_servers_is_ordered_and_complete_under_concurrency(
     TestServer: type[Server], monkeypatch: pytest.MonkeyPatch
 ) -> None:

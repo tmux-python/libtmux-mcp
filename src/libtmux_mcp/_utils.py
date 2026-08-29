@@ -16,6 +16,7 @@ import pathlib
 import re
 import shlex
 import shutil
+import subprocess
 import threading
 import typing as t
 
@@ -719,6 +720,33 @@ def _raise_if_spawned_pane_is_gone(pane: Pane, shell: str | None) -> None:
         pane.refresh()
     except exc.TmuxObjectDoesNotExist:
         _raise_spawned_pane_gone(shell)
+
+
+def _run_tmux_bounded(
+    server: Server, *tmux_args: str, timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    """Run one tmux command with a hard bound, or ``None`` if it hung.
+
+    A socket with a listener is not a server that answers. A tmux server
+    spinning inside its own event loop accepts the connection and never
+    replies, and ``Server.cmd`` has no timeout -- so ONE such socket in
+    ``$TMUX_TMPDIR`` made ``list_servers`` never return. Measured: the
+    same scan took 2.03s before a silent listener was added to the
+    directory and had not finished 85 seconds after.
+
+    The child is killed on timeout, so an abandoned probe does not leave
+    a tmux client behind.
+    """
+    try:
+        return subprocess.run(
+            _tmux_argv(server, *tmux_args),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
 
 
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:

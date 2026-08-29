@@ -8,6 +8,30 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `list_servers` no longer hangs on a socket that never answers
+
+A live listener is not a server that replies. A tmux server spinning
+inside its own event loop accepts the connection and never answers, and
+`Server.cmd` has no timeout -- so ONE such socket in `$TMUX_TMPDIR`
+made `list_servers` never return:
+
+    baseline                  25 servers in 2.03s
+    one silent listener added  never returned (85s and counting)
+
+That is the worst possible tool to lose, because a wedged server is
+exactly what an operator is reaching for `list_servers` to find.
+
+Every probe is bounded now, and a socket that does not answer is
+reported with `unreachable_reason` set rather than dropped -- dropping
+it would be the same "empty means absent" claim the resource path was
+fixed for. The same scan takes 2.09s with the silent listener present,
+and 0.11s without, down from 2.03s: the bounded probe also replaced
+three tmux round trips per server with two.
+
+Found while chasing an unrelated 286-second test, which turned out to
+be measuring the QA instance's wedged tmux servers rather than anything
+in the suite.
+
 #### Tools that type into a pane no longer pick the pane
 
 `send_keys`, `send_keys_batch`, `paste_text`, `paste_buffer` and

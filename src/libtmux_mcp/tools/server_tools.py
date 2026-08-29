@@ -10,7 +10,6 @@ import socket
 import typing as t
 from concurrent.futures import ThreadPoolExecutor
 
-from fastmcp.exceptions import ToolError
 from libtmux.session import Session
 
 from libtmux_mcp._history import _prepare_spawn_environment
@@ -29,6 +28,7 @@ from libtmux_mcp._utils import (
     _invalidate_server,
     _probe_liveness,
     _raise_if_start_directory_unusable,
+    _run_tmux_bounded,
     _serialize_session,
     handle_tool_errors,
 )
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.server import Server
 
 
 @handle_tool_errors
@@ -275,6 +276,61 @@ def _socket_key(path: pathlib.Path) -> str:
         return str(path)
 
 
+#: A responsive tmux server answers in single-digit milliseconds. This
+#: is generous by two orders of magnitude and still bounds a scan of a
+#: directory holding thousands of sockets.
+_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+def _probe_socket_bounded(server: Server, *, timeout: float) -> ServerInfo:
+    """Describe a server without trusting it to answer.
+
+    ``_is_tmux_socket_live`` proves a listener accepted the connection,
+    which is not the same as a server that replies: one wedged inside
+    its own event loop does the first and never the second. Every query
+    here is bounded, and a socket that does not answer is REPORTED as
+    unreachable rather than dropped -- dropping it would be the same
+    "empty means absent" claim the resource path was fixed for, and a
+    wedged server is exactly what an operator is looking for.
+    """
+    sessions = _run_tmux_bounded(
+        server, "list-sessions", "-F", "#{session_id}", timeout=timeout
+    )
+    if sessions is None:
+        return ServerInfo(
+            is_alive=False,
+            socket_name=server.socket_name,
+            socket_path=str(server.socket_path) if server.socket_path else None,
+            session_count=0,
+            version=None,
+            unreachable_reason=(
+                f"socket has a listener but did not answer within {timeout:g}s"
+            ),
+        )
+    alive = sessions.returncode == 0
+    reason: str | None = None
+    if not alive:
+        detail = sessions.stderr.strip()
+        if detail and "no server running" not in detail.lower():
+            reason = detail
+    version_result = _run_tmux_bounded(
+        server, "display-message", "-p", "#{version}", timeout=timeout
+    )
+    version = None
+    if version_result is not None and version_result.returncode == 0:
+        version = version_result.stdout.strip() or None
+    return ServerInfo(
+        is_alive=alive,
+        socket_name=server.socket_name,
+        socket_path=str(server.socket_path) if server.socket_path else None,
+        session_count=len([x for x in sessions.stdout.splitlines() if x])
+        if alive
+        else 0,
+        version=version,
+        unreachable_reason=reason,
+    )
+
+
 def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     """Return a :class:`ServerInfo` for a live socket at ``socket_path``.
 
@@ -295,25 +351,7 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     if not _is_tmux_socket_live(socket_path):
         return None
     server = _get_server(socket_path=str(socket_path))
-    try:
-        alive, unreachable = _probe_liveness(server)
-    except Exception as err:
-        logger.debug("probe %s: liveness probe raised %s", socket_path, err)
-        return None
-    version: str | None = None
-    try:
-        result = server.cmd("display-message", "-p", "#{version}")
-        version = result.stdout[0] if result.stdout else None
-    except Exception as err:
-        logger.debug("probe %s: version query raised %s", socket_path, err)
-    return ServerInfo(
-        is_alive=alive,
-        socket_name=server.socket_name,
-        socket_path=str(socket_path),
-        session_count=len(server.sessions) if alive else 0,
-        version=version,
-        unreachable_reason=unreachable,
-    )
+    return _probe_socket_bounded(server, timeout=_PROBE_TIMEOUT_SECONDS)
 
 
 #: Tools that intentionally do NOT accept ``socket_name`` because they
@@ -352,16 +390,11 @@ def _probe_scanned_socket(entry: pathlib.Path) -> tuple[str, ServerInfo] | None:
     # call. Stale sockets are the common case.
     if not _is_tmux_socket_live(entry):
         return None
-    info: ServerInfo | None
-    try:
-        info = get_server_info(socket_name=entry.name)
-    except ToolError:
-        # A name that does not round-trip through ``-L`` -- one holding
-        # a newline, say -- used to drop a live server from the listing
-        # silently. The path always works.
-        info = _probe_server_by_path(entry)
-    if info is None:
-        return None
+    # Addressed by PATH, not name: a socket name that does not round-trip
+    # through ``-L`` -- one holding a newline, say -- used to drop a live
+    # server from the listing silently. The path always works.
+    server = _get_server(socket_path=str(entry))
+    info = _probe_socket_bounded(server, timeout=_PROBE_TIMEOUT_SECONDS)
     # The scan holds the full path; reporting only the name left
     # ``socket_path`` null on every scanned row, so no row carried a
     # complete identity.
@@ -382,6 +415,11 @@ def list_servers(
     with a live listener are reported; stale inodes (a common case on
     long-running systems where ``$TMUX_TMPDIR`` can carry thousands of
     orphans) are silently filtered.
+
+    A listener is not a server that answers: one wedged inside its own
+    event loop accepts the connection and never replies. Every probe is
+    bounded, and such a socket is reported with ``unreachable_reason``
+    set rather than dropped or allowed to hang the listing.
 
     **Scope caveat**: custom ``tmux -S /some/path/...`` servers that
     live OUTSIDE ``$TMUX_TMPDIR`` are not returned by the scan alone —
