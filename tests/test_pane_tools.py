@@ -5714,6 +5714,8 @@ def test_wait_for_text_clamps_oversized_timeout(
     import asyncio
 
     from libtmux_mcp import _wait_policy
+    from libtmux_mcp._bounded_io import _TMUX_CALL_TIMEOUT_SECONDS
+    from libtmux_mcp._exec import _LIVENESS_TIMEOUT_SECONDS
 
     monkeypatch.setattr(_wait_policy, "_wait_max_seconds", 1.0)
 
@@ -5732,8 +5734,12 @@ def test_wait_for_text_clamps_oversized_timeout(
     assert result.effective_timeout == 1.0
     # The clamp is visible as effective_timeout < what we passed.
     assert result.effective_timeout < 3600.0
-    # Generous headroom for the fixed per-call tmux bound on slow CI.
-    assert elapsed < 10.0, f"clamped wait ran {elapsed:.1f}s"
+    # Derived, not guessed: server acquisition runs BEFORE the deadline is
+    # set, so its liveness bound is spendable on top of the ceiling, and
+    # the poll loop may overshoot by one tick of two bounded reads. A
+    # literal here is really an assumption about machine speed.
+    budget = 1.0 + _LIVENESS_TIMEOUT_SECONDS + 2 * _TMUX_CALL_TIMEOUT_SECONDS
+    assert elapsed < budget, f"clamped wait ran {elapsed:.1f}s, budget {budget:.1f}s"
 
 
 def test_wait_for_text_reports_unclamped_timeout(
