@@ -239,7 +239,7 @@ def respawn_pane(
         ``cmd-respawn-pane.c`` supports the flag repeatedly). Values
         supplied in a mapping are redacted in the audit log on a
         per-key basis — keys like ``DATABASE_URL`` remain visible but
-        their values are replaced by ``{len, sha256_prefix}`` digests.
+        their values are replaced by ``{len, digest}`` digests.
         A JSON object string is redacted as one scalar digest, so its
         keys are not retained in the audit record. Values may still
         appear briefly in the OS process table while tmux spawns the

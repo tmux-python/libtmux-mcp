@@ -335,11 +335,11 @@ def test_redact_digest_shape() -> None:
     payload = "rm -rf /"
     digest = _redact_digest(payload)
     assert digest["len"] == len(payload)
-    assert len(digest["sha256_prefix"]) == 12
+    assert len(digest["digest"]) == 12
 
     # Keyed: a log reader who knows the payload cannot reproduce the
     # entry, which is what makes guessing untestable.
-    assert digest["sha256_prefix"] != hashlib.sha256(payload.encode()).hexdigest()[:12]
+    assert digest["digest"] != hashlib.sha256(payload.encode()).hexdigest()[:12]
     assert _redact_digest(payload) == digest, "must correlate within the run"
     assert _redact_digest("rm -rf .") != digest, "distinct payloads must differ"
 
@@ -360,7 +360,7 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
     for sensitive in ("keys", "text", "command", "value", "content", "shell"):
         assert isinstance(summary[sensitive], dict)
         assert "len" in summary[sensitive]
-        assert "sha256_prefix" in summary[sensitive]
+        assert "digest" in summary[sensitive]
         raw_value = args[sensitive]
         assert isinstance(raw_value, str)
         assert raw_value not in str(summary[sensitive])
@@ -481,7 +481,7 @@ def test_summarize_args_redacts_command(test_id: str, command: str) -> None:
     summary = _summarize_args({"command": command})
     assert isinstance(summary["command"], dict)
     assert "len" in summary["command"]
-    assert "sha256_prefix" in summary["command"]
+    assert "digest" in summary["command"]
     assert command not in str(summary["command"])
 
 
@@ -508,7 +508,7 @@ def test_summarize_args_redacts_sensitive_dict_values() -> None:
         digest = summary["environment"][key]
         assert isinstance(digest, dict)
         assert "len" in digest
-        assert "sha256_prefix" in digest
+        assert "digest" in digest
     # No value bytes leak into the rendered summary.
     rendered = str(summary)
     assert "hunter2" not in rendered
@@ -540,7 +540,7 @@ def test_summarize_args_redacts_send_keys_batch_operations() -> None:
     for operation in (first, second):
         assert isinstance(operation["keys"], dict)
         assert "len" in operation["keys"]
-        assert "sha256_prefix" in operation["keys"]
+        assert "digest" in operation["keys"]
 
 
 def test_summarize_args_redacts_nested_tool_batch_arguments() -> None:
@@ -778,7 +778,7 @@ def test_audit_middleware_redacts_sensitive_args(
 
     rendered = "\n".join(rec.getMessage() for rec in caplog.records)
     assert payload not in rendered
-    assert "sha256_prefix" in rendered
+    assert "digest" in rendered
     assert "tool=send_keys" in rendered
 
 
@@ -2118,7 +2118,7 @@ def test_a_sensitive_list_is_redacted_whatever_its_items_are() -> None:
     assert len(items) == 4, "items must not be dropped"
     for original, redacted in zip(["secret-text", 42, True, None], items, strict=True):
         assert isinstance(redacted, dict), f"{original!r} passed through raw"
-        assert set(redacted) == {"len", "sha256_prefix"}
+        assert set(redacted) == {"len", "digest"}
         assert redacted["len"] == len(str(original))
     # Control: a non-sensitive argument is still readable, so "absent"
     # above means redacted rather than "there is no summary".

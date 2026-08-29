@@ -717,7 +717,7 @@ trap.
 searching the pane to check the credential did not leak -- wrote it to
 the audit log verbatim:
 
-    ok      set_environment  value={'len': 30, 'sha256_prefix': 'bc79fc24b1e3'}
+    ok      set_environment  value={'len': 30, 'digest': 'bc79fc24b1e3'}
     LEAKED  search_panes     pattern='AKIAIOSFODNN7EXAMPLE_LEAKCHECK'
     LEAKED  wait_for_text    patterns=['AKIAIOSFODNN7EXAMPLE_LEAKCHECK']
 
@@ -1973,7 +1973,7 @@ call sites and fails if one appears outside the bound set.
 
 #### The audit log's redaction survives a short secret
 
-Sensitive arguments are recorded as `{len, sha256_prefix}` rather than
+Sensitive arguments are recorded as `{len, digest}` rather than
 verbatim. The digest was an unsalted SHA-256, and the recorded length
 fixes the search space exactly — so a four-digit PIN typed into a pane
 was recoverable from its own audit entry by brute force in 25

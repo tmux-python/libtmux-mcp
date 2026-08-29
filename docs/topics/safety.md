@@ -116,7 +116,7 @@ Mitigations:
 
 Mitigations:
 
-- The server audit record replaces the `value` argument with a `{len, sha256_prefix}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. The digest is keyed with a random per-process secret: identical payloads correlate across lines within one server run, and someone reading the log cannot test a guess against it. (An unkeyed hash would not be enough — a recorded length fixes the search space, and a four-digit PIN was recovered from such an entry in 25 ms.) That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
+- The server audit record replaces the `value` argument with a `{len, digest}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. The digest is keyed with a random per-process secret: identical payloads correlate across lines within one server run, and someone reading the log cannot test a guess against it. (An unkeyed hash would not be enough — a recorded length fixes the search space, and a four-digit PIN was recovered from such an entry in 25 ms.) That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
 - If only a single command needs a non-sensitive env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child. For credentials, pass a reference that the child resolves instead of a literal value through tmux.
 
 ### Respawning panes
@@ -129,7 +129,7 @@ Mitigations:
 
 - `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get an {exc}`~libtmux_mcp._utils.ExpectedToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
 - Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
-- The optional `environment` argument accepts either a mapping of string keys and values or a JSON object string, then maps each item to one tmux `-e KEY=VALUE` flag. For a mapping, the audit log keeps each *key* visible and replaces each *value* with a `{len, sha256_prefix}` digest. A JSON string is redacted as one scalar digest, so its keys are not retained in the audit record. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
+- The optional `environment` argument accepts either a mapping of string keys and values or a JSON object string, then maps each item to one tmux `-e KEY=VALUE` flag. For a mapping, the audit log keeps each *key* visible and replaces each *value* with a `{len, digest}` digest. A JSON string is redacted as one scalar digest, so its keys are not retained in the audit record. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
 ### Raw pane input
@@ -157,7 +157,7 @@ Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carryi
 - `outcome` — `ok` or `error`, with `error_type` on failure
 - `duration_ms`
 - `client_id` / `request_id` — from the fastmcp context when available
-- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `command`, `value`, `content`, `shell`, and string-form `environment`) are replaced by `{len, sha256_prefix}`. Mapping-form `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
+- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `command`, `value`, `content`, `shell`, and string-form `environment`) are replaced by `{len, digest}`. Mapping-form `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
 
 Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 

@@ -685,6 +685,13 @@ _REDACTION_KEY: bytes = secrets.token_bytes(32)
 def _redact_digest(value: str) -> dict[str, t.Any]:
     """Return a length + keyed-digest summary of ``value``.
 
+    The field is ``digest`` and not ``sha256_prefix`` on purpose. It
+    holds an HMAC under a per-process key, so an operator who read the
+    old name and computed ``sha256(candidate)`` would find no match and
+    conclude two equal payloads DIFFERED -- a silent wrong answer in the
+    one use case the digest exists to serve. A name that fixes the
+    algorithm also has to change every time the algorithm does.
+
     Stable within one server run, so operators can correlate the same
     payload across log lines. NOT reproducible from the payload alone —
     see :data:`_REDACTION_KEY` for why that matters.
@@ -692,7 +699,7 @@ def _redact_digest(value: str) -> dict[str, t.Any]:
     Examples
     --------
     >>> summary = _redact_digest("hello")
-    >>> summary["len"], len(summary["sha256_prefix"])
+    >>> summary["len"], len(summary["digest"])
     (5, 12)
     >>> _redact_digest("hello") == summary  # correlates within the run
     True
@@ -701,7 +708,7 @@ def _redact_digest(value: str) -> dict[str, t.Any]:
     """
     return {
         "len": len(value),
-        "sha256_prefix": hmac.new(
+        "digest": hmac.new(
             _REDACTION_KEY, value.encode("utf-8"), hashlib.sha256
         ).hexdigest()[:12],
     }
