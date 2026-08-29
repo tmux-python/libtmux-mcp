@@ -948,7 +948,7 @@ async def run_command(
         # in-flight call wait with it -- and against a tmux server that
         # had stopped answering, wait indefinitely.
         status = await _run_tmux_lines(
-            server, "show-option", "-p", "-t", target_id, "-v", status_option
+            server, "show-options", "-p", "-t", target_id, "-v", status_option
         )
         status_text = status[0].strip() if status else ""
         try:
