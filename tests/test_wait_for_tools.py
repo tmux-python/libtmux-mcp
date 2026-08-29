@@ -447,8 +447,14 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
                 socket_name=socket_name,
             )
         )
+
+        # Off the loop: the probe walks every entry in /proc, which is a
+        # blocking call inside the event loop it is measuring.
+        async def _pids() -> list[int]:
+            return await asyncio.to_thread(_tmux_wait_pids, socket_name, channel)
+
         await asyncio.sleep(0.5)
-        assert _tmux_wait_pids(socket_name, channel), (
+        assert await _pids(), (
             "no tmux wait-for child observed before the cancel — the probe "
             "is broken, so a later 'no survivors' result would be vacuous"
         )
@@ -463,10 +469,10 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
         # here is an orphan and not a slow teardown.
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            if not _tmux_wait_pids(socket_name, channel):
+            if not await _pids():
                 break
             await asyncio.sleep(0.05)
-        return _tmux_wait_pids(socket_name, channel)
+        return await _pids()
 
     survivors = asyncio.run(_drive())
     assert not survivors, (

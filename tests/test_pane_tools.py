@@ -1075,10 +1075,18 @@ def test_run_command_kills_tmux_child_on_cancel(
                 socket_name=socket_name,
             )
         )
+
+        # Off the loop: the probe walks every entry in /proc, which on a
+        # busy box takes long enough to starve the run_command it is
+        # waiting for -- the poll then prevents the child it is polling
+        # for from ever being spawned, and the guard below fires.
+        async def _pids() -> list[int]:
+            return await asyncio.to_thread(_run_command_wait_pids, socket_name)
+
         deadline = time.monotonic() + 4.0
-        while time.monotonic() < deadline and not _run_command_wait_pids(socket_name):
+        while time.monotonic() < deadline and not await _pids():
             await asyncio.sleep(0.05)
-        assert _run_command_wait_pids(socket_name), (
+        assert await _pids(), (
             "no tmux wait-for child observed before the cancel — the probe "
             "is broken, so a later 'no survivors' result would be vacuous"
         )
@@ -1093,10 +1101,10 @@ def test_run_command_kills_tmux_child_on_cancel(
         # slow teardown.
         reap_deadline = time.monotonic() + 2.0
         while time.monotonic() < reap_deadline:
-            if not _run_command_wait_pids(socket_name):
+            if not await _pids():
                 break
             await asyncio.sleep(0.05)
-        return _run_command_wait_pids(socket_name)
+        return await _pids()
 
     survivors = asyncio.run(_drive())
     assert not survivors, (

@@ -302,10 +302,17 @@ and a genuine long-running command on a pane at a prompt still reports
 
 Cancellation reaps whichever phase is in flight -- verified directly on
 a pane that never starts, where the started channel's child appears and
-is gone after the cancel. The suite's orphan probe knew only the
-completion channel's `r_` prefix, so under load it could look during
-the started phase, find nothing, and trip its own "the probe is broken"
-guard. It matches both prefixes now.
+is gone after the cancel.
+
+The orphan test needed two fixes and the second is the interesting one.
+Its probe knew only the completion channel's `r_` prefix, so it was
+blind to a phase this branch added; it matches both now. But it still
+failed, because the probe walks every entry in `/proc` SYNCHRONOUSLY
+inside the event loop it is polling. On a busy box that starves the
+`run_command` it is waiting for, so the poll prevents the child it is
+polling for from ever being spawned -- a measurement that destroys what
+it measures. It runs off the loop now, as does its `wait_for_channel`
+sibling, which had the same blocking probe.
 
 A caller whose own budget is at or below the grace gets a plain
 timeout rather than a refusal: there, "it has not started yet" and "it
