@@ -8,6 +8,30 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Tools that type into a pane no longer pick the pane
+
+`send_keys`, `send_keys_batch`, `paste_text`, `paste_buffer` and
+`run_command` accepted no target at all and delivered the caller's
+input to a pane chosen by list order. Reads may default; typing may
+not -- and a stable default is not a correct one, since nothing in the
+call says which pane was meant.
+
+The precedent is in this same server: `kill_window` requires
+`window_id`, so the destructive tools already refuse to guess. There
+was no principled reason `send_keys` got to, and it is the one that
+executes something. The destination was disclosed in the result, but
+that arrives after the keystrokes have landed.
+
+A batch is checked per operation, since one untargeted entry among
+targeted ones is what a whole-batch check would miss. For
+`run_command` the check sits after the multi-line refusal, which keeps
+a breakout payload away from tmux entirely and whose ordering is
+deliberate.
+
+`SessionInfo` and `WindowInfo` already carry `active_pane_id`, so
+explicit targeting after a `create_session` or `create_window` is one
+field, not a follow-up `list_panes`.
+
 #### "No target" now means one thing, and it stays put
 
 An untargeted read was resolved by two different rules in the same

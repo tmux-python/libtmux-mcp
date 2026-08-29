@@ -479,6 +479,38 @@ ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+def _raise_if_untargeted(tool: str, **targets: str | None) -> None:
+    """Refuse a call that delivers input without saying where.
+
+    Reads may default; a tool that types into a pane may not. The
+    default was the first LISTED object, which tmux orders by name, so
+    ``rename_session`` moved where an untargeted ``send_keys`` landed --
+    keystrokes into a pane belonging to a session the caller had never
+    touched. Keying the default on the tmux id makes it stable, but
+    stable is not the same as correct: nothing about the call says
+    which pane was meant.
+
+    The precedent is in this same server. ``kill_window`` requires
+    ``window_id``, so the destructive tools already refuse to guess.
+    There is no principled reason ``send_keys`` gets to, and it is the
+    one that executes something.
+
+    The destination is disclosed in the result today, which is not the
+    same as a guard: it arrives after the keystrokes have landed.
+    """
+    if any(value is not None for value in targets.values()):
+        return
+    msg = (
+        f"{tool} requires an explicit target: pass "
+        f"{', '.join(sorted(targets))}. It delivers input to a pane, so "
+        "there is no safe default -- the pane it would have picked "
+        "belongs to whichever session is oldest, which is unrelated to "
+        "what the call is for. Use list_panes or search_panes to find "
+        "the pane, and snapshot_pane to confirm what it is running."
+    )
+    raise ExpectedToolError(msg)
+
+
 def _raise_if_flag_like(label: str, value: str) -> None:
     """Refuse a caller string tmux would parse as a flag.
 

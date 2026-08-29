@@ -694,10 +694,16 @@ def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
             requests = (
-                {"keys": "C-c", "enter": False},
-                {"keys": "partial-TUI", "enter": False, "literal": True},
-                {"keys": "/needle", "enter": True},
+                {"pane_id": "%1", "keys": "C-c", "enter": False},
                 {
+                    "pane_id": "%1",
+                    "keys": "partial-TUI",
+                    "enter": False,
+                    "literal": True,
+                },
+                {"pane_id": "%1", "keys": "/needle", "enter": True},
+                {
+                    "pane_id": "%1",
                     "keys": "explicit-secret",
                     "enter": True,
                     "literal": True,
@@ -760,13 +766,15 @@ def test_global_history_default_leaves_untimed_batch_operations_explicit_only(
                 "send_keys_batch",
                 {
                     "operations": [
-                        {"keys": "C-c", "enter": False},
+                        {"pane_id": "%1", "keys": "C-c", "enter": False},
                         {
+                            "pane_id": "%1",
                             "keys": "TUI_BATCH_DEFAULT",
                             "enter": True,
                             "literal": True,
                         },
                         {
+                            "pane_id": "%1",
                             "keys": "batch-secret",
                             "enter": True,
                             "literal": True,
@@ -825,13 +833,15 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
                 "send_keys_batch",
                 {
                     "operations": [
-                        {"keys": "C-c", "enter": False},
+                        {"pane_id": "%1", "keys": "C-c", "enter": False},
                         {
+                            "pane_id": "%1",
                             "keys": "TUI_BATCH_DEFAULT",
                             "enter": True,
                             "literal": True,
                         },
                         {
+                            "pane_id": "%1",
                             "keys": "batch-secret",
                             "enter": True,
                             "literal": True,
@@ -909,13 +919,13 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
         async with Client(_history_server("1")) as client:
             pasted_text = await client.call_tool(
                 "paste_text",
-                {"text": raw_text, "bracket": False},
+                {"pane_id": "%1", "text": raw_text, "bracket": False},
                 raise_on_error=False,
             )
             assert pasted_text.is_error is False
             pasted_buffer = await client.call_tool(
                 "paste_buffer",
-                {"buffer_name": existing_buffer, "bracket": True},
+                {"pane_id": "%1", "buffer_name": existing_buffer, "bracket": True},
                 raise_on_error=False,
             )
             assert pasted_buffer.is_error is False

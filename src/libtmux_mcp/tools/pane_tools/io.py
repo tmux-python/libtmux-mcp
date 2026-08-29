@@ -20,6 +20,7 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
     _map_exception_to_tool_error,
+    _raise_if_untargeted,
     _resolve_pane,
     _tmux_argv,
     handle_tool_errors,
@@ -368,6 +369,13 @@ def send_keys(
     str
         Confirmation message.
     """
+    _raise_if_untargeted(
+        "send_keys",
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,
@@ -432,7 +440,6 @@ def send_keys_batch(
     if on_error not in {"stop", "continue"}:
         msg = "on_error must be 'stop' or 'continue'"
         raise ExpectedToolError(msg)
-
     server = _get_server(socket_name=socket_name)
     results: list[SendKeysOperationResult] = []
     stopped_at: int | None = None
@@ -459,6 +466,16 @@ def send_keys_batch(
         started = time.monotonic()
         pane_id: str | None = None
         try:
+            # Per operation, not once for the batch: a batch is a list of
+            # independent sends, and one untargeted entry among targeted
+            # ones is the case a whole-batch check would miss.
+            _raise_if_untargeted(
+                f"send_keys_batch operation {index}",
+                pane_id=operation.pane_id,
+                session_name=operation.session_name,
+                session_id=operation.session_id,
+                window_id=operation.window_id,
+            )
             pane = _resolve_pane(
                 server,
                 pane_id=operation.pane_id,
@@ -641,6 +658,17 @@ async def run_command(
             "send_keys / paste_text if you need raw multi-line input."
         )
         raise ExpectedToolError(msg)
+
+    # After the multiline refusal, whose ordering ahead of any tmux
+    # contact is deliberate and asserted: that check keeps a breakout
+    # payload away from tmux entirely.
+    _raise_if_untargeted(
+        "run_command",
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
     if timeout <= 0:
         msg = "timeout must be positive"
         raise ExpectedToolError(msg)
@@ -1131,6 +1159,13 @@ def paste_text(
     str
         Confirmation message.
     """
+    _raise_if_untargeted(
+        "paste_text",
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
         server,

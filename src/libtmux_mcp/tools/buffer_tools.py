@@ -42,6 +42,7 @@ from libtmux_mcp._utils import (
     TAG_READONLY,
     ExpectedToolError,
     _get_server,
+    _raise_if_untargeted,
     _resolve_pane,
     _tmux_argv,
     handle_tool_errors,
@@ -278,6 +279,13 @@ def paste_buffer(
     str
         Confirmation message naming the target pane.
     """
+    _raise_if_untargeted(
+        "paste_buffer",
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
     server = _get_server(socket_name=socket_name)
     cname = _validate_buffer_name(buffer_name)
     pane = _resolve_pane(

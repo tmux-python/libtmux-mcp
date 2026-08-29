@@ -44,6 +44,7 @@ from libtmux_mcp.tools.pane_tools import (
     search_panes,
     select_pane,
     send_keys,
+    send_keys_batch,
     set_pane_title,
     snapshot_pane,
     swap_pane,
@@ -523,6 +524,45 @@ def test_search_panes_rejects_nonsense_pagination(
             limit=limit,
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_input_tools_refuse_to_guess_where_the_keystrokes_go(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A tool that types into a pane may not pick the pane itself.
+
+    Reads may default; delivering input may not. The default was the
+    first LISTED object, and tmux lists sessions by NAME, so
+    ``rename_session`` moved where an untargeted ``send_keys`` landed.
+    Keying the default on the tmux id makes it stable, but stable is
+    not correct: nothing in the call says which pane was meant, and
+    ``kill_window`` already refuses to guess for exactly this reason.
+
+    The result does name the pane it used -- after the keystrokes have
+    landed, which is disclosure rather than a guard.
+    """
+    socket = mcp_server.socket_name
+    for call in (
+        lambda: send_keys(keys="echo hi", socket_name=socket),
+        lambda: paste_text(text="hi", socket_name=socket),
+        lambda: asyncio.run(run_command(command="true", socket_name=socket)),
+    ):
+        with pytest.raises(ToolError, match="requires an explicit target"):
+            call()
+
+    # A batch is checked per operation: one untargeted entry among
+    # targeted ones is what a whole-batch check would miss.
+    result = send_keys_batch(
+        operations=[
+            SendKeysOperation(pane_id=mcp_pane.pane_id, keys="echo one"),
+            SendKeysOperation(keys="echo two"),
+        ],
+        on_error="continue",
+        socket_name=socket,
+    )
+    assert result.results[0].success is True
+    assert result.results[1].success is False
+    assert "requires an explicit target" in (result.results[1].error or "")
 
 
 def test_search_panes_refuses_a_pattern_it_could_not_interrupt(
