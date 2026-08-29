@@ -44,12 +44,6 @@ dependencies = [
   "fastmcp>=3.4.2,<4.0.0",
 ]
 
-[tool.uv.sources]
-# LOCAL ONLY -- points at the libtmux-improvements worktree so the MCP
-# can be exercised against unreleased libtmux fixes. CI resolves
-# libtmux from PyPI; this must not reach a pull request.
-libtmux = { path = "../libtmux-mcp-improvements", editable = true }
-
 [project.urls]
 "Bug Tracker" = "https://github.com/tmux-python/libtmux-mcp/issues"
 Documentation = "https://libtmux-mcp.git-pull.com"

@@ -2361,6 +2361,32 @@ unusual entry shape.
 
 ### Development
 
+**A local dependency pin can no longer travel**
+
+Commit 1367707 added a `[tool.uv.sources]` path entry pointing libtmux
+at a sibling worktree, so the server could be exercised against
+unreleased libtmux fixes. It carried a comment saying it must not reach
+a pull request -- and a comment was the only thing holding it.
+
+Two things were wrong beyond the reminder. The entry is committed, so
+pushing the branch pushes it; and `uv.lock` records the resolved source
+separately, so deleting the stanza alone would leave the lock pointing
+at the sibling. The comment also claimed "CI resolves libtmux from
+PyPI", which is false: CI runs `uv sync --all-extras --dev`, and uv
+reads `[tool.uv.sources]` from `pyproject.toml`. It would have resolved
+the relative path and failed before a single test ran -- a claim about
+a gate nobody had executed, which is the class this branch keeps
+fixing.
+
+The pin is removed, and two guards assert its absence: no path source
+in `pyproject.toml`, and no editable in `uv.lock` outside the project
+itself. Verified to fail on a reinstated pin and pass without one, so a
+future local pin announces itself instead of waiting to be noticed.
+
+Found by the QA instance, whose worktree could not resolve dependencies
+at all -- the first thing all day to touch dependency resolution rather
+than the tool surface.
+
 **Record atomicity is asserted, not left to fall out**
 
 A pane record cannot be torn -- half its fields from before a
