@@ -18,7 +18,11 @@ from libtmux import exc as libtmux_exc
 from libtmux.test.retry import retry_until
 
 from libtmux_mcp import _progress as _progress_module
-from libtmux_mcp._utils import ExpectedToolError
+from libtmux_mcp._utils import (
+    ExpectedToolError,
+    _resolve_pane,
+    _serialize_pane,
+)
 from libtmux_mcp.models import (
     CaptureSinceResult,
     PaneContentMatch,
@@ -7212,3 +7216,95 @@ def test_resize_pane_refuses_a_pane_that_fills_its_window(
             height=11,
             socket_name=mcp_server.socket_name,
         )
+
+
+# ---------------------------------------------------------------------------
+# Freshness of records returned by mutating tools
+# ---------------------------------------------------------------------------
+
+#: Mutating tools that answer with a ``PaneInfo``. Each receives two
+#: panes in one window so the layout tools have something to act
+#: against, and returns the model the tool produced.
+_PANE_MUTATORS: list[tuple[str, t.Callable[[Server, str, str], t.Any]]] = [
+    (
+        "set_pane_title",
+        lambda s, a, _b: set_pane_title(
+            title="drift-probe", pane_id=a, socket_name=s.socket_name
+        ),
+    ),
+    (
+        "resize_pane",
+        lambda s, a, _b: resize_pane(pane_id=a, height=8, socket_name=s.socket_name),
+    ),
+    (
+        "select_pane",
+        lambda s, a, _b: select_pane(pane_id=a, socket_name=s.socket_name),
+    ),
+    (
+        "swap_pane",
+        lambda s, a, b: swap_pane(
+            source_pane_id=a,
+            target_pane_id=b,
+            socket_name=s.socket_name,
+        ),
+    ),
+    (
+        "respawn_pane",
+        lambda s, a, _b: respawn_pane(pane_id=a, kill=True, socket_name=s.socket_name),
+    ),
+    (
+        "enter_copy_mode",
+        lambda s, a, _b: enter_copy_mode(pane_id=a, socket_name=s.socket_name),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "call"), _PANE_MUTATORS, ids=[n for n, _ in _PANE_MUTATORS]
+)
+def test_a_mutating_tool_answers_with_a_freshly_read_record(
+    mcp_server: Server,
+    mcp_window: Window,
+    name: str,
+    call: t.Callable[[Server, str, str], t.Any],
+) -> None:
+    """A returned record must describe the pane AFTER the mutation.
+
+    libtmux objects hold their fields as plain attributes populated when
+    the object was built, so serializing one the server has held for a
+    while returns what was true then. Such a record is internally
+    coherent, satisfies every geometry invariant, and is wrong -- the
+    caller cannot tell.
+
+    Eight hand-placed ``refresh()`` calls keep this true today. This
+    asserts the PROPERTY instead, so a tool added later that forgets one
+    fails here rather than shipping a plausible past.
+    """
+    second_id = mcp_window.split(attach=False).pane_id
+    first_id = mcp_window.panes[0].pane_id
+    assert first_id is not None
+    assert second_id is not None
+
+    returned = call(mcp_server, first_id, second_id)
+
+    fresh = _serialize_pane(_resolve_pane(mcp_server, pane_id=returned.pane_id))
+    assert returned == fresh, f"{name} answered with a stale record"
+
+
+def test_the_freshness_guard_detects_a_stale_record(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """The comparison above must be able to fail.
+
+    A guard that cannot produce its own negative is not evidence. This
+    builds the stale record deliberately -- serialized before the
+    mutation -- and requires the comparison to reject it.
+    """
+    stale = _serialize_pane(mcp_pane)
+    set_pane_title(
+        title="CHANGED-AFTERWARDS",
+        pane_id=mcp_pane.pane_id,
+        socket_name=mcp_server.socket_name,
+    )
+    fresh = _serialize_pane(_resolve_pane(mcp_server, pane_id=mcp_pane.pane_id))
+    assert stale != fresh

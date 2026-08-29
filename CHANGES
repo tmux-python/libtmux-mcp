@@ -109,6 +109,28 @@ alert-bell` set, `show-hooks -t A alert-bell` is empty while
 options table, so these are the same store reached two ways.
 `HookListResult.include_inherited` reports which lookup answered.
 
+### Development
+
+**A returned record is asserted fresh, not assumed fresh**
+
+libtmux objects hold their fields as plain attributes populated when the
+object was built, so serializing one the server has held for a while
+returns what was true then -- a record that is internally coherent,
+satisfies every geometry invariant, and is wrong, with nothing at the
+call site to reveal it. Eight hand-placed `refresh()` calls keep the
+mutating tools honest today, and the QA sweep confirmed all five it
+tested return post-mutation state.
+
+Eight placements with no invariant behind them is the shape that lets a
+ninth tool forget. A parametrized guard now calls each mutating tool
+that answers with a `PaneInfo` and compares the result field-by-field
+against a freshly resolved one, so the PROPERTY is asserted rather than
+the placement, and a future refactor may move the refreshes freely.
+
+Verified to have teeth in both directions: a synthetic stale record is
+rejected by the same comparison, and deleting the real `refresh()` in
+`respawn_pane` fails the guard on a changed `pane_pid`.
+
 ### Fixes
 
 #### `signal_channel` documented the footgun as a safe habit
