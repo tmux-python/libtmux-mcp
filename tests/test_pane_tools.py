@@ -1748,6 +1748,33 @@ def _signal_after_shell_payload(mcp_server: Server, pane: Pane, payload: str) ->
     )
 
 
+def test_enter_copy_mode_bounds_a_huge_scroll_up(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """An unbounded repeat count reaches an unbounded loop in tmux.
+
+    ``window_copy_cmd_scroll_up`` runs ``for (; np != 0; np--)`` with no
+    reference to how much scrollback exists, inside the single-threaded
+    server. At ~30us an iteration a caller-supplied ``10**9`` spins for
+    hours, and it is not the caller who pays: probe servers abandoned at
+    a 40s client timeout were still burning CPU at 422s when reaped, and
+    ``kill-server`` on the same socket did not get through.
+
+    Clamping preserves the outcome, which is the half worth guarding:
+    the discarded iterations could not have moved the cursor.
+    """
+    pane_id = mcp_pane.pane_id
+    assert pane_id is not None
+    started = time.monotonic()
+    enter_copy_mode(
+        pane_id=pane_id, scroll_up=10**9, socket_name=mcp_server.socket_name
+    )
+    elapsed = time.monotonic() - started
+    exit_copy_mode(pane_id=pane_id, socket_name=mcp_server.socket_name)
+    # Unclamped, the same call takes 3.5s at 100_000 and scales linearly.
+    assert elapsed < 2.0, f"scroll_up=10**9 took {elapsed:.2f}s"
+
+
 def test_capture_since_first_call_returns_visible_screen_and_cursor(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:

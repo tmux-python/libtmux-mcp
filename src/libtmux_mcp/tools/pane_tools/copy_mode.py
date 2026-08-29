@@ -19,6 +19,27 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
 
 
+def _scrollable_rows(pane: Pane) -> int:
+    """Rows a copy-mode cursor can move up before it stops moving.
+
+    History plus the visible screen: above that the cursor is already at
+    the top of the grid and every further step is a no-op.
+    """
+    stdout = pane.display_message("#{history_size} #{pane_height}", get_text=True)
+    if not stdout:
+        msg = (
+            f"pane {pane.pane_id} could not be measured, so a repeat count "
+            "cannot be bounded safely"
+        )
+        raise ExpectedToolError(msg)
+    try:
+        history, height = (int(part) for part in stdout[0].split())
+    except ValueError:
+        msg = f"pane {pane.pane_id} reported an unreadable size: {stdout[0]!r}"
+        raise ExpectedToolError(msg) from None
+    return history + height
+
+
 def _run_copy_mode_cmd(pane: Pane, command: str, *, repeat: int | None = None) -> None:
     """Send one ``-X`` copy-mode command, raising if tmux rejected it.
 
@@ -27,12 +48,35 @@ def _run_copy_mode_cmd(pane: Pane, command: str, *, repeat: int | None = None) -
     operation and the returned ``PaneInfo`` read like confirmation the
     pane had left copy mode. tmux says ``not in a mode`` and exits 1.
 
+    ``repeat`` is clamped here rather than by the caller, because tmux's
+    ``-N`` reaches an unbounded loop in the single-threaded server:
+    ``window_copy_cmd_scroll_up`` runs ``for (; np != 0; np--)`` with no
+    reference to how much scrollback exists. Measured at ~30us an
+    iteration on a pane with NO history, where every iteration after the
+    first is a no-op that still costs full price:
+
+        scroll_up      1,000 -> 0.07s
+        scroll_up    100,000 -> 3.0s
+        scroll_up 10,000,000 -> still spinning at 30s
+
+    It wedges the whole server rather than the caller. A client-side
+    timeout cannot help: three probe servers killed at the CLIENT's 40s
+    timeout were still burning CPU when reaped later, at 422s, 289s and
+    159s, and ``kill-server`` on the same socket never got through
+    either. So the bound has to be applied before dispatch.
+
+    Clamping is not a silent substitution -- the resulting pane state is
+    identical, because the discarded iterations could not move anything.
+    Measured on a pane with 192 rows of history: ``scroll_up=5`` lands
+    at 5, ``50`` at 50, and ``1_000_000_000`` at 192, which is where the
+    unclamped call also ended up.
+
     No ``--`` here, unlike the ordinary send path: every *command* is a
     module constant, never caller text.
     """
     args = ["send-keys"]
     if repeat is not None:
-        args.extend(("-N", str(repeat)))
+        args.extend(("-N", str(min(repeat, _scrollable_rows(pane)))))
     args.extend(("-X", command))
     result = pane.cmd(*args)
     if result.returncode != 0 or result.stderr:
@@ -83,10 +127,13 @@ def enter_copy_mode(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.copy_mode()
+    # Validated before entering, not after: a rejected scroll_up used to
+    # leave the pane in copy mode anyway, so the error described a call
+    # that had already half-happened.
     if scroll_up is not None and scroll_up < 0:
         msg = f"scroll_up must be zero or greater (received {scroll_up})"
         raise ExpectedToolError(msg)
+    pane.copy_mode()
     if scroll_up is not None and scroll_up > 0:
         _run_copy_mode_cmd(pane, "scroll-up", repeat=scroll_up)
     pane.refresh()

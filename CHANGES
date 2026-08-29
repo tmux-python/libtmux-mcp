@@ -8,6 +8,36 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `enter_copy_mode(scroll_up=...)` can no longer wedge the tmux server
+
+The repeat count went to tmux unbounded, and `window_copy_cmd_scroll_up`
+runs `for (; np != 0; np--)` with no reference to how much scrollback
+exists -- inside the single-threaded server. On a pane with NO history,
+where every iteration after the first is a no-op that still costs full
+price:
+
+    scroll_up      1,000 -> 0.07s
+    scroll_up    100,000 -> 3.5s
+    scroll_up 10,000,000 -> still spinning at 30s
+
+The caller is not the one who pays. Three probe servers abandoned at a
+40-second CLIENT timeout were still burning CPU when reaped later, at
+422s, 289s and 159s, and `kill-server` on the same socket never got
+through either -- so a timeout on our side cannot help and the bound
+has to be applied before dispatch.
+
+The count is now clamped where `-N` is emitted, so any future caller
+inherits the bound. Clamping does not change the outcome: on a pane
+with 192 rows of history, `scroll_up=5` lands at 5, `50` at 50, and
+`1_000_000_000` at 192 -- where the unclamped call also ended up, after
+spinning for the other 999,999,808 iterations.
+
+A rejected negative `scroll_up` also used to leave the pane in copy
+mode before raising. It is validated before entering now.
+
+Reported by the QA instance, which hit it twice from different
+directions during a mechanical parameter sweep.
+
 #### A split that destroys its own pane no longer reports success
 
 `split_window(shell=...)` returned a `PaneInfo` for a pane that no
