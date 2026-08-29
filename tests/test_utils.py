@@ -10,6 +10,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 from libtmux import exc
 from libtmux.session import Session
+from libtmux.test.retry import retry_until
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_CREATE,
@@ -1443,3 +1444,50 @@ def test_bounded_tmux_cmd_matches_stock_output(mcp_server: Server) -> None:
             theirs.stdout,
             theirs.stderr,
         ), f"diverged on {args[1]}"
+
+
+def test_caller_is_on_server_blocks_a_nested_self_kill(
+    TestServer: type[Server],
+) -> None:
+    """``$TMUX`` names only the INNERMOST server.
+
+    Run an agent inside tmux and point it at a second tmux, and the pane
+    hosting its terminal belongs to the OUTER server while ``$TMUX``
+    describes the inner one. Every path comparison then says "different
+    server" and a kill of that pane is permitted -- taking the caller's
+    tty with it. Reproduced on 3.7c before the fix: guard vs the inner
+    server True, vs the outer server False.
+
+    The control matters as much as the case: an unrelated third server
+    must still be killable, or the guard has simply stopped answering.
+    """
+    from libtmux_mcp._utils import (
+        CallerIdentity,
+        _caller_is_on_server,
+        _effective_socket_path,
+    )
+
+    outer, inner, other = TestServer(), TestServer(), TestServer()
+    outer.new_session(session_name="o", window_command="sh")
+    inner.new_session(session_name="i", window_command="sh")
+    other.new_session(session_name="x", window_command="sh")
+
+    pane = outer.sessions[0].windows[0].panes[0]
+    pane.send_keys(f"tmux -L {inner.socket_name} attach -t i", enter=True)
+    retry_until(
+        lambda: bool(inner.cmd("list-clients", "-F", "#{client_tty}").stdout),
+        10,
+        raises=True,
+    )
+    # The nesting is real: the inner client occupies the outer pane.
+    assert inner.cmd("list-clients", "-F", "#{client_tty}").stdout == [pane.pane_tty]
+
+    caller = CallerIdentity(
+        socket_path=_effective_socket_path(inner),
+        server_pid=None,
+        session_id=None,
+        pane_id="%0",
+    )
+    assert _caller_is_on_server(inner, caller) is True
+    assert _caller_is_on_server(outer, caller) is True
+    assert _caller_is_on_server(other, caller) is False

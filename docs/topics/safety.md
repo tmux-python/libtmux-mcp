@@ -61,6 +61,17 @@ Destructive tools include safeguards against self-harm:
 - {tool}`kill-window` refuses to kill the window containing the MCP pane
 - {tool}`kill-pane` refuses to kill the pane running the MCP server
 
+**Nested tmux.** `TMUX` names only the *innermost* server. Run an agent
+inside tmux and point it at a second tmux, and the pane hosting its
+terminal belongs to the outer server while `TMUX` describes the inner
+one — so a socket comparison alone says "different server" and would
+permit a kill that takes the caller's own terminal with it. The guard
+therefore also asks the caller's own server which terminals are attached
+to it: a client of that server occupies a pane of whatever hosts it, so
+the inner server's `client_tty` is the outer server's `pane_tty`. That
+holds however the nesting arose, including a server that was already
+running and merely attached to.
+
 These protections read both the `TMUX` and `TMUX_PANE` environment variables that tmux injects into pane child processes. The `TMUX` value is formatted `socket_path,server_pid,session_id` — libtmux-mcp parses the socket path and compares it to the target server's so the guard only fires when the caller is actually on the same tmux server. A kill across unrelated sockets is allowed; a kill of the caller's own pane/window/session/server is refused. If the caller's socket can't be determined (rare — `TMUX_PANE` set without `TMUX`), the guard errs on the side of blocking.
 
 ### macOS `TMUX_TMPDIR` caveat

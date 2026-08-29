@@ -2186,6 +2186,37 @@ again promise an argument that is not there.
 
 ### Fixes
 
+#### Nested tmux no longer defeats the self-kill guard
+
+`TMUX` names only the INNERMOST server. Run an agent inside tmux and
+point it at a second tmux, and the pane hosting its terminal belongs to
+the OUTER server while `TMUX` describes the inner one -- so every
+socket comparison in the guard said "different server" and a kill of
+that pane was permitted. It takes the caller's tty with it, which is
+exactly the self-kill the guard exists to prevent. Reproduced on 3.7c:
+guard against the inner server True, against the outer server False.
+
+Reachable rather than theoretical: `list_servers` enumerates every
+socket, so a nested agent can see the outer one and target it.
+
+The fix asks WHO IS ATTACHED instead of how the nesting arose. A client
+of the caller's own server occupies a pane of whatever hosts it, so the
+inner server's `client_tty` is the outer server's `pane_tty` --
+measured, both `/dev/pts/50`. That covers a server merely attached to
+as well as one started from a pane, and it needs no `/proc`, which
+macOS does not have; walking the process tree would have missed the
+first case and silently protected only Linux.
+
+A hung probe fails closed, matching the guard's existing bias. A
+nonzero exit does not: "no such server" is an ANSWER -- one that is
+gone hosts nothing -- and treating it as unknown would block every
+destructive call for a caller whose `TMUX` names a socket that has
+since died.
+
+Found by the QA instance from inside a real nest. Its control is what
+makes the fix trustworthy: an unrelated third server must still be
+killable, or the guard has merely stopped answering.
+
 #### A spawn start directory is a literal path
 
 `create_session` escaped its `start_directory` because `new-session -c`

@@ -266,6 +266,67 @@ def _effective_socket_path(server: Server) -> str | None:
     return str(pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}" / socket_name)
 
 
+def _target_hosts_the_callers_client(server: Server, caller: CallerIdentity) -> bool:
+    """Whether a pane on *server* is the terminal the caller lives in.
+
+    ``$TMUX`` names only the INNERMOST server. Run an agent inside tmux,
+    point it at a second tmux, and its ``$TMUX`` describes the inner one
+    while the pane actually hosting its terminal belongs to the outer
+    one -- so every path comparison above says "different server" and a
+    kill of that pane is permitted. It takes the caller's tty with it,
+    which is the self-kill this guard exists to prevent. Reproduced on
+    3.7c: guard vs the inner server True, vs the outer server False.
+
+    Asking WHO IS ATTACHED answers it without caring how the nesting
+    arose. A client of the caller's own server occupies a pane of
+    whatever hosts it, so the inner server's ``client_tty`` is the outer
+    server's ``pane_tty`` -- measured, both ``/dev/pts/50``. Walking the
+    process tree instead would only find servers STARTED FROM a pane,
+    missing one merely attached to, and would need ``/proc``, which
+    macOS does not have.
+
+    A HUNG probe fails closed, matching the bias of the table above. A
+    nonzero exit does not: "no such server" is an answer -- a server
+    that is gone hosts nothing -- and treating it as unknown would block
+    every destructive call for a caller whose ``$TMUX`` names a socket
+    that has since died. An empty client list is an answer for the same
+    reason.
+    """
+    caller_server = Server(socket_path=caller.socket_path)
+    attached = _run_tmux_sync(
+        caller_server,
+        "list-clients",
+        "-F",
+        "#{client_tty}",
+        timeout=_LIVENESS_TIMEOUT_SECONDS,
+    )
+    if attached is None:
+        return True
+    if attached.returncode != 0:
+        # No such server. It cannot be hosting anything, so this is an
+        # ANSWER rather than a failure -- distinct from the timeout
+        # above, where a live-but-wedged server might well be hosting
+        # us. Keeps a caller whose $TMUX names a dead socket from
+        # blocking every destructive call.
+        return False
+    ttys = {line.strip() for line in attached.stdout.splitlines() if line.strip()}
+    if not ttys:
+        return False
+    panes = _run_tmux_sync(
+        server,
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_tty}",
+        timeout=_LIVENESS_TIMEOUT_SECONDS,
+    )
+    if panes is None:
+        return True
+    if panes.returncode != 0:
+        return False
+    return any(line.strip() in ttys for line in panes.stdout.splitlines())
+
+
 def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
     """Return True if ``caller`` looks like it is on the same tmux server.
 
@@ -297,6 +358,10 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
       sides. Trades off one exotic false positive (two daemons with
       identical socket_name under different tmpdirs) for a real safety
       property.
+    * a pane on the target server is the terminal the caller's own
+      server is attached through (nested tmux) → ``True``. ``$TMUX``
+      names only the innermost server, so the comparisons above cannot
+      see this one.
     * Otherwise → ``False``.
 
     When a conservative block is a false positive, the caller's error
@@ -320,7 +385,12 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
     # the caller's shell (macOS launchd).
     caller_basename = pathlib.PurePath(caller.socket_path).name
     target_name = server.socket_name or "default"
-    return caller_basename == target_name
+    if caller_basename == target_name:
+        return True
+    # Nesting: $TMUX names only the innermost server, so none of the
+    # comparisons above can see a pane on ANOTHER server that is hosting
+    # this one.
+    return _target_hosts_the_callers_client(server, caller)
 
 
 def _caller_is_strictly_on_server(
