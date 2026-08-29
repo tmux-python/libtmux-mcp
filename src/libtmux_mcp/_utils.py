@@ -1202,15 +1202,40 @@ def _raise_if_server_unreachable(server: Server) -> None:
     ``pane_id`` or ``window_id`` let tmux's own error through, which is
     untidy but never false -- they are the ones already telling the
     truth.
+
+    Also covers the opposite end. ``_probe_liveness`` separates "no
+    server" from "unreachable", and a missing server reaching the
+    object-not-found path produced advice that cannot work: it tells the
+    caller to run ``list_sessions``, which fails identically. Both
+    branches raise here so neither answer is a guess.
     """
     alive, reason = _probe_liveness(server)
-    if not alive and reason is not None:
+    if alive:
+        return
+    if reason is not None:
         msg = (
             f"tmux server exists but could not be queried: {reason}. "
             "Reporting the object as missing would be wrong rather than "
             "merely unhelpful."
         )
         raise ExpectedToolError(msg)
+    # No server at all, which is not the same as "that object is
+    # missing". The object-not-found path advises calling list_sessions
+    # to discover valid ids; with no server that call fails the same
+    # way, so the advice sends the caller round the loop it is already
+    # in. Say what is actually true instead.
+    socket = getattr(server, "socket_name", None) or getattr(
+        server, "socket_path", None
+    )
+    msg = f"no tmux server is running{f' on {socket}' if socket else ''}"
+    raise ExpectedToolError(
+        msg,
+        suggestion=(
+            "There is no enumeration to consult. create_session starts a "
+            "server and a session in one call; list_servers finds sockets "
+            "that already have one."
+        ),
+    )
 
 
 def tmux_id_sort_key(raw: str | None) -> tuple[int, str]:

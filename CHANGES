@@ -88,6 +88,18 @@ options table, so these are the same store reached two ways.
 
 ### Fixes
 
+#### A missing tmux server no longer advises a call that cannot work
+
+With no server running, resolving an object raised `Object not found`
+and suggested calling `list_sessions` to discover valid ids -- a call
+that fails identically, so the advice sent the caller round the loop it
+was already in.
+
+The information to answer properly was already being gathered:
+`_probe_liveness` separates "no server" from "server exists but cannot
+be queried", and only the second had a message. Both do now. A missing
+server says so and names the socket.
+
 #### An oversized `send_keys` payload is the caller's problem, not a crash
 
 `send_keys` reported `Unexpected error: OSError: [Errno 7] Argument
