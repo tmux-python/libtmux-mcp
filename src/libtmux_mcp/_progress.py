@@ -19,6 +19,8 @@ import contextlib
 import time
 import typing as t
 
+import anyio
+
 if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import AsyncIterator
 
@@ -49,8 +51,6 @@ async def progress_ticker(
         yield
         return
 
-    from libtmux_mcp.tools.pane_tools.wait import _maybe_report_progress
-
     started = time.monotonic()
 
     async def _tick() -> None:
@@ -76,3 +76,71 @@ async def progress_ticker(
         # replacing the one the caller is propagating.
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+#: Both anyio stream errors must be caught: ``ClosedResourceError`` is
+#: raised when the *send* side of the stream is closed (our own
+#: shutdown path); ``BrokenResourceError`` is raised when the *receive*
+#: side is closed (peer disconnect) — FastMCP's own client catches
+#: both for the same reason. ``BrokenPipeError`` covers stdio
+#: transports; generic ``ConnectionError`` is the catch-all base for
+#: socket-level families. Anything else propagates so the caller
+#: sees it.
+_TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    anyio.ClosedResourceError,
+    anyio.BrokenResourceError,
+    BrokenPipeError,
+    ConnectionError,
+)
+
+
+async def _maybe_report_progress(
+    ctx: Context | None,
+    *,
+    progress: float,
+    total: float | None,
+    message: str,
+) -> None:
+    """Call ``ctx.report_progress`` if a Context is available.
+
+    Tests call the wait tools with ``ctx=None`` so progress plumbing is
+    optional. Only transport-closed exceptions are suppressed — a
+    progress report that fails because the client has disconnected is
+    unsurprising and must not take down the tool call. Everything else
+    (programming errors, kwarg mismatches, FastMCP internal failures)
+    propagates so it shows up in logs and tests instead of being
+    silently swallowed.
+    """
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress=progress, total=total, message=message)
+    except _TRANSPORT_CLOSED_EXCEPTIONS:
+        # Client gone; the poll loop will either complete or hit its
+        # timeout and return normally. No progress notification leaks.
+        return
+
+
+_LogLevel = t.Literal["debug", "info", "warning", "error"]
+
+
+async def _maybe_log(
+    ctx: Context | None,
+    *,
+    level: _LogLevel,
+    message: str,
+) -> None:
+    """Call the matching ``ctx.{level}`` if a Context is available.
+
+    Sibling to :func:`_maybe_report_progress` for client-visible log
+    notifications (``notifications/message`` in MCP). Same suppression
+    contract: silent only when the transport is gone, propagating
+    everything else so programming errors stay loud.
+    """
+    if ctx is None:
+        return
+    method = getattr(ctx, level)
+    try:
+        await method(message)
+    except _TRANSPORT_CLOSED_EXCEPTIONS:
+        return

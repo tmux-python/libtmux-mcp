@@ -49,11 +49,19 @@ different tmux command as the wedge is pushed later into the sequence
 -- `list-panes`, then `display-message`, then `send-keys` -- which is
 what advancing through the I/O actually looks like.
 
-Scope of that evidence, stated because it is easy to overstate: it
-covers the call no longer hanging. The other half -- that the PROCESS
-can now exit -- rests on one instrument, ours. A second one was built
-and turned out to hang unconditionally, including when it called no
-tool at all, so it can attribute nothing.
+Both halves are independently confirmed. The call no longer hanging is
+the table above; that the PROCESS can now exit was checked by a second
+instrument, separately built, which hangs on both pre-conversion pins
+in six rows and exits clean on both converted ones in six more --
+having first been shown to exit clean when it arms the wedge and calls
+no tool at all.
+
+That last check is the one nobody was running. Every fixture in this
+work was validated by showing it COULD produce the positive; this one
+also had to be shown NOT to produce it unconditionally. Two earlier
+versions failed one direction each -- one hung whatever it was pointed
+at, the other could not reach the defect because the bounded liveness
+probe caught its wedge first.
 
 The busy check split into the reads and the rules, so the async path
 takes the same rules over state it read safely rather than a second

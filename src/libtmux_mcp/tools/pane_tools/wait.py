@@ -8,7 +8,6 @@ import re
 import time
 import typing as t
 
-import anyio
 from fastmcp import Context
 
 # Explicit re-export form: these are part of wait.py's surface as far
@@ -22,6 +21,10 @@ from libtmux_mcp._bounded_io import (
     _run_tmux_lines as _run_tmux_lines,  # noqa: PLC0414
 )
 from libtmux_mcp._patterns import compile_pattern
+from libtmux_mcp._progress import (
+    _maybe_log as _maybe_log,  # noqa: PLC0414
+    _maybe_report_progress as _maybe_report_progress,  # noqa: PLC0414
+)
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server_async,
@@ -36,25 +39,6 @@ from libtmux_mcp.tools.pane_tools.state import (
 
 logger = logging.getLogger(__name__)
 
-#: Exceptions that indicate "client transport is gone, keep polling".
-#: Narrowly-scoped on purpose: a broader ``Exception`` catch would
-#: mask real programming errors (``TypeError`` on a renamed kwarg,
-#: ``AttributeError`` if ``ctx`` is wired wrong) behind a silent no-op.
-#: Both anyio stream errors must be caught: ``ClosedResourceError`` is
-#: raised when the *send* side of the stream is closed (our own
-#: shutdown path); ``BrokenResourceError`` is raised when the *receive*
-#: side is closed (peer disconnect) — FastMCP's own client catches
-#: both for the same reason. ``BrokenPipeError`` covers stdio
-#: transports; generic ``ConnectionError`` is the catch-all base for
-#: socket-level families. Anything else propagates so the caller
-#: sees it.
-_TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    anyio.ClosedResourceError,
-    anyio.BrokenResourceError,
-    BrokenPipeError,
-    ConnectionError,
-)
-
 
 #: Caps on ``WaitForTextResult.tail``. Bounded by BYTES as well as
 #: lines because ``capture-pane -J`` joins wrapped rows, so one logical
@@ -63,61 +47,9 @@ _TAIL_MAX_LINES = 20
 _TAIL_MAX_BYTES = 2_000
 
 #: Mirrors :class:`~libtmux_mcp.models.WaitForTextResult.outcome`.
-_WaitOutcome = t.Literal[
+_WaitOutcome: t.TypeAlias = t.Literal[
     "matched", "any_output", "stopped", "alternate_screen", "timeout"
 ]
-
-
-async def _maybe_report_progress(
-    ctx: Context | None,
-    *,
-    progress: float,
-    total: float | None,
-    message: str,
-) -> None:
-    """Call ``ctx.report_progress`` if a Context is available.
-
-    Tests call the wait tools with ``ctx=None`` so progress plumbing is
-    optional. Only transport-closed exceptions are suppressed — a
-    progress report that fails because the client has disconnected is
-    unsurprising and must not take down the tool call. Everything else
-    (programming errors, kwarg mismatches, FastMCP internal failures)
-    propagates so it shows up in logs and tests instead of being
-    silently swallowed.
-    """
-    if ctx is None:
-        return
-    try:
-        await ctx.report_progress(progress=progress, total=total, message=message)
-    except _TRANSPORT_CLOSED_EXCEPTIONS:
-        # Client gone; the poll loop will either complete or hit its
-        # timeout and return normally. No progress notification leaks.
-        return
-
-
-_LogLevel = t.Literal["debug", "info", "warning", "error"]
-
-
-async def _maybe_log(
-    ctx: Context | None,
-    *,
-    level: _LogLevel,
-    message: str,
-) -> None:
-    """Call the matching ``ctx.{level}`` if a Context is available.
-
-    Sibling to :func:`_maybe_report_progress` for client-visible log
-    notifications (``notifications/message`` in MCP). Same suppression
-    contract: silent only when the transport is gone, propagating
-    everything else so programming errors stay loud.
-    """
-    if ctx is None:
-        return
-    method = getattr(ctx, level)
-    try:
-        await method(message)
-    except _TRANSPORT_CLOSED_EXCEPTIONS:
-        return
 
 
 async def _compile_patterns(
