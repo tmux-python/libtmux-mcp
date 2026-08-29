@@ -25,6 +25,9 @@ Set it to `true` and {tooliconl}`respawn-pane` copies and merges best-effort no-
 
 When you enable it, tmux environment arguments are added, but the spawned process command text is not prefixed or rewritten. The `shell` text is passed through unchanged. If you also pass `environment`, any history-control values must agree with the policy. A conflict fails the call, names the variable without including the conflicting value, and is never retried without suppression. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for output, scrollback, process, transcript, hook, and logging boundaries.
 
+`start_directory` must name a directory that exists. tmux would otherwise
+start the pane in `$HOME` without reporting anything.
+
 **Tip:** Call {tooliconl}`get-pane-info` first if you need to capture
 `pane_current_command` before respawn — the new process loses its argv.
 Omitting `shell` makes tmux replay the original argv (good default for

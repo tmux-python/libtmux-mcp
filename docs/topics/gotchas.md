@@ -62,6 +62,19 @@ returns a cursor, and follow-up calls return only output written or rewritten
 after that cursor. If tmux has already trimmed or cleared the needed history,
 the result marks `lines_missed=true` and gives you a fresh cursor.
 
+## Names you pass are stored literally
+
+tmux expands several argument values as formats, where `#H` becomes the
+hostname and `#(cmd)` runs a shell job. Session names, window names, pane
+titles, option names, and `start_directory` all land in such an argument.
+
+This server escapes each of them, so a window named `build #2` or a directory
+named `has#hash` is stored as written. Nothing has to be pre-escaped, and
+doubling a `#` yourself produces a literal doubled `#`.
+
+Values are the exception. {tooliconl}`set-option` stores an option's value
+unexpanded, so a status format keeps its `#{...}` and runs when tmux draws it.
+
 ## Window names are not unique across sessions
 
 Two sessions can each have a window named "editor". Targeting by `window_name` alone is ambiguous — always include `session_name` or use the globally unique `window_id` (e.g., `@0`, `@1`).

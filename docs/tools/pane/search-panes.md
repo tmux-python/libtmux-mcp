@@ -12,6 +12,11 @@ for a one-shot read, or {tooliconl}`capture-since` for repeated observation.
 
 **Side effects:** None. Readonly.
 
+Matching shares a two-second ceiling across every line of every pane. A
+`regex=true` pattern with nested quantifiers such as `(a+)+` backtracks
+exponentially and will exhaust it on one ordinary line; anchor the pattern or
+search for a literal.
+
 **Example:**
 
 ```json
