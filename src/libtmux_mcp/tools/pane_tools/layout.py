@@ -57,7 +57,10 @@ def resize_pane(
         Serialized pane object.
     """
     if zoom is not None and (height is not None or width is not None):
-        msg = "Cannot combine zoom with height/width"
+        msg = (
+            f"Cannot combine zoom with height/width (zoom={zoom!r}, "
+            f"height={height!r}, width={width!r}). Resize first, then zoom."
+        )
         raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)

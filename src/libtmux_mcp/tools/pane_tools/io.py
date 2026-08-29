@@ -525,7 +525,7 @@ def send_keys_batch(
         msg = "operations must not be empty"
         raise ExpectedToolError(msg)
     if on_error not in {"stop", "continue"}:
-        msg = "on_error must be 'stop' or 'continue'"
+        msg = f"on_error must be 'stop' or 'continue' (received {on_error!r})"
         raise ExpectedToolError(msg)
     server = _get_server(socket_name=socket_name)
     results: list[SendKeysOperationResult] = []
@@ -762,7 +762,7 @@ async def run_command(
         window_id=window_id,
     )
     if timeout <= 0:
-        msg = "timeout must be positive"
+        msg = f"timeout must be positive (received {timeout})"
         raise ExpectedToolError(msg)
     effective_timeout = min(timeout, _wait_ceiling_seconds())
 

@@ -1304,3 +1304,62 @@ def test_untargeted_reads_pick_one_object_and_keep_it(
         for session in made:
             with contextlib.suppress(Exception):
                 session.kill()
+
+
+def test_validation_refusals_echo_what_the_caller_sent(mcp_server: Server) -> None:
+    """A refusal that states a rule without the value is half an answer.
+
+    Most of this tree already echoes -- ``offset``, ``limit``,
+    ``scroll_up`` and the batch ``timeout`` all say "received X". These
+    five did not, which is the same one-tool-does-one-thing asymmetry
+    the rest of this branch has been closing. A caller who typo'd
+    ``"STOP"`` was told the rule and left to spot their own mistake.
+
+    One test over the set rather than one per message: the property is
+    shared, and five near-identical tests would be bloat.
+    """
+    import asyncio
+
+    from libtmux_mcp.models import SendKeysOperation
+    from libtmux_mcp.tools.hook_tools import show_hooks
+    from libtmux_mcp.tools.option_tools import show_option
+    from libtmux_mcp.tools.pane_tools.io import run_command, send_keys_batch
+    from libtmux_mcp.tools.pane_tools.layout import resize_pane
+
+    socket = mcp_server.socket_name
+    cases: list[tuple[t.Callable[[], object], str]] = [
+        (
+            lambda: send_keys_batch(
+                operations=[SendKeysOperation(pane_id="%0", keys="x")],
+                on_error=t.cast("t.Any", "STOP"),
+                socket_name=socket,
+            ),
+            "'STOP'",
+        ),
+        (
+            lambda: asyncio.run(
+                run_command(
+                    command="true", pane_id="%0", timeout=-1, socket_name=socket
+                )
+            ),
+            "-1",
+        ),
+        (
+            lambda: show_hooks(target="nope", socket_name=socket),
+            "'nope'",
+        ),
+        (
+            lambda: show_option(option="status", target="nope", socket_name=socket),
+            "'nope'",
+        ),
+        (
+            lambda: resize_pane(pane_id="%0", zoom=True, height=10, socket_name=socket),
+            "zoom=True",
+        ),
+    ]
+    for call, expected in cases:
+        with pytest.raises(ToolError) as excinfo:
+            call()
+        assert expected in str(excinfo.value), (
+            f"refusal did not echo {expected}: {excinfo.value}"
+        )

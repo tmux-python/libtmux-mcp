@@ -92,7 +92,11 @@ def _resolve_hook_target(
         raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is None:
-        msg = "scope is required when target is specified"
+        valid = ", ".join(sorted(_SCOPE_MAP))
+        msg = (
+            f"scope is required when target is specified (target={target!r}). "
+            f"Valid: {valid}"
+        )
         raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is not None:

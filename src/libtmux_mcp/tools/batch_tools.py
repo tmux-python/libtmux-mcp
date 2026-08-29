@@ -278,7 +278,7 @@ async def _call_tools_batch(
         msg = f"operations must contain at most {MAX_BATCH_OPERATIONS} tool calls"
         raise ExpectedToolError(msg)
     if on_error not in {"stop", "continue"}:
-        msg = "on_error must be 'stop' or 'continue'"
+        msg = f"on_error must be 'stop' or 'continue' (received {on_error!r})"
         raise ExpectedToolError(msg)
     if ctx is None:
         msg = "FastMCP context is required; call this tool through MCP."

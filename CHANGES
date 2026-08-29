@@ -21,6 +21,23 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### Validation refusals say what you sent
+
+Most of this server already echoes the offending value -- `offset`,
+`limit`, `scroll_up` and the batch `timeout` all report "received X".
+Five refusals stated the rule and stopped there, so a caller who typo'd
+`on_error="STOP"` was told the valid values and left to spot their own
+mistake:
+
+    on_error must be 'stop' or 'continue'
+    timeout must be positive
+    scope is required when target is specified
+    Cannot combine zoom with height/width
+
+All five now name the value, and the scope ones also list what is
+valid. Found by auditing every error message in the tree for two
+properties a caller needs: the offending value, and what to do next.
+
 #### `run_command` reaches tmux through a subprocess, not a thread
 
 The last instance of the class. Its reads went through
