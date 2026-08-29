@@ -26,6 +26,10 @@ from libtmux_mcp.models import (
 #: (most-recent) matches so the agent sees what's currently on screen.
 SEARCH_DEFAULT_MAX_LINES_PER_PANE = 50
 
+#: Cap on a caller's pattern. Compilation happens before any match, so
+#: the wall-clock ceiling below does not cover it; a length bound does.
+SEARCH_MAX_PATTERN_LENGTH = 1_000
+
 #: Wall-clock ceiling for matching a caller's pattern across every
 #: captured line. A literal scan of 20,000 lines costs ~3.5 ms, so this
 #: is a ceiling reached only by a pattern that backtracks, never a
@@ -204,12 +208,26 @@ def search_panes(
     Raises
     ------
     ExpectedToolError
-        If ``pattern`` does not compile, or if matching it against the
-        captured lines exceeds ``SEARCH_MATCH_MAX_SECONDS`` in total. A
-        pattern with nested quantifiers such as ``(a+)+`` can backtrack
-        for hours on one ordinary line; anchor it or search for a
-        literal.
+        If ``pattern`` is over ``SEARCH_MAX_PATTERN_LENGTH``, does not
+        compile, or if matching it against the captured lines exceeds
+        ``SEARCH_MATCH_MAX_SECONDS`` in total. A pattern with nested
+        quantifiers such as ``(a+)+`` can backtrack for hours on one
+        ordinary line; anchor it or search for a literal.
+
+    Notes
+    -----
+    The deadline bounds pattern matching across the call, not the call:
+    capturing each pane is a separate tmux round-trip outside it, and the
+    work still grows with the number of panes in scope.
     """
+    if len(pattern) > SEARCH_MAX_PATTERN_LENGTH:
+        msg = (
+            f"pattern is longer than {SEARCH_MAX_PATTERN_LENGTH} characters. "
+            f"Compilation runs before the match deadline applies, so the "
+            f"length is bounded instead."
+        )
+        raise ExpectedToolError(msg)
+
     search_pattern = pattern if regex else regex_engine.escape(pattern)
     flags = 0 if match_case else regex_engine.IGNORECASE
     try:
@@ -296,6 +314,10 @@ def search_panes(
     # tail-truncated to keep the most recent matches.
     all_matches: list[PaneContentMatch] = []
     per_pane_truncated = False
+    # Computed once, so the budget spans every pane rather than resetting
+    # per pane. No test separates the two: the first pane to exhaust the
+    # budget aborts the call either way, so they differ only for a
+    # workload that is cheap per pane and expensive in total.
     deadline = time.monotonic() + SEARCH_MATCH_MAX_SECONDS
     for pane_id_str in matching_pane_ids:
         pane = server.panes.get(pane_id=pane_id_str, default=None)

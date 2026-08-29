@@ -2336,6 +2336,18 @@ def test_search_panes_bounds_matching_time(
     assert time.monotonic() - started < 5
 
 
+def test_search_panes_rejects_an_oversized_pattern(
+    mcp_server: Server,
+) -> None:
+    """Compilation is bounded by length, which no match deadline covers."""
+    with pytest.raises(ExpectedToolError, match="pattern is longer than"):
+        search_panes(
+            pattern="a" * (search.SEARCH_MAX_PATTERN_LENGTH + 1),
+            regex=True,
+            socket_name=mcp_server.socket_name,
+        )
+
+
 def test_search_panes_pagination_limit_and_offset(
     mcp_server: Server, mcp_session: Session, mcp_pane: Pane
 ) -> None:
