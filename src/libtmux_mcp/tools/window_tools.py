@@ -341,7 +341,18 @@ def kill_window(
             raise ExpectedToolError(msg)
 
     wid = window.window_id
+    session = window.session
+    session_id = session.session_id
+    session_name = session.session_name or session_id
     window.kill()
+    # Killing a session's LAST window destroys the session. Reported
+    # rather than left to be discovered: the tier permits it, but an
+    # agent tidying up a window has no reason to expect it, and the
+    # bare "Window killed" understates the blast radius.
+    if server.sessions.get(session_id=session_id, default=None) is None:
+        return (
+            f"Window killed: {wid} (session {session_name} was its last, and is gone)"
+        )
     return f"Window killed: {wid}"
 
 

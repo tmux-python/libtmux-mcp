@@ -70,7 +70,23 @@ def kill_pane(
 
     pane = _resolve_pane(server, pane_id=pane_id)
     pid = pane.pane_id
+    window = pane.window
+    window_id = window.window_id if window is not None else None
+    session_id = window.session.session_id if window is not None else None
+    session_name = (
+        (window.session.session_name or session_id) if window is not None else None
+    )
     pane.kill()
+    # A window with no panes left is removed, and a session with no
+    # windows left goes with it. The tier permits the cascade; the bare
+    # "Pane killed" hid it.
+    gone: list[str] = []
+    if window_id and server.windows.get(window_id=window_id, default=None) is None:
+        gone.append(f"window {window_id}")
+    if session_id and server.sessions.get(session_id=session_id, default=None) is None:
+        gone.append(f"session {session_name}")
+    if gone:
+        return f"Pane killed: {pid} (it was the last, so {' and '.join(gone)} went too)"
     return f"Pane killed: {pid}"
 
 

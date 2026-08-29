@@ -274,6 +274,13 @@ def kill_session(
 
     name = session.session_name or session.session_id
     session.kill()
+    # tmux exits when its last session goes, taking every other client
+    # and pane on that socket with it. "Session killed" did not say so.
+    if not server.is_alive():
+        return (
+            f"Session killed: {name} (it was the last session, so the tmux "
+            "server exited)"
+        )
     return f"Session killed: {name}"
 
 

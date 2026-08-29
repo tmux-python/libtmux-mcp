@@ -8,6 +8,30 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### The kill tools say what went with the target
+
+Killing the last child takes its parent, and the results did not
+mention it:
+
+| call | destroyed | reported |
+|---|---|---|
+| `kill_window` on a session's last window | the session | `Window killed: @0` |
+| `kill_pane` on a window's last pane | the window | `Pane killed: %2` |
+| `kill_session` on the only session | **the tmux server** | `Session killed: only` |
+
+The destructive tier permits all three; the messages understated them.
+An agent tidying up a window has no reason to expect the session to go
+with it, and killing one session on a single-session server exits tmux
+entirely -- taking every other client and pane on that socket.
+
+Each now names what it observed disappearing, checked after the kill
+rather than predicted from a count. A kill with no cascade is unchanged.
+
+These are the tools neither instance in this round's pairing had ever
+invoked -- not because the tier hid them, which was checked and is
+false, but because neither of us found them interesting.
+
+
 #### `snapshot_pane` reports which session and window the pane is in
 
 The server instructions recommend `snapshot_pane` over `capture_pane` +

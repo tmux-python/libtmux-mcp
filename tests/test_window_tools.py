@@ -514,3 +514,33 @@ def test_join_pane_refuses_to_empty_its_source_session(
         socket_name=mcp_server.socket_name,
     )
     assert moved.pane.pane_id == pane.pane_id
+
+
+def test_kill_tools_disclose_what_went_with_the_target(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Killing the last child takes its parent, and the result says so.
+
+    The destructive tier permits the cascade; the bare "Window killed:
+    @0" understated it. An agent tidying up a window has no reason to
+    expect the session to go with it, and on a single-session server
+    killing a session exits tmux entirely.
+    """
+    other = mcp_server.new_session(session_name="kill_probe")
+    window = mcp_session.active_window
+    assert window.window_id is not None
+
+    # Not the last window, so no cascade.
+    extra = mcp_session.new_window()
+    assert extra.window_id is not None
+    plain = kill_window(window_id=extra.window_id, socket_name=mcp_server.socket_name)
+    assert "is gone" not in plain
+
+    # The session's last window takes the session.
+    cascaded = kill_window(
+        window_id=window.window_id, socket_name=mcp_server.socket_name
+    )
+    assert mcp_session.session_name is not None
+    assert mcp_session.session_name in cascaded
+    assert "is gone" in cascaded
+    assert other.session_name in [s.session_name for s in mcp_server.sessions]
