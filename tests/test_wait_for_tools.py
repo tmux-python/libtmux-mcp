@@ -157,7 +157,15 @@ SERVER_DEATH_FIXTURES: list[ServerDeathFixture] = [
     ServerDeathFixture(
         test_id="server_sigkill",
         kill_mode="sigkill",
-        expected_message="server exited unexpectedly",
+        # Two honest outcomes, unlike the clean paths. tmux reports an
+        # abrupt death itself (8/8 on a quiet box), but if the wait-for
+        # child sees a zero exit first, the liveness re-probe catches it
+        # instead and says so differently. Both prove the tool did not
+        # claim a signal, and accepting both hides nothing: this case
+        # never exercised the re-probe -- with the re-probe removed it
+        # still passes on tmux's own error, which is why the clean
+        # fixtures above are the ones that keep the mechanism honest.
+        expected_message="server exited unexpectedly|no longer running",
     ),
 ]
 
