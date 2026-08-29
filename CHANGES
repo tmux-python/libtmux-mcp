@@ -1700,6 +1700,25 @@ was masked only because the native gate made the dispatch fail anyway.
 
 ### Documentation
 
+#### The safety tier gates tools, not what a shell can type
+
+`LIBTMUX_SAFETY=mutating` hides the destructive tools, and a caller can
+reasonably read that as "this MCP cannot kill my windows". Measured, at
+that tier and with `kill_window` absent from the tool list entirely:
+
+    run_command(command="tmux -L <socket> kill-window -t @1")
+    exit_status 0 -- the window is gone
+
+That is not a hole to close: a verb guard on command text is bypassed by
+`t=tmux; $t kill-window`, and refusing it would break the tool. It is a
+scope the docs had not stated, so the footgun section now states it, and
+says which tier does hold the distinction (`readonly` — it exposes
+neither the destructive tools nor the ones that type).
+
+Raised by an unrelated agent session driving this MCP for real work,
+which fell back to shelling out and asked whether the gate meant
+anything.
+
 #### opencode joins the install picker
 
 The install widget gains an opencode panel. `opencode mcp add tmux -- <command>`

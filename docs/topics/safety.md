@@ -82,6 +82,22 @@ resizes, {toolref}`rename-window` only renames. A few have broader
 reach because tmux itself exposes broader reach. Treat these as
 elevated risk even though they share the default tier:
 
+### Running shell commands
+
+{tool}`run-command` and {tool}`send-keys` execute text in a pane, and a pane's shell can run `tmux`. Measured at `LIBTMUX_SAFETY=mutating`, where {toolref}`kill-window` is not in the tool list at all:
+
+```console
+$ run_command(command="tmux -L <socket> kill-window -t @1")
+exit_status 0 — the window is gone
+```
+
+The tier gates which **tools** are exposed, not what a shell can do once you type into it. That is not a hole to be closed: a verb-level guard on command text is bypassed by `t=tmux; $t kill-window`, and refusing it would break the tool's actual purpose.
+
+What it means in practice:
+
+- `LIBTMUX_SAFETY=mutating` protects you from an agent that reaches for {toolref}`kill-pane`, not from one that reaches for a shell. If the distinction matters for your threat model, `readonly` is the only tier that holds it — it exposes neither the destructive tools nor the ones that type.
+- The audit log records the command text (digested), so a destructive verb sent this way is still visible to a reviewer.
+
 ### Piping pane output
 
 {tool}`pipe-pane` pipes a pane's output to a shell command that the server runs. In practice this means the caller chooses an arbitrary path or pipeline on the server host. There is no allow-list. Assume it can create files anywhere the server process can write.
