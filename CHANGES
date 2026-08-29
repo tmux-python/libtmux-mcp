@@ -1111,14 +1111,17 @@ the double-execution lie, reintroduced per version.
 Recorded rather than absorbed, because absorbing it is how the parallel
 flakes above hid for so long.
 
-Seen twice in full serial runs (`-p no:randomly --reruns 0`), never in
-twelve runs of the parallel gate, and it passes 6 of 6 in isolation. So
-it is a cross-test interaction rather than a timing budget, and the
-usual reproduction recipe for this suite -- `-n auto --reruns 0` --
-is the one configuration that does NOT show it.
+Roughly three sightings in eight full serial runs
+(`-p no:randomly --reruns 0`), against zero in twelve runs of the
+parallel gate. It passes 6 of 6 alone and 3 of 3 with its whole module,
+so the interaction is CROSS-MODULE, and the usual reproduction recipe
+for this suite -- `-n auto --reruns 0` -- is the one configuration that
+does not show it.
 
-Not diagnosed. The next step is a bisect over test order rather than a
-theory about the test.
+Not diagnosed, and deliberately not theorised about: every per-test
+explanation offered for the parallel flakes above turned out to be
+wrong, and this has the same shape. The next step is a bisect over
+module order, not a hypothesis about the test.
 
 
 **A killed test run leaked a tmux daemon forever**
