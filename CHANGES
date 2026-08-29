@@ -66,6 +66,26 @@ shipped commit by running it against all nine supported tmux versions,
 which is the check neither the test suite nor a source reading could
 have made.
 
+#### `show_hook` can answer with the hook actually in force
+
+`show_hook` returned zero entries for a hook set with `set-hook -g` --
+a hook that is in force and WILL fire. tmux's `show-hooks <name>` does
+not consult wider scopes, so the tool was faithful to tmux and still
+told an agent "no" to "is this hook set?".
+
+That is the trap `show_option` already documents and already solves, one
+module over: "not set AT THIS SCOPE, not 'not set'", with
+`include_inherited` for tmux's `-A`. `show_hook` now takes the same
+flag and its docstring carries the same warning, so the two
+option-shaped tools answer the same question the same way.
+
+The flag routes through the OPTIONS lookup, because that is the only one
+of tmux's two name lookups that honours `-A` -- with `set-hook -g
+alert-bell` set, `show-hooks -t A alert-bell` is empty while
+`show-options -A -t A alert-bell` returns it. tmux keeps hooks in the
+options table, so these are the same store reached two ways.
+`HookListResult.include_inherited` reports which lookup answered.
+
 ### Fixes
 
 #### An oversized `send_keys` payload is the caller's problem, not a crash

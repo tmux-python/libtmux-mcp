@@ -51,6 +51,7 @@ from libtmux_mcp.models import HookEntry, HookListResult
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
     from libtmux.hooks import HooksMixin
+    from libtmux.options import OptionsMixin
 
 
 _SCOPE_MAP: dict[str, OptionScope] = {
@@ -282,28 +283,64 @@ def show_hook(
     scope: t.Literal["server", "session", "window", "pane"] | None = None,
     target: str | None = None,
     global_: bool = False,
+    include_inherited: bool = False,
     socket_name: str | None = None,
 ) -> HookListResult:
     """Look up a specific tmux hook by name.
 
     Returns a :class:`~libtmux_mcp.models.HookListResult` with zero or
-    more :class:`~libtmux_mcp.models.HookEntry` rows — zero if the hook
-    is unset, one if it is a scalar hook, and multiple if it is an
-    array hook with sparse indices.
+    more :class:`~libtmux_mcp.models.HookEntry` rows — one if the hook
+    is a scalar, several if it is an array hook with sparse indices.
+
+    .. warning::
+       ``entries: []`` means "not set AT THIS SCOPE", not "not set". A
+       hook set with ``set-hook -g`` is in force and WILL fire, and this
+       still answers zero for it, because tmux's ``show-hooks <name>``
+       does not consult wider scopes. Pass ``include_inherited=True``
+       (tmux's ``-A``) for the value actually in force, exactly as
+       :func:`~libtmux_mcp.tools.option_tools.show_option` does — the
+       two are the same question about the same underlying store, since
+       tmux keeps hooks in the options table.
 
     Parameters
     ----------
     hook_name : str
         Hook to look up (e.g. ``"pane-exited"``).
+    include_inherited : bool
+        Resolve inherited values (tmux ``-A``) so the answer is the hook
+        in force at this scope rather than only one set on it.
     scope, target, global_, socket_name : see
         :func:`~libtmux_mcp.tools.hook_tools.show_hooks`.
 
     Returns
     -------
     HookListResult
-        One or more :class:`~libtmux_mcp.models.HookEntry` rows, or empty if unset.
+        One or more :class:`~libtmux_mcp.models.HookEntry` rows, or empty
+        if the hook is unset at the scope queried.
     """
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
+    if include_inherited:
+        # tmux stores hooks in the options table, and only the OPTIONS
+        # lookup honours -A. Measured: with `set-hook -g alert-bell`,
+        # `show-hooks -t A alert-bell` is empty while
+        # `show-options -A -t A alert-bell` returns it (flagged `*`,
+        # which libtmux already strips).
+        return HookListResult(
+            entries=_flatten_hook_value(
+                hook_name,
+                # Every concrete target -- Server, Session, Window,
+                # Pane -- carries both mixins; only libtmux's HooksMixin
+                # does not declare OptionsMixin as a base.
+                t.cast("OptionsMixin", obj).show_option(
+                    hook_name,
+                    global_=global_,
+                    scope=opt_scope,
+                    include_inherited=True,
+                ),
+            ),
+            resolved_target=_target_label(obj),
+            include_inherited=True,
+        )
     try:
         value = obj.show_hook(hook_name, global_=global_, scope=opt_scope)
     except libtmux_exc.OptionError as e:

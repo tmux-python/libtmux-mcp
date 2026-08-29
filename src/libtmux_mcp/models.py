@@ -916,6 +916,14 @@ class HookListResult(BaseModel):
     """
 
     entries: list[HookEntry] = Field(default_factory=list)
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "Whether wider scopes were consulted. When false, an empty "
+            "``entries`` means 'not set at this scope', NOT 'not set' -- "
+            "a hook set globally is in force and still reads as empty."
+        ),
+    )
     resolved_target: str | None = Field(
         default=None,
         description=(

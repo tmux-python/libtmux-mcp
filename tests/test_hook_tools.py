@@ -273,3 +273,49 @@ def test_show_hooks_reports_the_scope_it_was_asked_for(
         assert marks(global_=True) == marks(scope="server")
     finally:
         mcp_server.cmd("set-hook", "-gw", "-u", "pane-died")
+
+
+def test_show_hook_finds_a_globally_set_hook_when_asked_to_inherit(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``entries: []`` means "not set at this scope", not "not set".
+
+    A hook set with ``set-hook -g`` is in force and WILL fire, but
+    tmux's ``show-hooks <name>`` does not consult wider scopes, so the
+    default answer is zero rows for a hook that exists. This is the same
+    trap ``show_option`` documents, and it takes the same flag.
+    """
+    mcp_server.cmd("set-hook", "-g", "alert-bell", "display-message inherited")
+
+    at_scope = show_hook(
+        hook_name="alert-bell",
+        scope="session",
+        target=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert at_scope.entries == []
+    assert at_scope.include_inherited is False
+
+    in_force = show_hook(
+        hook_name="alert-bell",
+        scope="session",
+        target=mcp_session.session_name,
+        include_inherited=True,
+        socket_name=mcp_server.socket_name,
+    )
+    assert in_force.include_inherited is True
+    assert [e.command for e in in_force.entries] == ["display-message inherited"]
+
+
+def test_show_hook_inherited_still_rejects_a_typo(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A misspelled hook must not read as an unset one on either path."""
+    with pytest.raises(ToolError):
+        show_hook(
+            hook_name="alert-belll",
+            scope="session",
+            target=mcp_session.session_name,
+            include_inherited=True,
+            socket_name=mcp_server.socket_name,
+        )
