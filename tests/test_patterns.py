@@ -22,6 +22,9 @@ CATASTROPHIC = [
     r"(x*)+y",
     r"((a)*)*b",
     r"(a{1,50}){1,50}$",
+    r"(?=(a+)+$)b",
+    r"(?!(a+)+$)b",
+    r"(x)(?(1)(a+)+|b)$",
 ]
 
 #: Ordinary patterns an agent would actually write. A screen that
@@ -42,6 +45,10 @@ ORDINARY = [
     r"(foo|bar|baz)$",
     r"\bTODO\b.*",
     r"^#{1,6} ",
+    r"(?=.*ERROR)^\[",
+    r"(?!DEBUG)\w+$",
+    r"(x)(?(1)yes|no)",
+    r"(?<=ERROR: )\\w+",
 ]
 
 

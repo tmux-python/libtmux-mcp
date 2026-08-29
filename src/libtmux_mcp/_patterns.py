@@ -44,10 +44,14 @@ _REPEAT_OPS = frozenset(
 _BRANCH = _re_constants.BRANCH
 _SUBPATTERN = _re_constants.SUBPATTERN
 _ATOMIC_GROUP = getattr(_re_constants, "ATOMIC_GROUP", None)
+_ASSERT = _re_constants.ASSERT
+_ASSERT_NOT = _re_constants.ASSERT_NOT
+_GROUPREF_EXISTS = _re_constants.GROUPREF_EXISTS
 _LITERAL = _re_constants.LITERAL
-_NOT_LITERAL = _re_constants.NOT_LITERAL
-_IN = _re_constants.IN
-_ANY = _re_constants.ANY
+
+#: Ops that match without consuming input, so they contribute no first
+#: character of their own.
+_ZERO_WIDTH = frozenset({_re_constants.AT, _ASSERT, _ASSERT_NOT})
 
 #: A repeat this large is treated as unbounded for nesting purposes.
 #: ``(\d{2}){3}`` is six characters of work; ``(a{1,50}){1,50}`` is a
@@ -60,22 +64,34 @@ def _repeat_is_large(minimum: int, maximum: int) -> bool:
     return maximum is _MAXREPEAT or maximum >= _LARGE_REPEAT or maximum > minimum > 0
 
 
+def _subpatterns(op: t.Any, av: t.Any) -> list[Iterable[t.Any]]:
+    """Every pattern sequence nested inside one parsed node.
+
+    Each walker below recurses through this, so a container op is taught
+    to the screen once instead of once per walker. An op missing here is
+    a repeat the screen cannot see.
+    """
+    if op is _SUBPATTERN:
+        return [av[3]]
+    if op is _BRANCH:
+        return list(av[1])
+    if op in _REPEAT_OPS:
+        return [av[2]]
+    if op is _ATOMIC_GROUP:
+        return [av]
+    if op is _ASSERT or op is _ASSERT_NOT:
+        return [av[1]]
+    if op is _GROUPREF_EXISTS:
+        return [branch for branch in av[1:] if branch]
+    return []
+
+
 def _contains_large_repeat(node: Iterable[t.Any]) -> bool:
     """Return True when any repeat inside *node* can iterate freely."""
     for op, av in node:
-        if op in _REPEAT_OPS:
-            minimum, maximum, _ = av
-            if _repeat_is_large(minimum, maximum):
-                return True
-            if _contains_large_repeat(av[2]):
-                return True
-        elif op is _SUBPATTERN:
-            if _contains_large_repeat(av[3]):
-                return True
-        elif op is _BRANCH:
-            if any(_contains_large_repeat(branch) for branch in av[1]):
-                return True
-        elif op is _ATOMIC_GROUP and _contains_large_repeat(av):
+        if op in _REPEAT_OPS and _repeat_is_large(av[0], av[1]):
+            return True
+        if any(_contains_large_repeat(child) for child in _subpatterns(op, av)):
             return True
     return False
 
@@ -83,15 +99,14 @@ def _contains_large_repeat(node: Iterable[t.Any]) -> bool:
 def _first_characters(branch: Iterable[t.Any]) -> set[t.Any] | None:
     """Characters a branch can start with, or ``None`` if unbounded.
 
-    ``None`` also covers an EMPTY branch, which is the worst case: a
-    repeat whose body matches nothing at all is ambiguous at every
-    position.
+    ``None`` means "assume it overlaps" and covers an EMPTY branch,
+    which is the worst case: a repeat whose body matches nothing is
+    ambiguous at every position. Any op this screen does not model
+    lands there too.
     """
     for op, av in branch:
         if op is _LITERAL:
             return {av}
-        if op is _IN or op is _NOT_LITERAL or op is _ANY:
-            return None
         if op is _SUBPATTERN:
             return _first_characters(av[3])
         if op is _BRANCH:
@@ -99,9 +114,9 @@ def _first_characters(branch: Iterable[t.Any]) -> set[t.Any] | None:
             if any(item is None for item in nested):
                 return None
             return set().union(*(item for item in nested if item is not None))
-        if op in _REPEAT_OPS:
-            return None
-        # AT (anchors) and similar zero-width ops consume nothing.
+        if op in _ZERO_WIDTH:
+            continue
+        return None
     return None
 
 
@@ -112,14 +127,11 @@ def _branch_is_ambiguous(node: Iterable[t.Any]) -> bool:
             firsts = [_first_characters(alt) for alt in av[1]]
             if any(item is None for item in firsts):
                 return True
-            for i, left in enumerate(firsts):
-                for right in firsts[i + 1 :]:
-                    if left is not None and right is not None and left & right:
-                        return True
-        elif op is _SUBPATTERN:
-            if _branch_is_ambiguous(av[3]):
-                return True
-        elif op in _REPEAT_OPS and _branch_is_ambiguous(av[2]):
+            known = [item for item in firsts if item is not None]
+            for i, left in enumerate(known):
+                if any(left & right for right in known[i + 1 :]):
+                    return True
+        if any(_branch_is_ambiguous(child) for child in _subpatterns(op, av)):
             return True
     return False
 
@@ -136,27 +148,13 @@ def _ambiguous_repeat(node: Iterable[t.Any]) -> str | None:
       since no input can take both branches.
     """
     for op, av in node:
-        if op in _REPEAT_OPS:
-            minimum, maximum, body = av
-            if _repeat_is_large(minimum, maximum):
-                if _contains_large_repeat(body):
-                    return "a repeated group that already contains a repeat"
-                if _branch_is_ambiguous(body):
-                    return "a repeated group whose alternatives overlap"
-            found = _ambiguous_repeat(body)
-            if found is not None:
-                return found
-        elif op is _SUBPATTERN:
-            found = _ambiguous_repeat(av[3])
-            if found is not None:
-                return found
-        elif op is _BRANCH:
-            for branch in av[1]:
-                found = _ambiguous_repeat(branch)
-                if found is not None:
-                    return found
-        elif op is _ATOMIC_GROUP:
-            found = _ambiguous_repeat(av)
+        if op in _REPEAT_OPS and _repeat_is_large(av[0], av[1]):
+            if _contains_large_repeat(av[2]):
+                return "a repeated group that already contains a repeat"
+            if _branch_is_ambiguous(av[2]):
+                return "a repeated group whose alternatives overlap"
+        for child in _subpatterns(op, av):
+            found = _ambiguous_repeat(child)
             if found is not None:
                 return found
     return None
