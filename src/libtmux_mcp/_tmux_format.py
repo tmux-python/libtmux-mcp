@@ -6,7 +6,7 @@ turn it off. A tool that promises "this is the name I will store" has to
 escape, or it stores something else:
 
     rename_window(new_name="#{pane_current_path}")
-      -> window named "/home/d/work/python/libtmux-mcp"
+      -> window named "/home/user/src/project"
 
 That is a disclosure vector, not just a wrong string: ``#{host}``,
 ``#{pane_pid}`` and friends all interpolate server state into a name
