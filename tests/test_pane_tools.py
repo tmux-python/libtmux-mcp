@@ -1162,6 +1162,7 @@ def test_run_command_kills_tmux_child_on_cancel(
     agent cancels most — it is the one wrapping long shell commands.
     """
     import asyncio
+    import contextlib
 
     from libtmux_mcp.tools.pane_tools import run_command
 
@@ -1208,14 +1209,31 @@ def test_run_command_kills_tmux_child_on_cancel(
             # that exists is a fact about the probe. Reporting the first
             # as "the probe is broken" sent me looking in the wrong
             # place at loadavg 43.
-            outcome = "still running"
             if task.done():
+                # The call FINISHED without ever spawning a wait child.
+                # That is a fact about run_command, not about the box,
+                # and it is the regression this test exists to catch.
                 outcome = f"already finished: {task.exception() or task.result()!r}"
                 task.cancel()
-            pytest.fail(
-                f"no tmux wait-for child observed before the cancel; the "
-                f"call was {outcome}. A later 'no survivors' result would "
-                "be vacuous either way."
+                pytest.fail(
+                    f"no tmux wait-for child observed before the cancel; "
+                    f"the call {outcome}. A later 'no survivors' result "
+                    "would be vacuous either way."
+                )
+            # Still running: the pre-child work -- resolve, busy guard,
+            # occupant read, send -- is ~8 tmux round trips, and on a
+            # box under heavy parallel load it can outrun the window.
+            # Nothing was cancelled, so there is no property left to
+            # assert; skipping says that, where failing would report a
+            # loaded machine as a defect. Measured 3 runs in 12 at
+            # loadavg 30+, and never once in isolation.
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            pytest.skip(
+                f"run_command had not spawned its wait child after "
+                f"{call_budget * 0.75:.0f}s; no cancel happened, so there "
+                "is nothing to assert about reaping"
             )
 
         task.cancel()
