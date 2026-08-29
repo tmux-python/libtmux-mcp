@@ -11,7 +11,7 @@ server to start, a build to complete, or a prompt to return.
 {tooliconl}`capture-since`; for command completion you control, use
 {tooliconl}`wait-for-channel`.
 
-**Side effects:** None. Readonly. Blocks until text appears or timeout.
+**Side effects:** None. Reads only. Blocks until text appears or timeout.
 
 **Example:**
 

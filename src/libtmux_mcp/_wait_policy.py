@@ -61,7 +61,7 @@ _wait_max_seconds: float = WAIT_MAX_SECONDS_DEFAULT
 def _resolve_wait_max_seconds(value: str | None) -> float:
     """Return the effective wait ceiling for a ``LIBTMUX_MCP_WAIT_MAX_SECONDS``.
 
-    Mirrors :func:`libtmux_mcp.server._resolve_safety_level`: never
+    Mirrors :func:`libtmux_mcp.server._resolve_toolsets`: never
     raises, warns on a bad value, falls back to a safe default.
 
     Parameters

@@ -195,9 +195,9 @@ def _compute_is_caller(pane: Pane) -> bool | None:
 
     Uses :func:`_caller_is_strictly_on_server` rather than
     :func:`_caller_is_on_server`: the kill-guard comparator is
-    conservative-True-when-uncertain (right for blocking destructive
-    actions, wrong for an informational annotation that should
-    demand a positive match). The strict variant declines the
+    conservative-True-when-uncertain (right for blocking a kill, wrong
+    for an informational annotation that should demand a positive
+    match). The strict variant declines the
     basename fallback, the unresolvable-target branch, and the
     socket-path-unset branch so ambiguous cases resolve to ``False``.
     """
@@ -274,8 +274,8 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
       is possible.
     * caller has a pane id but no socket path (e.g. ``TMUX_PANE`` set
       without ``TMUX``) → ``True``. We can't rule out that the caller
-      is on the target server, so err on the side of blocking a
-      destructive action.
+      is on the target server, so err on the side of blocking the
+      kill.
     * target server has no resolvable socket path → ``True``. Same
       conservative reasoning.
     * realpath of caller's socket path matches target's effective path
@@ -285,7 +285,7 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
       last-chance block for env-mismatch scenarios where reconstruction
       produced a wrong path but the name was authoritative on both
       sides. Trades off one exotic false positive (two daemons with
-      identical socket_name under different tmpdirs) for a real safety
+      identical socket_name under different tmpdirs) for a real correctness
       property.
     * Otherwise → ``False``.
 
@@ -320,7 +320,7 @@ def _caller_is_strictly_on_server(
 
     Counterpart to :func:`_caller_is_on_server` for the informational
     :attr:`~libtmux_mcp.models.PaneInfo.is_caller` annotation. The
-    destructive-action guard is biased toward True-when-uncertain so a
+    kill guard is biased toward True-when-uncertain so a
     macOS ``$TMUX_TMPDIR`` divergence cannot fool it into permitting
     self-kill; the annotation cannot absorb that bias — ambiguous cases
     are exactly the cross-socket false positives documented by
@@ -1210,10 +1210,10 @@ def handle_tool_errors(
     (logged at ERROR).
 
     The re-raise chains the original exception via ``from e``. Keep it
-    single-level: :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware`
+    single-level: :class:`~libtmux_mcp.middleware.InspectRetryMiddleware`
     matches :exc:`libtmux.exc.LibTmuxException` by inspecting exactly
     one ``__cause__`` hop, so wrapping the mapped error again would
-    silently disable readonly retries.
+    silently disable ``inspect`` retries.
 
     Use :func:`handle_tool_errors_async` for ``async def`` tools — this
     wrapper only supports plain sync callables.
@@ -1246,7 +1246,7 @@ def handle_tool_errors_async(
     :class:`ExpectedToolError` at WARNING, the unexpected catch-all as
     stock ``ToolError`` at ERROR) by delegating to a shared helper,
     and chains the original exception via the same single-level
-    ``from e`` that readonly retries depend on.
+    ``from e`` that ``inspect`` retries depend on.
     """
 
     @functools.wraps(fn)

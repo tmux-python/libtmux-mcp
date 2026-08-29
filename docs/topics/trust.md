@@ -142,7 +142,7 @@ Mitigations:
 
 {tool}`respawn-pane` restarts a pane's process while preserving the pane id and layout — exactly what an agent wants when a shell wedges. Default `kill=True` terminates the running process before relaunch. The `pane_id` and layout are preserved (the point of the tool), but any unsaved REPL state, ssh session, or in-flight job in that pane is lost. Repeated calls are *not* idempotent — each call kills a new process.
 
-The registration advertises `destructiveHint=True` and `idempotentHint=False` while the tier tag stays at `mutating`, so recovery remains available to default-profile clients without understating what the call does.
+The registration advertises `destructiveHint=True` and `idempotentHint=False` while staying in `manage`, so recovery remains available by default without understating what the call does.
 
 Mitigations:
 
@@ -192,8 +192,8 @@ updates**, so a tool that replaces a name, a size, or a layout advertises
 reaches, or returns text from, outside tmux — a spawned process runs with your
 user's authority, and a pane holds whatever was printed into it.
 
-| Tool | Toolset | readOnly | destructive | idempotent | openWorld |
-|------|---------|----------|-------------|------------|-----------|
+| Tool | Toolset | readOnlyHint | destructiveHint | idempotentHint | openWorldHint |
+|------|---------|--------------|-----------------|----------------|---------------|
 | {toolref}`call-read-tools-batch` | {badge}`inspect` | true | false | true | true |
 | {toolref}`capture-pane` | {badge}`inspect` | true | false | true | true |
 | {toolref}`capture-since` | {badge}`inspect` | true | false | true | true |

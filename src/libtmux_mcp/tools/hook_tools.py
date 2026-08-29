@@ -17,7 +17,7 @@ close this gap. Three plausible future paths are open:
 * Install a tmux-side meta-hook on ``client-detached`` that self-cleans
   all ``libtmux_mcp_*``-namespaced hooks when the MCP client disconnects.
   Survives hard crashes because tmux enforces it.
-* Require ``LIBTMUX_SAFETY=destructive`` for write-hooks so leakage is
+* Require ``LIBTMUX_TOOLSETS`` to include ``teardown`` for write-hooks so leakage is
   an explicit opt-in with user awareness.
 * Expose ``run_hook`` (one-shot fire) but not ``set_hook`` (persistent
   install) — narrows the risk surface to transient events.

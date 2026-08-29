@@ -9,7 +9,7 @@ which session to target.
 **Avoid when** you need window or pane details — use {tooliconl}`list-windows` or
 {tooliconl}`list-panes` instead.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

@@ -6,7 +6,7 @@
 **Use when** you need to check a tmux configuration value — buffer limits,
 history size, status bar settings, etc.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

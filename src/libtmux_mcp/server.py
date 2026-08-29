@@ -152,7 +152,7 @@ def _build_instructions(
     toolsets: frozenset[str] = DEFAULT_TOOLSETS,
     suppress_history: bool = True,
 ) -> str:
-    """Build server instructions with agent context and safety level.
+    """Build server instructions with agent context and toolsets.
 
     When the MCP server process runs inside a tmux pane, ``TMUX_PANE`` and
     ``TMUX`` environment variables are available. This function appends that
@@ -172,7 +172,7 @@ def _build_instructions(
     """
     parts: list[str] = [_BASE_INSTRUCTIONS]
 
-    # Safety tier context
+    # Toolset context
     parts.append(
         "\n\nToolsets: "
         + (", ".join(sorted(toolsets)) or "(none)")
@@ -425,21 +425,21 @@ mcp = FastMCP(
     #   3. ToolErrorResultMiddleware — converts tool-call failures to
     #      rich ToolResult(is_error=True) results and transforms
     #      resource errors to MCP code -32002. Must stay OUTSIDE the
-    #      audit + retry + safety trio: all three depend on exception
+    #      audit + retry + toolset trio: all three depend on exception
     #      semantics (audit catches to record outcome=error, retry
-    #      matches LibTmuxException via __cause__, and safety's tier
+    #      matches LibTmuxException via __cause__, and the toolset
     #      denials must propagate as exceptions for audit to record
     #      them), so converting the exception to a result any deeper
     #      would silently break all three.
     #   4. AuditMiddleware — outside ToolsetMiddleware so a refusal
     #      events (which raise ExpectedToolError before call_next inside
-    #      Safety) are still logged with outcome=error. Without this
+    #      Toolset) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.
     #   5. InspectRetryMiddleware — inside Audit so retries are
-    #      audited once each, outside Safety so tier-denied tools
-    #      never reach retry. Only readonly tools are retried;
-    #      mutating/destructive tools pass straight through.
+    #      audited once each, outside Toolset so refused tools
+    #      never reach retry. Only inspect tools are retried;
+    #      everything else passes straight through.
     #   6. ToolsetMiddleware — innermost gate (fail-closed). Refusals
     #      never reach the tool, but the audit record above captures
     #      them for forensic review.

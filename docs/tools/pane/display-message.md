@@ -16,7 +16,7 @@ anything to the user; it substitutes the variables and returns the value.
 {class}`~libtmux_mcp.models.PaneInfo` without parsing `#{pane_at_bottom}` / `#{pane_at_right}`
 yourself.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 Accepts literal text and `#{variable}` references only. Modifiers such as
 `#{E:...}` re-expand a variable's *value*, which can arrive from a pane

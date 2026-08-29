@@ -670,7 +670,7 @@ def test_error_handling_middleware_transforms_errors() -> None:
     assert err_mw.transform_errors is True
 
 
-def test_audit_records_safety_denial(
+def test_audit_records_a_toolset_refusal(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A tool denied by SafetyMiddleware still appears in the audit log.
@@ -696,16 +696,16 @@ def test_audit_records_safety_denial(
     # would when blocking an over-tier call. The test's invariant is
     # that the AuditMiddleware sitting *outside* Safety still records
     # the attempt with outcome=error.
-    msg = "Tool 'kill_server' is not available at the current safety level."
+    msg = "Tool 'kill_server' is not in this server's enabled toolsets."
 
-    async def _safety_denial(_ctx: t.Any) -> None:
+    async def _toolset_refusal(_ctx: t.Any) -> None:
         raise ExpectedToolError(msg)
 
     with (
         caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"),
-        pytest.raises(ExpectedToolError, match="not available"),
+        pytest.raises(ExpectedToolError, match="not in this server's enabled"),
     ):
-        asyncio.run(audit.on_call_tool(ctx, _safety_denial))
+        asyncio.run(audit.on_call_tool(ctx, _toolset_refusal))
 
     rendered = "\n".join(rec.getMessage() for rec in caplog.records)
     assert "tool=kill_server" in rendered
@@ -767,8 +767,8 @@ class _FlakyCallNext:
         return "ok"
 
 
-def test_readonly_retry_recovers_from_libtmux_exception() -> None:
-    """Readonly tool is retried once on ``LibTmuxException`` and succeeds.
+def test_inspect_retry_recovers_from_libtmux_exception() -> None:
+    """An ``inspect`` tool is retried once on ``LibTmuxException``.
 
     Models the production scenario the middleware exists to fix: a
     transient socket error from libtmux on the first call, then a
@@ -791,13 +791,13 @@ def test_readonly_retry_recovers_from_libtmux_exception() -> None:
     assert call_next.calls == 2  # initial failure + one retry
 
 
-def test_readonly_retry_skips_mutating_tool() -> None:
-    """Mutating tool is NOT retried on ``LibTmuxException``.
+def test_inspect_retry_skips_a_writing_tool() -> None:
+    """A writing tool is NOT retried on ``LibTmuxException``.
 
     Critical safety property: re-running ``send_keys``,
-    ``create_session``, or any other mutating call on a transient
+    ``create_session``, or any other writing call on a transient
     error would silently double the side effect. This test pins the
-    "no retry for non-readonly" gate.
+    "only inspect is retried" gate.
     """
     from libtmux import exc as libtmux_exc
 
@@ -814,8 +814,8 @@ def test_readonly_retry_skips_mutating_tool() -> None:
     assert call_next.calls == 1  # no retry — fail on first call
 
 
-def test_readonly_retry_skips_self_bounded_tool() -> None:
-    """A readonly + self-bounded tool is NOT retried.
+def test_inspect_retry_skips_self_bounded_tool() -> None:
+    """An ``inspect`` + self-bounded tool is NOT retried.
 
     ``wait_for_text`` computes its deadline inside the tool body, so a
     retry restarts the clock: a transient ``LibTmuxException`` at t=29s
@@ -843,8 +843,8 @@ def test_readonly_retry_skips_self_bounded_tool() -> None:
     assert call_next.calls == 1  # no retry — the wait budget is not doubled
 
 
-def test_readonly_retry_skips_non_libtmux_exception() -> None:
-    """Even readonly tools don't retry on exceptions outside the trigger set.
+def test_inspect_retry_skips_non_libtmux_exception() -> None:
+    """Even ``inspect`` tools do not retry outside the trigger set.
 
     Default ``retry_exceptions=(LibTmuxException,)`` is narrow on
     purpose — a ``ValueError`` from caller-side input is a
@@ -864,7 +864,7 @@ def test_readonly_retry_skips_non_libtmux_exception() -> None:
     assert call_next.calls == 1  # no retry — wrong exception type
 
 
-def test_readonly_retry_recovers_on_decorated_tool(
+def test_inspect_retry_recovers_on_decorated_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: retry fires through the production decorator wrap path.
@@ -937,7 +937,7 @@ def test_readonly_retry_recovers_on_decorated_tool(
     ],
     ids=lambda e: type(e).__name__ if isinstance(e, Exception) else e.__name__,
 )
-def test_readonly_retry_skips_deterministic_failures(raised: Exception) -> None:
+def test_inspect_retry_skips_deterministic_failures(raised: Exception) -> None:
     """A failure a second attempt cannot change is not retried.
 
     Every one of these descends from ``LibTmuxException``, which is the retry
@@ -960,7 +960,7 @@ def test_readonly_retry_skips_deterministic_failures(raised: Exception) -> None:
     )
 
 
-def test_readonly_retry_skips_not_found_on_decorated_tool(
+def test_inspect_retry_skips_not_found_on_decorated_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: a stale id is not retried through the production wrap path.
@@ -1009,7 +1009,7 @@ def test_readonly_retry_skips_not_found_on_decorated_tool(
     )
 
 
-def test_readonly_retry_logger_uses_project_namespace() -> None:
+def test_inspect_retry_logger_uses_project_namespace() -> None:
     """Retry warnings route through ``libtmux_mcp.retry``, not ``fastmcp.retry``.
 
     Operators routing logs by the ``libtmux_mcp.*`` namespace prefix

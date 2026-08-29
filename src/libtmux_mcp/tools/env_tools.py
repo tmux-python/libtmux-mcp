@@ -81,7 +81,7 @@ def set_environment(
        not just panes the agent drives. A caller that writes ``PATH``,
        ``LD_PRELOAD``, or ``AWS_*`` variables can influence future
        commands the human user types directly. Treat this as
-       elevated-risk within the ``mutating`` safety tier. The audit log
+       elevated-risk within ``execute``. The audit log
        redacts the ``value`` argument, but the side effects persist on
        disk/memory until tmux is restarted. Prefer ``env VAR=value
        command`` via :func:`~libtmux_mcp.tools.pane_tools.send_keys`

@@ -11,7 +11,7 @@ terminal mode.
 
 **Avoid when** you only need raw text — {tooliconl}`capture-pane` is lighter.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

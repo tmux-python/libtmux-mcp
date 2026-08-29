@@ -52,10 +52,9 @@ def pipe_pane(
        This tool writes to arbitrary filesystem paths chosen by the MCP
        client. There is no allow-list; the server will create files
        anywhere the server process has write access. Treat this as
-       elevated-risk even though it sits in the ``mutating`` safety
-       tier — it is the broadest-reach tool in that tier. If you run
-       libtmux-mcp on untrusted input, consider
-       ``LIBTMUX_SAFETY=readonly`` or run the server under a user with
+       elevated-risk: it is the broadest-reach tool in ``execute``. If
+       you run libtmux-mcp on untrusted input, consider
+       ``LIBTMUX_TOOLSETS=inspect`` or run the server under a user with
        a scoped home directory. See :doc:`/topics/trust` for the full
        footgun list.
 

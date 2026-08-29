@@ -49,9 +49,11 @@ be stated twice, the file listed above is the one that governs.
 - A passing gate is evidence only once it has been shown capable of
   failing. Pair a new test with a deliberate break that proves it bites.
 
-Tools are tagged `readonly`, `mutating`, or `destructive`; `LIBTMUX_SAFETY`
-caps which tier is exposed (default `mutating`), and the middleware denies
-any tool whose tag it does not recognize. All tmux access goes through
+Tools are grouped into the unordered toolsets `inspect`, `manage`,
+`execute`, and `teardown`; `LIBTMUX_TOOLSETS` selects which are exposed
+(default `inspect,manage,execute`), and the middleware refuses any tool
+carrying none of them. Filtering shapes what is advertised, not what a
+pane can run. All tmux access goes through
 libtmux's `cmd()` on `Server`/`Session`/`Window`/`Pane`, returning a
 `CommandResult` with `stdout`/`stderr`; a libtmux object can go stale when
 tmux state changes externally, so call `.refresh()` before trusting a

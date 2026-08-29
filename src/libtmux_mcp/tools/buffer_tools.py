@@ -17,7 +17,7 @@ the caller can round-trip with
 :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`, and
 :func:`~libtmux_mcp.tools.buffer_tools.delete_buffer` without ambiguity.
 
-``list_buffers`` is **not** exposed in the default safety tier —
+``list_buffers`` is **not** exposed at all —
 buffer contents often include the user's OS clipboard history (passwords,
 private snippets), and a blanket enumeration would leak that to the
 agent. Callers track the buffers they own via the

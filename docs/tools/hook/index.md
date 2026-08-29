@@ -11,7 +11,7 @@ OOM-kill, and C-extension-fault crashes. Any cleanup registry in
 Python could be silently bypassed, leaking agent-installed shell hooks
 into the user's persistent tmux server where they would fire forever.
 Three plausible future paths exist (a tmux-side `client-detached`
-meta-hook for self-cleanup, requiring `LIBTMUX_SAFETY=destructive`, or
+meta-hook for self-cleanup, requiring `teardown` in `LIBTMUX_TOOLSETS`, or
 exposing one-shot `run_hook` only); none is in scope.
 
 Until one of those paths is implemented, the surface here is visibility only.

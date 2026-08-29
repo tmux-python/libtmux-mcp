@@ -61,7 +61,7 @@ def advertised_tools() -> dict[str, t.Any]:
 
     Registers into a fresh server rather than the production one, whose
     tier filter is fixed at import: reading that one would hide the
-    mutating and destructive tools whenever ``LIBTMUX_SAFETY`` is set.
+    the write tools whenever ``LIBTMUX_TOOLSETS`` is set.
     """
     import asyncio
 

@@ -98,7 +98,7 @@ Restart a pane's process in place, preserving pane_id.
 :::
 
 :::{grid-item-card} {tooliconl}`kill-pane`
-Terminate a pane. Destructive.
+Terminate a pane. Not reversible.
 :::
 
 ::::

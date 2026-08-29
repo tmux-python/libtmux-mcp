@@ -9,7 +9,7 @@ empty when the hook is unset; raises an
 unknown hook names (typos, wrong scope) so input mistakes don't
 masquerade as "nothing configured".
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 ```{fastmcp-tool-input} hook_tools.show_hook
 ```

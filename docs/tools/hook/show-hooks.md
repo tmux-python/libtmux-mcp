@@ -7,7 +7,7 @@
 target — the human user's tmux config, an inherited team setup, or
 a session that another tool may have touched.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 ```{fastmcp-tool-input} hook_tools.show_hooks
 ```

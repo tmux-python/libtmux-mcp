@@ -427,7 +427,7 @@ def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
 
     The static ``_BASE_INSTRUCTIONS`` length is not the contract —
     ``_build_instructions`` appends a safety-tier block, an optional
-    readonly-tier hint, and an optional ``$TMUX_PANE`` agent-context
+    `inspect`-only hint, and an optional ``$TMUX_PANE`` agent-context
     block. The full transmitted string must be ≤ 2048 bytes for every
     (tier, tmux_pane) combination, otherwise Claude Code silently
     truncates the agent-context block — the only server-side fix for
@@ -553,10 +553,10 @@ def test_scope_segment_carries_anti_triggers() -> None:
 def test_probe_hint_visible_only_on_an_inspect_only_surface(
     monkeypatch: pytest.MonkeyPatch, tier: str
 ) -> None:
-    """The 'Readonly mode:' investigation hint appears only on readonly.
+    """The investigation hint appears only when `inspect` is all there is.
 
-    False-positive activation is cheap on readonly (worst case: an
-    extra ``list_panes`` call) and expensive on mutating/destructive
+    A wrong guess is cheap there (worst case: an
+    extra ``list_panes`` call) and expensive on a surface holding
     (where ``kill_*`` is one mis-routed query away). Reuse the existing
     safety axis instead of shipping a separate discoverability knob.
     """

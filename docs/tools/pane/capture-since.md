@@ -15,7 +15,7 @@ output in one typed result. If you need a one-shot content + metadata
 view, use {tooliconl}`snapshot-pane`; if you do not know which pane
 contains text, use {tooliconl}`search-panes`.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

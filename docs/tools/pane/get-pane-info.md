@@ -8,7 +8,7 @@ other metadata without reading the terminal content.
 
 **Avoid when** you need the actual text — use {tooliconl}`capture-pane`.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

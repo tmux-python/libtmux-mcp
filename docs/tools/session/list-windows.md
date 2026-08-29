@@ -8,7 +8,7 @@ session before selecting a window to work with.
 
 **Avoid when** you need pane-level detail — use {tooliconl}`list-panes`.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

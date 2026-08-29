@@ -10,7 +10,7 @@ computing geometry yourself.
 **Avoid when** you already know the `pane_id`. Use {tooliconl}`get-pane-info`
 or {tooliconl}`select-pane` directly.
 
-**Side effects:** None. Read-only.
+**Side effects:** None. Reads only.
 
 **Example:**
 

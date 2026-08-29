@@ -10,7 +10,7 @@ without knowing which pane to look in.
 **Avoid when** you already know the target pane — use {tooliconl}`capture-pane`
 for a one-shot read, or {tooliconl}`capture-since` for repeated observation.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 Matching shares a two-second ceiling across every line of every pane. A
 `regex=true` pattern with nested quantifiers such as `(a+)+` backtracks

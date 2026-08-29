@@ -102,13 +102,13 @@ Each badge renders as:
 ```html
 <span class="sd-badge sd-bg-success"
       role="note"
-      aria-label="Toolset: readonly">
-  🔍 readonly
+      aria-label="Toolset: inspect">
+  🔍 inspect
 </span>
 ```
 
 Features:
-- **Emoji icon** — 🔍 readonly, ✏️ mutating, 💣 destructive (native system emoji, no filters)
+- **Emoji icon** — 🔍 inspect, ✏️ manage, 💣 teardown (native system emoji, no filters)
 - **Matte colors** — forest green, smoky amber, matte crimson with 1px border
 - **Accessible** — `role="note"` + `aria-label` for screen readers
 - **Non-selectable** — `user-select: none` so copying tool names skips badge text

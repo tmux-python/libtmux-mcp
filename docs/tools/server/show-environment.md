@@ -5,7 +5,7 @@
 
 **Use when** you need to inspect tmux environment variables.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

@@ -228,7 +228,7 @@ def install_fastmcp_validation_log_filter() -> None:
 #: from other clients stay loud. Contrast MemPalace/mempalace#322,
 #: which strips the key, and #647, which whitelists arguments against
 #: the schema — silent dropping would let a mis-named flag on a
-#: mutating tool (e.g. ``enter`` on send_keys) run with defaults.
+#: writing tool (e.g. ``enter`` on send_keys) run with defaults.
 _CLIENT_SCHEDULING_FLAG = "wait_for_previous"
 
 
@@ -385,9 +385,9 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     fix (see :func:`_error_tool_result`).
 
     Ordering invariant: must sit **outside** ``AuditMiddleware``,
-    ``ReadonlyRetryMiddleware``, and ``SafetyMiddleware``. All three
+    ``InspectRetryMiddleware``, and ``ToolsetMiddleware``. All three
     depend on exception semantics — audit detects failures by catching,
-    retry matches ``LibTmuxException`` via ``__cause__``, and safety's
+    retry matches ``LibTmuxException`` via ``__cause__``, and the toolset gate's
     tier denials must propagate as exceptions for audit to record them
     — so converting the exception to a result any deeper in the stack
     would silently break all three.
@@ -729,16 +729,16 @@ class _SkipDeterministicFailures(RetryMiddleware):
 
 
 class InspectRetryMiddleware(Middleware):
-    """Retry transient libtmux failures, but only for readonly tools.
+    """Retry transient libtmux failures, but only for ``inspect`` tools.
 
     Wraps fastmcp's :class:`fastmcp.server.middleware.error_handling.RetryMiddleware`
-    so retries are bounded by the safety tier the tool is registered
-    under. Mutating and destructive tools (``send_keys``,
+    so retries are bounded by the toolset the tool is registered
+    under. Tools in any other toolset (``send_keys``,
     ``create_session``, ``kill_server``, …) pass straight through —
     re-running them on a transient socket error would silently double
-    side effects, which is unacceptable. Readonly tools
+    side effects, which is unacceptable. ``inspect`` tools
     (``list_sessions``, ``capture_pane``, ``snapshot_pane``, …) are
-    safe to retry because they observe state without mutating it.
+    safe to retry because they observe state without changing it.
 
     Default retry trigger is :exc:`libtmux.exc.LibTmuxException` —
     libtmux wraps the subprocess failures we actually want to retry
@@ -754,7 +754,7 @@ class InspectRetryMiddleware(Middleware):
 
     Place this in the middleware stack **inside** ``AuditMiddleware``
     (so retried calls are audited once each) and **outside**
-    ``SafetyMiddleware`` (so tier-denied tools never reach retry).
+    ``ToolsetMiddleware`` (so refused tools never reach retry).
     """
 
     def __init__(
@@ -797,10 +797,10 @@ class InspectRetryMiddleware(Middleware):
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Delegate to the upstream retry only for retry-eligible readonly tools.
+        """Delegate to the upstream retry only for retry-eligible ``inspect`` tools.
 
         ``TAG_SELF_BOUNDED`` tools are excluded even though they are
-        readonly. Their deadline is computed inside the tool body, so a
+        ``inspect``. Their deadline is computed inside the tool body, so a
         retry restarts the clock: a transient ``LibTmuxException`` at
         t=29s of a 30s wait would produce a ~59s call and make the wait
         ceiling a lie. :class:`_SkipDeterministicFailures` cannot cover

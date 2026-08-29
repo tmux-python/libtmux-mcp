@@ -11,7 +11,7 @@ after running a command, checking output, or verifying state.
 {tooliconl}`capture-since` with its cursor so unchanged scrollback is not sent
 again. If you only need pane metadata (not content), use {tooliconl}`get-pane-info`.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

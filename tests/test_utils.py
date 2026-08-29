@@ -636,7 +636,7 @@ def test_serialize_pane_is_caller_requires_tmux_env_not_just_pane(
 
 
 def test_tag_constants() -> None:
-    """Safety tier tag constants are distinct strings."""
+    """Toolset constants are distinct strings."""
     tags = {TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN}
     assert len(tags) == 3
 

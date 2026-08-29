@@ -26,7 +26,7 @@ Rename an existing session.
 :::
 
 :::{grid-item-card} {tooliconl}`kill-session`
-Terminate a session. Destructive.
+Terminate a session. Not reversible.
 :::
 
 ::::

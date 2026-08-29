@@ -34,7 +34,7 @@ class BatchResponseLimitFixture(t.NamedTuple):
 
 BATCH_RESPONSE_LIMIT_FIXTURES: list[BatchResponseLimitFixture] = [
     BatchResponseLimitFixture(
-        test_id="two_large_readonly_results",
+        test_id="two_large_read_results",
         payload_size=300_000,
     ),
 ]
@@ -111,25 +111,25 @@ def _batch_probe_server() -> FastMCP:
     register_batch_tools(mcp)
 
     @mcp.tool(
-        title="Readonly Probe", annotations=ANNOTATIONS_OBSERVE, tags={TOOLSET_INSPECT}
+        title="Inspect Probe", annotations=ANNOTATIONS_OBSERVE, tags={TOOLSET_INSPECT}
     )
-    def readonly_probe(value: str) -> dict[str, str]:
+    def inspect_probe(value: str) -> dict[str, str]:
         return {"value": value}
 
     @mcp.tool(
-        title="Mutating Probe",
+        title="Manage Probe",
         annotations=ANNOTATIONS_CHANGE,
         tags={TOOLSET_MANAGE},
     )
-    def mutating_probe(value: str) -> dict[str, str]:
+    def manage_probe(value: str) -> dict[str, str]:
         return {"value": value}
 
     @mcp.tool(
-        title="Destructive Probe",
+        title="Teardown Probe",
         annotations=ANNOTATIONS_DELETE,
         tags={TOOLSET_TEARDOWN},
     )
-    def destructive_probe(value: str) -> dict[str, str]:
+    def teardown_probe(value: str) -> dict[str, str]:
         return {"value": value}
 
     @mcp.tool(
@@ -159,7 +159,7 @@ def _self_bounded_batch_call(wrapper: str, on_error: str = "stop") -> t.Any:
                             "arguments": {"value": "should-not-run"},
                         },
                         {
-                            "tool": "readonly_probe",
+                            "tool": "inspect_probe",
                             "arguments": {"value": "kept-going"},
                         },
                     ],
@@ -174,11 +174,10 @@ def test_batch_rejects_a_self_bounded_tool() -> None:
     """A ``TAG_SELF_BOUNDED`` tool is rejected by the batch wrapper.
 
     ``max_tier`` is a *ceiling* (``_TIER_LEVELS[tool_tier] <=
-    _TIER_LEVELS[max_tier]``), so a readonly tool is reachable through
-    the mutating and destructive wrappers too. The batch loop is serial
-    with no aggregate deadline and ``MAX_BATCH_OPERATIONS`` is 1000, so
-    a wait tool batched N times would cost N x its ceiling — the batch
-    wrapper is a cap amplifier unless every wrapper rejects it.
+    The batch loop is serial with no aggregate deadline and
+    ``MAX_BATCH_OPERATIONS`` is 1000, so a wait tool batched N times
+    would cost N x its ceiling — the wrapper is a cap amplifier unless
+    it rejects one.
     """
     result = _self_bounded_batch_call("call_read_tools_batch")
 
@@ -233,8 +232,8 @@ def test_run_command_is_registered_self_bounded_and_unbatchable() -> None:
         asyncio.run(_check_operation_allowed(fastmcp=mcp, operation=operation))
 
 
-def test_call_readonly_tools_batch_preserves_structured_results() -> None:
-    """The readonly batch wrapper returns per-tool structured content."""
+def test_call_read_tools_batch_preserves_structured_results() -> None:
+    """The read batch wrapper returns per-tool structured content."""
     from fastmcp import Client
 
     async def _call() -> t.Any:
@@ -244,11 +243,11 @@ def test_call_readonly_tools_batch_preserves_structured_results() -> None:
                 {
                     "operations": [
                         {
-                            "tool": "readonly_probe",
+                            "tool": "inspect_probe",
                             "arguments": {"value": "alpha"},
                         },
                         {
-                            "tool": "readonly_probe",
+                            "tool": "inspect_probe",
                             "arguments": {"value": "beta"},
                         },
                     ],
@@ -265,7 +264,7 @@ def test_call_readonly_tools_batch_preserves_structured_results() -> None:
     first, second = result.structured_content["results"]
     assert first == {
         "index": 0,
-        "tool": "readonly_probe",
+        "tool": "inspect_probe",
         "success": True,
         "error": None,
         "content": [{"type": "text", "text": '{"value":"alpha"}'}],
@@ -275,7 +274,7 @@ def test_call_readonly_tools_batch_preserves_structured_results() -> None:
     }
     assert second == {
         "index": 1,
-        "tool": "readonly_probe",
+        "tool": "inspect_probe",
         "success": True,
         "error": None,
         "content": [{"type": "text", "text": '{"value":"beta"}'}],
@@ -292,7 +291,7 @@ def test_call_readonly_tools_batch_preserves_structured_results() -> None:
     BATCH_RESPONSE_LIMIT_FIXTURES,
     ids=[fixture.test_id for fixture in BATCH_RESPONSE_LIMIT_FIXTURES],
 )
-def test_call_readonly_tools_batch_caps_aggregate_response(
+def test_call_read_tools_batch_caps_aggregate_response(
     test_id: str,
     payload_size: int,
 ) -> None:
@@ -311,11 +310,11 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
                 {
                     "operations": [
                         {
-                            "tool": "readonly_probe",
+                            "tool": "inspect_probe",
                             "arguments": {"value": first_payload},
                         },
                         {
-                            "tool": "readonly_probe",
+                            "tool": "inspect_probe",
                             "arguments": {"value": second_payload},
                         },
                     ],
@@ -344,7 +343,7 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
 
     first, second = structured["results"]
     assert first["index"] == 0
-    assert first["tool"] == "readonly_probe"
+    assert first["tool"] == "inspect_probe"
     assert first["success"] is True
     assert first["structured_content"] is None
     assert first["content"] == [
@@ -367,7 +366,7 @@ def test_call_readonly_tools_batch_caps_aggregate_response(
     BATCH_OPERATION_LIMIT_FIXTURES,
     ids=[fixture.test_id for fixture in BATCH_OPERATION_LIMIT_FIXTURES],
 )
-def test_call_readonly_tools_batch_rejects_oversized_operation_count(
+def test_call_read_tools_batch_rejects_oversized_operation_count(
     test_id: str,
     operation_count: int,
 ) -> None:
@@ -421,7 +420,7 @@ def test_the_read_batch_rejects_a_tool_outside_inspect() -> None:
         async with Client(_batch_probe_server()) as client:
             return await client.call_tool(
                 "call_read_tools_batch",
-                {"operations": [{"tool": "mutating_probe", "arguments": {}}]},
+                {"operations": [{"tool": "manage_probe", "arguments": {}}]},
                 raise_on_error=False,
             )
 

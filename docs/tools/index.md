@@ -162,7 +162,7 @@ Get tmux server info.
 :::{grid-item-card} call_read_tools_batch
 :link: call-read-tools-batch
 :link-type: ref
-Call typed readonly tools in order.
+Call typed `inspect` tools in order.
 :::
 
 :::{grid-item-card} list_servers

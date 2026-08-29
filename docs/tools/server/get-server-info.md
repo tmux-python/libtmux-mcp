@@ -8,7 +8,7 @@ or inspect server-level state before creating sessions.
 
 **Avoid when** you only need session names — use {tooliconl}`list-sessions`.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

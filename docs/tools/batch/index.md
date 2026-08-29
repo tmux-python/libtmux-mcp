@@ -8,15 +8,7 @@ including `socket_name` when needed.
 :gutter: 2 2 3 3
 
 :::{grid-item-card} {tooliconl}`call-read-tools-batch`
-Call readonly tools in order.
-:::
-
-:::{grid-item-card} {tooliconl}`call-mutating-tools-batch`
-Call readonly or mutating tools in order.
-:::
-
-:::{grid-item-card} {tooliconl}`call-destructive-tools-batch`
-Call readonly, mutating, or destructive tools in order.
+Call several `inspect` tools in order.
 :::
 
 ::::

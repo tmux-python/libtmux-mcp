@@ -5549,8 +5549,8 @@ def test_pane_tool_open_world_hint_registration(
     assert wire_annotations(tool).get("openWorldHint") is expected_open_world
 
 
-def test_clear_pane_advertises_destructive_non_idempotent() -> None:
-    """``clear_pane`` registers as mutating-tier with destructive hints."""
+def test_clear_pane_advertises_removal_hints() -> None:
+    """``clear_pane`` is in ``teardown`` and says what it removes."""
     import asyncio
 
     from fastmcp import FastMCP

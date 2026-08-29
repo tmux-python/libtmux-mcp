@@ -8,7 +8,7 @@ the agent composes the shell command with ``tmux wait-for -S NAME`` and
 then calls :func:`wait_for_channel` which blocks server-side until the
 signal fires.
 
-Wait channel safety
+Wait channel scope
 -------------------
 ``tmux wait-for`` without a timeout blocks indefinitely at the OS level.
 If the shell command that was supposed to emit the signal crashes

@@ -6,7 +6,7 @@
 **Use when** you need to discover which panes exist in a window before
 sending keys or capturing output.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 **Example:**
 

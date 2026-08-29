@@ -7,7 +7,7 @@
 to read back a buffer between modifications. Restricted to
 MCP-namespaced buffers — non-agent buffers are rejected.
 
-**Side effects:** None. Readonly.
+**Side effects:** None. Reads only.
 
 ```{fastmcp-tool-input} buffer_tools.show_buffer
 ```
