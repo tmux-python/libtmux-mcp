@@ -387,19 +387,38 @@ TAG_SELF_BOUNDED = "self-bounded"
 # Reusable annotation presets for tool registration
 # ---------------------------------------------------------------------------
 
+#: Annotations for tools that only read tmux or pane state.
 ANNOTATIONS_RO: dict[str, bool] = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "idempotentHint": True,
     "openWorldHint": False,
 }
+
+#: Annotations for tools that replace a value tmux already held — a name,
+#: a size, a layout, a selection, an option. MCP's ``destructiveHint: false``
+#: means additive-only, which a replacement is not, so these advertise
+#: ``True`` even though nothing is destroyed. Repeating the same call lands
+#: on the same state, so ``idempotentHint`` stays ``True``.
 ANNOTATIONS_MUTATING: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+
+#: Annotations for tools that add state without replacing any, and land on
+#: the same state when repeated.
+ANNOTATIONS_ADDITIVE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": False,
     "idempotentHint": True,
     "openWorldHint": False,
 }
-ANNOTATIONS_CREATE: dict[str, bool] = {
+
+#: Annotations for tools that allocate a new tmux object each call, so
+#: nothing is replaced and no two calls land on the same state.
+ANNOTATIONS_ALLOCATE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": False,
     "idempotentHint": False,

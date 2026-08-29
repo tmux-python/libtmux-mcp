@@ -12,7 +12,6 @@ from __future__ import annotations
 import typing as t
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
@@ -153,9 +152,9 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(
         title="Select Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(select_pane)
-    mcp.tool(title="Swap Pane", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING})(
-        swap_pane
-    )
+    mcp.tool(
+        title="Swap Pane", annotations=ANNOTATIONS_DESTRUCTIVE, tags={TAG_MUTATING}
+    )(swap_pane)
     mcp.tool(title="Pipe Pane", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING})(
         pipe_pane
     )
@@ -166,7 +165,7 @@ def register(mcp: FastMCP) -> None:
     )(display_message)
     mcp.tool(
         title="Enter Copy Mode",
-        annotations=ANNOTATIONS_CREATE,
+        annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_MUTATING},
     )(enter_copy_mode)
     mcp.tool(

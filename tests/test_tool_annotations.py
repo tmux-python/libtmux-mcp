@@ -108,3 +108,28 @@ def test_authored_command_spawns_do_not_claim_additive_updates(
 ) -> None:
     """A caller-authored command replaces what the pane would have run."""
     assert wire_annotations(advertised_tools[name])["destructiveHint"] is True
+
+
+#: The only tools whose updates are additive-only. Everything else that
+#: writes replaces or removes prior state, which MCP spells
+#: ``destructiveHint: true`` however small the change.
+ADDITIVE_TOOLS = frozenset(
+    {
+        "create_session",
+        "create_window",
+        "load_buffer",
+        "signal_channel",
+        "wait_for_channel",
+    }
+)
+
+
+def test_only_additive_tools_claim_additive_updates(
+    advertised_tools: dict[str, t.Any],
+) -> None:
+    """A new tool cannot quietly claim additive-only updates."""
+    for name, tool in advertised_tools.items():
+        hints = wire_annotations(tool)
+        if hints["readOnlyHint"]:
+            continue
+        assert hints["destructiveHint"] is (name not in ADDITIVE_TOOLS), name
