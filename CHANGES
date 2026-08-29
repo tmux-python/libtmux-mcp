@@ -88,6 +88,28 @@ options table, so these are the same store reached two ways.
 
 ### Fixes
 
+#### `resize_pane` refuses a resize that cannot happen
+
+`resize-pane` on the only pane in a window exits 0 and changes nothing:
+the pane already fills the window and there is no neighbour to take
+rows from. Measured on a lone pane at 30 rows, `-y 11` left it at 30.
+
+Nothing lied -- the returned `PaneInfo` carried the real size -- but no
+field said the REQUEST went unmet, and a caller has no reason to
+suspect the comparison needs making. `split_window` already refuses an
+unsatisfiable size rather than doing something else quietly; this now
+matches it. tmux clamping a resize to what the neighbours can give is
+its own semantics and is left alone.
+
+The reason it survived is worth recording: `test_resize_pane_dimensions`
+exercised a LONE pane and asserted only that the returned `pane_id`
+matched the one passed in -- which a complete no-op satisfies. The test
+has been given a neighbour and now compares the size against the value
+read before the call.
+
+Found by the QA instance while sweeping for tools whose result cannot
+confirm their own effect.
+
 #### A missing tmux server no longer advises a call that cannot work
 
 With no server running, resolving an object raised `Object not found`

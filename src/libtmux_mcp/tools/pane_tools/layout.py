@@ -16,6 +16,46 @@ from libtmux_mcp.models import (
     PaneInfo,
 )
 
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+
+
+def _raise_if_pane_fills_its_window(pane: Pane) -> None:
+    """Refuse a resize tmux accepts and then does not perform.
+
+    ``resize-pane`` on the only pane in a window exits 0 and changes
+    nothing: the pane already fills the window and there is no
+    neighbour to take rows from. Measured on a lone pane at 30 rows,
+    ``-y 11`` left it at 30 with rc 0.
+
+    Nothing lied about it -- the returned ``PaneInfo`` carries the real
+    size -- but no field said the REQUEST went unmet, and a caller has
+    no reason to suspect the comparison needs making. Refusing follows
+    ``split_window``, which already rejects an unsatisfiable size rather
+    than silently doing something else.
+
+    Only the case where nothing can happen. tmux clamping a resize to
+    what the neighbours can give is its own semantics and is left alone.
+
+    Fails OPEN: an unreadable probe lets the resize proceed, because the
+    guard exists to explain a no-op, not to add a way to fail.
+    """
+    stdout = pane.display_message("#{window_panes}", get_text=True)
+    if not stdout or stdout[0] != "1":
+        return
+    msg = (
+        f"pane {pane.pane_id} is the only pane in its window, so "
+        "resize_pane cannot change its size"
+    )
+    raise ExpectedToolError(
+        msg,
+        suggestion=(
+            "It already fills the window and there is no neighbouring "
+            "pane to take space from. Use resize_window to change the "
+            "window itself, or split_window first."
+        ),
+    )
+
 
 @handle_tool_errors
 def resize_pane(
@@ -83,6 +123,7 @@ def resize_pane(
         elif not zoom and is_zoomed:
             pane.resize(zoom=True)  # toggle off
     else:
+        _raise_if_pane_fills_its_window(pane)
         pane.resize(height=height, width=width)
     return _serialize_pane(pane)
 

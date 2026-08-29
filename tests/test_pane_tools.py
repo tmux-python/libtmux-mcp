@@ -3084,15 +3084,27 @@ def test_clear_pane_uses_libtmux_reset(
     assert reset_calls == [mcp_pane.pane_id]
 
 
-def test_resize_pane_dimensions(mcp_server: Server, mcp_pane: Pane) -> None:
-    """resize_pane resizes a pane with height/width."""
+def test_resize_pane_dimensions(
+    mcp_server: Server, mcp_pane: Pane, mcp_window: Window
+) -> None:
+    """resize_pane actually changes the size it was asked to change.
+
+    This ran against a LONE pane and asserted only that the returned
+    pane_id matched -- which a complete no-op satisfies, and that is
+    exactly what tmux does there. It needs a neighbour to take the rows
+    from, and it has to compare the size.
+    """
+    mcp_window.split(attach=False)
+    before = int(mcp_pane.display_message("#{pane_height}", get_text=True)[0])
+    target = before - 4
+
     result = resize_pane(
         pane_id=mcp_pane.pane_id,
-        height=10,
-        width=40,
+        height=target,
         socket_name=mcp_server.socket_name,
     )
     assert result.pane_id == mcp_pane.pane_id
+    assert result.pane_height == str(target)
 
 
 def test_resize_pane_zoom(mcp_server: Server, mcp_session: Session) -> None:
@@ -7183,3 +7195,20 @@ def test_copy_selection_passes_dash_c_only_where_it_exists(
     """
     monkeypatch.setattr(copy_mode_module, "has_gte_version", lambda *a, **k: supported)
     assert copy_mode_module._copy_selection_flags(None) == expected
+
+
+def test_resize_pane_refuses_a_pane_that_fills_its_window(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """Tmux accepts this resize, performs nothing, and exits 0.
+
+    The old result was honest -- pane_height carried the real size --
+    but no field said the request went unmet, so a caller that resized
+    and moved on believed it had resized.
+    """
+    with pytest.raises(ToolError, match="only pane in its window"):
+        resize_pane(
+            pane_id=mcp_pane.pane_id,
+            height=11,
+            socket_name=mcp_server.socket_name,
+        )
