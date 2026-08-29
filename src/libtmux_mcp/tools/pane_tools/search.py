@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import re
+import time
+
+# Aliased: the ``regex`` tool parameter below shadows the module name.
+import regex as regex_engine
 
 from libtmux_mcp._utils import (
     ExpectedToolError,
@@ -22,9 +26,63 @@ from libtmux_mcp.models import (
 #: (most-recent) matches so the agent sees what's currently on screen.
 SEARCH_DEFAULT_MAX_LINES_PER_PANE = 50
 
+#: Wall-clock ceiling for matching a caller's pattern across every
+#: captured line. A literal scan of 20,000 lines costs ~3.5 ms, so this
+#: is a ceiling reached only by a pattern that backtracks, never a
+#: budget a real search spends.
+SEARCH_MATCH_MAX_SECONDS = 2.0
+
 #: Default maximum number of matching panes returned in one call.
 #: Pagination via ``offset``/``limit`` lets the caller page forward.
 SEARCH_DEFAULT_LIMIT = 500
+
+
+def _match_lines(
+    compiled: regex_engine.Pattern[str],
+    lines: list[str],
+    deadline: float,
+) -> list[str]:
+    """Return the lines matching ``compiled``, giving up at ``deadline``.
+
+    A caller-supplied pattern can backtrack for longer than the age of
+    the universe on an ordinary pane line, so every match shares one
+    wall-clock budget rather than each line getting its own.
+
+    Parameters
+    ----------
+    compiled : regex_engine.Pattern
+        Caller's pattern, already compiled.
+    lines : list of str
+        Captured pane content.
+    deadline : float
+        :func:`time.monotonic` value at which to give up.
+
+    Returns
+    -------
+    list of str
+        Lines that matched.
+
+    Raises
+    ------
+    ExpectedToolError
+        If the budget runs out before every line has been tried.
+    """
+    matched: list[str] = []
+    for line in lines:
+        # A zero budget raises TimeoutError too, so an exhausted deadline
+        # and a single slow line report through one path.
+        remaining = max(deadline - time.monotonic(), 0.0)
+        try:
+            if compiled.search(line, timeout=remaining):
+                matched.append(line)
+        except TimeoutError as e:
+            msg = (
+                f"Matching took longer than {SEARCH_MATCH_MAX_SECONDS}s. "
+                f"Nested quantifiers such as '(a+)+' backtrack exponentially; "
+                f"anchor the pattern or search for a literal instead."
+            )
+            raise ExpectedToolError(msg) from e
+    return matched
 
 
 def _pane_id_sort_key(m: PaneContentMatch) -> tuple[int, str]:
@@ -143,11 +201,11 @@ def search_panes(
         Paginated match list with ``truncated`` / ``truncated_panes``
         / ``total_panes_matched`` / ``offset`` / ``limit`` fields.
     """
-    search_pattern = pattern if regex else re.escape(pattern)
-    flags = 0 if match_case else re.IGNORECASE
+    search_pattern = pattern if regex else regex_engine.escape(pattern)
+    flags = 0 if match_case else regex_engine.IGNORECASE
     try:
-        compiled = re.compile(search_pattern, flags)
-    except re.error as e:
+        compiled = regex_engine.compile(search_pattern, flags)
+    except regex_engine.error as e:
         msg = f"Invalid regex pattern: {e}"
         raise ExpectedToolError(msg) from e
 
@@ -229,6 +287,7 @@ def search_panes(
     # tail-truncated to keep the most recent matches.
     all_matches: list[PaneContentMatch] = []
     per_pane_truncated = False
+    deadline = time.monotonic() + SEARCH_MATCH_MAX_SECONDS
     for pane_id_str in matching_pane_ids:
         pane = server.panes.get(pane_id=pane_id_str, default=None)
         if pane is None:
@@ -239,7 +298,7 @@ def search_panes(
             end=content_end,
             join_wrapped=True,
         )
-        matched_lines = [line for line in lines if compiled.search(line)]
+        matched_lines = _match_lines(compiled, lines, deadline)
 
         if not matched_lines:
             continue

@@ -39,6 +39,7 @@ from libtmux_mcp.tools.pane_tools import (
     pipe_pane,
     resize_pane,
     respawn_pane,
+    search,
     search_panes,
     select_pane,
     send_keys,
@@ -2309,6 +2310,30 @@ def test_search_panes_invalid_regex(mcp_server: Server, mcp_session: Session) ->
             regex=True,
             socket_name=mcp_server.socket_name,
         )
+
+
+def test_search_panes_bounds_matching_time(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pattern that backtracks exponentially stops at the deadline."""
+    monkeypatch.setattr(search, "SEARCH_MATCH_MAX_SECONDS", 0.2)
+    mcp_pane.send_keys("echo " + "a" * 40 + "b", enter=True)
+    retry_until(
+        lambda: "a" * 40 in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ExpectedToolError, match="took longer than"):
+        search_panes(
+            pattern=r"(a|a)+$",
+            regex=True,
+            socket_name=mcp_server.socket_name,
+        )
+    assert time.monotonic() - started < 5
 
 
 def test_search_panes_pagination_limit_and_offset(

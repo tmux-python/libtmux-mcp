@@ -42,6 +42,7 @@ include = [
 dependencies = [
   "libtmux>=0.62.0,<1.0",
   "fastmcp>=3.4.2,<4.0.0",
+  "regex>=2024.11.6",
 ]
 
 [project.urls]
@@ -79,6 +80,7 @@ dev = [
   # Lint
   "ruff>=0.16.1",
   "mypy",
+  "types-regex",
 ]
 
 docs = [
