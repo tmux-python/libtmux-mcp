@@ -949,15 +949,25 @@ async def _get_server_async(
     with _server_cache_lock:
         cached = _server_cache.get(cache_key)
     probe = cached if cached is not None else server
-    argv = _tmux_argv(probe, "list-sessions")
+    returncode = 0
     try:
-        await _run_tmux_async(argv, timeout=_LIVENESS_TIMEOUT_SECONDS)
+        returncode, _stdout, _stderr = await _run_tmux_async(
+            _tmux_argv(probe, "list-sessions"),
+            timeout=_LIVENESS_TIMEOUT_SECONDS,
+        )
     except TimeoutError:
         _raise_socket_hung(probe)
     except OSError:
-        pass  # a missing binary or socket is not a hang; let the caller see it
+        pass  # a missing binary or socket is not a hang; the caller sees it
     if cached is not None:
-        return cached
+        if returncode == 0:
+            return cached
+        # Matches the synchronous path: a handle whose server is gone is
+        # dropped rather than reused. Diverging here would mean the same
+        # socket answered differently depending on which tool asked.
+        with _server_cache_lock:
+            if _server_cache.get(cache_key) is cached:
+                del _server_cache[cache_key]
     with _server_cache_lock:
         return _server_cache.setdefault(cache_key, server)
 
