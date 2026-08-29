@@ -1148,13 +1148,18 @@ Measured before and after, `pytest -n auto --reruns 0`, same box:
 | | runs failing | failures per run | loadavg at start |
 |---|---|---|---|
 | before | 6 of 6 | 3, 2, 2, 1, 1, 5 | 13 - 33 |
-| after | 1 of 3 | 0, 2, 0 | 25 - 45 |
+| after | **0 of 6** | 0, 0, 0, 0, 0, 0 | 11 - 30 |
 
-The after runs are the less favourable comparison, not the more: they
-ran at roughly double the load, on a box shared with a second agent
-driving tmux continuously. The two failures in that run were the same
-pure-budget shape at a `timeout=5.0` the first sweep had not covered,
-and are fixed by the same rule.
+The final run randomises test order, an axis the fixed-order runs never
+exercise. The "after" rows are the less favourable comparison, not the
+more: the box was shared throughout with a second agent driving tmux.
+
+Two defects were caught by this gate and by nothing else, both of them
+in work done during this branch. A `run_command` guard refused a
+LEGITIMATE command at loadavg 31, and a `list_servers` test failed only
+under `pytest-xdist` because a UNIX socket path is capped at 108 bytes
+and the worker and test-name components push `tmp_path` over it. Every
+serial run passed both.
 
 **`mcp_swap.py` covers opencode and pi**
 
