@@ -6,6 +6,40 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Documentation
+
+#### The batch speed curve named a break-even that does not exist
+
+`call_readonly_tools_batch` claimed batching "is not a speed win below
+about three or four operations", with a curve to match. The curve was
+measured with one cheap single-value read and then stated as a general
+rule. Measured over stdio across four read tools, the ratio at a SINGLE
+operation ranges from 0.71 to 1.83 -- the same n=1 both wins and loses
+depending on which tool is nested -- so no count-based break-even can be
+stated at all.
+
+The cost of that was real rather than cosmetic: the numbers led, the
+qualifier that invalidated them ("it pays most when the nested
+operations are individually expensive") trailed, and an agent reading
+only the first sentence would skip batching two operations that batching
+wins. The docstring now leads with the dependency and points at the
+per-operation `elapsed_seconds` already in the result, so a caller can
+settle it for its own mix.
+
+Reported with the measurements by the QA instance. An independent
+in-process run put the four tools within 1.4x of each other, against
+2.4x end-to-end, which locates the variance in the MCP layer rather than
+in the tmux work -- so "how expensive is the nested tool" means its
+whole round trip, response size included.
+
+#### `show_option(scope=...)` pointed nowhere for tmux's `-g`
+
+`scope="global"` is the first thing to try, since `-g` is tmux's own
+vocabulary, and it failed schema validation with an enum error that
+never mentioned `global_`. `-g` is not a scope here -- it is orthogonal,
+because session and window options each have a global level -- and the
+`scope` and `global_` descriptions now say so.
+
 ### Breaking changes
 
 - **A name or title argument is now a literal.** `rename_window`,

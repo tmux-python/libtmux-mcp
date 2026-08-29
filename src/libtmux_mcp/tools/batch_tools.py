@@ -348,13 +348,22 @@ async def call_readonly_tools_batch(
     rejected even if the server process itself is running at a higher
     safety tier.
 
-    Batching saves the transport round trip and re-pays the per-call
-    framework cost, so it is not a speed win below about three or four
-    operations -- measured 2.5x SLOWER at one, 1.2x at two, break-even
-    around three, and 0.80x at ten. It pays most when the nested
-    operations are individually expensive: a mixed read of
-    ``get_pane_info`` + ``list_panes`` + ``show_option`` + ``capture_pane``
-    measured 65 ms batched against 120 ms serial.
+    Batching trades one transport round trip for one re-paid per-call
+    framework cost, so whether it wins depends on which is bigger --
+    that is, on **how expensive the nested tool is**, not on how many
+    of them there are. There is no general break-even count. Measured
+    over stdio, the ratio at a single operation ranged from 0.71 to
+    1.83 across four read tools, so the same n=1 both wins and loses
+    depending on what is nested.
+
+    Batch when the operations are individually expensive or return a
+    lot: a mixed read of ``get_pane_info`` + ``list_panes`` +
+    ``show_option`` + ``capture_pane`` measured 65 ms batched against
+    120 ms serial. For the cheapest single-value reads the two are
+    close at low counts and batching pulls ahead as the count grows.
+    Per-operation ``elapsed_seconds`` in the result is there so a
+    caller can settle this for its own mix rather than trusting a
+    curve.
 
     ``timeout`` bounds the WHOLE batch, checked between operations.
     Without it a batch runs to completion, and the cap is 1000 calls:

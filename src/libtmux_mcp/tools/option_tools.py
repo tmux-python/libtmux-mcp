@@ -190,13 +190,17 @@ def show_option(
     option : str
         The tmux option name to query.
     scope : str, optional
-        Option scope.
+        Option scope: 'server', 'session', 'window' or 'pane'. tmux's
+        ``-g`` is NOT a scope here -- it is orthogonal, since session
+        and window options each have a global level -- so pass
+        ``global_=True`` for it, not ``scope='global'``.
     target : str, optional
         Target identifier. For session scope: session name
         (e.g. 'mysession'). For window scope: window ID (e.g. '@1').
         For pane scope: pane ID (e.g. '%1'). Requires scope.
     global_ : bool
-        Whether to query the global option.
+        Query the global level (tmux ``-g``), rather than the value set
+        on the target itself.
     include_inherited : bool
         Resolve inherited values (tmux ``-A``) so the answer is the
         value in force at this scope rather than only one set on it.
@@ -250,7 +254,10 @@ def set_option(
     value : str
         The value to set.
     scope : str, optional
-        Option scope.
+        Option scope: 'server', 'session', 'window' or 'pane'. tmux's
+        ``-g`` is NOT a scope here -- it is orthogonal, since session
+        and window options each have a global level -- so pass
+        ``global_=True`` for it, not ``scope='global'``.
     target : str, optional
         Target identifier. For session scope: session name
         (e.g. 'mysession'). For window scope: window ID (e.g. '@1').
