@@ -37,7 +37,7 @@ import uuid
 from libtmux_mcp._utils import (
     ANNOTATIONS_ALLOCATE,
     ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_RO,
+    ANNOTATIONS_RO_CONTENT,
     ANNOTATIONS_SHELL,
     TAG_MUTATING,
     TAG_READONLY,
@@ -393,9 +393,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING},
     )(paste_buffer)
-    mcp.tool(title="Show tmux Buffer", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_buffer
-    )
+    mcp.tool(
+        title="Show tmux Buffer",
+        annotations=ANNOTATIONS_RO_CONTENT,
+        tags={TAG_READONLY},
+    )(show_buffer)
     mcp.tool(
         title="Delete tmux Buffer",
         annotations=ANNOTATIONS_DESTRUCTIVE,

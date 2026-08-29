@@ -15,6 +15,7 @@ from libtmux_mcp._utils import (
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
+    ANNOTATIONS_RO_CONTENT,
     ANNOTATIONS_SHELL,
     DISCOVERY_META,
     TAG_DESTRUCTIVE,
@@ -98,12 +99,12 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_SHELL,
         tags={TAG_MUTATING, TAG_SELF_BOUNDED},
     )(run_command)
-    mcp.tool(title="Capture Pane", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        capture_pane
-    )
-    mcp.tool(title="Capture Since", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        capture_since
-    )
+    mcp.tool(
+        title="Capture Pane", annotations=ANNOTATIONS_RO_CONTENT, tags={TAG_READONLY}
+    )(capture_pane)
+    mcp.tool(
+        title="Capture Since", annotations=ANNOTATIONS_RO_CONTENT, tags={TAG_READONLY}
+    )(capture_since)
     mcp.tool(
         title="Resize Pane", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
     )(resize_pane)
@@ -133,19 +134,19 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_DESTRUCTIVE,
         tags={TAG_MUTATING},
     )(clear_pane)
-    mcp.tool(title="Search Panes", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        search_panes
-    )
+    mcp.tool(
+        title="Search Panes", annotations=ANNOTATIONS_RO_CONTENT, tags={TAG_READONLY}
+    )(search_panes)
     # TAG_SELF_BOUNDED excludes this tool from retry and from batch
     # wrappers: both would multiply the wait ceiling it enforces.
     mcp.tool(
         title="Wait For Text",
-        annotations=ANNOTATIONS_RO,
+        annotations=ANNOTATIONS_RO_CONTENT,
         tags={TAG_READONLY, TAG_SELF_BOUNDED},
     )(wait_for_text)
     mcp.tool(
         title="Snapshot Pane",
-        annotations=ANNOTATIONS_RO,
+        annotations=ANNOTATIONS_RO_CONTENT,
         tags={TAG_READONLY},
         meta=DISCOVERY_META,
     )(snapshot_pane)

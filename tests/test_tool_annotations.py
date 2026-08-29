@@ -133,3 +133,36 @@ def test_only_additive_tools_claim_additive_updates(
         if hints["readOnlyHint"]:
             continue
         assert hints["destructiveHint"] is (name not in ADDITIVE_TOOLS), name
+
+
+#: Read tools that return terminal content. What a pane holds arrived
+#: from somewhere else — an SSH session, a package manager, a remote
+#: agent — so the text crossed a trust boundary before this server saw
+#: it, which is what ``openWorldHint`` tells a client.
+TERMINAL_CONTENT_TOOLS = frozenset(
+    {
+        "capture_pane",
+        "capture_since",
+        "search_panes",
+        "show_buffer",
+        "snapshot_pane",
+        "wait_for_text",
+    }
+)
+
+
+@pytest.mark.parametrize("name", sorted(TERMINAL_CONTENT_TOOLS))
+def test_terminal_content_reads_are_advertised_open_world(
+    advertised_tools: dict[str, t.Any],
+    name: str,
+) -> None:
+    """Returned pane text is untrusted, however read-only the call was."""
+    assert wire_annotations(advertised_tools[name])["openWorldHint"] is True
+
+
+def test_the_read_batch_carries_its_members_open_world_hint(
+    advertised_tools: dict[str, t.Any],
+) -> None:
+    """A batch advertises the worst case of what it can invoke."""
+    batch = advertised_tools["call_readonly_tools_batch"]
+    assert wire_annotations(batch)["openWorldHint"] is True

@@ -11,7 +11,6 @@ from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
@@ -53,6 +52,15 @@ _BATCH_TRUNCATED_CONTENT: list[dict[str, t.Any]] = [
         "text": "[... batch truncated nested content ...]",
     }
 ]
+
+#: The read batch can invoke a member that returns pane text, so it
+#: carries that member's ``openWorldHint``.
+_ANNOTATIONS_BATCH_READ: dict[str, bool] = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
 
 _ANNOTATIONS_BATCH_SIDE_EFFECTS: dict[str, bool] = {
     "readOnlyHint": False,
@@ -366,7 +374,7 @@ def register(mcp: FastMCP) -> None:
     """Register generic MCP batch tools."""
     mcp.tool(
         title="Call Readonly Tools Batch",
-        annotations=ANNOTATIONS_RO,
+        annotations=_ANNOTATIONS_BATCH_READ,
         tags={TAG_READONLY},
     )(call_readonly_tools_batch)
     mcp.tool(

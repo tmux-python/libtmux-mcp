@@ -395,6 +395,17 @@ ANNOTATIONS_RO: dict[str, bool] = {
     "openWorldHint": False,
 }
 
+#: Annotations for read tools that return terminal content. Read-only,
+#: but ``openWorldHint`` is ``True``: a pane holds whatever was printed
+#: into it — remote sessions, package managers, other agents — so the
+#: text reaching the caller crossed a trust boundary on its way in.
+ANNOTATIONS_RO_CONTENT: dict[str, bool] = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
 #: Annotations for tools that replace a value tmux already held — a name,
 #: a size, a layout, a selection, an option. MCP's ``destructiveHint: false``
 #: means additive-only, which a replacement is not, so these advertise
