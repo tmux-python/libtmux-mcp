@@ -577,7 +577,9 @@ def test_tools_refuse_a_wedged_server_instead_of_hanging(
     assert elapsed < 15.0, f"the refusal took {elapsed:.1f}s"
 
 
-def test_list_servers_survives_a_socket_that_never_answers() -> None:
+def test_list_servers_survives_a_socket_that_never_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A listener is not a server that replies, and one hung the scan.
 
     ``_is_tmux_socket_live`` proves only that the connection was
@@ -595,7 +597,20 @@ def test_list_servers_survives_a_socket_that_never_answers() -> None:
     import threading
     import time
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    from libtmux_mcp.tools.server_tools import _PROBE_TIMEOUT_SECONDS
+
+    # Scan an EMPTY TMUX_TMPDIR so the measurement is of this code and
+    # not of the machine's accumulated socket litter. Unisolated, the
+    # scan also probed every socket in the shared directory -- 1785 of
+    # them on the development box. Quiet those are ~1 ms each and
+    # invisible; under load their per-probe cost inflates and 1785 of
+    # them push the wall clock past any fixed bound. The sibling test
+    # below isolates for a related reason.
+    with (
+        tempfile.TemporaryDirectory(prefix="lsq-") as empty_dir,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        monkeypatch.setenv("TMUX_TMPDIR", empty_dir)
         path = pathlib.Path(tmpdir) / "silent.sock"
         listener = socket_module.socket(
             socket_module.AF_UNIX, socket_module.SOCK_STREAM
@@ -627,7 +642,17 @@ def test_list_servers_survives_a_socket_that_never_answers() -> None:
                 conn.close()
             thread.join(timeout=2)
 
-    assert elapsed < 10.0, f"list_servers took {elapsed:.1f}s against a silent socket"
+    # Derived from the product's constant rather than a human-scale
+    # number, so it moves when the constant does. One silent socket
+    # costs one probe timeout; the multiple is headroom, because this is
+    # a CEILING that a working scan returns from in about 2 s. A literal
+    # 10.0 was asserting the machine's speed -- it failed at loadavg 90,
+    # once by 28 ms.
+    ceiling = _PROBE_TIMEOUT_SECONDS * 5
+    assert elapsed < ceiling, (
+        f"list_servers took {elapsed:.1f}s against a silent socket "
+        f"(ceiling {ceiling:.1f}s)"
+    )
     rows = [row for row in found if row.socket_name == "silent.sock"]
     assert rows, "the unreachable socket was dropped instead of reported"
     assert rows[0].is_alive is False

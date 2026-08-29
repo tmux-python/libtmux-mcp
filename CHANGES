@@ -2384,6 +2384,32 @@ unusual entry shape.
 
 ### Development
 
+**The silent-socket test measured the machine, not the code**
+
+`test_list_servers_survives_a_socket_that_never_answers` asserted the
+scan finished in under 10 s, and failed deterministically at loadavg
+90 -- once by 28 ms. The arithmetic looked like the cause:
+`_SCAN_WORKERS` is 16 and `_PROBE_TIMEOUT_SECONDS` is 2.0, so a wedged
+socket costs one probe timeout per batch and contention stretches it.
+
+The real multiplier was elsewhere. The test never isolated
+`TMUX_TMPDIR`, so the scan also probed every socket in the machine's
+shared directory -- 1785 of them on the development box. Quiet, those
+are about a millisecond each and invisible; under load their per-probe
+cost inflates and there are 1785 of them. The test was measuring
+accumulated socket litter, which is why it failed on one box and not
+the other. The sibling test immediately below it already isolates, for
+a related reason.
+
+It now scans an empty `TMUX_TMPDIR` and reaches the silent socket
+through `extra_socket_paths`, exactly as before. Measured at 87
+runnable on 20 CPUs: 2.07-2.16 s, against 10-12 s before, and
+indistinguishable from a quiet box.
+
+The bound is also derived from `_PROBE_TIMEOUT_SECONDS` rather than
+written as 10.0, so it moves when the constant does. A literal was
+asserting the machine's speed rather than the code's behaviour.
+
 **Three more load-sensitive tests, from a series at loadavg 85**
 
 `matches_a_reprinted_line` needed a third pass, and the numbers said
