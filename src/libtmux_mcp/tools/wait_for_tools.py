@@ -282,8 +282,30 @@ async def signal_channel(
 ) -> str:
     """Signal a tmux ``wait-for`` channel, waking any blocked waiters.
 
-    Signalling an unwaited channel is a no-op that still returns
-    successfully — safe to call defensively.
+    **Signal exactly once per channel.** tmux latches a signal nobody is
+    waiting for, which is what makes this better than polling: signal
+    first, wait later, and "did it finish?" becomes a question about the
+    past. A SECOND signal on a latched channel with no waiter destroys
+    the channel, latch included, and the next wait then blocks to its
+    ceiling. It toggles rather than saturating -- measured on tmux 3.7b:
+
+    ==========  ==================  =====================
+    signals     then wait
+    ==========  ==================  =====================
+    1           returns in 0.04s    latch held
+    2           blocks              latch CLEARED
+    3           returns in 0.03s    latch held again
+    ==========  ==================  =====================
+
+    ``cmd_wait_for_signal`` guards the latch with
+    ``TAILQ_EMPTY(&wc->waiters) && !wc->woken``, so an already-woken
+    channel falls through to the wake-the-waiters path, finds none, and
+    calls ``cmd_wait_for_remove``.
+
+    This server does not paper over it: reading the latch first is a
+    race, and there is no non-destructive way to ask. The habit that
+    breaks it is the careful one -- a ``wait-for -S done`` at the end of
+    the command AND another in a cleanup or trap. Put it in one place.
 
     Parameters
     ----------

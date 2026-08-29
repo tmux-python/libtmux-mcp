@@ -122,6 +122,22 @@ while tmux answers under the name it stored. A name containing `#` would be
 writable and permanently unreadable, so {tooliconl}`set-option` and
 {tooliconl}`show-option` reject it. Option *values* were never affected.
 
+## Signalling a wait channel twice clears its latch
+
+{tooliconl}`signal-channel` is not idempotent. tmux latches a signal
+that has no waiter — that latch is the whole reason to prefer it over
+polling — but a second signal on an already-latched channel with no
+waiter *removes the channel*, latch included, and the next
+{tooliconl}`wait-for-channel` blocks until its ceiling.
+
+It toggles: one signal latches, two clears, three latches again. The
+failure then looks like "the build never finished", because the wait
+simply sits there.
+
+The defensive habit is what triggers it — `tmux wait-for -S done` at the
+end of a command *and* again in a trap or cleanup. Signal in exactly one
+place.
+
 ## Shell-history suppression is best effort
 
 MCP calls to {tooliconl}`run-command` request lightweight suppression by

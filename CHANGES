@@ -88,6 +88,32 @@ options table, so these are the same store reached two ways.
 
 ### Fixes
 
+#### `signal_channel` documented the footgun as a safe habit
+
+The description said "signalling an unwaited channel is a no-op that
+still returns successfully -- safe to call defensively". It is not safe,
+and defensive repetition is exactly what breaks it.
+
+tmux latches a signal nobody is waiting for, which is what makes this
+primitive better than polling. A SECOND signal on a latched channel with
+no waiter destroys the channel, latch included, and the next wait blocks
+to its ceiling. It toggles rather than saturating -- measured: one
+signal returns in 0.04s, two blocks, three returns in 0.03s.
+`cmd_wait_for_signal` guards the latch with `TAILQ_EMPTY(&wc->waiters)
+&& !wc->woken`, so an already-woken channel falls through to the
+wake-the-waiters path, finds none, and calls `cmd_wait_for_remove`.
+
+Not papered over: reading the latch first is a race and there is no
+non-destructive way to ask. Documented instead, in the tool description,
+the tool page and the gotchas topic, and pinned by a test across the
+supported tmux matrix -- a cited measurement goes stale silently
+otherwise.
+
+Found by the QA instance, which also confirmed the attack this pair was
+most at risk from is NOT present: a server that dies mid-wait is
+reported as a failure, not as a signal, and a graceful `kill-server` and
+an abrupt SIGKILL give different messages.
+
 #### `resize_pane` refuses a resize that cannot happen
 
 `resize-pane` on the only pane in a window exits 0 and changes nothing:

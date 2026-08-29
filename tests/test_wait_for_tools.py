@@ -639,3 +639,44 @@ def test_a_channel_signalled_past_the_flat_bound_still_succeeds(
 
     assert "was signalled" in result
     assert elapsed > 0.5, "returned before the flat bound; the wait never blocked"
+
+
+@pytest.mark.parametrize(
+    ("signals", "latched"),
+    [
+        pytest.param(1, True, id="one-signal-latches"),
+        pytest.param(2, False, id="two-signals-clear-the-latch"),
+        pytest.param(3, True, id="three-signals-latch-again"),
+    ],
+)
+@pytest.mark.usefixtures("mcp_session")
+def test_signalling_twice_clears_the_latch(
+    mcp_server: Server, signals: int, latched: bool
+) -> None:
+    """Tmux's signal TOGGLES the latch rather than saturating.
+
+    Pinned because ``signal_channel``'s description asserts it, and a
+    cited measurement goes stale silently. A second signal on a latched
+    channel with no waiter falls past tmux's ``!wc->woken`` guard into
+    the wake-the-waiters path, finds none, and removes the channel --
+    taking the latch with it.
+
+    The cleared case spends its timeout on purpose: a wait that must NOT
+    return is only observable by letting it expire.
+    """
+    channel = f"latch_{signals}"
+    for _ in range(signals):
+        asyncio.run(signal_channel(channel=channel, socket_name=mcp_server.socket_name))
+
+    def _wait() -> str:
+        return asyncio.run(
+            wait_for_channel(
+                channel=channel, timeout=1.0, socket_name=mcp_server.socket_name
+            )
+        )
+
+    if latched:
+        assert "signalled" in _wait()
+    else:
+        with pytest.raises(ToolError, match="was not signalled within"):
+            _wait()
