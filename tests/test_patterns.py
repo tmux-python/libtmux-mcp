@@ -25,6 +25,12 @@ CATASTROPHIC = [
     r"(?=(a+)+$)b",
     r"(?!(a+)+$)b",
     r"(x)(?(1)(a+)+|b)$",
+    # A body that can match nothing, owed many iterations. The MINIMUM
+    # decides it: the unbounded forms below are fine and stay allowed.
+    r"(a?){20}b",
+    r"(a?){20,}b",
+    r"(a|){20}b",
+    r"(a??){20}b",
 ]
 
 #: Ordinary patterns an agent would actually write. A screen that

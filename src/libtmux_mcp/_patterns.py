@@ -14,8 +14,14 @@ reaches the check -- so the caller who defends themselves with a small
 timeout is exactly the one it does not protect.
 
 The bound has to be the pattern, because neither a deadline nor a
-worker cap can reclaim a thread stuck inside ``re``. Ambiguous repeats
-are refused before they run.
+worker cap can reclaim a thread stuck inside ``re``. So the screen
+refuses three shapes before they run: a repeat inside a repeat, a
+repeat over alternatives that can start on the same character, and a
+body that can match nothing owed many iterations.
+
+Those three are a MODEL of catastrophic backtracking, not a proof of
+its absence. A pattern the screen accepts is one it could not show to
+be exponential.
 """
 
 from __future__ import annotations
@@ -58,6 +64,30 @@ _ZERO_WIDTH = frozenset({_re_constants.AT, _ASSERT, _ASSERT_NOT})
 #: bomb with a number in front of it.
 _LARGE_REPEAT = 20
 
+#: Minimum iteration count past which a repeat over a body that can match
+#: NOTHING becomes exponential. The engine owes that many iterations and
+#: each one may consume or not, so the cost is 2**minimum. The minimum is
+#: what decides it, not the maximum: measured on a 27-character subject,
+#: ``(a?)*b`` and ``(a?){1,20}b`` finish in 0.00s because ``re`` breaks a
+#: loop that matched nothing, while ``(a?){15}b`` takes 0.03s,
+#: ``(a?){20}b`` 0.76s and ``(a?){20,}b`` does not finish. 2**8 leaves
+#: three orders of magnitude of headroom.
+_LARGE_MINIMUM = 8
+
+#: Ops that always consume input, so a sequence containing one cannot
+#: match the empty string. Anything else is treated as nullable, which
+#: only ever refuses more -- and is consulted only under an already
+#: suspicious repeat.
+_CONSUMING = frozenset(
+    {
+        _LITERAL,
+        _re_constants.NOT_LITERAL,
+        _re_constants.IN,
+        _re_constants.ANY,
+        _re_constants.GROUPREF,
+    }
+)
+
 
 def _repeat_is_large(minimum: int, maximum: int) -> bool:
     """Return True when a repeat can iterate enough times to matter."""
@@ -94,6 +124,28 @@ def _contains_large_repeat(node: Iterable[t.Any]) -> bool:
         if any(_contains_large_repeat(child) for child in _subpatterns(op, av)):
             return True
     return False
+
+
+def _matches_empty(node: Iterable[t.Any]) -> bool:
+    """Whether *node* can match without consuming any input."""
+    for op, av in node:
+        if op in _CONSUMING:
+            return False
+        if op in _ZERO_WIDTH:
+            continue
+        if op in _REPEAT_OPS and av[0] == 0:
+            continue
+        children = _subpatterns(op, av)
+        if not children:
+            continue
+        nullable = (
+            any(_matches_empty(alt) for alt in children)
+            if op is _BRANCH or op is _GROUPREF_EXISTS
+            else all(_matches_empty(alt) for alt in children)
+        )
+        if not nullable:
+            return False
+    return True
 
 
 def _first_characters(branch: Iterable[t.Any]) -> set[t.Any] | None:
@@ -146,13 +198,22 @@ def _ambiguous_repeat(node: Iterable[t.Any]) -> str | None:
     * a large repeat over alternatives that can begin with the same
       character -- ``(a|a)+``, ``(a|ab)+``. ``(cat|dog)+`` is fine,
       since no input can take both branches.
+
+    Plus a third shape that is about the repeat's MINIMUM rather than
+    its body's structure: a body that can match nothing, owed many
+    iterations -- ``(a?){20}``. ``(a?)*`` is fine, because ``re`` breaks
+    a loop whose body matched nothing and an unbounded repeat can take
+    that exit.
     """
     for op, av in node:
-        if op in _REPEAT_OPS and _repeat_is_large(av[0], av[1]):
-            if _contains_large_repeat(av[2]):
-                return "a repeated group that already contains a repeat"
-            if _branch_is_ambiguous(av[2]):
-                return "a repeated group whose alternatives overlap"
+        if op in _REPEAT_OPS:
+            if av[0] >= _LARGE_MINIMUM and _matches_empty(av[2]):
+                return "a group repeated many times over a body that can match nothing"
+            if _repeat_is_large(av[0], av[1]):
+                if _contains_large_repeat(av[2]):
+                    return "a repeated group that already contains a repeat"
+                if _branch_is_ambiguous(av[2]):
+                    return "a repeated group whose alternatives overlap"
         for child in _subpatterns(op, av):
             found = _ambiguous_repeat(child)
             if found is not None:
