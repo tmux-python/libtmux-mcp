@@ -34,8 +34,11 @@ test can see this class either.
 always returns. The hazard is the untimed call, not the thread.
 
 ``tests/test_pane_tools.py`` enforces this structurally: it reads the
-tree for a tmux call made inline from an async body, and for a
-libtmux method called on any receiver.
+tree for a tmux call made inline from an async body, and for a libtmux
+method called on any receiver. Both halves of the failure -- the call
+never returning, and the process then unable to exit -- were confirmed
+by two independently built fixtures, each shown to fire when the defect
+is present and to stay silent when it is not.
 """
 
 from __future__ import annotations
