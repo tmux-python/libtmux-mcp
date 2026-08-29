@@ -36,6 +36,7 @@ from libtmux_mcp.tools.pane_tools.state import _read_pane_state
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
+    from libtmux.server import Server
 
 
 def _batch_timeout_error(timeout: float) -> str:
@@ -55,6 +56,11 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
 #: ``Popen.communicate()`` with no timeout, so an unresponsive server
 #: would wedge the tool call. Mirrors ``wait.py``'s per-call ceiling.
 _SEND_KEYS_TIMEOUT_SECONDS = 5.0
+
+#: Ceiling for the latched-signal read. It is a local tmux round
+#: trip against a signal that has either already been recorded or
+#: never will be, so it never waits on a shell.
+_STARTED_CHANNEL_PROBE_SECONDS = 1.0
 
 #: Shared recovery hint for a pane that cannot accept a shell command.
 _BUSY_PANE_SUGGESTION = (
@@ -629,14 +635,36 @@ async def run_command(
         _tmux_argv(server, "set-option", "-p", "-t", target_pane_id, status_option)
     )
     signal_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", channel))
+    started_channel = f"p_{command_id}"
+    started_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", started_channel))
     history_prefix = " " if suppress_history else ""
-    payload = "\n".join(
-        (
-            f"{history_prefix}(",
-            command.rstrip(),
-            (f'); s=$?; {status_cmd} "$s"; {signal_cmd}'),
+    # ``started_cmd`` runs before the command and answers a question the
+    # completion channel cannot: did a shell execute any of this at all?
+    # Without it a swallowed payload and a slow command are the same
+    # observation, and the tool reported the slow one -- "may still run"
+    # about something that never ran.
+    #
+    # One line whenever the command allows it, because atomicity is what
+    # makes the answer trustworthy. A shell mid-`read` consumes a whole
+    # line as its answer, so a single line is eaten entire and nothing
+    # executes. Split across lines, the same shell eats only the first
+    # and then RUNS the rest -- measured. Multi-line commands keep the
+    # split form and cannot detect that case; ``suppress_history``
+    # already refuses them for a related reason.
+    if "\n" in command or "\r" in command:
+        payload = "\n".join(
+            (
+                f"{history_prefix}{started_cmd}",
+                "(",
+                command.rstrip(),
+                (f'); s=$?; {status_cmd} "$s"; {signal_cmd}'),
+            )
         )
-    )
+    else:
+        payload = (
+            f"{history_prefix}{started_cmd}; ( {command.strip()} ); "
+            f's=$?; {status_cmd} "$s"; {signal_cmd}'
+        )
 
     started = time.monotonic()
     await asyncio.to_thread(
@@ -674,6 +702,26 @@ async def run_command(
         raise ExpectedToolError(msg)
 
     elapsed = time.monotonic() - started
+    # On a timeout, ask whether the shell ever started the payload.
+    # tmux latches a `wait-for -S` with no waiter (measured: a later
+    # wait returns in 4 ms), so this is a question about the past, not
+    # a second wait.
+    if timed_out and not await _channel_already_signalled(server, started_channel):
+        occupant = await asyncio.to_thread(_read_pane_current_command, pane)
+        named = f" (foreground: {occupant!r})" if occupant else ""
+        # Deliberately does not guess between the two readings. A REPL
+        # and a still-running command look identical from here, and
+        # they call for opposite reactions -- one is safe to retry and
+        # the other would run the command twice.
+        msg = (
+            f"pane {target_pane_id} never reached a shell prompt for this "
+            f"command{named}, so it has not run. If the pane is mid-"
+            "continuation, in a `read`, or in a REPL, it never will. If that "
+            "process is still running, the input is queued behind it and "
+            "will run when it exits. Check capture_pane before retrying."
+        )
+        raise ExpectedToolError(msg, suggestion=_BUSY_PANE_SUGGESTION)
+
     exit_status: int | None = None
     if not timed_out:
         status = pane.cmd("show-option", "-p", "-v", status_option).stdout
@@ -694,6 +742,7 @@ async def run_command(
         raw_lines,
         channel=channel,
         status_option=status_option,
+        started_channel=started_channel,
     )
     kept_lines, truncated, dropped = _truncate_lines_tail(visible_lines, max_lines)
     return RunCommandResult(
@@ -755,8 +804,27 @@ def _truncate_lines_tail(
     return lines[-max_lines:], True, dropped
 
 
+async def _channel_already_signalled(server: Server, channel: str) -> bool:
+    """Whether ``channel`` was signalled, without waiting for it.
+
+    tmux latches a ``wait-for -S`` that has no waiter, so a later wait
+    on that channel returns at once -- measured at 4 ms against 2 s for
+    a channel nobody signalled. That makes this a question about the
+    past rather than a second wait, which is why it can sit on the
+    timeout path without adding to the budget.
+    """
+    argv = _tmux_argv(server, "wait-for", channel)
+    try:
+        returncode, _stdout, _stderr = await _run_tmux_bounded(
+            argv, timeout=_STARTED_CHANNEL_PROBE_SECONDS
+        )
+    except TimeoutError:
+        return False
+    return returncode == 0
+
+
 def _filter_run_command_internal_lines(
-    lines: list[str], channel: str, status_option: str
+    lines: list[str], channel: str, status_option: str, started_channel: str = ""
 ) -> list[str]:
     """Drop private run_command synchronization rows from captured output.
 
@@ -783,7 +851,9 @@ def _filter_run_command_internal_lines(
         + r"(?P<prefix>libtmux_mcp_run_|r_)"
         + r"(?P<id>[0-9a-fA-F]*)(?![0-9A-Za-z_])"
     )
-    internal_markers = (channel, status_option)
+    internal_markers = tuple(
+        marker for marker in (channel, status_option, started_channel) if marker
+    )
     hex_chars = frozenset("0123456789abcdefABCDEF")
     kept: list[str] = []
     drop_hex_continuation = False

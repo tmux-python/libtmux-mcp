@@ -8,6 +8,54 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `run_command` stops claiming a command "may still run" when it never ran
+
+A pane whose shell is mid-continuation swallows the wrapper. Every
+signal the busy-pane guard reads says "shell at a prompt" --
+`pane_current_command` is the shell, `alternate_on` is 0 -- and no
+deny-list entry can fix that, because the occupant genuinely *is* the
+shell.
+
+The worst shape was `read`. A shell sitting in `read ANSWERVAR`
+consumed the wrapper's first line as its answer and then **ran the
+command** from the following lines, while the status line died on a
+parse error. The result said `timed_out`, `command_may_still_run` --
+failure-shaped and false. An agent retrying a non-idempotent command
+ran it twice.
+
+Two changes, and neither costs a round trip:
+
+The wrapper is now a single line whenever the command allows it.
+Atomicity is what makes the answer trustworthy: `read` consumes a whole
+line as its answer, so one line is eaten entire and nothing executes.
+Split across lines, the same shell eats only the first and then runs
+the rest -- measured.
+
+The wrapper signals a private "started" channel before running the
+command. tmux latches a `wait-for -S` that has no waiter, so asking
+about it afterwards is a question about the past, not a second wait --
+measured at 4 ms against 2 s for a channel nobody signalled. The check
+therefore sits on the timeout path and adds nothing to the budget. A
+pre-flight probe was the obvious alternative and was rejected on cost:
+it is a full shell round trip, about 628 ms on a configured zsh, and
+would have nearly doubled every call.
+
+Measured across the occupants: an unclosed quote, an unclosed function
+body, `read`, a Python REPL, `cat`, and a pane busy with `sleep` are
+all now reported as not run, with the command verifiably never
+executing. An ordinary call is unchanged at about 700 ms on this box,
+of which roughly 615 ms is the pane shell's own per-command hooks.
+
+The refusal deliberately does not guess between "nothing ran and
+nothing will" and "your input is queued behind a running command". Both
+look identical from outside and they call for opposite reactions, so
+the message names the foreground process and states both readings.
+
+It is incomplete by construction for multi-line commands, which keep
+the split wrapper and so remain vulnerable to the `read` split.
+`suppress_history` already refuses those for a related reason.
+
+
 #### `list_servers` is 6.7x faster, and concurrent calls stop queueing
 
 `list_servers` probed each live socket with its own tmux subprocess,
@@ -27,9 +75,18 @@ process queued behind one another for the duration of a subprocess. The
 liveness check now happens outside the lock, and two threads racing to
 cache the same key agree via `setdefault`.
 
-That second fix is not about `list_servers`. Any concurrent use of this
-server was serialised at that lock: a `call_readonly_tools_batch`, two
-agents sharing a server, a wait in one pane while another is queried.
+That second fix matters inside the scan's own pool -- sixteen threads,
+sixteen distinct socket names, sixteen cache misses, each holding the
+lock across a subprocess.
+
+It does NOT generalise beyond multi-socket work, and an earlier draft
+of this entry claimed it did. Measured against that claim: sixteen
+concurrent tool calls on one socket went 139.2 to 127.7 ms (noise), and
+on sixteen distinct sockets, cold, 122.1 to 119.5 ms. Concurrent tool
+calls were already parallelising about 3x before the change, because
+they arrive through asyncio and the common single-socket case hits a
+warm cache where the lock is a brief dict lookup. A batch or a
+multi-agent workload should not expect a speedup from this.
 
 Measured at 40 live servers, same box: 536 ms serial, 176 ms at 4
 workers, 80 ms at 16, 76 ms at 32. 16 takes the win and 32 buys
@@ -83,6 +140,14 @@ valid. A cursor minted before this field existed is treated as
 invalidated rather than trusted, which self-heals on the next call.
 
 The trigger is a user resizing their terminal.
+
+Width is not merely *a* discriminator, it is the only correct one, and
+tmux's source says why: `screen.c` calls `grid_reflow()` on a width
+change, `grid_reflow()` splits any line wider than the new width and
+grows the grid's line count, and `#{history_size}` is that line count.
+So "history_size went up" has two causes -- new output, which must keep
+a cursor valid, and reflow, which invalidates every absolute row
+coordinate -- and width is the only field that separates them.
 
 #### `run_command` refuses a pane in copy mode
 

@@ -336,18 +336,27 @@ def test_run_command_timeout_flags_that_the_command_may_still_run(
 ) -> None:
     """A timed-out command is sent, not cancelled.
 
-    The command keeps running in the pane after the wait gives up, and
-    a shell that is busy when more input arrives runs it whenever it
-    next reads a line. An agent reading only ``timed_out`` concludes it
-    did not run and retries, which is how a non-idempotent command runs
-    twice.
+    The command keeps running in the pane after the wait gives up, so
+    an agent reading only ``timed_out`` concludes it did not run and
+    retries -- which is how a non-idempotent command runs twice.
+
+    The pane must be genuinely at a prompt for that to be the claim
+    under test. This previously used ``_park_pane``, which leaves
+    ``sleep 60`` in the foreground of a one-shot ``sh -c`` that never
+    returns to a prompt: the command could not have run, then or ever,
+    so ``command_may_still_run=True`` was passing while being false.
     """
     import asyncio
 
-    _park_pane(mcp_pane)
+    mcp_pane.respawn(kill=True, shell="sh")
+    retry_until(
+        lambda: (
+            mcp_pane.display_message("#{pane_current_command}", get_text=True) == ["sh"]
+        ),
+        10,
+        raises=True,
+    )
 
-    # The pane must be at a prompt or the busy guard refuses outright,
-    # so the command itself is what outlives the timeout.
     result = asyncio.run(
         run_command(
             command="sleep 10",
@@ -1727,6 +1736,47 @@ def test_capture_since_reports_a_narrowed_pane_as_missed(
         capture_since(pane_id=pane.pane_id, cursor=unchanged.cursor, socket_name=socket)
     )
     assert after.lines_missed is True
+
+
+def test_run_command_reports_a_command_that_never_ran(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A shell mid-``read`` swallows the wrapper; say so, do not guess.
+
+    This used to be the worst shape in the tool: ``read`` consumed the
+    wrapper's first line as its answer and the shell then RAN the
+    command from the following lines, while the result reported
+    ``timed_out`` with ``command_may_still_run`` -- failure-shaped and
+    false. An agent retrying a non-idempotent command ran it twice.
+
+    The wrapper is one line when the command allows it, so ``read``
+    consumes the whole thing and nothing executes, and a private
+    "started" channel signalled before the command distinguishes
+    "never began" from "still running".
+    """
+    import asyncio
+
+    # printf builds the marker at runtime, so the echoed input line can
+    # never contain it -- only real execution can.
+    marker = "RAN_WHEN_IT_SHOULD_NOT"
+    mcp_pane.send_keys("read ANSWERVAR", enter=True)
+    retry_until(
+        lambda: any("read ANSWERVAR" in line for line in mcp_pane.capture_pane()),
+        10,
+        raises=True,
+    )
+
+    with pytest.raises(ToolError, match="never reached a shell prompt"):
+        asyncio.run(
+            run_command(
+                command=f"printf '{marker}%s\\n' ''",
+                pane_id=mcp_pane.pane_id,
+                timeout=2.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+    assert not any(marker in line for line in mcp_pane.capture_pane())
 
 
 def test_run_command_refuses_a_pane_in_copy_mode(
