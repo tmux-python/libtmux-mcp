@@ -180,6 +180,21 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     # cursor that carries the width.
     if cursor.pane_width is None or state.pane_width != cursor.pane_width:
         return True
+    # A screen RESET moves the cursor back up without touching
+    # history_size, which every other check here misses: they all assume
+    # an anchor dies by history shrinking or by the anchor passing the
+    # bottom row. Measured on a pane with no scrollback yet --
+    # history_size 0, cursor_y 2 -- `clear_pane` left history_size 0 and
+    # cursor_y 0, so the anchor pointed BELOW the new output and the
+    # call returned nothing under lines_missed=False.
+    #
+    # The conjunction is what makes it safe. Ordinary output only moves
+    # the cursor down; scrolling holds it at the bottom row and GROWS
+    # history; a resize-grow pulls rows out of history, shrinking it
+    # while the cursor moves down. None of those can satisfy both halves.
+    entry_cursor_y = cursor.anchor_abs - cursor.history_size
+    if state.cursor_y < entry_cursor_y and state.history_size <= cursor.history_size:
+        return True
     return state.history_size < cursor.history_size and (
         state.pane_height <= cursor.pane_height
     )

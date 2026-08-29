@@ -630,6 +630,21 @@ invalidated rather than trusted, which self-heals on the next call.
 
 The trigger is a user resizing their terminal.
 
+A THIRD cause of the same silence: a screen reset. `clear_pane` on a
+pane with no scrollback yet -- `history_size` 0, `cursor_y` 2 -- leaves
+`history_size` 0 and `cursor_y` 0, so the anchor points BELOW the new
+output and the call returns nothing under `lines_missed=false`. Every
+other check assumed an anchor dies by history shrinking or by passing
+the bottom row; a reset moves the cursor UP without touching history.
+`clear_pane`'s own docstring recommends the sequence that hits it --
+clear, then observe.
+
+The discriminator is that the cursor moved BACKWARD while history did
+not grow. The conjunction is what makes it safe: ordinary output only
+moves the cursor down, scrolling holds it at the bottom row and grows
+history, and a resize-grow shrinks history while the cursor moves down.
+Verified that a 60-line scrolling burst is still not invalidated.
+
 Width is not merely *a* discriminator, it is the only correct one, and
 tmux's source says why: `screen.c` calls `grid_reflow()` on a width
 change, `grid_reflow()` splits any line wider than the new width and

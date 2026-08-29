@@ -1808,6 +1808,55 @@ def test_capture_since_followup_returns_only_new_output(
     assert second.pane_id == mcp_pane.pane_id
 
 
+def test_capture_since_reports_a_screen_reset_as_missed(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A screen reset moves the cursor up without touching history.
+
+    Every other invalidation check assumes an anchor dies by history
+    shrinking or by passing the bottom row. On a pane with no
+    scrollback yet -- history_size 0, cursor_y 2 -- ``clear_pane`` left
+    history_size 0 and cursor_y 0, so the anchor pointed BELOW the new
+    output and the call returned nothing under ``lines_missed=False``.
+
+    ``clear_pane``'s own docstring recommends this sequence: clear, then
+    observe.
+    """
+    import asyncio
+
+    # The anchor must sit BELOW row 0 for the reset to strand it, and
+    # history must still be 0 -- so print two lines and park, rather
+    # than using _park_pane, which leaves the cursor on row 0.
+    mcp_pane.respawn(kill=True, shell="sh -c \"printf 'r0\\nr1\\n'; sleep 60\"")
+
+    def _parked_below_row_zero() -> bool:
+        state = mcp_pane.display_message("#{history_size}:#{cursor_y}", get_text=True)
+        return bool(state) and state[0].startswith("0:") and state[0] != "0:0"
+
+    retry_until(_parked_below_row_zero, 10, raises=True)
+    before = asyncio.run(
+        capture_since(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+    )
+
+    clear_pane(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
+    _write_to_pane_tty(mcp_pane, "AFTER_CLEAR\n")
+    retry_until(
+        lambda: any("AFTER_CLEAR" in line for line in mcp_pane.capture_pane()),
+        10,
+        raises=True,
+    )
+
+    after = asyncio.run(
+        capture_since(
+            pane_id=mcp_pane.pane_id,
+            cursor=before.cursor,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    assert after.lines_missed is True
+    assert any("AFTER_CLEAR" in line for line in after.lines)
+
+
 def test_capture_since_reports_a_narrowed_pane_as_missed(
     mcp_server: Server, mcp_session: Session
 ) -> None:
