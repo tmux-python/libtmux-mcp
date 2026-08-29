@@ -6,6 +6,35 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Fixes
+
+#### An oversized `send_keys` payload is the caller's problem, not a crash
+
+`send_keys` reported `Unexpected error: OSError: [Errno 7] Argument
+list too long`, which tells an agent the server is broken when what
+happened is that its input was too big.
+
+Two regimes, and only one of them was handled. Linux caps a SINGLE argv
+element at `MAX_ARG_STRLEN` (32 pages, 131072 bytes) independently of
+the total, and the boundary is exact: at 131071 bytes tmux runs and
+rejects the argument cleanly with `command too long`, at 131072
+`execve` fails and tmux never starts. Every `subprocess.run` in this
+server caught `TimeoutExpired` and `CalledProcessError` -- both of
+which mean tmux RAN -- so the failure that happens *before* tmux runs
+had no handler anywhere.
+
+Fixed as a class rather than at the one reported site: a shared mapper
+turns an exec-time `OSError` into an `ExpectedToolError` naming the
+limit and pointing at `paste_text`, and it is wired into every call
+that puts caller-sized data in an argv -- `send_keys`,
+`send_keys_batch` and `signal_channel`. `send_keys`'s own size note now
+gives both limits instead of only tmux's.
+
+Found by the QA instance, which also caught its own instrument error in
+the same pass: its pass/fail classifier keyed on the substring "too
+long", which appears in both `command too long` and `Argument list too
+long`, so its first run scored the unhandled path as handled.
+
 ### Documentation
 
 #### The batch speed curve named a break-even that does not exist

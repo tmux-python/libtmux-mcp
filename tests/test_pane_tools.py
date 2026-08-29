@@ -6965,3 +6965,35 @@ def test_pane_read_tools_return_pydantic_models(
         result = maybe_result
     assert type(result).__name__ == expected_type
     assert hasattr(result, "model_dump"), "expected a Pydantic BaseModel instance"
+
+
+@pytest.mark.parametrize(
+    ("size", "id_"),
+    [
+        pytest.param(131_072, "at-the-exec-limit", id="at-the-exec-limit"),
+        pytest.param(200_000, "past-the-exec-limit", id="past-the-exec-limit"),
+    ],
+)
+def test_send_keys_reports_an_oversized_payload_as_the_caller_s_problem(
+    mcp_server: Server, mcp_pane: Pane, size: int, id_: str
+) -> None:
+    """An argument too large for execve is a bounded error, not a crash.
+
+    tmux rejects a long ``send-keys`` argument with ``command too long``,
+    but only if it runs at all. Past ``MAX_ARG_STRLEN`` (131072 on Linux)
+    execve fails first, and the raw ``OSError`` escaped as "Unexpected
+    error", which tells an agent the server is broken rather than that
+    its input is too big.
+    """
+    with pytest.raises(ToolError) as excinfo:
+        send_keys(
+            pane_id=mcp_pane.pane_id,
+            keys="D" * size,
+            literal=True,
+            enter=False,
+            socket_name=mcp_server.socket_name,
+        )
+    message = str(excinfo.value)
+    assert "Unexpected error" not in message
+    assert "OSError" not in message
+    assert "paste_text" in message

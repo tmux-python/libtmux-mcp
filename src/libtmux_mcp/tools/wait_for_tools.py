@@ -51,6 +51,7 @@ from libtmux_mcp._utils import (
     TAG_SELF_BOUNDED,
     ExpectedToolError,
     _get_server_async,
+    _raise_tmux_exec_error,
     _tmux_argv,
     handle_tool_errors_async,
 )
@@ -325,6 +326,8 @@ async def signal_channel(
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"signal-channel failed for channel {cname!r}: {stderr or e}"
         raise ExpectedToolError(msg) from e
+    except OSError as e:
+        _raise_tmux_exec_error(e, argv)
     return f"Channel {cname!r} signalled"
 
 

@@ -30,6 +30,7 @@ from libtmux_mcp._utils import (
     _get_server_async,
     _map_exception_to_tool_error,
     _raise_if_untargeted,
+    _raise_tmux_exec_error,
     _resolve_pane,
     _tmux_argv,
     handle_tool_errors,
@@ -319,6 +320,8 @@ def _run_send_keys_argv(argv: list[str]) -> None:
         raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         _raise_send_keys_error(e)
+    except OSError as e:
+        _raise_tmux_exec_error(e, argv)
 
 
 def _run_send_keys(
@@ -358,6 +361,8 @@ def _run_timed_send_keys_argv(
         raise ExpectedToolError(_batch_timeout_error(timeout)) from e
     except subprocess.CalledProcessError as e:
         _raise_send_keys_error(e)
+    except OSError as e:
+        _raise_tmux_exec_error(e, argv)
 
 
 def _run_timed_send_keys(
@@ -406,10 +411,12 @@ def send_keys(
     Do NOT call ``capture_pane`` immediately — both the read and the
     pattern-match paths race the pane's PTY draw.
 
-    **Size limit:** tmux rejects a ``send-keys`` argument beyond roughly
-    16 KB with ``command too long``. ``paste_text`` routes through a
-    buffer instead of argv and takes far more, so use it for large
-    payloads.
+    **Size limit:** two of them, and both report as ordinary errors.
+    tmux rejects an argument beyond roughly 16 KB with ``command too
+    long``; past 131072 bytes the OS refuses the argument before tmux
+    sees it at all. ``paste_text`` routes through a tmux buffer instead
+    of argv and has no comparable limit -- measured at 1 MB -- so use it
+    for large payloads.
 
     **Verifying a write:** do not string-compare captured text against
     what you sent. The bytes arrive correctly and can still read back

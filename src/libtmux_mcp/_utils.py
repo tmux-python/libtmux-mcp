@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import errno
 import functools
 import importlib
 import json
@@ -514,6 +515,56 @@ def _raise_if_untargeted(tool: str, **targets: str | None) -> None:
         "the pane, and snapshot_pane to confirm what it is running."
     )
     raise ExpectedToolError(msg)
+
+
+#: Linux caps one argv element at 32 pages regardless of total argv
+#: size. Reported in the error rather than enforced: the OS is the
+#: authority, and predicting it would drift from the platform.
+_MAX_ARG_STRLEN = 131072
+
+
+def _raise_tmux_exec_error(err: OSError, argv: list[str]) -> t.NoReturn:
+    """Re-raise an exec-time ``OSError`` as a caller-correctable failure.
+
+    Every ``subprocess.run`` here catches ``TimeoutExpired`` and
+    ``CalledProcessError`` -- both of which mean tmux RAN. An argv that
+    never reaches tmux fails earlier and differently, and the raw
+    ``OSError`` then surfaced as "Unexpected error", which reads as a
+    server defect rather than as oversized input.
+
+    ``E2BIG`` is the one an agent can hit with ordinary input: Linux
+    caps a SINGLE argv element at ``MAX_ARG_STRLEN`` (32 pages, 131072
+    bytes), independently of the total. Measured, the boundary is
+    exact -- 131071 bytes reaches tmux and is rejected with ``command
+    too long``, 131072 fails in ``execve``. Both mean "too big", but
+    only one of them used to say so.
+
+    Parameters
+    ----------
+    err : OSError
+        The exec failure.
+    argv : list of str
+        The command vector, used to report which argument was too long.
+
+    Raises
+    ------
+    ExpectedToolError
+        For a failure the caller can correct.
+    OSError
+        Re-raised unchanged when it is not one of those.
+    """
+    if err.errno == errno.E2BIG:
+        longest = max((len(a) for a in argv), default=0)
+        msg = (
+            f"tmux {_tmux_subcommand(argv)} argument is too large to pass to "
+            f"the OS ({longest} bytes; the limit is {_MAX_ARG_STRLEN} per "
+            "argument). Use paste_text, which routes through a tmux buffer "
+            "instead of argv and has no comparable limit."
+        )
+        raise ExpectedToolError(msg) from err
+    if isinstance(err, FileNotFoundError):
+        raise exc.TmuxCommandNotFound from err
+    raise err
 
 
 def _raise_if_flag_like(label: str, value: str) -> None:
