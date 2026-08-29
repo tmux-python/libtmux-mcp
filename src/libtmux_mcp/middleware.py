@@ -55,12 +55,10 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
 )
 
-#: Errors this server raises deliberately to describe a CALLER-caused
-#: failure. They must never reach the ``-32603`` "Internal error" path,
-#: whichever message kind raised them: ``ExpectedToolError`` from tools,
-#: and fastmcp's ``ResourceError`` / ``PromptError`` from the resource
-#: and prompt handlers, which this package raises only for a bad target
-#: or a missing object.
+#: Errors describing a CALLER-caused failure, which must never reach the
+#: ``-32603`` "Internal error" path whichever handler raised them:
+#: ``ExpectedToolError`` from tools, ``ResourceError`` / ``PromptError``
+#: from resources and prompts.
 _CALLER_CAUSED_ERRORS: tuple[type[Exception], ...] = (
     ExpectedToolError,
     ResourceError,
@@ -325,14 +323,11 @@ def install_fastmcp_validation_log_filter() -> None:
         logger.addFilter(_FastMCPValidationLogFilter())
 
 
-#: Scheduling flag some MCP clients (notably Gemini CLI when batching
-#: several tool calls in one turn) merge into the tool's arguments.
-#: Recognized only to *word the rejection helpfully* — the argument is
-#: still rejected, never silently stripped, so genuine argument typos
-#: from other clients stay loud. Contrast MemPalace/mempalace#322,
-#: which strips the key, and #647, which whitelists arguments against
-#: the schema — silent dropping would let a mis-named flag on a
-#: mutating tool (e.g. ``enter`` on send_keys) run with defaults.
+#: Scheduling flag some MCP clients (notably Gemini CLI batching several
+#: tool calls in one turn) merge into the tool's arguments. Recognized
+#: only to word the rejection helpfully: the argument is still rejected,
+#: never silently stripped, so a mis-named flag on a mutating tool
+#: (``enter`` on send_keys) cannot run with defaults.
 _CLIENT_SCHEDULING_FLAG = "wait_for_previous"
 
 
@@ -563,9 +558,8 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
         and it has to hold on every path this transform serves.
         """
         if self.transform_errors and isinstance(error, _CALLER_CAUSED_ERRORS):
-            # Mirror the base class's own convention: -32002 is the MCP
-            # code for a resource miss, -32602 says the caller's
-            # arguments were wrong. Neither prefixes the message, which
+            # -32002 is the MCP code for a resource miss, -32602 for bad
+            # caller arguments. Neither prefixes the message, which
             # already names the object that was not found.
             method = context.method or ""
             code = -32002 if method.startswith("resources/") else -32602
@@ -589,38 +583,25 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 # Audit middleware
 # ---------------------------------------------------------------------------
 
-#: Argument names that carry user-supplied payloads we never want in logs.
-#: ``keys`` (send_keys), ``text`` (paste_text), ``command`` (run_command),
-#: ``value`` (set_environment), ``content`` (load_buffer), ``shell``
-#: (respawn_pane), and ``environment`` (respawn_pane) can contain commands,
-#: secrets, or arbitrary large strings.
-#: Matched by exact name, case-sensitive, to mirror the tool signatures.
+#: Argument names carrying user-supplied payloads that must not reach the
+#: log. Matched by exact name, case-sensitive, to mirror the signatures.
 #:
-#: ``environment`` accepts a mapping or a JSON object string. The redaction
-#: logic in :func:`_summarize_args` digests each mapping *value* while leaving
-#: its *keys* (env var names like ``DATABASE_URL``) visible. A JSON string is
-#: instead redacted as one scalar digest, so its keys are not retained.
+#: ``environment`` as a mapping digests each *value* and leaves its *keys*
+#: (``DATABASE_URL``) visible; as a JSON object string it is redacted as
+#: one scalar digest, so its keys are not retained.
 #:
-#: Note on ``shell`` and ``environment`` redaction: this redacts the MCP
-#: audit log only. ``respawn_pane(shell="env SECRET=... bash")`` and
-#: ``environment={"AWS_SECRET_KEY": "..."}`` may briefly expose the values
-#: via the OS process table and tmux's ``pane_current_command`` metadata
-#: until the spawned shell takes over — see ``docs/topics/safety.md``.
-#: DECIDED AND LEFT VERBATIM: ``output_path``, ``start_directory`` and
-#: the various name arguments. A path is legitimate audit content --
-#: knowing where pane output was written is often the point of the
-#: record. Listed here because this allowlist defaults to "log it", so
-#: a free-text argument added later is exposed by omission rather than
-#: by judgement; anything new belongs in one of these two lists.
+#: ``pattern``/``patterns``/``stop`` carry what the caller is looking FOR,
+#: and the realistic reason to look for a credential is to check whether
+#: one leaked. Redacting delivery while logging verification protects
+#: neither.
 #:
-#: ``pattern``/``patterns``/``stop`` are here because their whole
-#: purpose is to carry a value the caller is looking FOR, and the
-#: realistic reason to look for a credential is to check whether one
-#: leaked. Redacting it on the way in and logging it on the way out
-#: protected the delivery and not the verification -- measured, a
-#: ``set_environment`` value was digested and the same secret appeared
-#: verbatim in the following ``search_panes`` and ``wait_for_text``
-#: records.
+#: Scope is the audit log. ``shell`` and ``environment`` values may still
+#: surface in the OS process table and ``pane_current_command`` until the
+#: spawned shell takes over -- see ``docs/topics/safety.md``.
+#:
+#: Paths and names are logged on purpose. This set defaults to "log it",
+#: so a free-text argument added later is exposed by omission unless it
+#: is added here.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {
         "keys",
@@ -633,20 +614,17 @@ _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
         "pattern",
         "patterns",
         "stop",
-        # A caller-supplied MATCH EXPRESSION, the same category as
-        # ``pattern`` -- {"pane_title__contains": ...} says what the
-        # caller was hunting for. It reached the log verbatim in both
-        # accepted shapes: a dict, and the JSON STRING that
-        # ``_coerce_dict_arg`` also accepts. A dict-only entry would
-        # have half-fixed it.
+        # A caller-supplied MATCH EXPRESSION, same category as ``pattern``:
+        # {"pane_title__contains": ...} says what the caller hunted for.
+        # Both accepted shapes need it -- a dict, and the JSON string that
+        # ``_coerce_dict_arg`` also takes.
         "filters",
     }
 )
 
-#: Nested argument containers that may contain sensitive argument names.
-#: ``operations`` is used by ``send_keys_batch`` and the generic tool-batch
-#: wrappers. Preserving routing metadata is useful for audit trails, but
-#: nested payloads must be digested the same way top-level tool calls are.
+#: Nested argument containers that may hold sensitive argument names.
+#: Routing metadata stays readable for the audit trail; nested payloads
+#: are digested the same way top-level ones are.
 _NESTED_ARG_LIST_NAMES: frozenset[str] = frozenset({"operations"})
 
 _NONE_TYPE = type(None)
@@ -669,16 +647,12 @@ _MAX_LOGGED_STR_LEN: int = 200
 
 
 #: Keyed per PROCESS, not per payload. A plain SHA-256 beside an exact
-#: length is reversible for anything short: the length fixes the search
-#: space, so ``{'len': 4, ...}`` for a PIN typed into a pane was
-#: recovered by brute force in 25 ms from the audit record alone. The
-#: values named sensitive are sensitive precisely because agents type
-#: PINs, 2FA codes and short confirmations into panes.
+#: length is reversible for anything short -- the length fixes the search
+#: space, and agents type PINs and 2FA codes into panes.
 #:
-#: Correlation was the point of a deterministic digest and it survives:
-#: identical payloads still match within a server run, which is the
-#: scope an operator reads a log at. What is lost is correlation ACROSS
-#: runs, and what is gained is that a log reader cannot test a guess.
+#: Identical payloads still correlate within a server run, the scope an
+#: operator reads a log at; correlation ACROSS runs is what this trades
+#: away, in exchange for a log reader being unable to test a guess.
 _REDACTION_KEY: bytes = secrets.token_bytes(32)
 
 
@@ -790,17 +764,10 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, list):
-            # ``patterns`` and ``stop`` are lists. Naming them sensitive
-            # without handling the container would have left them
-            # verbatim, which is the shape of the bug being fixed.
-            #
             # Coerced like the dict branch rather than redacting only
-            # ``str`` items. Every sensitive list is ``list[str]`` today,
-            # so a type test would work -- and would keep working
-            # silently until an annotation widened, at which point values
-            # start appearing in the audit log and nothing fails. A
-            # sensitive argument does not become safe by not being a
-            # string.
+            # ``str`` items: every sensitive list is ``list[str]`` today,
+            # so a type test works right up until an annotation widens and
+            # values start reaching the log with nothing failing.
             summary[key] = [_redact_digest(str(item)) for item in value]
         elif key in _NESTED_ARG_LIST_NAMES:
             if isinstance(value, list):
@@ -887,21 +854,18 @@ class AuditMiddleware(Middleware):
 # Tail-preserving response limiter
 # ---------------------------------------------------------------------------
 
-#: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`.
-#: Matches FastMCP's stock 1 MB default so normal schema-bearing tool
-#: responses stay below this global backstop. Tool-level caps remain
-#: responsible for terminal-specific truncation metadata.
+#: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`,
+#: matching FastMCP's stock 1 MB. Tool-level caps stay responsible for
+#: terminal-specific truncation metadata.
 DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 
 
-#: Failures a retry cannot fix. Each one names a thing that is not there, or a
-#: request that cannot succeed as written, so re-running it buys a second tmux
-#: round-trip and a backoff window in order to fail identically. They all
-#: descend from :exc:`libtmux.exc.LibTmuxException`, which is the retry
-#: trigger, so without this set they would all be retried.
-#:
-#: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
-#: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
+#: Failures a retry cannot fix: each names a thing that is not there, or a
+#: request that cannot succeed as written, so re-running buys a round-trip
+#: and a backoff before failing identically. All descend from
+#: :exc:`libtmux.exc.LibTmuxException`, the retry trigger, so without this
+#: set every one would be retried. ``ObjectDoesNotExist`` already covers
+#: :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
 NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     libtmux_exc.ObjectDoesNotExist,
     libtmux_exc.MultipleObjectsReturned,
@@ -1116,12 +1080,9 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
         if inner.structured_content is None:
             return result
 
-        # A SUCCESSFUL oversized response is the other half of the same
-        # defect: the tool declares an output schema, the rebuilt result
-        # carries no structured content, and a spec-compliant client
-        # raises a transport-level error instead of delivering truncated
-        # data. That is worse than the truncation this middleware exists
-        # to perform, and worse than having no middleware at all.
+        # A tool that declares an output schema and gets a truncated result
+        # with no structured content makes a spec-compliant client raise a
+        # transport error instead of delivering the truncated data.
         rebuilt = _restructure_truncated(inner.structured_content, result)
         if rebuilt is not None:
             return rebuilt

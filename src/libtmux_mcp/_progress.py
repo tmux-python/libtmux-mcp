@@ -76,23 +76,16 @@ async def progress_ticker(
         yield
     finally:
         task.cancel()
-        # Awaiting the cancelled task is what makes this safe to use
-        # inside a wait that is itself being cancelled: without it the
-        # ticker is left pending and asyncio complains at teardown.
-        # ``suppress`` keeps the ticker's own CancelledError from
-        # replacing the one the caller is propagating.
+        # Await the cancelled ticker or it is left pending at teardown;
+        # ``suppress`` keeps its CancelledError from replacing the
+        # caller's.
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
 
-#: Both anyio stream errors must be caught: ``ClosedResourceError`` is
-#: raised when the *send* side of the stream is closed (our own
-#: shutdown path); ``BrokenResourceError`` is raised when the *receive*
-#: side is closed (peer disconnect) — FastMCP's own client catches
-#: both for the same reason. ``BrokenPipeError`` covers stdio
-#: transports; generic ``ConnectionError`` is the catch-all base for
-#: socket-level families. Anything else propagates so the caller
-#: sees it.
+#: ``ClosedResourceError`` is the send side closing (our shutdown),
+#: ``BrokenResourceError`` the receive side (peer disconnect),
+#: ``BrokenPipeError`` stdio, ``ConnectionError`` socket families.
 _TRANSPORT_CLOSED_EXCEPTIONS: tuple[type[BaseException], ...] = (
     anyio.ClosedResourceError,
     anyio.BrokenResourceError,

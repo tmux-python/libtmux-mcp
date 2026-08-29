@@ -245,10 +245,9 @@ def _effective_socket_path(server: Server) -> str | None:
     """
     if server.socket_path:
         return str(server.socket_path)
-    # Preferred: ask tmux directly. ``display-message -p`` prints the
-    # value to stdout and exits, so this is cheap. Wrapped defensively
-    # because the server may be down, the format may be unsupported on
-    # ancient tmux, or permissions may deny the call.
+    # ``display-message -p`` prints and exits, so this is cheap. Wrapped
+    # because the server may be down, the format unsupported on an old
+    # tmux, or the call denied.
     try:
         resolved = server.cmd(
             "display-message",
@@ -303,11 +302,10 @@ def _target_hosts_the_callers_client(server: Server, caller: CallerIdentity) -> 
     if attached is None:
         return True
     if attached.returncode != 0:
-        # No such server. It cannot be hosting anything, so this is an
-        # ANSWER rather than a failure -- distinct from the timeout
-        # above, where a live-but-wedged server might well be hosting
-        # us. Keeps a caller whose $TMUX names a dead socket from
-        # blocking every destructive call.
+        # No such server is an ANSWER, not a failure: it cannot be
+        # hosting us. Distinct from the timeout above, where a wedged
+        # server might be -- so a dead $TMUX socket cannot block every
+        # destructive call.
         return False
     ttys = {line.strip() for line in attached.stdout.splitlines() if line.strip()}
     if not ttys:
@@ -442,26 +440,18 @@ TAG_DESTRUCTIVE = "destructive"
 
 VALID_SAFETY_LEVELS = frozenset({TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE})
 
-#: Non-tier marker tag for tools that enforce their own wall-clock
-#: ceiling internally and whose cost is therefore *duration*, not
-#: side effects.
+#: Non-tier marker for tools that enforce their own wall-clock ceiling,
+#: whose cost is therefore *duration* rather than side effects. Such a
+#: tool must never be re-driven by machinery that assumes a cheap call:
 #:
-#: A tagged tool must never be re-driven by machinery that assumes a
-#: call is cheap:
+#: * :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` skips it --
+#:   the deadline lives in the tool body, so a retry doubles the ceiling.
+#: * The ``call_*_tools_batch`` wrappers reject it per-operation, the
+#:   batch loop being serial with no aggregate deadline.
 #:
-#: * :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` skips it,
-#:   because the deadline is computed inside the tool body — a retry
-#:   restarts the clock and doubles the ceiling.
-#: * The ``call_*_tools_batch`` wrappers reject it per-operation,
-#:   because the batch loop is serial with no aggregate deadline and
-#:   ``MAX_BATCH_OPERATIONS`` is 1000.
-#:
-#: A TAG rather than a tool-name list on purpose: a name string is
-#: exactly what ``add_tool_transformation`` can rename out from under
-#: the exclusion. Tier resolution
-#: (:meth:`~libtmux_mcp.middleware.SafetyMiddleware._is_allowed`,
-#: ``batch_tools._tool_tier``) inspects only the three tier tags, so
-#: carrying this extra tag is inert everywhere else.
+#: A tag rather than a name list because ``add_tool_transformation`` can
+#: rename a tool out from under a name. Tier resolution reads only the
+#: three tier tags, so this one is inert elsewhere.
 TAG_SELF_BOUNDED = "self-bounded"
 
 # ---------------------------------------------------------------------------
@@ -486,23 +476,14 @@ ANNOTATIONS_CREATE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
-#: Annotations for tools that move user-supplied payloads into a shell
-#: context. Six consumers today:
+#: Annotations for tools that move a user-supplied payload into a shell
+#: context, whether directly (``send_keys``, ``run_command``,
+#: ``paste_text``, ``pipe_pane``) or through a staged buffer
+#: (``load_buffer`` then ``paste_buffer``).
 #:
-#: * ``send_keys``, ``run_command``, ``paste_text``, ``pipe_pane`` — the
-#:   canonical shell-driving tools; caller's keys/command/text/stream
-#:   reaches the shell prompt or pipes into an external command
-#:   respectively.
-#: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
-#:   into a tmux paste buffer; ``paste_buffer`` pushes that content
-#:   into a target pane where the shell receives it as input. The two
-#:   are split into a stage/fire pair so callers can validate before
-#:   paste, but both participate in the same open-world transfer.
-#:
-#: Distinguished from :data:`ANNOTATIONS_CREATE` by ``openWorldHint=True``:
-#: the effects of these tools extend into whatever command or content
-#: the caller supplies, which is the canonical open-world MCP
-#: interaction.
+#: ``openWorldHint=True`` is what separates these from
+#: :data:`ANNOTATIONS_CREATE`: the effect extends into whatever command
+#: or content the caller supplies.
 ANNOTATIONS_SHELL: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": False,
@@ -516,33 +497,24 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
     "openWorldHint": False,
 }
 
-#: Per-tool MCP ``meta`` payload that hints clients to keep this tool
-#: always visible (not deferred). FastMCP passes ``meta`` opaquely
-#: (verified vs ``~/study/python/fastmcp/src`` — no special handling);
-#: honoring is delegated to Claude Code, where ``alwaysLoad`` is
-#: documented at https://code.claude.com/docs/en/mcp (v2.1.121+).
+#: Per-tool MCP ``meta`` hinting that a client keep this tool visible
+#: rather than deferred. FastMCP passes ``meta`` opaquely; honouring it
+#: is the client's business, so this is a safe no-op for one that does
+#: not index the ``anthropic/*`` namespace.
 #:
-#: Best-effort by design — safe no-op for clients that don't index the
-#: ``anthropic/*`` namespace. Apply only to read-tier discovery anchors
-#: (``list_panes``, ``list_windows``, ``snapshot_pane``); each
-#: always-loaded tool consumes a fixed schema budget in clients that
-#: honour the hint, so widening the set has a real cost.
+#: Apply only to read-tier discovery anchors: each always-loaded tool
+#: spends a fixed schema budget in clients that do honour the hint.
 DISCOVERY_META: dict[str, t.Any] = {
     "anthropic/alwaysLoad": True,
 }
-#: Annotations for tools that stay in the ``mutating`` tier (so they remain
-#: visible to default-profile agents) but whose default behaviour can
-#: terminate processes or otherwise lose state.
+#: Annotations for tools that stay in the ``mutating`` tier -- so they
+#: remain visible to default-profile agents -- but can still terminate a
+#: process or lose state. ``respawn_pane`` and ``clear_pane`` are the
+#: canonical users: shell recovery and scrollback cleanup are ordinary
+#: agent work, while the hints keep disclosing the cost.
 #:
-#: Canonical users include ``respawn_pane`` and ``clear_pane``:
-#: tier=mutating because shell recovery and scrollback cleanup are part
-#: of normal agent workflows, while the hints still disclose process
-#: termination or state loss.
-#:
-#: Distinct from :data:`ANNOTATIONS_DESTRUCTIVE` (same hint values) because
-#: the tier tag differs: ``ANNOTATIONS_DESTRUCTIVE`` is paired with
-#: ``TAG_DESTRUCTIVE`` everywhere it is used; this preset is paired with
-#: ``TAG_MUTATING``. The distinct name documents intent at the call site.
+#: Hint values match :data:`ANNOTATIONS_DESTRUCTIVE`; only the paired
+#: tier tag differs.
 ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
@@ -849,13 +821,12 @@ def _raise_if_spawned_pane_is_gone(pane: Pane, shell: str | None) -> None:
 
 #: How long any single tmux call may take before this server calls the
 #: tmux server unresponsive. Generous: a responsive tmux answers in
-#: single-digit milliseconds, and the slowest operation constructible
-#: here -- capturing a 200,000-line history -- measured 37ms.
+#: single-digit milliseconds, and capturing a 200,000-line history --
+#: the slowest operation constructible here -- measured 37ms.
 #:
-#: THE one definition of that policy. Every other bound in the tree
-#: derives from it rather than repeating the literal, because a second
-#: 5.0 does not fail when this one moves; the tools simply start
-#: disagreeing about how long "unresponsive" takes.
+#: THE one definition of that policy. Every other bound derives from it
+#: rather than repeating the literal, because a second copy does not
+#: fail when this one moves; the tools just start disagreeing.
 _LIVENESS_TIMEOUT_SECONDS = 5.0
 
 #: Distinguishable by identity, so callers can tell "did not answer"
@@ -1006,10 +977,9 @@ class _BoundedTmuxCmd(tmux_cmd):
             raise exc.TmuxCommandNotFound
         argv = [resolved, *(str(arg) for arg in args)]
         self.cmd = argv
-        # Stock tmux_cmd emits these two records on libtmux.common, and
-        # they are a contract, not decoration: callers read the argv of
-        # every dispatched command out of them. Replacing __init__
-        # without them silently blinds that.
+        # A contract, not decoration: callers read the argv of every
+        # dispatched command out of these two records, so replacing
+        # __init__ without them blinds that silently.
         emit_debug = _LIBTMUX_COMMON_LOGGER.isEnabledFor(logging.DEBUG)
         cmd_str = shlex.join(argv) if emit_debug else ""
         if emit_debug:
@@ -1029,14 +999,10 @@ class _BoundedTmuxCmd(tmux_cmd):
         except FileNotFoundError:
             raise exc.TmuxCommandNotFound from None
         except subprocess.TimeoutExpired as err:
-            # NOT a LibTmuxException: Server._fetch_or_empty catches
-            # those and returns [] for a not-yet-started daemon, which
-            # would report a WEDGED server as having no sessions.
-            #
-            # subprocess.run kills and reaps the child before raising,
-            # so a stalled call leaves no tmux client behind -- the leak
-            # measured when a cancelled coroutine left the untimed
-            # communicate() running until the server died.
+            # NOT a LibTmuxException: Server._fetch_or_empty catches those
+            # and returns [] for a not-yet-started daemon, which would
+            # report a WEDGED server as having no sessions. subprocess.run
+            # kills and reaps before raising, so no tmux client is left.
             msg = (
                 f"tmux {_tmux_subcommand(argv)} did not return within "
                 f"{_SYNC_CALL_TIMEOUT_SECONDS:.2f}s; the tmux server is unresponsive"
@@ -1069,11 +1035,10 @@ class _BoundedTmuxCmd(tmux_cmd):
             )
 
 
-#: Every libtmux module that constructs a ``tmux_cmd``. Each resolves
-#: the name as a module global at call time, so rebinding it here bounds
-#: the call. Kept in sync by a test that AST-walks the installed libtmux
-#: for ``tmux_cmd`` calls: a new call site in a new module fails loudly
-#: instead of silently reintroducing an unbounded path.
+#: Every libtmux module that constructs a ``tmux_cmd``. Each resolves the
+#: name as a module global at call time, so rebinding it here bounds the
+#: call. A test AST-walks the installed libtmux so a new call site in a
+#: new module fails loudly rather than reintroducing an unbounded path.
 _PATCHED_LIBTMUX_MODULES = ("libtmux.common", "libtmux.neo", "libtmux.server")
 
 
@@ -1135,10 +1100,9 @@ def _get_server(
     with _server_cache_lock:
         cached = _server_cache.get(cache_key)
 
-    # ``is_alive()`` is a tmux subprocess round trip. Holding the cache
+    # ``is_alive()`` is a tmux subprocess round trip; holding the cache
     # lock across it serialises every concurrent tool call in this
-    # process behind one another -- measured, it capped a 16-way
-    # parallel socket scan at about 2x instead of 8x.
+    # process -- measured, a 16-way socket scan capped at 2x, not 8x.
     if cached is not None:
         alive, reason = _probe_liveness(cached)
         _raise_if_socket_hung(cached, reason)
@@ -1150,12 +1114,9 @@ def _get_server(
 
     server = _build_server(socket_name=socket_name, socket_path=socket_path)
 
-    # Probed before it is handed out, because nothing downstream is
-    # bounded: ``server.panes`` and friends go straight to
-    # ``Server.cmd``, which has no timeout. A socket that never answers
-    # would otherwise hang whichever tool touched it first. This costs
-    # one round trip per socket per process -- the cached path above
-    # already pays one on every call.
+    # Probed before it is handed out: nothing downstream is bounded, as
+    # ``server.panes`` and friends reach ``Server.cmd``, which has no
+    # timeout. Costs one round trip per socket per process.
     _, reason = _probe_liveness(server)
     _raise_if_socket_hung(server, reason)
 
@@ -1289,11 +1250,9 @@ def _raise_if_server_unreachable(server: Server) -> None:
             "merely unhelpful."
         )
         raise ExpectedToolError(msg)
-    # No server at all, which is not the same as "that object is
-    # missing". The object-not-found path advises calling list_sessions
-    # to discover valid ids; with no server that call fails the same
-    # way, so the advice sends the caller round the loop it is already
-    # in. Say what is actually true instead.
+    # No server at all is not "that object is missing": the
+    # object-not-found path advises list_sessions, which fails the same
+    # way here and sends the caller round the loop it is already in.
     socket = getattr(server, "socket_name", None) or getattr(
         server, "socket_path", None
     )
@@ -1624,9 +1583,9 @@ _BOOL_TRUE = frozenset({"true", "1", "yes"})
 _BOOL_FALSE = frozenset({"false", "0", "no"})
 
 #: Operators that mean anything against a bool. The rest are string or
-#: collection tests; libtmux's lookups fall through to ``return False``
-#: for a bool, so allowing them would answer every query with an empty
-#: list -- including contradictory pairs like ``__in``/``__nin``.
+#: collection tests, and libtmux's lookups fall through to ``False`` for
+#: a bool -- so allowing them answers every query with an empty list,
+#: contradictory pairs like ``__in``/``__nin`` included.
 _BOOL_OPERATORS = frozenset({"exact", "eq"})
 
 
@@ -1820,10 +1779,9 @@ def _apply_filters(
     probe = list(items)
 
     for key, value in filters.items():
-        # A trailing segment that is not an operator is part of the
-        # attribute path, matching QueryList: it treats an unknown
-        # trailing segment as a path and defaults the operator to
-        # ``exact``, so ``active_pane__pane_id`` traverses.
+        # Matching QueryList: an unknown trailing segment is part of the
+        # attribute path with the operator defaulting to ``exact``, so
+        # ``active_pane__pane_id`` traverses.
         field_path, op = key, ""
         if "__" in key:
             lhs, trailing = key.rsplit("__", 1)
@@ -1885,11 +1843,9 @@ def _serialize_session(session: Session) -> SessionInfo:
     from libtmux_mcp.models import SessionInfo
 
     assert session.session_id is not None
-    # Defensive ``getattr``: ``Session.active_pane`` exists on every
-    # supported libtmux version, but older builds may raise instead of
-    # returning ``None`` for sessions mid-teardown. Treating a missing
-    # attribute or missing pane id as ``None`` lets ``list_sessions``
-    # tolerate transient state without breaking serialization.
+    # ``Session.active_pane`` may raise rather than return ``None`` for a
+    # session mid-teardown, so a missing attribute or pane id reads as
+    # ``None`` and ``list_sessions`` still serialises.
     active_pane = getattr(session, "active_pane", None)
     active_pane_id = active_pane.pane_id if active_pane is not None else None
 
@@ -2010,10 +1966,10 @@ P = t.ParamSpec("P")
 R = t.TypeVar("R")
 
 
-#: tmux stderr fragments that mean the socket genuinely has no daemon
-#: behind it. Anything else on a failed ``list-sessions`` -- a protocol
-#: mismatch, a permission error -- means a server that exists and cannot
-#: be talked to, which is a different answer.
+#: tmux stderr fragments meaning the socket has no daemon behind it.
+#: Anything else on a failed ``list-sessions`` -- a protocol mismatch, a
+#: permission error -- is a server that exists and cannot be reached,
+#: which is a different answer.
 _NO_SERVER_MARKERS = (
     "no server running",
     "no such file or directory",
