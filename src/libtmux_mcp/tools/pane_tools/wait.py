@@ -262,51 +262,41 @@ async def wait_for_text(
         deadline=deadline,
     )
 
-    # Snapshot the pane state before polling. ``hs0 + cy0`` is the
-    # absolute grid anchor — invariant under subsequent scrolling
-    # because tmux's ``-S`` is relative to the live ``hsize`` at
+    # ``hs0 + cy0`` is the absolute grid anchor, invariant under later
+    # scrolling because tmux's ``-S`` is relative to the live ``hsize`` at
     # capture time (cmd-capture-pane.c: ``top = gd->hsize + n``).
-    # ``pane_pid`` lets us detect a respawn-pane mid-wait that would
-    # otherwise leave the absolute anchor pointing at the old
-    # process's output. See issue #45.
+    # ``pane_pid`` catches a respawn mid-wait, which would otherwise leave
+    # the anchor pointing at the old process's output.
     entry = await _bounded_pane_state(server, target, deadline=deadline)
     baseline_abs = entry.history_size + entry.cursor_y
     baseline_pid = entry.pane_pid
     baseline_hlimit = await _bounded_history_limit(server, target, deadline=deadline)
 
-    # Snapshot the entry cursor row and everything below it, BY CONTENT.
-    # The cursor anchor alone matches any row at start_line onward, which
-    # includes stale paint-style content (TUI repaints, paste-text, manual
-    # cursor positioning) that pre-dates the wait. Filtering per-tick
-    # captures against this set turns the cursor anchor into an honest
-    # "content written after entry" predicate.
+    # The entry cursor row and everything below it, BY CONTENT. The cursor
+    # anchor alone matches any row from start_line on, stale paint (TUI
+    # repaints, paste-text) included; filtering each tick against this set
+    # makes it an honest "written after entry" predicate.
     #
-    # The capture starts AT ``cursor_y``, not below it. Suppressing the
-    # entry row by index instead was a shipped false negative: on a
-    # quiescent pane the cursor sits at the end of the prompt, so the
-    # first line a command prints lands on that very row and was never
-    # matchable. Content-filtering covers the same stale-paint case
-    # without the blind spot, because the prompt text that was on the row
-    # at entry is in this set while text appended to it afterwards is not.
+    # Starts AT ``cursor_y``, not below it: on a quiescent pane the cursor
+    # sits at the end of the prompt, so a command's first line lands on
+    # that row. Suppressing the row by index instead makes it unmatchable,
+    # while content-filtering keeps the prompt text out and the text
+    # appended after it in.
     entry_rows = await _bounded_capture(
         server, target, start=entry.cursor_y, deadline=deadline
     )
-    # Kept as a LIST, compared per index. A set discards position, and
-    # the ambiguity this resolves is confined to one row -- the entry
-    # cursor row, which the anchor deliberately includes so a daemon's
-    # single "ready" line stays matchable. Flattened, a line twenty rows
-    # below the cursor permanently blocked a fresh identical line
-    # arriving on the cursor row: a program printing "BUILD OK" again,
-    # two seconds into the wait, was suppressed and the wait ran to its
-    # ceiling reporting found=false. Waiting for a repeated status line
-    # is this tool's headline case.
+    # A LIST compared per index, not a set: a set discards position, so a
+    # line twenty rows below the cursor permanently blocks a fresh
+    # identical line arriving on the cursor row -- a program printing
+    # "BUILD OK" a second time is suppressed and the wait runs to its
+    # ceiling reporting found=false. Waiting for a repeated status line is
+    # this tool's headline case.
     entry_below_cursor: list[str] = list(entry_rows)
 
-    # ``matched_at_entry`` scans the WHOLE visible screen, not just the
-    # rows the delta filter suppresses. The usual shape of this mistake
-    # is text a command printed moments ago sitting ABOVE the cursor,
-    # which a below-cursor scan reports as a clean miss — the agent
-    # then cannot tell "already there" from "never arrived".
+    # Scans the WHOLE visible screen, not just the rows the delta filter
+    # suppresses: text printed moments ago sits ABOVE the cursor, and a
+    # below-cursor scan calls that a clean miss, leaving the agent unable
+    # to tell "already there" from "never arrived".
     visible_rows = await _bounded_capture(server, target, start=0, deadline=deadline)
 
     # Honest, non-heuristic diagnostic: did a success pattern already
@@ -314,12 +304,10 @@ async def wait_for_text(
     # single most common reason a wait "should have" matched instantly
     # and instead ran to the ceiling.
     stale_at_entry = _first_match(compiled_patterns, visible_rows) is not None
-    # Same rationale applied to ``stop``. A failure marker already on
-    # screen is the case where a bare "timeout" misleads most: an agent
-    # re-running a build reads it as "still running" when the honest
-    # answer is "the previous run already failed". Kept a separate field
-    # because "my success text predates the call" and "my failure text
-    # predates the call" call for opposite reactions.
+    # Same for ``stop``: an agent re-running a build reads a bare
+    # "timeout" as "still running" when a failure marker was already on
+    # screen. A separate field, because success text and failure text
+    # predating the call call for opposite reactions.
     stop_stale_at_entry = _first_match(compiled_stop, visible_rows) is not None
 
     matched_lines: list[str] = []
@@ -330,19 +318,14 @@ async def wait_for_text(
     saw_alternate_screen = entry.alternate_on
     last_rows: list[str] = []
 
-    # Reported on its own 1 s cadence rather than once per poll, which
-    # is what the siblings do. Progress-per-iteration coupled the
-    # notification rate to ``interval`` -- a polling knob with a 0.01
-    # floor -- so the default sent ~20 notifications a second and the
-    # floor ~100, each an awaited JSON-RPC message carrying the same
-    # sentence with a different decimal. Nothing perceives the
-    # difference: the message only changes meaningfully once a second.
+    # Its own 1 s cadence, not one per poll: per-iteration progress ties
+    # the notification rate to ``interval``, whose 0.01 floor means ~100
+    # awaited JSON-RPC messages a second carrying the same sentence with a
+    # different decimal. The message only changes once a second.
     #
-    # Spend the message on the numbers, not on restating the pane.
-    # Clients that surface progress usually show the message rather
-    # than the raw progress/total pair, and it is the field most likely
-    # to survive a future transport -- MCP background tasks drop
-    # numeric progress entirely and keep only a status message.
+    # Spend it on the numbers rather than restating the pane. Clients
+    # usually surface the message over the raw progress/total pair, and it
+    # is likeliest to survive a future transport.
     try:
         async with progress_ticker(
             ctx,
@@ -360,20 +343,16 @@ async def wait_for_text(
                 _raise_if_pane_lifecycle_changed(target, state, baseline_pid)
                 if state.alternate_on:
                     saw_alternate_screen = True
-                # When tmux's ``history-limit`` is reached, ``grid_collect_history``
-                # (grid.c) frees the oldest scrollback rows and decrements
-                # ``gd->hsize``, so absolute index math anchored on
-                # ``history_size + cursor_y`` is no longer recoverable. The same
-                # hsize-decrement also fires on ``clear-history``.
+                # At ``history-limit``, ``grid_collect_history`` frees the
+                # oldest rows and decrements ``gd->hsize``, so absolute
+                # index math on ``history_size + cursor_y`` is no longer
+                # recoverable. ``clear-history`` decrements it too.
                 #
-                # ``hsize`` ALSO decrements on resize-grow when ``hscrolled > 0``
-                # (``screen.c`` ``screen_resize_y``: rows are pulled from history
-                # back into the visible region). In that case no row data is freed
-                # — only the hsize/visible-region partition shifts and absolute
-                # indices stay valid. Trim and resize-grow are distinguished by
-                # ``pane_height``: trim leaves it unchanged, resize-grow increases
-                # it. The conjunction below is the actual signature of row
-                # eviction; resize-grow falls through cleanly.
+                # So does resize-grow with ``hscrolled > 0``, where rows
+                # move from history into the visible region and no data is
+                # freed. ``pane_height`` separates them -- trim leaves it
+                # unchanged, resize-grow increases it -- so the conjunction
+                # below is the real eviction signature.
                 if (
                     state.history_size < entry.history_size
                     and state.pane_height <= entry.pane_height
@@ -386,12 +365,9 @@ async def wait_for_text(
                         "deterministic synchronization"
                     )
                     raise ExpectedToolError(msg)
-                # The shrink guard above catches clear-history and the
-                # entry-at-cap rollover edge. It does NOT catch
-                # grid_collect_history trim during continuous output, where
-                # hsize bounces between (hlimit - hlimit/10) and hlimit
-                # faster than we can poll. Emit a one-shot warning when
-                # sampled state is in the trim-risk band.
+                # The shrink guard above misses grid_collect_history trim
+                # during continuous output, where hsize bounces between
+                # (hlimit - hlimit/10) and hlimit faster than we can poll.
                 if not warned_risk_band and baseline_hlimit > 0:
                     trim_batch = max(baseline_hlimit // 10, 1)
                     risk_floor = baseline_hlimit - trim_batch
@@ -410,19 +386,17 @@ async def wait_for_text(
                             ),
                         )
                         warned_risk_band = True
-                # Anchored ON the entry cursor row, not below it. That row is
-                # where the next line lands on a quiescent pane, so skipping
-                # it by index made the tool's headline case — a daemon
-                # printing one ``ready`` line — structurally unmatchable. The
-                # ``entry_below_cursor`` content filter below suppresses what
-                # was already on the row without hiding what arrives on it.
+                # ON the entry cursor row, not below it: that row is where
+                # the next line lands on a quiescent pane, so skipping it by
+                # index makes a daemon's single ``ready`` line unmatchable.
+                # ``entry_below_cursor`` suppresses what the row already
+                # held without hiding what arrives on it.
                 start_line = baseline_abs - state.history_size
-                # ``capture-pane -S`` clips a below-visible start back to the
-                # bottom row (cmd-capture-pane.c, post-tmux-3.0), so a naive
-                # capture would return stale bottom-row text whenever no new rows
-                # have appeared below the cursor yet. Compare against
-                # ``state.pane_height`` (re-read each tick) so a resize mid-wait
-                # doesn't leave the guard keyed to a stale height.
+                # ``capture-pane -S`` clips a below-visible start back to
+                # the bottom row, so a naive capture returns stale
+                # bottom-row text until new rows appear. ``pane_height`` is
+                # re-read each tick so a mid-wait resize cannot leave the
+                # guard keyed to a stale height.
                 if start_line >= state.pane_height:
                     rows: list[str] = []
                 else:
@@ -430,16 +404,13 @@ async def wait_for_text(
                         server, target, start=start_line, deadline=deadline
                     )
                 last_rows = rows
-                # Drop lines whose content was already below the entry
-                # cursor — stale paint, not output written after the call.
                 # A row is new when it differs from what THAT index held at
-                # entry. Rows past the entry capture are new by construction.
-                # Residual, and not fixable from tmux primitives: a row that
-                # rewrites the same text at the same index still reads as
-                # unchanged. tmux exposes no per-row last-written time, so
-                # something content-shaped is unavoidable at the bottom --
-                # this shrinks the hole from "any line anywhere below the
-                # cursor" to "the exact row that already held that text".
+                # entry; rows past the entry capture are new by
+                # construction. Residual and not fixable from tmux
+                # primitives: a row rewriting the same text at the same
+                # index still reads as unchanged, since tmux exposes no
+                # per-row write time. This shrinks the hole from "any line
+                # below the cursor" to "the exact row that held that text".
                 new_lines = [
                     line
                     for index, line in enumerate(rows)
@@ -450,13 +421,10 @@ async def wait_for_text(
                     saw_new_output = True
 
                 if state.alternate_on:
-                    # A full-screen program owns and repaints the whole
-                    # grid, so rows "below the cursor" are its paint, not
-                    # output written after this call. Matching them reports
-                    # text the program had already drawn — a false accept,
-                    # which is worse than waiting. Skip matching for as long
-                    # as it lasts; never latch, so quitting a pager mid-wait
-                    # resumes an honest wait.
+                    # A full-screen program repaints the whole grid, so
+                    # rows "below the cursor" are its paint and matching
+                    # them is a false accept -- worse than waiting. Never
+                    # latches, so quitting a pager mid-wait resumes.
                     if time.monotonic() >= deadline:
                         break
                     await asyncio.sleep(interval)
@@ -464,13 +432,11 @@ async def wait_for_text(
 
                 stop_hit = _first_match(compiled_stop, new_lines)
                 pattern_hit = _first_match(compiled_patterns, new_lines)
-                # ``stop`` wins a same-tick tie. Every tick re-captures the
-                # whole region, so a failure line at t=1.00 and a success
-                # line at t=1.02 arrive in the SAME ``new_lines`` — letting
-                # ``patterns`` win there means a broad success pattern (a
-                # shell-prompt regex, say) silently swallows every failure
-                # marker the caller supplied, which defeats the entire
-                # point of passing ``stop``.
+                # ``stop`` wins a same-tick tie. Each tick re-captures the
+                # whole region, so a failure at t=1.00 and a success at
+                # t=1.02 arrive in the SAME ``new_lines``, and letting
+                # ``patterns`` win lets a broad success pattern swallow
+                # every failure marker the caller passed.
                 if stop_hit is not None:
                     matched_index, matched_lines = stop_hit
                     outcome = "stopped"
@@ -481,10 +447,9 @@ async def wait_for_text(
                     break
                 if not compiled_patterns and new_lines:
                     # ``patterns=None`` catch-all: any new output satisfies
-                    # the wait. Subsumes the former wait_for_content_change.
-                    # Reported as its own outcome so an agent that dropped
-                    # ``patterns`` under context pressure can SEE that it
-                    # matched "something moved", not "the thing I wanted".
+                    # the wait. Its own outcome, so an agent that dropped
+                    # ``patterns`` can SEE it matched "something moved",
+                    # not "the thing I wanted".
                     matched_lines = _limit_lines(
                         list(new_lines),
                         max_lines=_TAIL_MAX_LINES,

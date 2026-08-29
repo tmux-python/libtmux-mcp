@@ -112,12 +112,10 @@ def list_panes(
     return _apply_filters(panes, filters, _serialize_pane, Pane, PaneInfo)
 
 
-# get_window_info completes the core-tmux-hierarchy symmetry of get_*_info
-# tools: the four hierarchy levels (server, session, window, pane) now each
-# have a targeted single-object read. This is deliberately NOT a license to
-# add get_buffer_info / get_hook_info / get_option_info — those scopes are
-# not part of the hierarchy and the existing show_*/load_* tools already
-# cover their reads.
+# Each of the four hierarchy levels has a targeted single-object read.
+# Not a license for get_buffer_info / get_hook_info / get_option_info:
+# those scopes are outside the hierarchy and show_*/load_* already read
+# them.
 @handle_tool_errors
 def get_window_info(
     window_id: str | None = None,
@@ -162,12 +160,11 @@ def get_window_info(
     return _serialize_window(window)
 
 
-#: A split takes ``size`` for the NEW pane and one column or row for the
-#: border, so the pane being split keeps ``extent - size - 1``. The line
-#: is drawn where tmux stops HONOURING the request rather than where the
-#: layout gets cramped: leaving the source at one column is a choice, and
-#: refusing it would be policing the caller's layout. Being told the new
-#: pane is 78 when 120 was asked for is a false report.
+#: A split takes ``size`` for the NEW pane plus one column or row for the
+#: border, so the split pane keeps ``extent - size - 1``. The line is
+#: drawn where tmux stops HONOURING the request, not where the layout
+#: gets cramped -- a one-column source is the caller's choice, but being
+#: told the new pane is 78 when 120 was asked for is a false report.
 _MIN_REMAINING_EXTENT = 1
 
 
@@ -603,12 +600,9 @@ def move_window(
         session_name=session_name,
         session_id=session_id,
     )
-    # Moving a session's LAST window to another session leaves the
-    # source with none, and tmux destroys it -- measured, moving alpha's
-    # only window to beta made alpha cease to exist while the result
-    # named only the destination. Same shape as break_pane, and
-    # avoidable the same way, so refused rather than disclosed:
-    # destroying a session is destructive-tier work.
+    # Moving a session's LAST window leaves the source with none and tmux
+    # destroys it, while the result names only the destination. Destroying
+    # a session is destructive-tier work, so refuse rather than disclose.
     if destination_session is not None and len(window.session.windows) == 1:
         msg = (
             f"window {window.window_id} is the only window in session "
@@ -669,15 +663,11 @@ def break_pane(
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(server, pane_id=pane_id)
 
-    # tmux puts the new window in the CURRENT session, which is not
-    # necessarily the pane's own. If the pane is the last one in its
-    # session's last window, the source session is left with no windows
-    # and tmux destroys it -- measured: breaking alpha's only pane moved
-    # it to beta and alpha ceased to exist, while the result reported
-    # only where the pane went.
-    #
-    # Destroying a session is destructive-tier work and this tool is
-    # mutating, so refuse rather than disclose.
+    # tmux puts the new window in the CURRENT session, not necessarily
+    # the pane's own. Breaking the last pane of a session's last window
+    # leaves it empty and tmux destroys it, while the result reports only
+    # where the pane went. Destroying a session is destructive-tier work
+    # and this tool is mutating, so refuse rather than disclose.
     source_window = pane.window
     if (
         source_window is not None
@@ -740,13 +730,11 @@ def join_pane(
     source_window = pane.window
     source_window_id = source_window.window_id if source_window else None
 
-    # A window emptying is inherent to moving its last pane, and is
-    # disclosed below. A SESSION emptying is not inherent -- the caller
-    # can add a window first -- and destroying a session is
-    # destructive-tier work reachable from a mutating-tier client.
-    # `break_pane` already refuses exactly this predicate; its sibling
-    # reached the same end state with no check, and from there a client
-    # restricted to `mutating` could take the whole server down.
+    # A window emptying is inherent to moving its last pane and is
+    # disclosed below. A SESSION emptying is not -- the caller can add a
+    # window first -- and it is destructive-tier work reachable from a
+    # mutating-tier client, which is the same predicate `break_pane`
+    # refuses.
     if (
         source_window is not None
         and len(source_window.panes) == 1

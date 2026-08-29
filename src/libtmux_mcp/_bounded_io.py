@@ -47,23 +47,17 @@ if t.TYPE_CHECKING:  # pragma: no cover - typing only
     from libtmux_mcp.tools.pane_tools.state import _PaneState
 
 
-#: Per-``tmux``-invocation wall-clock bound.
+#: Per-``tmux``-invocation wall-clock bound, and the load-bearing half of
+#: the wait ceiling. libtmux runs tmux through ``Popen.communicate()``
+#: with no timeout, and ``mcp.tool(timeout=...)`` bounds only the
+#: coroutine, so neither bounds the work. The wait path spawns tmux itself
+#: as a killable async subprocess -- not a thread, since a worker stuck in
+#: ``Popen.communicate()`` cannot be cancelled and ``_python_exit`` joins
+#: pool workers untimed, so one wedged tmux hangs process exit and Ctrl-C.
 #:
-#: This is the load-bearing half of the wait ceiling. libtmux runs tmux
-#: through ``Popen.communicate()`` with no timeout, and
-#: ``mcp.tool(timeout=...)`` bounds only the coroutine (it uses
-#: ``anyio.fail_after``), so neither bounds the actual work. The wait
-#: path therefore spawns tmux itself, as an async subprocess it can
-#: kill. It must not use a thread for this: a worker stuck in
-#: ``Popen.communicate()`` cannot be cancelled, and
-#: ``concurrent.futures.thread._python_exit`` joins every pool worker
-#: untimed at interpreter shutdown — measured, one wedged tmux hangs
-#: process exit and Ctrl-C forever, after a 300 s pause and a
-#: ``RuntimeWarning`` from ``shutdown_default_executor``.
-#:
-#: This is the CEILING on a single call; :func:`_call_budget` lowers it
-#: to whatever remains of the caller's own deadline, so the wait cannot
-#: overshoot by a whole call's worth.
+#: A CEILING on a single call; :func:`_call_budget` lowers it to what
+#: remains of the caller's deadline, so a wait cannot overshoot by a whole
+#: call's worth.
 _TMUX_CALL_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
 #: Floor for a budget-derived per-call timeout. Without it, a wait
 #: whose deadline has just passed would hand ``subprocess.run`` a
@@ -72,11 +66,10 @@ _TMUX_CALL_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
 _TMUX_CALL_MIN_SECONDS = 0.25
 
 
-#: Default line cap applied to :func:`capture_pane` and similar scrollback
-#: readers. Large enough to cover typical prompt + a few screens of output,
-#: small enough that a pathological pane (e.g. 50K lines of ``tail -f``)
-#: cannot blow the agent's context window on a single call. Callers who
-#: need a full capture can pass ``max_lines=None`` to opt out.
+#: Default line cap for :func:`capture_pane` and similar scrollback
+#: readers: a few screens of output, while a pathological pane (50K lines
+#: of ``tail -f``) cannot blow an agent's context in one call. Pass
+#: ``max_lines=None`` to opt out.
 CAPTURE_DEFAULT_MAX_LINES = 500
 
 
@@ -117,12 +110,10 @@ def _truncate_lines_tail(
     """
     if max_lines is not None and max_lines < 1:
         # Python slices a non-positive cap into nonsense rather than
-        # failing: ``lines[-0:]`` is the WHOLE list, so max_lines=0
-        # returned more rows than no truncation at all while announcing
-        # that everything had been dropped, and a negative inflated the
-        # count past the pane's own size -- 112 truncated from 12.
-        # The header is this tool's only disclosure channel, so a number
-        # that cannot be true is the whole defect.
+        # failing: ``lines[-0:]`` is the WHOLE list, so max_lines=0 returns
+        # every row while announcing that all were dropped, and a negative
+        # inflates the count past the pane's size -- 112 truncated from 12.
+        # The header is this tool's only disclosure channel.
         msg = (
             f"max_lines must be at least 1, or null for no limit (received {max_lines})"
         )

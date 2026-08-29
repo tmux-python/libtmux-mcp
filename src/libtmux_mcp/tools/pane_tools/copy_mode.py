@@ -27,34 +27,27 @@ if t.TYPE_CHECKING:
     from libtmux.pane import Pane
 
 
-#: Floor for :func:`copy_selection`. Below this, ``copy-selection``
-#: kills the tmux SERVER -- not the pane, not the command -- taking
-#: every session on it. Four conditions, each varied independently
-#: across the supported matrix, and ALL of them hold in a default
-#: install:
+#: Floor for :func:`copy_selection`. Below this, ``copy-selection`` kills
+#: the tmux SERVER -- not the pane, not the command -- taking every
+#: session on it. All four conditions hold in a default install:
 #:
 #:     tmux 3.2a or 3.3a       3.4+ is unaffected
 #:     a client attached       detached survives
 #:     set-clipboard on        the default is ``external`` on 3.2a..3.7c
 #:     clipboard-capable TERM  xterm-256color dies, screen-256color does not
 #:
-#: The conjunction IS this tool's use case: it exists to read a human's
-#: selection, and a human means an attached client in a real terminal at
-#: default settings. So the crash cannot be avoided by documenting it --
-#: the configurations that survive are the ones with nobody in them.
-#:
-#: Refusing rather than working around it. ``set-clipboard off`` for the
-#: duration does prevent the crash, but it mutates a server-global,
-#: user-visible option around every call, and two concurrent calls would
-#: race to restore it.
+#: Documenting it is not enough: this tool reads a human's selection, so
+#: an attached client at default settings IS its use case. Refused rather
+#: than worked around -- ``set-clipboard off`` for the duration prevents
+#: the crash but mutates a server-global option, and two concurrent calls
+#: would race to restore it.
 _COPY_SELECTION_MIN_VERSION = "3.4"
 
-#: From this version ``copy-selection`` takes ``-C``, which suppresses
-#: the OSC 52 write. Worth passing wherever it exists: an agent reading
-#: a person's selection should not also overwrite that person's system
-#: clipboard. On 3.4 and 3.5 the flag does not exist -- their copy-mode
-#: commands still parse by minargs/maxargs -- and ``-C`` would be taken
-#: as the buffer-name prefix.
+#: From this version ``copy-selection`` takes ``-C``, suppressing the OSC
+#: 52 write so an agent reading a person's selection does not overwrite
+#: their system clipboard. On 3.4 and 3.5 the flag does not exist --
+#: those copy-mode commands parse by minargs/maxargs -- and ``-C`` would
+#: be taken as the buffer-name prefix.
 _COPY_SELECTION_NO_CLIPBOARD_VERSION = "3.6"
 
 
@@ -386,11 +379,10 @@ def copy_selection(
                 "or enter_copy_mode to make a selection yourself."
             ),
         )
-    # tmux EXITS 0 for copy-selection with nothing selected and creates
-    # no buffer at all, so without this the tool would report success
-    # and hand back a buffer name that does not exist. Compared against
-    # "1" rather than against "0": on the floor an absent selection
-    # reads as the empty string, not "0".
+    # tmux exits 0 for copy-selection with nothing selected and creates no
+    # buffer, so this is what keeps the tool from handing back a name that
+    # does not exist. Compared against "1": on the floor an absent
+    # selection reads as the empty string, not "0".
     if selection != "1":
         msg = f"pane {pane.pane_id} is in copy mode but nothing is selected"
         raise ExpectedToolError(

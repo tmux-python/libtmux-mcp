@@ -156,11 +156,9 @@ def search_panes(
     flags = 0 if match_case else re.IGNORECASE
     compiled = compile_pattern(pattern, regex=regex, flags=flags, label="search")
 
-    # Reject nonsense pagination rather than answering with an empty
-    # page: ``limit=0`` returned ``matches: []``, which an agent cannot
-    # tell from a genuine miss, and a negative ``offset`` was clamped
-    # to 0 and echoed back unchanged, so the result silently did not
-    # match the request.
+    # Reject nonsense pagination rather than answer with an empty page:
+    # ``limit=0`` is indistinguishable from a genuine miss, and a negative
+    # ``offset`` clamped to 0 answers a different request than it echoes.
     if offset < 0:
         msg = f"offset must be zero or greater (received {offset})"
         raise ExpectedToolError(msg)
@@ -172,28 +170,18 @@ def search_panes(
 
     uses_scrollback = content_start is not None or content_end is not None
 
-    # Decide whether the tmux-side ``#{C:...}`` fast path can safely
-    # serve the query. Two distinct hazards gate the decision:
+    # Two hazards gate the tmux-side ``#{C:...}`` fast path:
     #
-    # 1. Regex metacharacters in a ``regex=True`` pattern — tmux's glob
-    #    matcher cannot interpret them, so they must take the slow
-    #    Python-regex path. Checked against the raw ``pattern``, NOT
-    #    the escaped ``search_pattern``; the previous form incorrectly
-    #    tested ``re.escape(pattern)``, so any literal input that
-    #    happened to contain a metacharacter (e.g. "192.168.1.1" →
-    #    "192\\.168\\.1\\.1" — now matches because of ``\\``) was
-    #    pushed onto the slow path.
+    # 1. Regex metacharacters under ``regex=True`` -- tmux's glob matcher
+    #    cannot interpret them. Tested against the raw ``pattern``, never
+    #    the escaped ``search_pattern``, whose own backslashes would push
+    #    every literal containing a dot onto the slow path.
     #
-    # 2. tmux format-string injection — ``#{C:pattern}`` is a tmux
-    #    format block. ``}`` in the pattern closes the block early
-    #    (evaluated as truthy, matching every pane as a false
-    #    positive); ``#{`` starts a nested format variable; ``#(``
-    #    runs a format job (shell command). tmux provides no escape
-    #    mechanism for these bytes inside the format block, so the
-    #    only safe option is to route around: when the raw pattern
-    #    contains any of these sequences, fall through to the slow
-    #    Python-regex path. This applies whether or not ``regex`` is
-    #    True — the injection risk is tmux-side, not regex-side.
+    # 2. tmux format-string injection -- ``}`` closes the format block
+    #    early and matches every pane, ``#{`` nests a format variable,
+    #    ``#(`` runs a shell job. tmux offers no escape for these inside
+    #    a format block, so the only safe move is the slow path. Applies
+    #    regardless of ``regex``: the risk is tmux-side.
     _REGEX_META = re.compile(r"[\\.*+?{}()\[\]|^$]")
     _TMUX_FORMAT_INJECTION = re.compile(r"\}|#\{|#\(")
     if _TMUX_FORMAT_INJECTION.search(pattern):
@@ -239,11 +227,9 @@ def search_panes(
             dict.fromkeys(p.pane_id for p in all_panes if p.pane_id is not None)
         )
 
-    # Phase 2: Capture matching panes, extract matched lines, and
-    # apply bounded-output caps. Pagination is at the pane level:
-    # sort the matching panes by pane_id for deterministic ordering,
-    # then slice by offset / limit. Per-pane matched_lines is
-    # tail-truncated to keep the most recent matches.
+    # Pagination is at the PANE level: sorted by pane_id for determinism,
+    # then sliced by offset/limit. Per-pane matched_lines is tail-
+    # truncated, keeping the most recent matches.
     all_matches: list[PaneContentMatch] = []
     per_pane_truncated = False
     for pane_id_str in matching_pane_ids:

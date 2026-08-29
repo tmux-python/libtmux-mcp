@@ -19,11 +19,8 @@ if t.TYPE_CHECKING:
     from fastmcp import FastMCP
     from libtmux.server import Server
 
-#: MIME type advertised for resources that return structured tmux
-#: metadata (session / window / pane views). Previously these resources
-#: returned ``json.dumps(...)`` with no MIME annotation, so clients
-#: treated the payload as opaque text. Declaring ``application/json``
-#: lets clients parse it automatically.
+#: MIME type advertised for resources returning structured tmux metadata,
+#: so a client parses the payload instead of treating it as opaque text.
 _JSON_MIME = "application/json"
 
 #: MIME type for the pane-content resource, which returns raw captured

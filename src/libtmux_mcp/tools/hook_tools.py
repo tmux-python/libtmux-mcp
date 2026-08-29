@@ -101,15 +101,13 @@ def _resolve_hook_target(
         raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is not None:
-        # Session only. Its object default IS the session tree, so
-        # dropping the scope there is genuinely redundant -- and passing
-        # it mis-builds the argv (measured: returns an empty listing).
-        #
-        # Window and Pane default to the SESSION tree too, so dropping
-        # the scope for them silently answered about a different object:
-        # show_hooks(scope="window", target=@0) returned the session's
-        # hooks and no spelling reached the window's. Measured, they
-        # take the explicit scope without the argv problem.
+        # Session only: its object default IS the session tree, so the
+        # scope is redundant there and passing it mis-builds the argv into
+        # an empty listing. Window and Pane also default to the SESSION
+        # tree, so dropping the scope for them answers about a different
+        # object -- show_hooks(scope="window", target=@0) returns the
+        # session's hooks. They take the explicit scope without the argv
+        # problem.
         if opt_scope == OptionScope.Session:
             return _resolve_session(server, session_name=target), None
         if opt_scope == OptionScope.Window:
@@ -249,22 +247,16 @@ def show_hooks(
 
     if target is None and scope in (None, "server"):
         # tmux does not unify a listing across the session and window
-        # trees, so one query alone misses half of what a name-targeted
-        # ``show_hook`` would find -- the inconsistency this merge
-        # exists to prevent.
+        # trees, so one query misses half of what a name-targeted
+        # ``show_hook`` finds.
         #
-        # WHICH window tree depends on the base query, and treating the
-        # two as interchangeable is what made the untargeted listing
-        # incoherent: it returned session-scope hooks stapled to
-        # GLOBAL-window ones, a combination corresponding to no tmux
-        # scope, while omitting global-session hooks entirely.
-        #
-        # scope="server" queries the global session tree, so the global
-        # window tree is its counterpart. scope=None queries THIS
-        # session's tree, so the counterpart is this window's. An
-        # explicit global_=True makes the base global whatever the
-        # scope says, so it has to be carried too -- otherwise the
-        # listing stapled the CURRENT window's hooks onto the globals.
+        # WHICH window tree depends on the base query, and the two are not
+        # interchangeable: scope="server" queries the global session tree,
+        # so the global window tree is its counterpart; scope=None queries
+        # THIS session's, so the counterpart is this window's. An explicit
+        # global_=True makes the base global whatever the scope says, so it
+        # must be carried too, or the CURRENT window's hooks land on the
+        # globals.
         raw_window = obj.show_hooks(
             global_=global_ or scope == "server", scope=OptionScope.Window
         )
@@ -320,11 +312,10 @@ def show_hook(
     """
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
     if include_inherited:
-        # tmux stores hooks in the options table, and only the OPTIONS
-        # lookup honours -A. Measured: with `set-hook -g alert-bell`,
-        # `show-hooks -t A alert-bell` is empty while
-        # `show-options -A -t A alert-bell` returns it (flagged `*`,
-        # which libtmux already strips).
+        # tmux stores hooks in the options table and only the OPTIONS
+        # lookup honours -A: with `set-hook -g alert-bell`, `show-hooks -t
+        # A alert-bell` is empty while `show-options -A -t A alert-bell`
+        # returns it, flagged `*`, which libtmux strips.
         return HookListResult(
             entries=_flatten_hook_value(
                 hook_name,
@@ -344,13 +335,10 @@ def show_hook(
     try:
         value = obj.show_hook(hook_name, global_=global_, scope=opt_scope)
     except libtmux_exc.OptionError as e:
-        # tmux rejects ``show-hooks <name>`` for *unset* hooks with
-        # "too many arguments" on every build the project supports —
-        # that specific message is the only one treated as the empty
-        # result. Genuine name errors ("unknown hook", "invalid option"
-        # on typos or wrong scope) must surface to the caller so agents
-        # can correct their input instead of silently getting an empty
-        # list they read as "hook is unset".
+        # tmux rejects ``show-hooks <name>`` for an *unset* hook with "too
+        # many arguments" on every supported build, and that message alone
+        # reads as the empty result. A genuine name error must surface, or
+        # an agent reads its own typo as "hook is unset".
         if "too many arguments" in str(e):
             return HookListResult(entries=[], resolved_target=_target_label(obj))
         raise

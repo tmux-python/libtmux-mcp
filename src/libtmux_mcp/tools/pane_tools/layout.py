@@ -199,18 +199,12 @@ def select_pane(
     if direction in _DIRECTION_FLAGS:
         window.select_pane(_DIRECTION_FLAGS[direction])
     elif direction in ("next", "previous"):
-        # Compute the target pane by absolute pane_id rather than using
-        # tmux's relative pane-target syntax. Two portability issues
-        # motivate this approach:
-        # 1. A bare `-t +` / `-t -1` resolves against the attached
-        #    client's current window (tmux cmd-find.c), not the window
-        #    we're targeting.
-        # 2. The scoped form `@window_id.+` / `.-` works from tmux 3.4.
-        #    On 3.2a and 3.3a -- and 3.2a is this project's floor -- it
-        #    exits 0, prints nothing, and leaves the window with NO
-        #    active pane. Not the wrong pane: none at all, silently.
-        #    Enumerating panes and selecting by absolute pane_id
-        #    sidesteps tmux-version variation entirely.
+        # By absolute pane_id, not tmux's relative pane-target syntax:
+        # a bare `-t +` / `-t -1` resolves against the attached client's
+        # current window rather than the targeted one, and the scoped
+        # `@window_id.+` form needs tmux 3.4 -- on 3.2a (this project's
+        # floor) and 3.3a it exits 0, prints nothing, and leaves the
+        # window with NO active pane.
         window.refresh()
         panes = list(window.panes)
         active = next((p for p in panes if p.pane_active == "1"), panes[0])

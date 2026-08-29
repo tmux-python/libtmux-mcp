@@ -69,12 +69,11 @@ def display_message(
         session_id=session_id,
         window_id=window_id,
     )
-    # ``--`` terminates flag parsing so a format that begins with a
-    # dash reaches tmux as a format. Without it, format_string="-p" was
-    # eaten as tmux's own print flag and tmux answered with its DEFAULT
-    # message -- a plausible string answering a question nobody asked.
-    # libtmux's display_message() cannot pass the terminator, hence the
-    # direct cmd().
+    # ``--`` terminates flag parsing so a format beginning with a dash
+    # reaches tmux as a format: without it ``-p`` is eaten as tmux's own
+    # print flag and tmux answers with its DEFAULT message, a plausible
+    # string to a question nobody asked. libtmux's display_message()
+    # cannot pass the terminator, hence the direct cmd().
     result = pane.cmd("display-message", "-p", "--", format_string)
     if result.stderr:
         detail = "; ".join(result.stderr)
@@ -142,16 +141,10 @@ def snapshot_pane(
         window_id=window_id,
     )
 
-    # Fetch all metadata in a single display-message call. Use the
-    # printable Unicode glyph ␞ (U+241E, "SYMBOL FOR RECORD SEPARATOR")
-    # as the delimiter — the same choice libtmux itself uses for
-    # FORMAT_SEPARATOR. tmux's utf8_strvis (tmux/utf8.c) copies any
-    # valid UTF-8 multi-byte sequence verbatim, bypassing the vis()
-    # escape that turns ASCII control chars like 0x1f into literal
-    # "\037" in display-message output on some tmux builds. And ␞ is
-    # safe against the false-positive path that a tab delimiter has:
-    # tabs are legal (if rare) in Linux paths and could realistically
-    # appear in pane_current_path.
+    # The delimiter is ␞ (U+241E), as libtmux uses for FORMAT_SEPARATOR.
+    # tmux's utf8_strvis copies valid UTF-8 verbatim, bypassing the vis()
+    # escape that renders 0x1f as literal "\037" on some builds; and
+    # unlike a tab it cannot occur in pane_current_path.
     _SEP = "␞"
     _FMT_VARS = [
         "#{cursor_x}",

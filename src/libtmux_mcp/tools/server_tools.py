@@ -228,11 +228,9 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
         result = server.cmd("display-message", "-p", "#{version}")
         version = result.stdout[0] if result.stdout else None
     except Exception as err:
-        # Best-effort — tmux ancient versions lack ``#{version}``,
-        # permissions may deny display-message, etc. Mirrors the same
-        # logging style used by ``_probe_server_by_path`` so operators
-        # see a uniform signal when custom sockets fail to report
-        # metadata.
+        # Best-effort: old tmux lacks ``#{version}`` and permissions may
+        # deny display-message. Logged like ``_probe_server_by_path`` so a
+        # socket failing to report metadata reads the same either way.
         logger.debug("get_server_info: version query raised %s", err)
     return ServerInfo(
         is_alive=alive,
@@ -373,14 +371,11 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     return _probe_or_report_unreachable(socket_path)
 
 
-#: Tools that intentionally do NOT accept ``socket_name`` because they
-#: either discover sockets themselves or coordinate nested tools whose
-#: arguments carry their own targeting. Read by
-#: ``test_registered_tools_accept_socket_name`` to enforce the
-#: agent-facing contract advertised in
-#: :data:`libtmux_mcp.server._BASE_INSTRUCTIONS`. When you add a new
-#: discovery-style tool, append it here AND update the prose in
-#: ``_BASE_INSTRUCTIONS`` so the two stay in lockstep.
+#: Tools that intentionally do NOT accept ``socket_name``, because they
+#: discover sockets themselves or coordinate nested tools carrying their
+#: own targeting. A new discovery-style tool belongs here AND in the
+#: :data:`libtmux_mcp.server._BASE_INSTRUCTIONS` prose, which a test
+#: holds in lockstep with this set.
 SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
     {
         "call_destructive_tools_batch",
@@ -409,13 +404,11 @@ def _probe_scanned_socket(entry: pathlib.Path) -> tuple[str, ServerInfo] | None:
     # call. Stale sockets are the common case.
     if not _is_tmux_socket_live(entry):
         return None
-    # Addressed by PATH, not name: a socket name that does not round-trip
-    # through ``-L`` -- one holding a newline, say -- used to drop a live
-    # server from the listing silently. The path always works.
+    # Addressed by path: a socket name holding a newline does not
+    # round-trip through ``-L``, and dropped a live server silently.
     info = _probe_or_report_unreachable(entry)
-    # The scan holds the full path; reporting only the name left
-    # ``socket_path`` null on every scanned row, so no row carried a
-    # complete identity.
+    # The scan holds the full path, so every row can carry both halves of
+    # the identity.
     return _socket_key(entry), info.model_copy(
         update={"socket_name": entry.name, "socket_path": str(entry)}
     )

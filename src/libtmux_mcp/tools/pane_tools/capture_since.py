@@ -175,40 +175,33 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     # anchor regardless of pane height — the grid is reset to zero.
     if state.history_size == 0 and cursor.history_size > 0:
         return True
-    # ``anchor_abs < history_size`` means the anchor has scrolled into
-    # retained history, where ``capture-pane -S`` can still address it
-    # with a negative start offset.
+    # ``anchor_abs < history_size`` means the anchor scrolled into retained
+    # history, which ``capture-pane -S`` still addresses with a negative
+    # start. The ``pane_height`` guard separates resize-grow (rows pulled
+    # back from history, no data freed) from a real trim.
     #
-    # The ``pane_height`` guard distinguishes resize-grow (which pulls
-    # rows from history back into the visible region without freeing
-    # data) from actual trim (where row data is destroyed).
-    # A width change rewraps history, so row coordinates taken at the
-    # old width stop being comparable. Widening was already caught by
-    # the shrink branch below (rewrap makes history SHORTER); narrowing
-    # makes it longer, which is indistinguishable from ordinary new
-    # output -- so ``start`` went negative by exactly the rewrap growth
-    # and ``capture-pane -S`` returned that many rows of already-seen
-    # scrollback as new, with lines_missed=false. Measured at one
-    # column of narrowing, not just dramatic resizes.
+    # A width change rewraps history, so old-width row coordinates stop
+    # comparing. Widening is caught by the shrink branch below (rewrap
+    # shortens history); narrowing lengthens it and looks like ordinary
+    # new output, replaying already-seen scrollback with lines_missed
+    # false -- at one column of narrowing, not just dramatic resizes.
     #
-    # ``None`` means a cursor minted before this field existed: reflow
-    # cannot be ruled out, so treat it the same way rather than
-    # silently trusting it. Self-healing -- the caller gets a fresh
-    # cursor that carries the width.
+    # ``None`` is a cursor minted before this field existed: reflow cannot
+    # be ruled out, so treat it the same. Self-healing, since the caller
+    # gets back a fresh cursor carrying the width.
     if cursor.pane_width is None or state.pane_width != cursor.pane_width:
         return True
-    # A screen RESET moves the cursor back up without touching
-    # history_size, which every other check here misses: they all assume
-    # an anchor dies by history shrinking or by the anchor passing the
-    # bottom row. Measured on a pane with no scrollback yet --
-    # history_size 0, cursor_y 2 -- `clear_pane` left history_size 0 and
-    # cursor_y 0, so the anchor pointed BELOW the new output and the
-    # call returned nothing under lines_missed=False.
+    # A screen RESET moves the cursor up without touching history_size,
+    # which every other check here misses -- they assume an anchor dies by
+    # history shrinking or by passing the bottom row. On a pane at
+    # history_size 0, cursor_y 2, `clear_pane` leaves cursor_y 0, so the
+    # anchor points BELOW the new output and the call returns nothing
+    # under lines_missed=False.
     #
-    # The conjunction is what makes it safe. Ordinary output only moves
-    # the cursor down; scrolling holds it at the bottom row and GROWS
-    # history; a resize-grow pulls rows out of history, shrinking it
-    # while the cursor moves down. None of those can satisfy both halves.
+    # The conjunction is what makes it safe: ordinary output only moves
+    # the cursor down, scrolling holds it at the bottom row and GROWS
+    # history, and a resize-grow shrinks history while the cursor moves
+    # down. None satisfies both halves.
     entry_cursor_y = cursor.anchor_abs - cursor.history_size
     if state.cursor_y < entry_cursor_y and state.history_size <= cursor.history_size:
         return True
@@ -271,25 +264,22 @@ def _find_unique_cursor_match(
     if len(rows) < len(fingerprint):
         return None
 
-    # A one-row fingerprint carries no way to tell the anchor from any
-    # other line with the same text, and on a SATURATED history the twin
-    # that survives is the prompt currently on screen.
-    # ``index >= history_size`` means the candidate sits in the visible
-    # region rather than in scrollback, which is that signature exactly.
+    # A one-row fingerprint cannot tell the anchor from any other line
+    # with the same text, and on a SATURATED history the surviving twin is
+    # the prompt now on screen. ``index >= history_size`` is that
+    # signature: the candidate sits in the visible region, not scrollback.
     #
-    # Saturation is asked via ``_history_limit_trim_risk`` rather than
-    # ``history_size == history_limit``: measured on tmux 3.7c, a pane
-    # with ``history-limit 20`` pins at ``history_size 19``, so an exact
-    # comparison never fires on the very panes this guards.
+    # Saturation comes from ``_history_limit_trim_risk``, not
+    # ``history_size == history_limit``: on tmux 3.7c a pane with
+    # ``history-limit 20`` pins at 19, so an exact comparison never fires
+    # on the panes this guards.
     #
-    # The cost is a measured false-positive band: on a 50000-line limit
-    # this reports a loss from roughly 92% full, where trim risk is on
-    # but tmux has not evicted yet (clean at 0/10/50/80/88%). Erring
-    # there costs a pessimistic flag and a full visible read, never
-    # silence. Growth in ``history_size`` between cursor and read would
-    # narrow it -- history still growing means nothing was dropped --
-    # but a burst that saturates midway grows AND evicts, so trusting
-    # growth would reopen the silent loss this closes.
+    # The cost is a false-positive band -- on a 50000-line limit, a loss
+    # reported from roughly 92% full, where trim risk is on but tmux has
+    # not evicted. That costs a pessimistic flag and a full visible read,
+    # never silence. Growth in ``history_size`` would narrow the band, but
+    # a burst that saturates midway grows AND evicts, which would reopen
+    # the silent loss this closes.
     blind = len(fingerprint) == 1 and _history_limit_trim_risk(
         cursor, state, history_limit
     )
@@ -610,15 +600,11 @@ async def capture_since(
         pane_id = decoded.pane_id
 
     server = await _get_server_async(socket_name=socket_name)
-    # Resolved and read through a killable subprocess, never a worker
-    # thread. libtmux reaches tmux with an untimed
-    # ``Popen.communicate()``: in a thread that cannot be cancelled, and
-    # ``concurrent.futures.thread._python_exit`` joins pool workers
-    # untimed at shutdown -- so a tmux server that answers once and then
-    # stops answering left this call unable to return AND the process
-    # unable to exit. Measured with a socket forwarding its first
-    # connection and stalling the rest; the event loop kept ticking
-    # throughout, which is why no loop-blocking test could see it.
+    # A killable subprocess, never a worker thread: libtmux reaches tmux
+    # with an untimed ``Popen.communicate()`` that a thread cannot cancel,
+    # and ``_python_exit`` joins pool workers untimed at shutdown. A tmux
+    # server that answers once then stops leaves the call unable to return
+    # AND the process unable to exit, with the event loop still ticking.
     resolved = await _resolve_pane_bounded(
         server,
         pane_id=pane_id,

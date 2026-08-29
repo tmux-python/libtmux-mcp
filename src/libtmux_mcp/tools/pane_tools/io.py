@@ -71,21 +71,16 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
 #: bound, so it derives rather than repeating the number.
 _SEND_KEYS_TIMEOUT_SECONDS = _LIVENESS_TIMEOUT_SECONDS
 
-#: How long to give a shell to acknowledge that it began the payload,
-#: as a fraction of the caller's own budget with a floor. Paid only
-#: when nothing starts, so it is refusal latency rather than a cost on
-#: the happy path: a REPL is reported in half the budget instead of at
-#: the end of it.
+#: How long to give a shell to acknowledge it began the payload, as a
+#: fraction of the caller's budget with a floor. Paid only when nothing
+#: starts, so it is refusal latency rather than a happy-path cost -- a
+#: REPL is reported at half the budget instead of at the end of it.
 #:
-#: Scaled rather than fixed because over-refusal is the dangerous
-#: direction. A shell round trip is 56 ms clean and 714 ms on a
-#: configured zsh, but a fixed 3 s refused a LEGITIMATE command under
-#: parallel test load at loadavg 31 -- and telling a caller its command
-#: did not run, when it is merely slow and about to, is the same
-#: double-execution hazard the started channel exists to prevent. The
-#: caller's timeout is the only statement of how long the work may
-#: honestly take, so the grace is derived from it rather than from a
-#: guess about machine speed.
+#: Scaled, not fixed, because over-refusal is the dangerous direction: a
+#: fixed 3 s refused a LEGITIMATE command at loadavg 31, and telling a
+#: caller its command did not run when it is merely slow is the same
+#: double-execution hazard the started channel prevents. (A shell round
+#: trip is 56 ms clean, 714 ms on a configured zsh.)
 _STARTED_GRACE_FRACTION = 0.5
 _STARTED_GRACE_FLOOR_SECONDS = 5.0
 
@@ -163,22 +158,19 @@ def _raise_send_keys_error(exc: subprocess.CalledProcessError) -> t.NoReturn:
     raise ExpectedToolError(msg) from exc
 
 
-#: Programs that take over a pane's keyboard and for which typing a
-#: shell wrapper is actively destructive -- a pager consumes it as
-#: commands, an editor puts it in the buffer where ``:``-prefixed
-#: fragments write files. Only ones that can own the pane while
-#: ``alternate_on`` is still 0 need naming here; anything that enters
-#: the alternate screen is already caught by the flag. Measured:
-#: ``top`` repaints the primary screen and needs an entry, while
-#: ``htop`` and ``watch`` reach the alternate screen and do not.
+#: Programs that take over a pane's keyboard, where typing a shell
+#: wrapper is destructive -- a pager consumes it as commands, an editor
+#: puts it in the buffer where ``:``-prefixed fragments write files. Only
+#: programs that own the pane while ``alternate_on`` is still 0 need
+#: naming; the alternate screen is already caught by the flag. ``top``
+#: repaints the primary screen and needs an entry, ``htop`` and ``watch``
+#: do not.
 #:
-#: A DENY-list on purpose. The general signal -- "the foreground
-#: command is not the process tmux started" -- was measured and
-#: rejected: it refuses a pane where the user simply ran ``bash``
-#: inside a ``zsh`` pane, and equally ``sudo -s``, ``ssh`` or
-#: ``nix-shell``, all of which have a perfectly good prompt. There is
-#: no reliable way to ask tmux "is there a prompt", so this errs
-#: toward letting calls through and names only what is known harmful.
+#: A DENY-list on purpose. The general signal -- "the foreground command
+#: is not the process tmux started" -- refuses a plain ``bash`` inside a
+#: ``zsh`` pane, and equally ``sudo -s``, ``ssh`` and ``nix-shell``, all
+#: of which have a good prompt. Nothing can ask tmux "is there a
+#: prompt", so this names only known harm and lets the rest through.
 _PANE_OWNING_PROGRAMS: frozenset[str] = frozenset(
     {
         "emacs",
@@ -236,10 +228,8 @@ def _raise_if_busy_state(pane_id: str, state: _PaneState, occupant: str | None) 
     """
     # Copy/view/clock mode owns the keyboard while alternate_on stays 0
     # and pane_current_command still reads as the shell, so both other
-    # arms miss it. Measured with a client attached: the payload was
-    # consumed as copy-mode keystrokes, the command never ran, and the
-    # user's scroll position was destroyed in 7 of 8 trials -- while
-    # the result claimed command_may_still_run.
+    # arms miss it. With a client attached the payload is consumed as
+    # copy-mode keystrokes and the command never runs.
     if state.in_mode:
         msg = (
             f"pane {pane_id} is in a tmux mode (copy, view or clock), "
@@ -781,13 +771,11 @@ async def run_command(
         msg = "command must not be empty"
         raise ExpectedToolError(msg)
     if "\n" in command or "\r" in command:
-        # The wrapper must be ONE line, because that is what makes its
-        # "did this start" answer true. A shell mid-`read` consumes a
-        # whole line as its answer: one line is eaten entire and nothing
-        # executes, while a split wrapper has its first line eaten and
-        # then RUNS the rest -- and the tool would report "it has not
-        # run" about a command that just did, talking the caller into a
-        # retry that executes it twice. Measured.
+        # ONE line, because that is what makes the "did this start"
+        # answer true. A shell mid-`read` eats a whole line as its answer:
+        # one line is consumed entire and nothing runs, while a split
+        # wrapper loses its first line and RUNS the rest -- reported as
+        # "has not run", talking the caller into a double execution.
         msg = (
             "command must be a single line. A multi-line command cannot be "
             "sent atomically, so this tool cannot tell whether a pane "
@@ -812,13 +800,11 @@ async def run_command(
     effective_timeout = min(timeout, _wait_ceiling_seconds())
 
     server = await _get_server_async(socket_name=socket_name)
-    # Resolved and read through a killable subprocess, never a worker
-    # thread. libtmux reaches tmux with an untimed
-    # ``Popen.communicate()``, which cannot be cancelled from a thread,
-    # and ``concurrent.futures.thread._python_exit`` joins pool workers
-    # untimed at shutdown -- so a tmux server that answers once and then
-    # stops answering would leave this call unable to return AND the
-    # process unable to exit.
+    # A killable subprocess, never a worker thread: libtmux reaches tmux
+    # with an untimed ``Popen.communicate()`` that a thread cannot cancel,
+    # and ``_python_exit`` joins pool workers untimed at shutdown. A tmux
+    # server that answers once then stops leaves the call unable to return
+    # AND the process unable to exit.
     target_id = await _resolve_pane_bounded(
         server,
         pane_id=pane_id,
@@ -827,14 +813,12 @@ async def run_command(
         window_id=window_id,
     )
 
-    # A full-screen program (less, vi, htop) owns the pane's keyboard,
-    # so the wrapper below is consumed as ITS keystrokes rather than by
-    # a shell: measured against `less`, `s=$?...` became less's
-    # save-to-file command and a fragment escaped to a shell. In `vi`
-    # the same payload lands in the buffer, where `:`-prefixed
-    # fragments are commands that edit and write files. This tool means
-    # "run a shell command and report its exit status", which requires
-    # a shell, so refuse rather than type into whatever is there.
+    # A full-screen program (less, vi, htop) owns the keyboard, so the
+    # wrapper below is consumed as ITS keystrokes: against `less`,
+    # `s=$?...` becomes the save-to-file command and a fragment escapes to
+    # a shell; in `vi` it lands in the buffer, where `:`-prefixed
+    # fragments write files. Reporting an exit status requires a shell, so
+    # refuse rather than type into whatever is there.
     _raise_if_busy_state(
         target_id,
         await _bounded_pane_state(server, target_id),
@@ -852,14 +836,11 @@ async def run_command(
     started_channel = f"p_{command_id}"
     started_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", started_channel))
     history_prefix = " " if suppress_history else ""
-    # ``started_cmd`` runs before the command and answers a question the
-    # completion channel cannot: did a shell execute any of this at all?
-    # Without it a swallowed payload and a slow command are the same
-    # observation, and the tool reported the slow one -- "may still run"
-    # about something that never ran.
-    #
-    # Always one line -- multi-line commands are refused above, because
-    # atomicity is what makes the "did this start" answer true.
+    # ``started_cmd`` runs first and answers what the completion channel
+    # cannot: did a shell execute any of this at all? Without it a
+    # swallowed payload and a slow command are the same observation.
+    # Always one line -- multi-line commands are refused above, since
+    # atomicity is what makes the answer true.
     payload = (
         f"{history_prefix}{started_cmd}; ( {command.strip()} ); "
         f's=$?; {status_cmd} "$s"; {signal_cmd}'
@@ -902,15 +883,10 @@ async def run_command(
         occupant = await _bounded_current_command(server, target_id)
         # A foreground process that CHANGED since the send is positive
         # evidence a shell read the line and is working -- slow, not
-        # wedged. Extend rather than refuse: measured, a prompt hook
-        # sleeping 8 s is refused by the grace alone while the command
-        # runs, which is the double execution this guard exists to
-        # prevent, arriving on an ordinary call.
-        #
-        # Partial by construction: slow work in a shell BUILTIN spawns
-        # no child, so it still reads as unchanged. It fails toward
-        # refusing, which is the behaviour without it, so it can only
-        # remove over-refusals and never create a false accept.
+        # wedged -- so extend rather than refuse. Partial by construction:
+        # slow work in a shell BUILTIN spawns no child and still reads as
+        # unchanged, so this can only remove over-refusals, never create a
+        # false accept.
         started_ok = occupant != entry_occupant
     if not started_ok and can_refuse:
         named = f" (foreground: {occupant!r})" if occupant else ""
@@ -929,23 +905,19 @@ async def run_command(
 
     timed_out = not started_ok
     wait_argv = _tmux_argv(server, "wait-for", channel)
-    # The wait must be owned by a killable child, not a worker thread.
-    # ``asyncio.to_thread(subprocess.run, ...)`` cannot be interrupted:
-    # cancelling the call raised ``CancelledError`` at once while the
-    # thread stayed blocked in an untimed ``waitpid``, so ``tmux
-    # wait-for`` ran on for the rest of the budget — measured at 22 s
-    # of orphan for a 25 s ``run_command`` cancelled at 3 s. This is
-    # the most-cancelled wait of the three: agents routinely bail out
-    # of a long shell command. ``_run_tmux_bounded`` kills the child on
-    # expiry and on cancellation alike.
+    # The wait must be owned by a killable child, not a worker thread:
+    # ``asyncio.to_thread(subprocess.run, ...)`` raises ``CancelledError``
+    # at once while the thread stays blocked in an untimed ``waitpid``,
+    # leaving ``tmux wait-for`` to run out the budget -- 22 s of orphan
+    # for a 25 s ``run_command`` cancelled at 3 s. This is the
+    # most-cancelled wait of the three; ``_run_tmux_bounded`` kills the
+    # child on expiry and on cancellation alike.
     returncode = 0
     stderr_bytes = b""
     if started_ok:
-        # A single await hears nothing until it returns, so a client
-        # watching a thirty-second command saw the same thing whether
-        # the command was running or the server had stopped answering.
-        # wait_for_text reports from inside its poll loop; this one has
-        # no loop to report from.
+        # A single await hears nothing until it returns, so a long command
+        # and a server that stopped answering look identical to a client.
+        # wait_for_text reports from its poll loop; this has no loop.
         try:
             async with progress_ticker(
                 ctx,
@@ -1279,13 +1251,10 @@ def paste_text(
         # never chose. Pasting nothing succeeds and does nothing.
         return f"Text pasted to pane {pane.pane_id}"
 
-    # Use a unique named tmux buffer so we don't clobber the user's
-    # unnamed paste buffer, and so we can reliably clean up on error
-    # paths (paste-buffer -b NAME -d deletes the named buffer). The
-    # shape matches ``buffer_tools._BUFFER_NAME_RE`` exactly —
-    # ``libtmux_mcp_<32-hex>_<logical>`` — so a future operator-facing
-    # listing of MCP-owned buffers sees paste-through buffers and
-    # ``load_buffer`` buffers uniformly under one regex.
+    # A uniquely named buffer leaves the user's unnamed paste buffer
+    # alone and cleans up on error paths (``paste-buffer -b NAME -d``).
+    # The shape matches ``buffer_tools._BUFFER_NAME_RE`` so one regex
+    # lists every MCP-owned buffer.
     buffer_name = f"libtmux_mcp_{uuid.uuid4().hex}_paste"
     tmppath: str | None = None
     try:
@@ -1330,13 +1299,11 @@ def paste_text(
             server.delete_buffer(buffer_name=buffer_name)
 
     if bracket and text.endswith(("\n", "\r")):
-        # Bracketed paste tells the terminal "this is pasted text, not
-        # typed input", so the shell holds the trailing newline in its
-        # edit buffer instead of submitting. Correct terminal behavior
-        # and a safe default -- but an unqualified "Text pasted" reads
-        # as "your command ran", and the text is not inert: it executes
-        # the moment ANY Enter reaches this pane, from any source,
-        # possibly long after this call and out of order with it.
+        # Bracketed paste makes the shell hold the trailing newline in its
+        # edit buffer rather than submit. The text is not inert: it runs
+        # the moment ANY Enter reaches this pane, from any source, possibly
+        # long after this call -- so "Text pasted" must not read as "your
+        # command ran".
         return (
             f"Text pasted to pane {pane.pane_id}, but NOT submitted: with "
             "bracket=True the trailing newline goes into the shell's edit "

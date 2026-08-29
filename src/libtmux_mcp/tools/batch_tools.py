@@ -125,22 +125,18 @@ async def _get_allowed_tool_tier(
 
     tool = await fastmcp.get_tool(operation.tool)
     if tool is None:
-        # None means nonexistent OR disabled by tier, so raising
-        # "Unknown tool" here denied that a gated tool exists. Hand it
-        # on instead: the nested call runs with ``run_middleware=True``,
-        # letting ``SafetyMiddleware`` name the tier and FastMCP still
-        # raise ``NotFoundError`` for a typo. Nothing is skipped --
-        # visibility follows tier tags, so an invisible tool is
-        # off-tier by construction and is denied before these checks.
+        # None means nonexistent OR disabled by tier, so "Unknown tool"
+        # here would deny that a gated tool exists. Hand it on: the nested
+        # call runs with ``run_middleware=True``, letting
+        # ``SafetyMiddleware`` name the tier while FastMCP still raises
+        # ``NotFoundError`` for a typo.
         return
 
     # ``max_tier`` is a CEILING, so a readonly tool is reachable through
-    # every batch wrapper, not only the readonly one. The batch loop is
-    # serial with no aggregate deadline and ``MAX_BATCH_OPERATIONS`` is
-    # 1000, so a self-bounded wait batched N times costs N x its
-    # ceiling. Reject per-operation (not pre-loop) so the raise becomes
-    # a ``success=False`` row and ``on_error='continue'`` isolation is
-    # preserved.
+    # every batch wrapper. The loop is serial with no aggregate deadline,
+    # so a self-bounded wait batched N times costs N x its ceiling.
+    # Rejected per-operation, not pre-loop, so the raise becomes a
+    # ``success=False`` row and ``on_error='continue'`` still isolates.
     if TAG_SELF_BOUNDED in tool.tags:
         msg = (
             f"Tool {operation.tool!r} enforces its own wait ceiling and "
@@ -288,12 +284,10 @@ async def _call_tools_batch(
     stopped_at: int | None = None
     deadline = time.monotonic() + timeout if timeout is not None else None
     for index, operation in enumerate(operations):
-        # Checked BETWEEN operations, which is enough here and would not
-        # have been for a caller-supplied regex: the time is genuinely
-        # in this loop. A thousand operations is the cap and a thousand
-        # mutations took 67 seconds, and a client that gives up does not
-        # stop the server -- 617 further mutations landed after the
-        # caller was gone, with no report of where it stopped.
+        # BETWEEN operations is enough because the time is genuinely in
+        # this loop. A thousand mutations take 67 s, and a client giving up
+        # does not stop the server -- 617 further mutations landed after
+        # the caller was gone, with no report of where it stopped.
         if deadline is not None and time.monotonic() > deadline:
             assert timeout is not None
             results.append(

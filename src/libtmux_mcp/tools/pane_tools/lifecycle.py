@@ -91,20 +91,17 @@ def kill_pane(
     return f"Pane killed: {pid}"
 
 
-#: Bound on waiting for a respawned pane to report its new command.
-#: Measured on tmux 3.7c over 15 runs, ``pane_current_command`` reaches
-#: its new value by 26.4 ms worst case, so this is generous by an order
-#: of magnitude while keeping a pane that never matches to a fixed cost.
-#: Ceiling for the pid to change. Exits the instant it does, so a
-#: generous value is free -- and 0.25 was NOT generous: measured
-#: failing at loadavg 30, where the whole round trip takes longer than
-#: the settle it was written to absorb.
+#: Ceiling for the pid to change. Exits the instant it does, so a generous
+#: value is free -- and 0.25 was NOT generous: it failed at loadavg 30,
+#: where the round trip outlasts the settle it was written to absorb.
 _RESPAWN_PID_SECONDS = 5.0
 
 #: Grace for the command to catch up ONCE THE PID HAS CHANGED. Small on
 #: purpose: a command whose basename never appears -- ``env FOO=1 sleep
 #: 5`` reports ``sleep``, not ``env`` -- pays this in full, so it is a
-#: bill rather than a ceiling and cannot be widened the same way.
+#: bill rather than a ceiling and cannot be widened the same way. On tmux
+#: 3.7c over 15 runs, ``pane_current_command`` reached its new value by
+#: 26.4 ms worst case.
 _RESPAWN_COMMAND_SECONDS = 0.25
 _RESPAWN_SETTLE_INTERVAL = 0.005
 
@@ -301,11 +298,9 @@ def respawn_pane(
         pane.refresh()
     except exc.TmuxObjectDoesNotExist as err:
         # tmux does not fail a respawn whose command cannot be executed:
-        # the new process dies immediately and takes the pane with it --
-        # and the window, session and server too, if it was the last
-        # one. Returning the stale object would describe a pane that no
-        # longer exists, which is how a mistyped shell reported success
-        # while destroying its own subject.
+        # the new process dies at once and takes the pane with it -- and
+        # the window, session and server too, if it was the last. The
+        # stale object would describe a pane that no longer exists.
         msg = (
             f"pane {pane_id} did not survive the respawn: its new command "
             "exited immediately. The pane is gone, along with its window "
@@ -474,12 +469,9 @@ def find_pane_by_position(
         )
         raise ExpectedToolError(msg)
 
-    # When more than one pane qualifies (e.g. a single-pane window
-    # touches all four edges, or an unusual layout), prefer the pane
-    # whose top-left coordinate is furthest from window origin (0,0).
-    # That picks the visually innermost pane for the corner — i.e.
-    # for 'bottom-right', the pane with the largest pane_left +
-    # pane_top, which sits visually closest to the bottom-right.
+    # When several panes qualify -- a single-pane window touches all four
+    # edges -- prefer the one whose top-left is furthest from the window
+    # origin, so 'bottom-right' picks the largest pane_left + pane_top.
     def _innermost_score(p: t.Any) -> int:
         try:
             return int(p.pane_left or 0) + int(p.pane_top or 0)
