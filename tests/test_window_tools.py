@@ -796,10 +796,22 @@ def test_a_typed_filter_matches_what_its_string_form_matches(
         (list_sessions, {"session_windows": 1}, {"session_windows": "1"}),
     ]
 
+    def _ids(rows: list[t.Any]) -> set[str]:
+        # Identity, not whole models. The two encodings are necessarily
+        # two separate calls, and any live object's attributes can change
+        # between them -- a window elsewhere on the server renaming
+        # itself made this fail on a difference that has nothing to do
+        # with filtering. Which ROWS matched is the property.
+        for attr in ("pane_id", "window_id", "session_id"):
+            if rows and hasattr(rows[0], attr):
+                return {getattr(row, attr) for row in rows}
+        msg = "no identity field on the returned rows"
+        raise AssertionError(msg)
+
     for fn, typed, text in table:
         got = fn(filters=typed, socket_name=socket_name)
         want = fn(filters=text, socket_name=socket_name)
         assert want, f"{fn.__name__}{text} matched nothing; the row proves nothing"
-        assert got == want, (
+        assert _ids(got) == _ids(want), (
             f"{fn.__name__}: {typed} matched {len(got)}, {text} matched {len(want)}"
         )
