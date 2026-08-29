@@ -382,14 +382,39 @@ def test_pipe_pane_refuses_a_destination_it_cannot_write(
     pipe, because the shell has been spawned and has not yet failed, so
     reading it here would be a check that never fires.
     """
-    missing = tmp_path / "no-such-dir" / "out.log"
 
-    with pytest.raises(ToolError, match="not an existing directory"):
-        pipe_pane(
-            pane_id=mcp_pane.pane_id,
-            output_path=str(missing),
-            socket_name=mcp_server.socket_name,
-        )
+    def refuse(path: pathlib.Path | str) -> None:
+        with pytest.raises(ToolError, match="cannot pipe to"):
+            pipe_pane(
+                pane_id=mcp_pane.pane_id,
+                output_path=str(path),
+                socket_name=mcp_server.socket_name,
+            )
+
+    refuse(tmp_path / "no-such-dir" / "out.log")
+
+    # Each of these passed a parent-directory-plus-access check and
+    # captured nothing. They are here because every stat-shaped
+    # predicate is a proxy for "a shell can append to this", and the
+    # proxy kept being wrong in a new way.
+    directory = tmp_path / "isadir"
+    directory.mkdir()
+    refuse(directory)
+
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o500)
+    dangling = tmp_path / "dangling"
+    dangling.symlink_to(locked / "nope.log")
+    refuse(dangling)
+
+    refuse(tmp_path / ("n" * 300))
+
+    # A reader-less FIFO blocks the shell in open() forever, so it looks
+    # healthy and captures nothing -- invisible to any poll of
+    # #{pane_pipe}, which is why the regular-file test is separate.
+    fifo = tmp_path / "nr.fifo"
+    os.mkfifo(fifo)
+    refuse(fifo)
 
     # Control: a writable destination still pipes.
     good = tmp_path / "out.log"

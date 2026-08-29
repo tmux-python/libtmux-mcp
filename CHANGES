@@ -8,6 +8,32 @@ _Notes on upcoming releases will be added here_
 
 ### What's new
 
+#### `pipe_pane` does what the redirect does, instead of predicting it
+
+Four more destinations passed the pre-flight, returned "Piping pane %N
+to ...", and captured nothing: an existing DIRECTORY, a DANGLING
+SYMLINK pointing into an unwritable directory, `/dev/full`, and a
+300-character basename. The check tested the parent directory and
+`os.access`, which is a proxy for "a shell can append here" -- and each
+time the proxy was wrong it was wrong in a new way, which is the
+argument against adding a fifth stat check.
+
+Opening the path for append answers the real question and closes all
+four at once: the directory raises `IsADirectoryError`, the dangling
+link resolves and fails on its real parent rather than on the directory
+holding the link, `/dev/full` is not a regular file, and the long name
+raises `ENAMETOOLONG`.
+
+The regular-file test stays separate because `open` succeeds on a FIFO
+that has a reader and on a character device. A reader-less FIFO blocks
+the shell inside `open()` indefinitely, so the pipe looks perfectly
+healthy -- `#{pane_pipe}` reads 1 at every delay measured -- while
+nothing is ever captured. No poll of any duration can see that, which
+is also why this is a pre-flight rather than a check after the fact:
+the answer is available synchronously, and polling would spend latency
+on every call to be less correct.
+
+
 #### Hook queries answer about the object you named
 
 `show_hooks(scope="window", target="@0")` returned the SESSION's hooks,

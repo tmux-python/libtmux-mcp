@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
 import shlex
@@ -83,28 +82,45 @@ def _raise_if_unwritable(output_path: str) -> None:
     being captured to a file that will never appear. Worse, a stale file
     already at that path then reads back as if it were live capture.
 
-    Checked BEFORE piping rather than after. ``#{pane_pipe}`` looks like
-    the obvious discriminator and is not: measured, it reads ``1``
-    immediately after a doomed pipe, because the shell has been spawned
-    and has not yet failed on the redirect. Only a later poll sees ``0``,
-    so reading it here would be a check that never fires.
+    Checked BEFORE piping rather than after. ``#{pane_pipe}`` reads
+    ``1`` immediately after a doomed pipe, because the shell has been
+    spawned and has not yet failed on the redirect; only a later poll
+    sees ``0``. Polling it would work, but the answer is available
+    synchronously and a poll is latency spent on every call.
+
+    Does what the redirect does rather than predicting it. A stat-based
+    predicate is a proxy for "a shell can append here", and each new
+    stat check is another proxy: measured, an existing DIRECTORY, a
+    DANGLING SYMLINK into an unwritable directory, ``/dev/full`` and a
+    300-character basename all passed a parent-directory-plus-``access``
+    check and captured nothing. Opening the path for append answers the
+    real question and closes all four at once -- the directory raises
+    ``IsADirectoryError``, the dangling link resolves and fails on the
+    real parent, ``/dev/full`` is not a regular file, and the long name
+    raises ``ENAMETOOLONG``.
+
+    The regular-file test is separate because ``open`` succeeds on a
+    FIFO with a reader and on a character device: a reader-less FIFO
+    blocks the shell in ``open()`` forever, so it looks healthy and
+    captures nothing, and no poll of any duration can see that.
     """
     target = pathlib.Path(output_path)
-    parent = target.parent
-    if not parent.is_dir():
+    if target.exists() and not target.is_file():
+        kind = "a directory" if target.is_dir() else "not a regular file"
         msg = (
-            f"cannot pipe to {output_path!r}: {str(parent)!r} is not an "
-            "existing directory. tmux would report success and write "
-            "nothing."
+            f"cannot pipe to {output_path!r}: it is {kind}. tmux would "
+            "report success and capture nothing."
         )
         raise ExpectedToolError(msg)
-    probe = target if target.exists() else parent
-    if not os.access(probe, os.W_OK):
+    try:
+        with target.open("ab"):
+            pass
+    except OSError as exc:
         msg = (
-            f"cannot pipe to {output_path!r}: no write permission. tmux "
-            "would report success and write nothing."
+            f"cannot pipe to {output_path!r}: {exc.strerror or exc}. tmux "
+            "would report success and capture nothing."
         )
-        raise ExpectedToolError(msg)
+        raise ExpectedToolError(msg) from exc
 
 
 @handle_tool_errors
