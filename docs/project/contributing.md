@@ -45,6 +45,44 @@ Watch mode:
 $ uv run ptw .
 ```
 
+### Reading a green run
+
+`--reruns=2` is in `addopts`, so a passing summary means "did not fail
+three times consecutively" rather than "did not fail". Each retry now
+prints its own `RERUN <nodeid>` line, so an absorbed failure names
+itself — but the summary counts still say `passed`.
+
+When hunting a flake, turn retries off so the first failure is the
+reported one:
+
+```console
+$ uv run pytest -n auto --reruns 0
+```
+
+### Timeouts under heavy parallel load
+
+Several tests poll with libtmux's `retry_until`, whose budget is
+`RETRY_TIMEOUT_SECONDS` (default 8 s). That is a ceiling, not a spend:
+measured, the polls it guards complete in 1.4–4.3 s, so there is
+normally 2–6x of margin and raising it changes nothing on the passing
+path.
+
+On a heavily loaded machine the margin can close, and the symptom is
+`libtmux.exc.WaitTimeout` at just over 10 s. Measured at loadavg 213 on
+a 20-core box, roughly one run in six tipped one test — never the same
+one twice, because whichever wait-bounded test gets starved is the one
+that fails. CI runs at far lower parallelism and has not shown it.
+
+If you see it, widen the ceiling:
+
+```console
+$ RETRY_TIMEOUT_SECONDS=20 uv run pytest -n auto
+```
+
+The variable has to be set before pytest starts: libtmux binds it as a
+default argument when `retry_until` is defined, and its pytest plugin
+imports that module before any `conftest.py` runs.
+
 ## Linting
 
 ```console
