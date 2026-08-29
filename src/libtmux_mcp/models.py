@@ -109,6 +109,14 @@ class PaneInfo(BaseModel):
         default=None, description="Active flag ('1' or '0')"
     )
     window_id: str | None = Field(default=None, description="Parent window ID")
+    session_name: str | None = Field(
+        default=None,
+        description=(
+            "Session the pane is in. Present because a pane can change "
+            "session -- break_pane and join_pane both move panes across "
+            "them -- and session_id alone does not name it."
+        ),
+    )
     session_id: str | None = Field(default=None, description="Parent session ID")
     is_caller: bool | None = Field(
         default=None,
@@ -620,6 +628,28 @@ class ToolCallBatchResult(BaseModel):
     response_truncated_bytes: int = Field(
         default=0,
         description="Approximate serialized bytes removed from nested result payloads.",
+    )
+
+
+class PaneMoveResult(BaseModel):
+    """Result of moving a pane between windows.
+
+    Carries the source-window outcome because the move can DESTROY it:
+    a window with no panes left is removed by tmux, so consolidating
+    panes deletes windows the caller never named. The pane alone cannot
+    express that -- it reports only where it landed.
+    """
+
+    pane: PaneInfo = Field(description="The pane after the move.")
+    source_window_id: str | None = Field(
+        default=None, description="Window the pane was moved out of."
+    )
+    source_window_destroyed: bool = Field(
+        default=False,
+        description=(
+            "Whether the source window was removed because this move left "
+            "it with no panes."
+        ),
     )
 
 

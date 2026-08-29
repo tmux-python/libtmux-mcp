@@ -29,7 +29,7 @@ from libtmux_mcp._utils import (
     _serialize_window,
     handle_tool_errors,
 )
-from libtmux_mcp.models import PaneInfo, WindowInfo
+from libtmux_mcp.models import PaneInfo, PaneMoveResult, WindowInfo
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -575,7 +575,7 @@ def join_pane(
     target_window_id: str,
     vertical: bool = True,
     socket_name: str | None = None,
-) -> PaneInfo:
+) -> PaneMoveResult:
     """Move an existing pane into another window, splitting it.
 
     The counterpart to :func:`break_pane`, and the reason to prefer both
@@ -596,19 +596,34 @@ def join_pane(
 
     Returns
     -------
-    PaneInfo
+    PaneMoveResult
         The pane after the move, re-read so ``window_id`` reflects where
-        it actually landed.
+        it actually landed, plus whether the source window was DESTROYED
+        by the move. tmux removes a window left with no panes, so
+        consolidating panes deletes windows the caller never named.
     """
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(server, pane_id=pane_id)
     window = _resolve_window(server, window_id=target_window_id)
+    source_window = pane.window
+    source_window_id = source_window.window_id if source_window else None
     pane.join(window, vertical=vertical)
+
     moved = server.panes.get(pane_id=pane.pane_id, default=None)
     if moved is None:
         msg = f"pane {pane_id} did not survive join-pane"
         raise ExpectedToolError(msg)
-    return _serialize_pane(moved)
+    # Asked afterwards rather than predicted from the pane count: the
+    # question is whether the window is still there, and that is
+    # observable.
+    destroyed = source_window_id is not None and (
+        server.windows.get(window_id=source_window_id, default=None) is None
+    )
+    return PaneMoveResult(
+        pane=_serialize_pane(moved),
+        source_window_id=source_window_id,
+        source_window_destroyed=destroyed,
+    )
 
 
 def register(mcp: FastMCP) -> None:

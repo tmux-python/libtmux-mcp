@@ -1282,6 +1282,7 @@ def _serialize_pane(pane: Pane) -> PaneInfo:
         pane_active=getattr(pane, "pane_active", None),
         window_id=pane.window_id,
         session_id=pane.session_id,
+        session_name=pane.session_name,
         is_caller=_compute_is_caller(pane),
     )
 

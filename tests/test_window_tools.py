@@ -402,8 +402,13 @@ def test_break_and_join_pane_preserve_the_pane(
         target_window_id=other.window_id,
         socket_name=mcp_server.socket_name,
     )
-    assert joined.pane_id == pane.pane_id
-    assert joined.window_id == other.window_id
+    assert joined.pane.pane_id == pane.pane_id
+    assert joined.pane.window_id == other.window_id
+    # The pane was its source window's last, so tmux removed that
+    # window. Consolidating panes deletes windows the caller never
+    # named, and the result has to say so.
+    assert joined.source_window_id == broken.window_id
+    assert joined.source_window_destroyed is True
 
 
 def test_break_pane_refuses_to_empty_its_source_session(

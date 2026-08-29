@@ -97,6 +97,21 @@ kill it and start again somewhere else -- which loses the process, the
 scrollback, and the pane id, along with any `capture_since` cursor a
 caller holds against that id.
 
+`join_pane` reports whether the move DESTROYED the source window.
+tmux removes a window left with no panes, so consolidating panes
+deletes windows the caller never named -- measured, moving the last
+pane out of `@9` removed it and the result named only the destination.
+It returns `source_window_id` and `source_window_destroyed`, observed
+after the move rather than predicted from a pane count. Unlike
+`break_pane`'s session case this is not refused: a window emptying is
+inherent to moving its last pane, so refusing it would forbid moving
+most panes.
+
+`PaneInfo` gained `session_name`. It carried `session_id` and no name,
+so `break_pane`'s warning to check which session a pane ended up in
+could not be followed on `join_pane` -- which crosses sessions the same
+way -- or on `list_panes`.
+
 Both report where the pane actually ended up, re-read after the move
 rather than assumed from the request: `break_pane` returns the window
 the pane now lives in, and `join_pane` returns the pane with the
