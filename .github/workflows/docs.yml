@@ -94,7 +94,7 @@ jobs:
         run: |
           aws cloudfront create-invalidation \
             --distribution-id "${{ secrets.LIBTMUX_MCP_DOCS_DISTRIBUTION }}" \
-            --paths "/index.html" "/objects.inv" "/searchindex.js"
+            --paths "/*"
 
       - name: Purge cache on Cloudflare
         if: env.PUBLISH == 'true'
