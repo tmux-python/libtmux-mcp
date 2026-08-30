@@ -12,7 +12,18 @@ commits to and what it refuses to promise.
 
 ## Status
 
-Proposed. Supersedes the former three-level capability model.
+Proposed. Supersedes the former three-level capability model. The
+[four toolsets](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/_utils.py#L385-L395)
+already ship. The manifest, pinned socket lifecycle, target names and removals,
+and generated disclosure surfaces remain proposed. Version 0.1.0a21 still
+exposes
+[`run_command` and per-call socket selection](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/pane_tools/io.py#L327-L338),
+generic
+[`set_option`](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/option_tools.py#L103-L119)
+and
+[`set_environment`](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/env_tools.py#L60-L70),
+and
+[`pipe_pane`](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/pane_tools/pipe.py#L32-L41).
 
 ## Context
 
@@ -155,10 +166,10 @@ keyed on an inner tool's name will not fire. That is stated in the tool's own
 description rather than papered over, and it is why the mutating and destructive
 batches do not survive at all.
 
-**Names are not yet stable.** The model depends on literal tool names as client
-policy hooks, which makes the alpha's renames a one-time break rather than a
-free change. `MIGRATION` carries the explicit old-to-new map; the stability
-promise begins after this lands, not before.
+**Target names are not yet stable.** The model depends on literal tool names as
+client policy hooks, which makes the alpha's renames a one-time break rather than
+a free change. `MIGRATION` records each rename when it lands; the stability
+promise begins after the target surface lands, not before.
 
 **Self-kill guards protect one process against the direct teardown tools.** They
 cover the pane, window, and session containing this server, only when it lives
@@ -178,16 +189,17 @@ MCP entries. Deriving everything from one manifest means adding a tool is adding
 a row plus a test, and a tool whose claims drift from its behaviour fails CI
 rather than shipping.
 
-The changes span two repositories: the documentation extension hardcodes the old
-tier vocabulary and silently renders unknown tags as `readonly`, so it has to
-grow a configurable vocabulary and release before any tag rename lands here.
+The documentation extension and this server share the toolset vocabulary.
+gp-sphinx
+[accepts configured axes](https://github.com/git-pull/gp-sphinx/blob/v0.1.0a38/packages/sphinx-autodoc-fastmcp/src/sphinx_autodoc_fastmcp/__init__.py#L149-L158),
+so releases keep those terms aligned.
 
 Because `exit-empty` defaults on
 ([`options-table.c`](https://github.com/tmux/tmux/blob/3.7c/options-table.c)),
 an agent that removes its own sessions empties its server without a socket-wide
 kill tool, which is why none is offered.
 
-The result is a server that is useful by default, explicit that it can execute
+The target is a server that is useful by default, explicit that it can execute
 arbitrary code, precise about the little the socket actually scopes, and
 structured so that a future tool cannot quietly acquire authority the
 documentation does not admit to.
