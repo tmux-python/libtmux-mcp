@@ -47,7 +47,9 @@ HISTORICAL_FILES = frozenset({pathlib.Path("CHANGES"), pathlib.Path("MIGRATION.m
 
 CONFIG_REJECTION_FILES = frozenset(
     {
+        pathlib.Path("scripts/mcp_swap.py"),
         pathlib.Path("src/libtmux_mcp/server.py"),
+        pathlib.Path("tests/test_mcp_swap.py"),
         pathlib.Path("tests/test_server.py"),
     }
 )
