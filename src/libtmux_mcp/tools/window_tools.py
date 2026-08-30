@@ -8,10 +8,7 @@ from libtmux.constants import PaneDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CHANGE,
-    ANNOTATIONS_DELETE,
-    ANNOTATIONS_OBSERVE,
-    ANNOTATIONS_PANE_INPUT,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     DISCOVERY_META,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
@@ -503,42 +500,42 @@ def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Panes",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(list_panes)
     mcp.tool(
         title="Get tmux Window Info",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(get_window_info)
     mcp.tool(
         title="Split tmux Window",
-        annotations=ANNOTATIONS_PANE_INPUT,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(split_window)
     mcp.tool(
         title="Rename tmux Window",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(rename_window)
     mcp.tool(
         title="Kill tmux Window",
-        annotations=ANNOTATIONS_DELETE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_TEARDOWN},
     )(kill_window)
     mcp.tool(
         title="Select tmux Layout",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(select_layout)
     mcp.tool(
         title="Resize tmux Window",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(resize_window)
     mcp.tool(
         title="Move tmux Window",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(move_window)

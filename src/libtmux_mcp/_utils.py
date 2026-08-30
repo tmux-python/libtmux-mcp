@@ -36,7 +36,7 @@ class ExpectedToolError(ToolError):
 
     Defaults the error's ``log_level`` to ``WARNING`` (honored by
     fastmcp >= 3.3 when logging tool/resource failures) so routine
-    validation errors, missing objects, and tier denials do not surface
+    validation errors, missing objects, and toolset denials do not surface
     as ERROR records. Unexpected failures keep stock :class:`ToolError`
     and its ERROR default — those are the ones operators must see.
 
@@ -356,22 +356,22 @@ def _caller_is_strictly_on_server(
 # Toolsets
 # ---------------------------------------------------------------------------
 
-#: Read tmux state and terminal output. Starts no process and hands no
-#: caller input to one: what a client supplies is IDs, names, bounded
-#: patterns, and validated variable names.
+#: Request tmux state or terminal output, or render server-local prompt
+#: text. The built-in operation does not pass caller input as a tmux or
+#: shell command.
 #:
 #: Reading is not "safe" — a capture returns whatever a pane holds,
 #: including credentials and text written by a remote process — so this
 #: names what the tools *do*, not how much they are trusted.
 TOOLSET_INSPECT = "inspect"
 
-#: Change tmux structure or presentation: names, sizes, layouts,
-#: selections, modes. Starts no process, and takes no caller input that
-#: anything later executes.
+#: Change tmux-managed structure, presentation, staging, or coordination
+#: state. The built-in operation does not supply a shell command, pane
+#: input, or a value tmux treats as executable configuration.
 TOOLSET_MANAGE = "manage"
 
-#: Start a pane process, deliver input to one, or store a value tmux
-#: later runs. The product lives here.
+#: Start a pane process, deliver input to one, or store state that can
+#: control later execution. The product lives here.
 TOOLSET_EXECUTE = "execute"
 
 #: Delete tmux objects or retained scrollback. Irreversible at the tmux
@@ -380,13 +380,13 @@ TOOLSET_TEARDOWN = "teardown"
 
 #: The four toolsets, in the order startup reports them.
 #:
-#: An unordered set, deliberately. The tiers this replaced accumulated
+#: An unordered set, deliberately. The ordered model this replaced accumulated
 #: upward, so the kill tools could not be enabled without also enabling
 #: the typing tools; ``LIBTMUX_TOOLSETS=inspect,teardown`` is a legal
 #: surface. They group tools by what they do, for inventory
-#: configuration, context reduction, and client routing. They are not
-#: permissions, and filtering them is not containment: an enabled
-#: execute tool can type the equivalent of anything hidden.
+#: configuration, context reduction, and client routing. They control MCP
+#: tool calls, not tmux authority or containment: an enabled execute tool can
+#: type the equivalent of anything hidden.
 VALID_TOOLSETS: tuple[str, ...] = (
     TOOLSET_INSPECT,
     TOOLSET_MANAGE,
@@ -400,93 +400,13 @@ TAG_SELF_BOUNDED = "self-bounded"
 # Reusable annotation presets for tool registration
 # ---------------------------------------------------------------------------
 
-#: Annotations for tools that only read tmux or pane state.
-ANNOTATIONS_OBSERVE: dict[str, bool] = {
-    "readOnlyHint": True,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": False,
-}
-
-#: Annotations for read tools that return terminal content. Read-only,
-#: but ``openWorldHint`` is ``True``: a pane holds whatever was printed
-#: into it — remote sessions, package managers, other agents — so the
-#: text reaching the caller crossed a trust boundary on its way in.
-ANNOTATIONS_OBSERVE_CONTENT: dict[str, bool] = {
-    "readOnlyHint": True,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": True,
-}
-
-#: Annotations for tools that replace a value tmux already held — a name,
-#: a size, a layout, a selection, an option. MCP's ``destructiveHint: false``
-#: means additive-only, which a replacement is not, so these advertise
-#: ``True`` even though nothing is destroyed. Repeating the same call lands
-#: on the same state, so ``idempotentHint`` stays ``True``.
-ANNOTATIONS_CHANGE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "idempotentHint": True,
-    "openWorldHint": False,
-}
-
-#: Annotations for tools that allocate a new tmux object each call, so
-#: nothing is replaced and no two calls land on the same state.
-ANNOTATIONS_ALLOCATE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": False,
-    "idempotentHint": False,
-    "openWorldHint": False,
-}
-#: Annotations for tools that start a pane's configured process without a
-#: caller-supplied command. Additive at the tmux level, but ``openWorldHint``
-#: is ``True``: the new process runs with the user's authority and reaches
-#: whatever that user reaches.
-ANNOTATIONS_SPAWN: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": False,
-    "idempotentHint": False,
-    "openWorldHint": True,
-}
-
-#: Annotations for tools that store a value tmux runs later: the status
-#: formats, ``default-command`` and ``command-alias`` all execute a
-#: ``#(...)`` job when the stored value is used, and a tmux environment
-#: value reaches a future shell that may execute it.
-#:
-#: Nothing runs during the call, so ``idempotentHint`` stays ``True`` — the
-#: same call lands on the same stored state. ``openWorldHint`` is ``True``
-#: because what that state later reaches does not stop at tmux.
-ANNOTATIONS_DEFERRED_EXEC: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "idempotentHint": True,
-    "openWorldHint": True,
-}
-
-#: Annotations for tools that hand a caller-supplied payload to a program
-#: that runs it — typed keys, a pasted buffer, an authored shell command,
-#: or the command ``pipe_pane`` feeds.
-#:
-#: ``destructiveHint`` is ``True`` because MCP defines ``False`` as a claim
-#: of additive-only updates, and such a payload can overwrite a file, end a
-#: process, or leave a shell mid-line. ``openWorldHint`` is ``True`` because
-#: the effect extends into whatever the payload runs.
-#:
-#: Contrast :data:`ANNOTATIONS_SPAWN`, which starts the pane's *configured*
-#: process and carries no payload.
-ANNOTATIONS_PANE_INPUT: dict[str, bool] = {
+#: Conservative MCP defaults for calls into programmable tmux servers.
+#: Aliases and hooks can replace or extend the requested operation.
+ANNOTATIONS_AMBIENT_UNKNOWN: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": False,
     "openWorldHint": True,
-}
-ANNOTATIONS_DELETE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "idempotentHint": False,
-    "openWorldHint": False,
 }
 
 #: Per-tool MCP ``meta`` payload that hints clients to keep this tool
@@ -496,7 +416,7 @@ ANNOTATIONS_DELETE: dict[str, bool] = {
 #: documented at https://code.claude.com/docs/en/mcp (v2.1.121+).
 #:
 #: Best-effort by design — safe no-op for clients that don't index the
-#: ``anthropic/*`` namespace. Apply only to read-tier discovery anchors
+#: ``anthropic/*`` namespace. Apply only to inspect discovery anchors
 #: (``list_panes``, ``list_windows``, ``snapshot_pane``); each
 #: always-loaded tool consumes a fixed schema budget in clients that
 #: honour the hint, so widening the set has a real cost.
@@ -1209,11 +1129,8 @@ def handle_tool_errors(
     at WARNING), the unexpected catch-all as stock ``ToolError``
     (logged at ERROR).
 
-    The re-raise chains the original exception via ``from e``. Keep it
-    single-level: :class:`~libtmux_mcp.middleware.InspectRetryMiddleware`
-    matches :exc:`libtmux.exc.LibTmuxException` by inspecting exactly
-    one ``__cause__`` hop, so wrapping the mapped error again would
-    silently disable ``inspect`` retries.
+    The re-raise chains the original exception via ``from e`` so logs and
+    debuggers retain the libtmux cause behind the caller-facing error.
 
     Use :func:`handle_tool_errors_async` for ``async def`` tools — this
     wrapper only supports plain sync callables.
@@ -1245,8 +1162,7 @@ def handle_tool_errors_async(
     error classes as the sync decorator (expected failures as
     :class:`ExpectedToolError` at WARNING, the unexpected catch-all as
     stock ``ToolError`` at ERROR) by delegating to a shared helper,
-    and chains the original exception via the same single-level
-    ``from e`` that ``inspect`` retries depend on.
+    and chains the original exception via ``from e`` for diagnostics.
     """
 
     @functools.wraps(fn)

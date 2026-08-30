@@ -8,10 +8,7 @@ from libtmux.constants import WindowDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CHANGE,
-    ANNOTATIONS_DELETE,
-    ANNOTATIONS_OBSERVE,
-    ANNOTATIONS_SPAWN,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     DISCOVERY_META,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
@@ -355,32 +352,32 @@ def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Windows",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(list_windows)
     mcp.tool(
         title="Get tmux Session Info",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(get_session_info)
     mcp.tool(
         title="Create tmux Window",
-        annotations=ANNOTATIONS_SPAWN,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(create_window)
     mcp.tool(
         title="Rename tmux Session",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(rename_session)
     mcp.tool(
         title="Kill tmux Session",
-        annotations=ANNOTATIONS_DELETE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_TEARDOWN},
     )(kill_session)
     mcp.tool(
         title="Select tmux Window",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(select_window)

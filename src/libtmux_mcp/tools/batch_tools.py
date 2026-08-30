@@ -11,6 +11,7 @@ from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TAG_SELF_BOUNDED,
     TOOLSET_INSPECT,
     ExpectedToolError,
@@ -38,15 +39,6 @@ _BATCH_TRUNCATED_CONTENT: list[dict[str, t.Any]] = [
         "text": "[... batch truncated nested content ...]",
     }
 ]
-
-#: The read batch can invoke a member that returns pane text, so it
-#: carries that member's ``openWorldHint``.
-_ANNOTATIONS_BATCH_READ: dict[str, bool] = {
-    "readOnlyHint": True,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": True,
-}
 
 
 def _content_block_to_dict(block: t.Any) -> dict[str, t.Any]:
@@ -283,6 +275,6 @@ def register(mcp: FastMCP) -> None:
     """Register generic MCP batch tools."""
     mcp.tool(
         title="Call Read Tools Batch",
-        annotations=_ANNOTATIONS_BATCH_READ,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(call_read_tools_batch)

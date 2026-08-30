@@ -35,10 +35,7 @@ import typing as t
 import uuid
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_ALLOCATE,
-    ANNOTATIONS_DELETE,
-    ANNOTATIONS_OBSERVE_CONTENT,
-    ANNOTATIONS_PANE_INPUT,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
     TOOLSET_MANAGE,
@@ -383,27 +380,26 @@ def delete_buffer(
 def register(mcp: FastMCP) -> None:
     """Register buffer tools with the MCP instance.
 
-    ``load_buffer`` stages content into a buffer it allocates, so it is
-    additive and closed-world. ``paste_buffer`` is what delivers that
-    content to a pane's program, and carries the hints for it.
+    ``load_buffer`` stages inert content, while ``paste_buffer`` delivers
+    that content to a pane's program. Their toolsets preserve that boundary.
     """
     mcp.tool(
         title="Load tmux Buffer",
-        annotations=ANNOTATIONS_ALLOCATE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )(load_buffer)
     mcp.tool(
         title="Paste tmux Buffer",
-        annotations=ANNOTATIONS_PANE_INPUT,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(paste_buffer)
     mcp.tool(
         title="Show tmux Buffer",
-        annotations=ANNOTATIONS_OBSERVE_CONTENT,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(show_buffer)
     mcp.tool(
         title="Delete tmux Buffer",
-        annotations=ANNOTATIONS_DELETE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_TEARDOWN},
     )(delete_buffer)

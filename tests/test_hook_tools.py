@@ -1,4 +1,4 @@
-"""Tests for read-only tmux hook introspection tools."""
+"""Tests for tmux hook inspection tools."""
 
 from __future__ import annotations
 

@@ -9,9 +9,7 @@ import typing as t
 import pytest
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CHANGE,
-    ANNOTATIONS_DELETE,
-    ANNOTATIONS_OBSERVE,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TAG_SELF_BOUNDED,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
@@ -19,7 +17,6 @@ from libtmux_mcp._utils import (
     TOOLSET_TEARDOWN,
     VALID_TOOLSETS,
 )
-from tests.conftest import wire_annotations
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -55,29 +52,6 @@ BATCH_OPERATION_LIMIT_FIXTURES: list[BatchOperationLimitFixture] = [
 ]
 
 
-class BatchAnnotationFixture(t.NamedTuple):
-    """Test fixture for generic batch wrapper annotations."""
-
-    test_id: str
-    tool_name: str
-    read_only_hint: bool
-    destructive_hint: bool
-    idempotent_hint: bool
-    open_world_hint: bool
-
-
-BATCH_ANNOTATION_FIXTURES: list[BatchAnnotationFixture] = [
-    BatchAnnotationFixture(
-        test_id="read_batch_carries_its_members_open_world",
-        tool_name="call_read_tools_batch",
-        read_only_hint=True,
-        destructive_hint=False,
-        idempotent_hint=True,
-        open_world_hint=True,
-    ),
-]
-
-
 def _content_block_to_wire(block: t.Any) -> dict[str, t.Any]:
     if hasattr(block, "model_dump"):
         dumped = block.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -95,7 +69,7 @@ def _call_tool_result_wire(result: t.Any) -> dict[str, t.Any]:
 
 
 def _batch_probe_server() -> FastMCP:
-    """Build a small FastMCP server with batch tools and tiered probes."""
+    """Build a small FastMCP server with batch tools and tagged probes."""
     from fastmcp import FastMCP
 
     from libtmux_mcp.middleware import ToolErrorResultMiddleware, ToolsetMiddleware
@@ -111,14 +85,16 @@ def _batch_probe_server() -> FastMCP:
     register_batch_tools(mcp)
 
     @mcp.tool(
-        title="Inspect Probe", annotations=ANNOTATIONS_OBSERVE, tags={TOOLSET_INSPECT}
+        title="Inspect Probe",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )
     def inspect_probe(value: str) -> dict[str, str]:
         return {"value": value}
 
     @mcp.tool(
         title="Manage Probe",
-        annotations=ANNOTATIONS_CHANGE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_MANAGE},
     )
     def manage_probe(value: str) -> dict[str, str]:
@@ -126,7 +102,7 @@ def _batch_probe_server() -> FastMCP:
 
     @mcp.tool(
         title="Teardown Probe",
-        annotations=ANNOTATIONS_DELETE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_TEARDOWN},
     )
     def teardown_probe(value: str) -> dict[str, str]:
@@ -134,7 +110,7 @@ def _batch_probe_server() -> FastMCP:
 
     @mcp.tool(
         title="Self Bounded Probe",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT, TAG_SELF_BOUNDED},
     )
     def self_bounded_probe(value: str) -> dict[str, str]:
@@ -173,7 +149,6 @@ def _self_bounded_batch_call(wrapper: str, on_error: str = "stop") -> t.Any:
 def test_batch_rejects_a_self_bounded_tool() -> None:
     """A ``TAG_SELF_BOUNDED`` tool is rejected by the batch wrapper.
 
-    ``max_tier`` is a *ceiling* (``_TIER_LEVELS[tool_tier] <=
     The batch loop is serial with no aggregate deadline and
     ``MAX_BATCH_OPERATIONS`` is 1000, so a wait tool batched N times
     would cost N x its ceiling — the wrapper is a cap amplifier unless
@@ -455,28 +430,3 @@ def test_call_tools_batch_rejects_self_invocation() -> None:
     [operation] = result.structured_content["results"]
     assert operation["success"] is False
     assert "cannot call batch tools recursively" in operation["error"]
-
-
-@pytest.mark.parametrize(
-    BatchAnnotationFixture._fields,
-    BATCH_ANNOTATION_FIXTURES,
-    ids=[fixture.test_id for fixture in BATCH_ANNOTATION_FIXTURES],
-)
-def test_batch_wrappers_advertise_worst_case_annotations(
-    test_id: str,
-    tool_name: str,
-    read_only_hint: bool,
-    destructive_hint: bool,
-    idempotent_hint: bool,
-    open_world_hint: bool,
-) -> None:
-    """Batch wrappers advertise the strongest hint from their allowed tools."""
-    mcp = _batch_probe_server()
-
-    tool = asyncio.run(mcp.get_tool(tool_name))
-    assert tool is not None, f"{tool_name} should be registered"
-    assert tool.annotations is not None, f"{tool_name} should carry annotations"
-    assert wire_annotations(tool).get("readOnlyHint") is read_only_hint
-    assert wire_annotations(tool).get("destructiveHint") is destructive_hint
-    assert wire_annotations(tool).get("idempotentHint") is idempotent_hint
-    assert wire_annotations(tool).get("openWorldHint") is open_world_hint

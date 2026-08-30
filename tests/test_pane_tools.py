@@ -48,7 +48,6 @@ from libtmux_mcp.tools.pane_tools import (
     swap_pane,
     wait_for_text,
 )
-from tests.conftest import wire_annotations
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -5514,58 +5513,6 @@ def test_paste_text_does_not_leak_named_buffer(
     assert "libtmux_mcp_" not in buffer_names, (
         f"paste_text leaked a named buffer: {buffer_names!r}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Registration-time annotation verification
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("tool_name", "expected_open_world"),
-    [
-        ("swap_pane", False),
-        ("enter_copy_mode", False),
-    ],
-)
-def test_pane_tool_open_world_hint_registration(
-    tool_name: str, expected_open_world: bool
-) -> None:
-    """Pane tools that only rearrange tmux state stay closed-world."""
-    import asyncio
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import pane_tools
-
-    mcp = FastMCP(name="test-pane-annotations")
-    pane_tools.register(mcp)
-
-    tool = asyncio.run(mcp.get_tool(tool_name))
-    assert tool is not None, f"{tool_name} should be registered"
-    assert tool.annotations is not None, (
-        f"{tool_name} registration should carry annotations"
-    )
-    assert wire_annotations(tool).get("openWorldHint") is expected_open_world
-
-
-def test_clear_pane_advertises_removal_hints() -> None:
-    """``clear_pane`` is in ``teardown`` and says what it removes."""
-    import asyncio
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import pane_tools
-
-    mcp = FastMCP(name="test-clear-pane-annotations")
-    pane_tools.register(mcp)
-
-    tool = asyncio.run(mcp.get_tool("clear_pane"))
-    assert tool is not None, "clear_pane should be registered"
-    assert tool.annotations is not None, "clear_pane should carry annotations"
-    assert wire_annotations(tool).get("destructiveHint") is True
-    assert wire_annotations(tool).get("idempotentHint") is False
-    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 # ---------------------------------------------------------------------------

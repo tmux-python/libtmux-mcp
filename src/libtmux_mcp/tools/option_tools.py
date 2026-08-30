@@ -7,8 +7,7 @@ import typing as t
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DEFERRED_EXEC,
-    ANNOTATIONS_OBSERVE,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
     ExpectedToolError,
@@ -153,11 +152,11 @@ def register(mcp: FastMCP) -> None:
     """Register option tools with the MCP instance."""
     mcp.tool(
         title="Show tmux Option",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(show_option)
     mcp.tool(
         title="Set tmux Option",
-        annotations=ANNOTATIONS_DEFERRED_EXEC,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(set_option)

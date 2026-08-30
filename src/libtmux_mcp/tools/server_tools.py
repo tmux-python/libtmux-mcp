@@ -13,9 +13,7 @@ from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DELETE,
-    ANNOTATIONS_OBSERVE,
-    ANNOTATIONS_SPAWN,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
     TOOLSET_TEARDOWN,
@@ -363,26 +361,26 @@ def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Sessions",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(list_sessions)
     mcp.tool(
         title="List tmux Servers",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(list_servers)
     mcp.tool(
         title="Create tmux Session",
-        annotations=ANNOTATIONS_SPAWN,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(create_session)
     mcp.tool(
         title="Kill tmux Server",
-        annotations=ANNOTATIONS_DELETE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_TEARDOWN},
     )(kill_server)
     mcp.tool(
         title="Get tmux Server Info",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(get_server_info)

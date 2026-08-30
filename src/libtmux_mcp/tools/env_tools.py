@@ -5,8 +5,7 @@ from __future__ import annotations
 import typing as t
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_DEFERRED_EXEC,
-    ANNOTATIONS_OBSERVE,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
     _get_server,
@@ -71,9 +70,9 @@ def set_environment(
     Use to set variables that will be inherited by new panes and windows.
     Changes do not affect already-running processes.
 
-    A shell reads some variables as code — ``BASH_ENV``, ``ENV`` and
-    ``PROMPT_COMMAND`` among them — so a value set here can run in a pane
-    started later.
+    Some variables control later shell execution. Bash sources the file named
+    by ``BASH_ENV``, POSIX shells may source the file named by ``ENV``, and
+    Bash evaluates ``PROMPT_COMMAND`` before displaying a prompt.
 
     .. warning::
        Values set here propagate into **every** shell tmux later spawns
@@ -125,11 +124,11 @@ def register(mcp: FastMCP) -> None:
     """Register environment tools with the MCP instance."""
     mcp.tool(
         title="Show tmux Environment",
-        annotations=ANNOTATIONS_OBSERVE,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
     )(show_environment)
     mcp.tool(
         title="Set tmux Environment",
-        annotations=ANNOTATIONS_DEFERRED_EXEC,
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(set_environment)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import shlex
 import typing as t
 
 import pytest
@@ -19,6 +21,8 @@ from libtmux_mcp.tools.window_tools import (
 )
 
 if t.TYPE_CHECKING:
+    import pathlib
+
     from libtmux.server import Server
     from libtmux.session import Session
 
@@ -33,6 +37,54 @@ def test_list_panes(mcp_server: Server, mcp_session: Session) -> None:
     assert isinstance(result, list)
     assert len(result) >= 1
     assert result[0].pane_id is not None
+
+
+def test_list_panes_can_activate_target_alias_and_hook(
+    mcp_server: Server,
+    mcp_session: Session,
+    tmp_path: pathlib.Path,
+) -> None:
+    """The target server can add effects around an inspect operation."""
+    alias_marker = tmp_path / "alias"
+    hook_marker = tmp_path / "hook"
+    alias_command = shlex.join(["touch", str(alias_marker)])
+    hook_command = shlex.join(["touch", str(hook_marker)])
+
+    mcp_server.cmd(
+        "set-option",
+        "-s",
+        "command-alias[999]",
+        f"list-panes=run-shell {shlex.quote(alias_command)} ; list-panes",
+    )
+    mcp_server.cmd(
+        "set-hook",
+        "-g",
+        "after-list-panes",
+        f"run-shell {shlex.quote(hook_command)}",
+    )
+
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    window = mcp_session.active_window
+
+    async def _call() -> t.Any:
+        async with Client(build_mcp_server()) as client:
+            return await client.call_tool(
+                "list_panes",
+                {
+                    "window_id": window.window_id,
+                    "socket_name": mcp_server.socket_name,
+                },
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is False
+    assert alias_marker.exists()
+    assert hook_marker.exists()
 
 
 def test_get_window_info(mcp_server: Server, mcp_session: Session) -> None:
