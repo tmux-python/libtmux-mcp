@@ -600,6 +600,56 @@ def test_break_pane_refuses_to_empty_its_source_session(
     assert moved.window_id is not None
 
 
+@pytest.mark.parametrize(
+    ("tmux_version", "expected_args"),
+    [
+        pytest.param(
+            "3.6",
+            ("-d", "-n", "#(literal-name)", "-s"),
+            id="ordinary-release",
+        ),
+        pytest.param("3.7", ("-d", "-n", "libtmux", "-s"), id="tmux-3.7"),
+    ],
+)
+def test_break_pane_builds_a_version_safe_command(
+    monkeypatch: pytest.MonkeyPatch,
+    mcp_server: Server,
+    mcp_session: Session,
+    tmux_version: str,
+    expected_args: tuple[str, ...],
+) -> None:
+    """Probe exact 3.7 and failure output without moving a pane."""
+    pane = mcp_session.active_window.active_pane
+    assert pane is not None and pane.pane_id is not None
+    mcp_session.new_window()
+
+    class _Command(t.NamedTuple):
+        returncode: int
+        stdout: list[str]
+        stderr: list[str]
+
+    captured: list[tuple[str, ...]] = []
+
+    def fail_break_pane(command: str, *args: str, **_kwargs: t.Any) -> _Command:
+        captured.append((command, *args))
+        return _Command(1, [], [])
+
+    monkeypatch.setattr(
+        "libtmux_mcp.tools.window_tools.get_version_str",
+        lambda **_kwargs: tmux_version,
+    )
+    monkeypatch.setattr(mcp_server, "cmd", fail_break_pane)
+
+    with pytest.raises(ToolError, match="pane state may have changed"):
+        break_pane(
+            pane_id=pane.pane_id,
+            window_name="#(literal-name)",
+            socket_name=mcp_server.socket_name,
+        )
+
+    assert captured == [("break-pane", *expected_args, pane.pane_id)]
+
+
 def test_move_window_refuses_to_empty_its_source_session(
     mcp_server: Server, mcp_session: Session
 ) -> None:

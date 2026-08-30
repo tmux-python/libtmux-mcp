@@ -25,7 +25,7 @@ from libtmux_mcp.tools.pane_tools.lifecycle import respawn_pane, set_pane_title
 from libtmux_mcp.tools.pane_tools.meta import display_message
 from libtmux_mcp.tools.server_tools import create_session
 from libtmux_mcp.tools.session_tools import create_window, rename_session
-from libtmux_mcp.tools.window_tools import rename_window, split_window
+from libtmux_mcp.tools.window_tools import break_pane, rename_window, split_window
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -90,6 +90,25 @@ def test_rename_window_stores_the_literal(
         window_id=mcp_window.window_id,
         socket_name=mcp_server.socket_name,
     )
+    assert result.window_name == value
+
+
+@pytest.mark.parametrize("value", HOSTILE)
+def test_break_pane_stores_the_literal_window_name(
+    mcp_server: Server,
+    mcp_session: Session,
+    value: str,
+) -> None:
+    """break_pane(window_name=X) names the destination window X."""
+    pane = mcp_session.active_window.split()
+    assert pane.pane_id is not None
+
+    result = break_pane(
+        pane_id=pane.pane_id,
+        window_name=value,
+        socket_name=mcp_server.socket_name,
+    )
+
     assert result.window_name == value
 
 

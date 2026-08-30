@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing as t
 
 from libtmux import exc
+from libtmux.common import get_version_str
 from libtmux.constants import PaneDirection
 from libtmux.pane import Pane
 from libtmux.window import Window
@@ -680,11 +681,44 @@ def break_pane(
         )
         raise ExpectedToolError(msg)
 
-    pane.break_pane(window_name=window_name)
-    moved = server.panes.get(pane_id=pane.pane_id, default=None)
-    if moved is None or moved.window is None:
-        msg = f"pane {pane_id} did not survive break-pane"
+    tmux_version = get_version_str(tmux_bin=server.tmux_bin)
+    command_name = window_name
+    if tmux_version == "3.7":
+        command_name = "libtmux"
+    args = ["break-pane", "-d"]
+    if command_name is not None:
+        args.extend(("-n", command_name))
+    args.extend(("-s", pane_id))
+    result = server.cmd(*args)
+    if result.returncode != 0 or result.stderr:
+        detail = " ".join(result.stderr).strip() if result.stderr else ""
+        failure = detail or f"exit {result.returncode}"
+        msg = f"break-pane failed: {failure}; pane state may have changed"
         raise ExpectedToolError(msg)
+
+    try:
+        moved = server.panes.get(pane_id=pane.pane_id, default=None)
+    except exc.LibTmuxException as error:
+        msg = (
+            f"break-pane completed, but its destination could not be read: {error}; "
+            "pane state may have changed"
+        )
+        raise ExpectedToolError(msg) from error
+    if moved is None or moved.window is None:
+        msg = (
+            f"break-pane completed, but pane {pane_id} could not be resolved; "
+            "pane state may have changed"
+        )
+        raise ExpectedToolError(msg)
+    if window_name is not None and tmux_version == "3.7":
+        try:
+            moved.window.rename_window(escape_format(window_name))
+        except exc.LibTmuxException as error:
+            msg = (
+                f"pane {pane_id} moved, but naming its window failed: {error}; "
+                "pane state may have changed"
+            )
+            raise ExpectedToolError(msg) from error
     return _serialize_window(moved.window)
 
 
