@@ -150,7 +150,8 @@ teaches operators to rely on it.
 
 **Bounded matching is a mechanism we must supply, not something the language
 gives us.** CPython's
-[`re`](https://github.com/python/cpython/blob/v3.14.0/Lib/re/__init__.py) has no
+[`re.search`](https://github.com/python/cpython/blob/v3.14.0/Lib/re/__init__.py#L174-L177)
+has no
 execution timeout, so pattern-length caps alone are not a time ceiling. Search
 bounds mean a specific bounded-time engine, named at implementation, or the
 guarantee is not made.
@@ -195,7 +196,7 @@ gp-sphinx
 so releases keep those terms aligned.
 
 Because `exit-empty` defaults on
-([`options-table.c`](https://github.com/tmux/tmux/blob/3.7c/options-table.c)),
+([`options-table.c`](https://github.com/tmux/tmux/blob/3.7c/options-table.c#L375-L380)),
 an agent that removes its own sessions empties its server without a socket-wide
 kill tool, which is why none is offered.
 
