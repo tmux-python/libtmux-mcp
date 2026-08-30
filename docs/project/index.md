@@ -25,6 +25,12 @@ Ruff, mypy, NumPy docstrings, import conventions.
 Release checklist and version policy.
 :::
 
+:::{grid-item-card} Architecture decisions
+:link: ../dev/adr/index
+:link-type: doc
+Long-lived design choices, their trade-offs, and their consequences.
+:::
+
 ::::
 
 ```{toctree}
@@ -33,4 +39,5 @@ Release checklist and version policy.
 contributing
 code-style
 releasing
+../dev/adr/index
 ```
