@@ -11,15 +11,13 @@ from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TAG_SELF_BOUNDED,
+    TOOLSET_INSPECT,
     ExpectedToolError,
     handle_tool_errors_async,
 )
-from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
+from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES, _allow_nested_read_tool
 from libtmux_mcp.models import (
     ToolCallBatchResult,
     ToolCallOperation,
@@ -31,19 +29,7 @@ if t.TYPE_CHECKING:
 
 _OnError: t.TypeAlias = t.Literal["stop", "continue"]
 
-_TIER_LEVELS: dict[str, int] = {
-    TAG_READONLY: 0,
-    TAG_MUTATING: 1,
-    TAG_DESTRUCTIVE: 2,
-}
-
-_BATCH_TOOL_NAMES: frozenset[str] = frozenset(
-    {
-        "call_readonly_tools_batch",
-        "call_mutating_tools_batch",
-        "call_destructive_tools_batch",
-    }
-)
+_BATCH_TOOL_NAMES: frozenset[str] = frozenset({"call_read_tools_batch"})
 
 MAX_BATCH_OPERATIONS = 1_000
 
@@ -53,13 +39,6 @@ _BATCH_TRUNCATED_CONTENT: list[dict[str, t.Any]] = [
         "text": "[... batch truncated nested content ...]",
     }
 ]
-
-_ANNOTATIONS_BATCH_SIDE_EFFECTS: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "idempotentHint": False,
-    "openWorldHint": True,
-}
 
 
 def _content_block_to_dict(block: t.Any) -> dict[str, t.Any]:
@@ -87,38 +66,12 @@ def _result_error_text(result: ToolResult) -> str | None:
     return None
 
 
-def _tool_tier(tool_name: str, tags: set[str]) -> str:
-    """Return the highest recognized safety tier for a registered tool."""
-    found = [tier for tier in _TIER_LEVELS if tier in tags]
-    if not found:
-        msg = f"Tool {tool_name!r} has no recognized safety tier tag."
-        raise ExpectedToolError(msg)
-    return max(found, key=lambda tier: _TIER_LEVELS[tier])
-
-
-def _check_operation_allowed(
-    *,
-    tool_name: str,
-    tool_tier: str,
-    max_tier: str,
-) -> None:
-    """Raise when a nested tool exceeds this batch wrapper's tier."""
-    if _TIER_LEVELS[tool_tier] <= _TIER_LEVELS[max_tier]:
-        return
-    msg = (
-        f"Tool {tool_name!r} has tier {tool_tier!r}, which exceeds "
-        f"batch tier {max_tier}."
-    )
-    raise ExpectedToolError(msg)
-
-
-async def _get_allowed_tool_tier(
+async def _check_operation_allowed(
     *,
     fastmcp: FastMCP,
     operation: ToolCallOperation,
-    max_tier: str,
 ) -> None:
-    """Validate that one nested operation targets an allowed tool."""
+    """Validate that one nested operation targets an ``inspect`` tool."""
     if operation.tool in _BATCH_TOOL_NAMES:
         msg = "Batch tools cannot call batch tools recursively."
         raise ExpectedToolError(msg)
@@ -128,13 +81,11 @@ async def _get_allowed_tool_tier(
         msg = f"Unknown tool: {operation.tool!r}"
         raise ExpectedToolError(msg)
 
-    # ``max_tier`` is a CEILING, so a readonly tool is reachable through
-    # every batch wrapper, not only the readonly one. The batch loop is
-    # serial with no aggregate deadline and ``MAX_BATCH_OPERATIONS`` is
-    # 1000, so a self-bounded wait batched N times costs N x its
-    # ceiling. Reject per-operation (not pre-loop) so the raise becomes
-    # a ``success=False`` row and ``on_error='continue'`` isolation is
-    # preserved.
+    # The batch loop is serial with no aggregate deadline and
+    # ``MAX_BATCH_OPERATIONS`` is 1000, so a self-bounded wait batched N
+    # times costs N x its ceiling. Reject per-operation, not pre-loop, so
+    # the raise becomes a ``success=False`` row and ``on_error='continue'``
+    # isolation is preserved.
     if TAG_SELF_BOUNDED in tool.tags:
         msg = (
             f"Tool {operation.tool!r} enforces its own wait ceiling and "
@@ -143,12 +94,12 @@ async def _get_allowed_tool_tier(
         )
         raise ExpectedToolError(msg)
 
-    tool_tier = _tool_tier(operation.tool, tool.tags)
-    _check_operation_allowed(
-        tool_name=operation.tool,
-        tool_tier=tool_tier,
-        max_tier=max_tier,
-    )
+    if TOOLSET_INSPECT not in tool.tags:
+        msg = (
+            f"Tool {operation.tool!r} is not an 'inspect' tool, so it "
+            "cannot run in a read batch. Call it directly."
+        )
+        raise ExpectedToolError(msg)
 
 
 def _ensure_tool_result(tool_name: str, result: t.Any) -> ToolResult:
@@ -212,25 +163,24 @@ async def _call_one_tool(
     fastmcp: FastMCP,
     operation: ToolCallOperation,
     index: int,
-    max_tier: str,
 ) -> ToolCallOperationResult:
     """Call one nested tool and convert its outcome to a batch result row."""
     start = time.monotonic()
     try:
-        await _get_allowed_tool_tier(
-            fastmcp=fastmcp,
-            operation=operation,
-            max_tier=max_tier,
-        )
+        with _allow_nested_read_tool(operation.tool):
+            await _check_operation_allowed(
+                fastmcp=fastmcp,
+                operation=operation,
+            )
 
-        result = _ensure_tool_result(
-            operation.tool,
-            await fastmcp.call_tool(
+            result = _ensure_tool_result(
                 operation.tool,
-                operation.arguments,
-                run_middleware=True,
-            ),
-        )
+                await fastmcp.call_tool(
+                    operation.tool,
+                    operation.arguments,
+                    run_middleware=True,
+                ),
+            )
 
         error = _result_error_text(result)
         return ToolCallOperationResult(
@@ -257,7 +207,6 @@ async def _call_tools_batch(
     *,
     operations: list[ToolCallOperation],
     on_error: _OnError,
-    max_tier: str,
     ctx: Context | None,
 ) -> ToolCallBatchResult:
     """Execute nested MCP tool calls serially through FastMCP."""
@@ -281,7 +230,6 @@ async def _call_tools_batch(
             fastmcp=ctx.fastmcp,
             operation=operation,
             index=index,
-            max_tier=max_tier,
         )
         results.append(result)
         if not result.success and on_error == "stop":
@@ -301,63 +249,25 @@ async def _call_tools_batch(
 
 
 @handle_tool_errors_async
-async def call_readonly_tools_batch(
+async def call_read_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
-    """Call readonly MCP tools serially and return per-tool results.
+    """Call several `inspect` tools serially and return per-tool results.
 
-    Use when several read-only observations should be made in one agent
-    turn. Each nested call still goes through FastMCP validation,
-    middleware, and safety checks. Mutating and destructive tools are
-    rejected even if the server process itself is running at a higher
-    safety tier.
+    Use when one agent turn needs several observations. Each nested call
+    still goes through FastMCP validation and this server's middleware.
+    Only `inspect` tools are accepted; anything that changes tmux state
+    is refused, whatever this server has enabled.
+
+    This wrapper aggregates authority under its own name: a client rule
+    keyed on a nested tool's name does not fire for a call made through
+    it. Read it as authority to invoke any `inspect` tool.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
-        max_tier=TAG_READONLY,
-        ctx=ctx,
-    )
-
-
-@handle_tool_errors_async
-async def call_mutating_tools_batch(
-    operations: list[ToolCallOperation],
-    on_error: _OnError = "stop",
-    ctx: Context | None = None,
-) -> ToolCallBatchResult:
-    """Call readonly or mutating MCP tools serially and return per-tool results.
-
-    Use for ordered tmux workflows where every step is still an existing
-    typed MCP tool. Destructive tools are rejected regardless of the
-    process-wide safety tier.
-    """
-    return await _call_tools_batch(
-        operations=operations,
-        on_error=on_error,
-        max_tier=TAG_MUTATING,
-        ctx=ctx,
-    )
-
-
-@handle_tool_errors_async
-async def call_destructive_tools_batch(
-    operations: list[ToolCallOperation],
-    on_error: _OnError = "stop",
-    ctx: Context | None = None,
-) -> ToolCallBatchResult:
-    """Call readonly, mutating, or destructive MCP tools serially.
-
-    This wrapper preserves the normal per-tool schemas and middleware
-    but its tier permits destructive nested operations. Prefer the
-    narrower readonly or mutating wrappers whenever possible.
-    """
-    return await _call_tools_batch(
-        operations=operations,
-        on_error=on_error,
-        max_tier=TAG_DESTRUCTIVE,
         ctx=ctx,
     )
 
@@ -365,17 +275,7 @@ async def call_destructive_tools_batch(
 def register(mcp: FastMCP) -> None:
     """Register generic MCP batch tools."""
     mcp.tool(
-        title="Call Readonly Tools Batch",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
-    )(call_readonly_tools_batch)
-    mcp.tool(
-        title="Call Mutating Tools Batch",
-        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
-        tags={TAG_MUTATING},
-    )(call_mutating_tools_batch)
-    mcp.tool(
-        title="Call Destructive Tools Batch",
-        annotations=_ANNOTATIONS_BATCH_SIDE_EFFECTS,
-        tags={TAG_DESTRUCTIVE},
-    )(call_destructive_tools_batch)
+        title="Call Read Tools Batch",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
+    )(call_read_tools_batch)

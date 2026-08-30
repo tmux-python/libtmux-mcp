@@ -5,10 +5,9 @@ from __future__ import annotations
 import typing as t
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
     _get_server,
     _resolve_session,
     handle_tool_errors,
@@ -71,18 +70,22 @@ def set_environment(
     Use to set variables that will be inherited by new panes and windows.
     Changes do not affect already-running processes.
 
+    Some variables control later shell execution. Bash sources the file named
+    by ``BASH_ENV``, POSIX shells may source the file named by ``ENV``, and
+    Bash evaluates ``PROMPT_COMMAND`` before displaying a prompt.
+
     .. warning::
        Values set here propagate into **every** shell tmux later spawns
        in the targeted scope — including panes the user opens manually,
        not just panes the agent drives. A caller that writes ``PATH``,
        ``LD_PRELOAD``, or ``AWS_*`` variables can influence future
        commands the human user types directly. Treat this as
-       elevated-risk within the ``mutating`` safety tier. The audit log
+       elevated-risk within ``execute``. The audit log
        redacts the ``value`` argument, but the side effects persist on
        disk/memory until tmux is restarted. Prefer ``env VAR=value
        command`` via :func:`~libtmux_mcp.tools.pane_tools.send_keys`
        when you only need the override for a single command. See
-       :doc:`/topics/safety`.
+       :doc:`/topics/trust`.
 
     Parameters
     ----------
@@ -121,11 +124,11 @@ def register(mcp: FastMCP) -> None:
     """Register environment tools with the MCP instance."""
     mcp.tool(
         title="Show tmux Environment",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )(show_environment)
     mcp.tool(
         title="Set tmux Environment",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
     )(set_environment)

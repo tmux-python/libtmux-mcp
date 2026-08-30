@@ -370,65 +370,46 @@ def _spawn_history_server(enabled: bool) -> FastMCP:
     return mcp
 
 
-def test_generic_batch_spawn_ignores_command_default_unless_opted_in(
+def test_a_spawn_cannot_be_laundered_through_the_read_batch(
     mcp_server: Server,
     mcp_session: Session,
 ) -> None:
-    """Nested spawn calls retain their explicit persistent-history option."""
-    supplied = "private-nested-history-path"
-    before = {window.window_id for window in mcp_session.windows}
-    base = {
-        "session_name": mcp_session.session_name,
-        "environment": {"HISTFILE": supplied},
-        "socket_name": mcp_server.socket_name,
-    }
+    """The batch refuses a spawn instead of running it under its own name.
+
+    A batch gives every nested call the wrapper's name, so a client rule
+    keyed on ``create_window`` would not fire. Keeping the wrapper to
+    ``inspect`` is what makes that unreachable.
+    """
+    from fastmcp import Client
 
     async def _exercise() -> t.Any:
         async with Client(_spawn_history_server(True)) as client:
             return await client.call_tool(
-                "call_mutating_tools_batch",
+                "call_read_tools_batch",
                 {
-                    "on_error": "continue",
                     "operations": [
                         {
                             "tool": "create_window",
                             "arguments": {
-                                **base,
-                                "window_name": "batch_spawn_omitted",
+                                "session_name": mcp_session.session_name,
+                                "socket_name": mcp_server.socket_name,
+                                "window_name": "batch_spawn_refused",
                             },
-                        },
-                        {
-                            "tool": "create_window",
-                            "arguments": {
-                                **base,
-                                "window_name": "batch_spawn_explicit_true_conflict",
-                                "suppress_persistent_history": True,
-                            },
-                        },
-                    ],
+                        }
+                    ]
                 },
                 raise_on_error=False,
             )
 
+    before = {window.window_id for window in mcp_session.windows}
     result = asyncio.run(_exercise())
 
-    assert result.is_error is False
     assert result.structured_content is not None
-    assert result.structured_content["succeeded"] == 1
-    assert result.structured_content["failed"] == 1
-    assert result.structured_content["stopped_at"] is None
-    succeeded, failed = result.structured_content["results"]
-    assert succeeded["success"] is True
-    assert succeeded["structured_content"]["window_name"] == "batch_spawn_omitted"
-    assert failed["success"] is False
-    assert failed["error"] == (
-        "environment variable HISTFILE conflicts with "
-        "suppress_persistent_history=True; "
-        "omit it or set it to an empty string"
-    )
-    assert supplied not in failed["error"]
-    created = {window.window_id for window in mcp_session.windows} - before
-    assert len(created) == 1
+    assert result.structured_content["succeeded"] == 0
+    [operation] = result.structured_content["results"]
+    assert "not an 'inspect' tool" in operation["error"]
+    mcp_session.refresh()
+    assert {window.window_id for window in mcp_session.windows} == before
 
 
 def test_spawn_conflict_is_absent_from_tool_results_and_logs(

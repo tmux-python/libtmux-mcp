@@ -41,8 +41,8 @@ below.
    the CLI inherits them and launches the `uv` server fine. The alternate-socket-pane
    PATH gap (a `-L` pane's non-login shell lacks the mise shims) only bites when you
    launch a CLI **TUI inside a harness pane** (Layer 2).
-7. **Non-interactive mutating tool calls need an approval-bypass flag** — different per
-   CLI (table). Without it, a mutating call blocks on an approval prompt with no TTY
+7. **Non-interactive write-capable tool calls need an approval-bypass flag** — different per
+   CLI (table). Without it, a write-capable call blocks on an approval prompt with no TTY
    and the harness hangs.
 8. **Interactive send-keys submit:** send the prompt text and `Enter` as **separate
    `send-keys` events** — then a single Enter submits. The "needs a double Enter"

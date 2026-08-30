@@ -6,7 +6,8 @@
 **Use when** you need to discover which panes exist in a window before
 sending keys or capturing output.
 
-**Side effects:** None. Readonly.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

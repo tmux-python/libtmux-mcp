@@ -39,6 +39,7 @@ from libtmux_mcp.tools.pane_tools import (
     pipe_pane,
     resize_pane,
     respawn_pane,
+    search,
     search_panes,
     select_pane,
     send_keys,
@@ -47,7 +48,6 @@ from libtmux_mcp.tools.pane_tools import (
     swap_pane,
     wait_for_text,
 )
-from tests.conftest import wire_annotations
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -111,7 +111,7 @@ RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
 
 RUN_COMMAND_STATUS_ISOLATION_FIXTURES: list[RunCommandStatusIsolationFixture] = [
     RunCommandStatusIsolationFixture(
-        "path_mutation",
+        "path_change",
         "PATH=/tmp; printf 'RUN_COMMAND_PATH_OK\\n'",
         0,
         "RUN_COMMAND_PATH_OK",
@@ -1383,7 +1383,7 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
             "for i in $(seq 1 120); do printf 'CAPTURE_SINCE_TRIM_%03d\\n' \"$i\"; done"
         )
         _signal_after_shell_payload(mcp_server, fresh_pane, payload)
-        # Guarantee anchor destruction: tmux 3.6 can retain the original
+        # Guarantee anchor removal: tmux 3.6 can retain the original
         # prompt hash in scrollback even after flooding past history-limit.
         fresh_pane.cmd("clear-history")
         _signal_after_shell_payload(
@@ -1957,9 +1957,16 @@ def test_respawn_pane_replaces_shell(mcp_server: Server, mcp_session: Session) -
         socket_name=mcp_server.socket_name,
     )
     assert result.pane_id == new_pane.pane_id
-    # pane_current_command reflects the relaunched command.
-    assert result.pane_current_command is not None
-    assert "sleep" in result.pane_current_command
+
+    # tmux reports the shell briefly while the child crosses exec(2).
+    command = result.pane_current_command
+    deadline = time.monotonic() + 1.0
+    while (command is None or "sleep" not in command) and time.monotonic() < deadline:
+        time.sleep(0.01)
+        new_pane.refresh()
+        command = new_pane.pane_current_command
+    assert command is not None
+    assert "sleep" in command
 
     new_pane.kill()
 
@@ -2306,6 +2313,69 @@ def test_search_panes_invalid_regex(mcp_server: Server, mcp_session: Session) ->
     with pytest.raises(ToolError, match="Invalid regex pattern"):
         search_panes(
             pattern="[invalid",
+            regex=True,
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_search_panes_bounds_matching_time(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pattern that backtracks exponentially stops at the deadline."""
+    monkeypatch.setattr(search, "SEARCH_MATCH_MAX_SECONDS", 0.2)
+    mcp_pane.send_keys("echo " + "a" * 40 + "b", enter=True)
+    retry_until(
+        lambda: "a" * 40 in "\n".join(mcp_pane.capture_pane()),
+        2,
+        raises=True,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ExpectedToolError, match="took longer than"):
+        search_panes(
+            pattern=r"(a|a)+$",
+            regex=True,
+            socket_name=mcp_server.socket_name,
+        )
+    assert time.monotonic() - started < 5
+
+
+def test_search_panes_excludes_capture_time_from_matching_deadline(
+    mcp_server: Server,
+    mcp_session: Session,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed pane capture does not spend the regex matching budget."""
+    marker = "CAPTURE_OUTSIDE_MATCH_DEADLINE"
+
+    def delayed_capture(*args: object, **kwargs: object) -> list[str]:
+        time.sleep(0.05)
+        return [marker]
+
+    monkeypatch.setattr(search, "SEARCH_MATCH_MAX_SECONDS", 0.02)
+    monkeypatch.setattr(type(mcp_pane), "capture_pane", delayed_capture)
+
+    result = search_panes(
+        pattern=marker,
+        regex=True,
+        session_id=mcp_session.session_id,
+        content_start=0,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert [match.pane_id for match in result.matches] == [mcp_pane.pane_id]
+
+
+def test_search_panes_rejects_an_oversized_pattern(
+    mcp_server: Server,
+) -> None:
+    """Compilation is bounded by length, which no match deadline covers."""
+    with pytest.raises(ExpectedToolError, match="pattern is longer than"):
+        search_panes(
+            pattern="a" * (search.SEARCH_MAX_PATTERN_LENGTH + 1),
             regex=True,
             socket_name=mcp_server.socket_name,
         )
@@ -5477,108 +5547,6 @@ def test_paste_text_does_not_leak_named_buffer(
     assert "libtmux_mcp_" not in buffer_names, (
         f"paste_text leaked a named buffer: {buffer_names!r}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Registration-time annotation verification
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("tool_name", "expected_open_world"),
-    [
-        # Shell-driving tools: the command the caller sends can reach
-        # arbitrary external state, so the interaction is open-world.
-        ("send_keys", True),
-        ("send_keys_batch", True),
-        ("run_command", True),
-        ("paste_text", True),
-        ("pipe_pane", True),
-        # Create-style tools: allocate tmux objects only. Not open-world
-        # even though they share the old ANNOTATIONS_CREATE preset.
-        ("swap_pane", False),
-        ("enter_copy_mode", False),
-    ],
-)
-def test_pane_tool_open_world_hint_registration(
-    tool_name: str, expected_open_world: bool
-) -> None:
-    """Pane tools advertise ``openWorldHint`` matching their real semantics.
-
-    Regression guard for the shared-preset trap: the old
-    ``ANNOTATIONS_CREATE`` preset was applied to both shell-driving and
-    non-shell-driving tools, so every caller saw ``openWorldHint=False``.
-    A new ``ANNOTATIONS_SHELL`` preset now carries ``openWorldHint=True``
-    for the three shell-driving tools only, leaving the other
-    ``ANNOTATIONS_CREATE`` users unchanged.
-    """
-    import asyncio
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import pane_tools
-
-    mcp = FastMCP(name="test-pane-annotations")
-    pane_tools.register(mcp)
-
-    tool = asyncio.run(mcp.get_tool(tool_name))
-    assert tool is not None, f"{tool_name} should be registered"
-    assert tool.annotations is not None, (
-        f"{tool_name} registration should carry annotations"
-    )
-    assert wire_annotations(tool).get("openWorldHint") is expected_open_world
-
-
-def test_respawn_pane_advertises_destructive_non_idempotent() -> None:
-    """``respawn_pane`` registers as mutating-tier with destructive hints.
-
-    Default ``kill=True`` sends ``SPAWN_KILL`` to the running process
-    (`cmd-respawn-pane.c:78-79`); repeated calls kill repeated processes.
-    The MCP spec defines ``destructiveHint`` as "may perform destructive
-    updates" and ``idempotentHint`` as "calling repeatedly will have no
-    additional effect" (`mcp/types.py:1268-1282`). The default
-    ``ANNOTATIONS_MUTATING`` preset (``destructiveHint=False``,
-    ``idempotentHint=True``) would lie to the agent. The new
-    ``ANNOTATIONS_MUTATING_DESTRUCTIVE`` preset stays in ``TAG_MUTATING``
-    so the recovery use case remains visible to default-profile clients,
-    while honestly advertising destructive non-idempotent semantics.
-    """
-    import asyncio
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import pane_tools
-
-    mcp = FastMCP(name="test-respawn-annotations")
-    pane_tools.register(mcp)
-
-    tool = asyncio.run(mcp.get_tool("respawn_pane"))
-    assert tool is not None, "respawn_pane should be registered"
-    assert tool.annotations is not None, (
-        "respawn_pane registration should carry annotations"
-    )
-    assert wire_annotations(tool).get("destructiveHint") is True
-    assert wire_annotations(tool).get("idempotentHint") is False
-    assert wire_annotations(tool).get("readOnlyHint") is False
-
-
-def test_clear_pane_advertises_destructive_non_idempotent() -> None:
-    """``clear_pane`` registers as mutating-tier with destructive hints."""
-    import asyncio
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import pane_tools
-
-    mcp = FastMCP(name="test-clear-pane-annotations")
-    pane_tools.register(mcp)
-
-    tool = asyncio.run(mcp.get_tool("clear_pane"))
-    assert tool is not None, "clear_pane should be registered"
-    assert tool.annotations is not None, "clear_pane should carry annotations"
-    assert wire_annotations(tool).get("destructiveHint") is True
-    assert wire_annotations(tool).get("idempotentHint") is False
-    assert wire_annotations(tool).get("readOnlyHint") is False
 
 
 # ---------------------------------------------------------------------------

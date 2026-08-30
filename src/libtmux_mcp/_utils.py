@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 import typing as t
 
@@ -35,7 +36,7 @@ class ExpectedToolError(ToolError):
 
     Defaults the error's ``log_level`` to ``WARNING`` (honored by
     fastmcp >= 3.3 when logging tool/resource failures) so routine
-    validation errors, missing objects, and tier denials do not surface
+    validation errors, missing objects, and toolset denials do not surface
     as ERROR records. Unexpected failures keep stock :class:`ToolError`
     and its ERROR default — those are the ones operators must see.
 
@@ -194,9 +195,9 @@ def _compute_is_caller(pane: Pane) -> bool | None:
 
     Uses :func:`_caller_is_strictly_on_server` rather than
     :func:`_caller_is_on_server`: the kill-guard comparator is
-    conservative-True-when-uncertain (right for blocking destructive
-    actions, wrong for an informational annotation that should
-    demand a positive match). The strict variant declines the
+    conservative-True-when-uncertain (right for blocking a kill, wrong
+    for an informational annotation that should demand a positive
+    match). The strict variant declines the
     basename fallback, the unresolvable-target branch, and the
     socket-path-unset branch so ambiguous cases resolve to ``False``.
     """
@@ -224,7 +225,7 @@ def _effective_socket_path(server: Server) -> str | None:
        server — authoritative because tmux itself reports the path it
        is actually using, regardless of our process environment.
        Necessary on macOS where ``$TMUX_TMPDIR`` under launchd diverges
-       from the interactive shell (see ``docs/topics/safety.md`` for
+       from the interactive shell (see ``docs/topics/trust.md`` for
        the self-kill guard gap this closes).
     3. Fallback: reconstruct from ``$TMUX_TMPDIR`` + euid + socket name.
        This path is reached only when the target server is unreachable
@@ -273,8 +274,8 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
       is possible.
     * caller has a pane id but no socket path (e.g. ``TMUX_PANE`` set
       without ``TMUX``) → ``True``. We can't rule out that the caller
-      is on the target server, so err on the side of blocking a
-      destructive action.
+      is on the target server, so err on the side of blocking the
+      kill.
     * target server has no resolvable socket path → ``True``. Same
       conservative reasoning.
     * realpath of caller's socket path matches target's effective path
@@ -284,7 +285,7 @@ def _caller_is_on_server(server: Server, caller: CallerIdentity | None) -> bool:
       last-chance block for env-mismatch scenarios where reconstruction
       produced a wrong path but the name was authoritative on both
       sides. Trades off one exotic false positive (two daemons with
-      identical socket_name under different tmpdirs) for a real safety
+      identical socket_name under different tmpdirs) for a real correctness
       property.
     * Otherwise → ``False``.
 
@@ -319,7 +320,7 @@ def _caller_is_strictly_on_server(
 
     Counterpart to :func:`_caller_is_on_server` for the informational
     :attr:`~libtmux_mcp.models.PaneInfo.is_caller` annotation. The
-    destructive-action guard is biased toward True-when-uncertain so a
+    kill guard is biased toward True-when-uncertain so a
     macOS ``$TMUX_TMPDIR`` divergence cannot fool it into permitting
     self-kill; the annotation cannot absorb that bias — ambiguous cases
     are exactly the cross-socket false positives documented by
@@ -352,87 +353,60 @@ def _caller_is_strictly_on_server(
 
 
 # ---------------------------------------------------------------------------
-# Safety tier tags
+# Toolsets
 # ---------------------------------------------------------------------------
 
-TAG_READONLY = "readonly"
-TAG_MUTATING = "mutating"
-TAG_DESTRUCTIVE = "destructive"
+#: Request tmux state or terminal output, or render server-local prompt
+#: text. The built-in operation does not pass caller input as a tmux or
+#: shell command.
+#:
+#: Reading is not "safe" — a capture returns whatever a pane holds,
+#: including credentials and text written by a remote process — so this
+#: names what the tools *do*, not how much they are trusted.
+TOOLSET_INSPECT = "inspect"
 
-VALID_SAFETY_LEVELS = frozenset({TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE})
+#: Change tmux-managed structure, presentation, staging, or coordination
+#: state. The built-in operation does not supply a shell command, pane
+#: input, or a value tmux treats as executable configuration.
+TOOLSET_MANAGE = "manage"
 
-#: Non-tier marker tag for tools that enforce their own wall-clock
-#: ceiling internally and whose cost is therefore *duration*, not
-#: side effects.
+#: Start a pane process, deliver input to one, or store state that can
+#: control later execution. The product lives here.
+TOOLSET_EXECUTE = "execute"
+
+#: Delete tmux objects or retained scrollback. Irreversible at the tmux
+#: level.
+TOOLSET_TEARDOWN = "teardown"
+
+#: The four toolsets, in the order startup reports them.
 #:
-#: A tagged tool must never be re-driven by machinery that assumes a
-#: call is cheap:
-#:
-#: * :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` skips it,
-#:   because the deadline is computed inside the tool body — a retry
-#:   restarts the clock and doubles the ceiling.
-#: * The ``call_*_tools_batch`` wrappers reject it per-operation,
-#:   because the batch loop is serial with no aggregate deadline and
-#:   ``MAX_BATCH_OPERATIONS`` is 1000.
-#:
-#: A TAG rather than a tool-name list on purpose: a name string is
-#: exactly what ``add_tool_transformation`` can rename out from under
-#: the exclusion. Tier resolution
-#: (:meth:`~libtmux_mcp.middleware.SafetyMiddleware._is_allowed`,
-#: ``batch_tools._tool_tier``) inspects only the three tier tags, so
-#: carrying this extra tag is inert everywhere else.
+#: An unordered set, deliberately. The ordered model this replaced accumulated
+#: upward, so the kill tools could not be enabled without also enabling
+#: the typing tools; ``LIBTMUX_TOOLSETS=inspect,teardown`` is a legal
+#: surface. They group tools by what they do, for inventory
+#: configuration, context reduction, and client routing. They control MCP
+#: tool calls, not tmux authority or containment: an enabled execute tool can
+#: type the equivalent of anything hidden.
+VALID_TOOLSETS: tuple[str, ...] = (
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_EXECUTE,
+    TOOLSET_TEARDOWN,
+)
+
 TAG_SELF_BOUNDED = "self-bounded"
 
 # ---------------------------------------------------------------------------
 # Reusable annotation presets for tool registration
 # ---------------------------------------------------------------------------
 
-ANNOTATIONS_RO: dict[str, bool] = {
-    "readOnlyHint": True,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": False,
-}
-ANNOTATIONS_MUTATING: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": False,
-    "idempotentHint": True,
-    "openWorldHint": False,
-}
-ANNOTATIONS_CREATE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": False,
-    "idempotentHint": False,
-    "openWorldHint": False,
-}
-#: Annotations for tools that move user-supplied payloads into a shell
-#: context. Six consumers today:
-#:
-#: * ``send_keys``, ``run_command``, ``paste_text``, ``pipe_pane`` — the
-#:   canonical shell-driving tools; caller's keys/command/text/stream
-#:   reaches the shell prompt or pipes into an external command
-#:   respectively.
-#: * ``load_buffer``, ``paste_buffer`` — ``load_buffer`` stages content
-#:   into a tmux paste buffer; ``paste_buffer`` pushes that content
-#:   into a target pane where the shell receives it as input. The two
-#:   are split into a stage/fire pair so callers can validate before
-#:   paste, but both participate in the same open-world transfer.
-#:
-#: Distinguished from :data:`ANNOTATIONS_CREATE` by ``openWorldHint=True``:
-#: the effects of these tools extend into whatever command or content
-#: the caller supplies, which is the canonical open-world MCP
-#: interaction.
-ANNOTATIONS_SHELL: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": False,
-    "idempotentHint": False,
-    "openWorldHint": True,
-}
-ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
+#: Conservative MCP defaults for calls into programmable tmux servers.
+#: Aliases and hooks can replace or extend the requested operation.
+ANNOTATIONS_AMBIENT_UNKNOWN: dict[str, bool] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": False,
-    "openWorldHint": False,
+    "openWorldHint": True,
 }
 
 #: Per-tool MCP ``meta`` payload that hints clients to keep this tool
@@ -442,32 +416,100 @@ ANNOTATIONS_DESTRUCTIVE: dict[str, bool] = {
 #: documented at https://code.claude.com/docs/en/mcp (v2.1.121+).
 #:
 #: Best-effort by design — safe no-op for clients that don't index the
-#: ``anthropic/*`` namespace. Apply only to read-tier discovery anchors
+#: ``anthropic/*`` namespace. Apply only to inspect discovery anchors
 #: (``list_panes``, ``list_windows``, ``snapshot_pane``); each
 #: always-loaded tool consumes a fixed schema budget in clients that
 #: honour the hint, so widening the set has a real cost.
 DISCOVERY_META: dict[str, t.Any] = {
     "anthropic/alwaysLoad": True,
 }
-#: Annotations for tools that stay in the ``mutating`` tier (so they remain
-#: visible to default-profile agents) but whose default behaviour can
-#: terminate processes or otherwise lose state.
-#:
-#: Canonical users include ``respawn_pane`` and ``clear_pane``:
-#: tier=mutating because shell recovery and scrollback cleanup are part
-#: of normal agent workflows, while the hints still disclose process
-#: termination or state loss.
-#:
-#: Distinct from :data:`ANNOTATIONS_DESTRUCTIVE` (same hint values) because
-#: the tier tag differs: ``ANNOTATIONS_DESTRUCTIVE`` is paired with
-#: ``TAG_DESTRUCTIVE`` everywhere it is used; this preset is paired with
-#: ``TAG_MUTATING``. The distinct name documents intent at the call site.
-ANNOTATIONS_MUTATING_DESTRUCTIVE: dict[str, bool] = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "idempotentHint": False,
-    "openWorldHint": False,
-}
+
+
+#: A maximal run of ``#``, plus the ``[`` that may follow it. tmux reads a
+#: ``#``-run by what comes next, so the run is the unit to escape, not the
+#: individual ``#``.
+_TMUX_HASH_RUN = re.compile(r"(#+)(\[?)")
+
+
+def _escape_tmux_format(value: str) -> str:
+    """Escape ``value`` so tmux's format expander reproduces it literally.
+
+    Doubling every ``#`` is the obvious escape and it is wrong. A ``#``-run
+    followed by ``[`` is a style sequence reserved for ``format_draw``, and
+    the expander copies the run through verbatim rather than collapsing it,
+    so doubling there corrupts the value. Leave those runs alone and double
+    the rest.
+
+    This covers the ``#`` expander only. A caller reaching an argument tmux
+    expands with ``format_expand_time`` must escape ``%`` for ``strftime``
+    as well — see :func:`~libtmux_mcp.tools.pane_tools.pipe.pipe_pane`.
+
+    Parameters
+    ----------
+    value : str
+        Text to pass through a tmux format argument.
+
+    Returns
+    -------
+    str
+        ``value`` escaped for one pass of tmux format expansion.
+
+    Examples
+    --------
+    >>> _escape_tmux_format("/srv/#(id)")
+    '/srv/##(id)'
+    >>> _escape_tmux_format("/srv/#[x]")
+    '/srv/#[x]'
+    >>> _escape_tmux_format("issue #42")
+    'issue ##42'
+    """
+
+    def escape_run(match: re.Match[str]) -> str:
+        run, bracket = match.group(1), match.group(2)
+        return f"{run}{bracket}" if bracket else run * 2
+
+    return _TMUX_HASH_RUN.sub(escape_run, value)
+
+
+def _prepare_start_directory(start_directory: str | None) -> str | None:
+    """Resolve a caller path to the directory tmux will actually use.
+
+    tmux expands ``-c`` as a format before using it as a working
+    directory, then silently falls back to ``$HOME``, or ``/``, when the
+    result cannot be entered — so an unresolvable path starts the pane
+    somewhere else instead of failing. Resolving here leaves no format for
+    tmux to run and turns a bad path into an error the caller can correct.
+
+    Parameters
+    ----------
+    start_directory : str or None
+        Caller-supplied working directory, or ``None``.
+
+    Returns
+    -------
+    str or None
+        Absolute path escaped for tmux, or ``None`` when none was given.
+
+    Raises
+    ------
+    ExpectedToolError
+        If the path does not name an existing directory.
+
+    Examples
+    --------
+    >>> _prepare_start_directory(None) is None
+    True
+    >>> _prepare_start_directory("/")
+    '/'
+    """
+    if start_directory is None:
+        return None
+
+    resolved = pathlib.Path(start_directory).expanduser().resolve()
+    if not resolved.is_dir():
+        msg = f"start_directory is not an existing directory: {str(resolved)!r}"
+        raise ExpectedToolError(msg)
+    return _escape_tmux_format(str(resolved))
 
 
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
@@ -1087,11 +1129,8 @@ def handle_tool_errors(
     at WARNING), the unexpected catch-all as stock ``ToolError``
     (logged at ERROR).
 
-    The re-raise chains the original exception via ``from e``. Keep it
-    single-level: :class:`~libtmux_mcp.middleware.ReadonlyRetryMiddleware`
-    matches :exc:`libtmux.exc.LibTmuxException` by inspecting exactly
-    one ``__cause__`` hop, so wrapping the mapped error again would
-    silently disable readonly retries.
+    The re-raise chains the original exception via ``from e`` so logs and
+    debuggers retain the libtmux cause behind the caller-facing error.
 
     Use :func:`handle_tool_errors_async` for ``async def`` tools — this
     wrapper only supports plain sync callables.
@@ -1123,8 +1162,7 @@ def handle_tool_errors_async(
     error classes as the sync decorator (expected failures as
     :class:`ExpectedToolError` at WARNING, the unexpected catch-all as
     stock ``ToolError`` at ERROR) by delegating to a shared helper,
-    and chains the original exception via the same single-level
-    ``from e`` that readonly retries depend on.
+    and chains the original exception via ``from e`` for diagnostics.
     """
 
     @functools.wraps(fn)

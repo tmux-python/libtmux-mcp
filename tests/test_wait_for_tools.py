@@ -59,21 +59,50 @@ def test_channel_tools_are_coroutines() -> None:
 
 
 @pytest.mark.usefixtures("mcp_session")
-def test_signal_channel_no_waiter_is_noop(mcp_server: Server) -> None:
-    """``tmux wait-for -S`` on an unwaited channel returns successfully.
+def test_signal_channel_before_wait_records_one_signal(mcp_server: Server) -> None:
+    """One pre-signal is retained; a second clears the channel.
 
     The ``mcp_session`` fixture is required even though the test does
     not touch it — the bare ``mcp_server`` fixture only constructs an
     unstarted Server instance, so ``mcp_session`` is what actually
     boots the tmux process.
     """
-    result = asyncio.run(
+    asyncio.run(
         signal_channel(
-            channel="wf_test_noop",
+            channel="wf_test_pending",
             socket_name=mcp_server.socket_name,
         )
     )
+    result = asyncio.run(
+        wait_for_channel(
+            channel="wf_test_pending",
+            timeout=2.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
     assert "signalled" in result
+
+    asyncio.run(
+        signal_channel(
+            channel="wf_test_pending",
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    asyncio.run(
+        signal_channel(
+            channel="wf_test_pending",
+            socket_name=mcp_server.socket_name,
+        )
+    )
+    with pytest.raises(ToolError, match="was not signalled"):
+        asyncio.run(
+            wait_for_channel(
+                channel="wf_test_pending",
+                timeout=0.1,
+                socket_name=mcp_server.socket_name,
+            )
+        )
 
 
 @pytest.mark.usefixtures("mcp_session")

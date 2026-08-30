@@ -11,7 +11,8 @@ terminal mode.
 
 **Avoid when** you only need raw text — {tooliconl}`capture-pane` is lighter.
 
-**Side effects:** None. Readonly.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

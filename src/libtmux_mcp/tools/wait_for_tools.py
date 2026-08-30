@@ -8,7 +8,7 @@ the agent composes the shell command with ``tmux wait-for -S NAME`` and
 then calls :func:`wait_for_channel` which blocks server-side until the
 signal fires.
 
-Wait channel safety
+Wait channel scope
 -------------------
 ``tmux wait-for`` without a timeout blocks indefinitely at the OS level.
 If the shell command that was supposed to emit the signal crashes
@@ -42,9 +42,9 @@ import typing as t
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
-    TAG_MUTATING,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     TAG_SELF_BOUNDED,
+    TOOLSET_MANAGE,
     ExpectedToolError,
     _get_server,
     _tmux_argv,
@@ -261,10 +261,11 @@ async def signal_channel(
     channel: str,
     socket_name: str | None = None,
 ) -> str:
-    """Signal a tmux ``wait-for`` channel, waking any blocked waiters.
+    """Signal a tmux ``wait-for`` channel, waking blocked waiters.
 
-    Signalling an unwaited channel is a no-op that still returns
-    successfully — safe to call defensively.
+    With no current waiter, tmux records one pending signal for the
+    next waiter to consume. Signalling that channel again clears it.
+    A woken waiter continues whatever work follows its wait.
 
     Parameters
     ----------
@@ -284,8 +285,8 @@ async def signal_channel(
     # Deliberately still a worker thread, unlike every other tmux call
     # in this package. The orphan-on-cancel defect that pushed the
     # waits onto ``_run_tmux_bounded`` needs a child that blocks for a
-    # caller-chosen duration; ``wait-for -S`` is edge-triggered and
-    # returns in milliseconds, so the worst case here is a 5 s child
+    # caller-chosen duration; ``wait-for -S`` does not block, so the
+    # worst case here is a 5 s child
     # against an already-wedged tmux — and that bound is ours, not the
     # caller's. Converting it would buy nothing and change this tool's
     # error messages.
@@ -320,11 +321,11 @@ def register(mcp: FastMCP) -> None:
     # which is what the tag asserts.
     mcp.tool(
         title="Wait For tmux Channel",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING, TAG_SELF_BOUNDED},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE, TAG_SELF_BOUNDED},
     )(wait_for_channel)
     mcp.tool(
         title="Signal tmux Channel",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(signal_channel)

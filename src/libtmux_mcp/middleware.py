@@ -2,9 +2,9 @@
 
 Provides the project's middleware infrastructure, in definition order:
 
-* :class:`SafetyMiddleware` gates tools by safety tier based on the
-  ``LIBTMUX_SAFETY`` environment variable. Tools tagged above the
-  configured tier are hidden from listing and blocked from execution.
+* :class:`ToolsetMiddleware` rechecks the configured surface for any
+  tool that reaches dispatch. FastMCP visibility makes tools outside
+  that surface unavailable on the wire first.
 * :class:`ToolErrorResultMiddleware` converts tool-call failures into
   ``ToolResult(is_error=True)`` results that carry the clean error
   message plus a structured ``meta`` payload, instead of fastmcp's
@@ -14,9 +14,6 @@ Provides the project's middleware infrastructure, in definition order:
   invocation (name, duration, outcome, client/request ids, and a
   summary of arguments with payload-bearing fields redacted to a
   length + SHA-256 prefix).
-* :class:`ReadonlyRetryMiddleware` retries transient libtmux failures,
-  but only for readonly tools — re-running a mutating tool would
-  silently double side effects.
 * :class:`TailPreservingResponseLimitingMiddleware` is a backstop cap
   for oversized tool output. Unlike FastMCP's stock
   ``ResponseLimitingMiddleware`` it preserves the **tail** of the
@@ -27,85 +24,134 @@ Provides the project's middleware infrastructure, in definition order:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import logging
 import time
 import typing as t
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.middleware.error_handling import (
-    ErrorHandlingMiddleware,
-    RetryMiddleware,
-)
+from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
+from fastmcp.server.transforms import Transform, Visibility
 from fastmcp.tools.base import ToolResult
-from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
-from libtmux_mcp._utils import (
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
-    TAG_SELF_BOUNDED,
-    ExpectedToolError,
+from libtmux_mcp._utils import TOOLSET_INSPECT, VALID_TOOLSETS, ExpectedToolError
+
+if t.TYPE_CHECKING:
+    from fastmcp.server.transforms import GetToolNext
+    from fastmcp.tools.base import Tool
+    from fastmcp.utilities.versions import VersionSpec
+
+
+_NESTED_READ_TOOL = contextvars.ContextVar[str | None](
+    "libtmux_mcp_nested_read_tool",
+    default=None,
 )
 
-_TIER_LEVELS: dict[str, int] = {
-    TAG_READONLY: 0,
-    TAG_MUTATING: 1,
-    TAG_DESTRUCTIVE: 2,
-}
+
+@contextlib.contextmanager
+def _allow_nested_read_tool(name: str) -> t.Iterator[None]:
+    """Scope one nested read-batch operation to ``name``."""
+    token = _NESTED_READ_TOOL.set(name)
+    try:
+        yield
+    finally:
+        _NESTED_READ_TOOL.reset(token)
 
 
-class SafetyMiddleware(Middleware):
-    """Gate tools by safety tier.
+class _NestedReadToolVisibility(Transform):
+    """Expose the current read-batch operation to FastMCP lookup."""
+
+    def __init__(self, exclude_tools: t.AbstractSet[str]) -> None:
+        self.exclude_tools = frozenset(exclude_tools)
+
+    async def get_tool(
+        self,
+        name: str,
+        call_next: GetToolNext,
+        *,
+        version: VersionSpec | None = None,
+    ) -> Tool | None:
+        """Enable only the tool scoped by the read-batch validator."""
+        if name != _NESTED_READ_TOOL.get() or name in self.exclude_tools:
+            return await call_next(name, version=version)
+        return await Visibility(
+            True,
+            names={name},
+            components={"tool"},
+        ).get_tool(name, call_next, version=version)
+
+
+class ToolsetMiddleware(Middleware):
+    """Filter tools to the enabled toolsets.
+
+    Filtering controls which MCP tool calls this server advertises and
+    accepts. It does not confine tmux: an enabled ``execute`` tool can type
+    the equivalent of any hidden tool.
 
     Parameters
     ----------
-    max_tier : str
-        Maximum allowed tier. One of ``TAG_READONLY``, ``TAG_MUTATING``,
-        or ``TAG_DESTRUCTIVE``.
+    toolsets : set of str
+        Enabled toolsets. A tool tagged with none of them is refused.
+    tools : set of str
+        Tool names enabled regardless of toolset.
+    exclude_tools : set of str
+        Tool names refused regardless of every enable above.
     """
 
-    def __init__(self, max_tier: str = TAG_MUTATING) -> None:
-        self.max_level = _TIER_LEVELS.get(max_tier, 0)
+    def __init__(
+        self,
+        toolsets: t.AbstractSet[str],
+        tools: t.AbstractSet[str] = frozenset(),
+        exclude_tools: t.AbstractSet[str] = frozenset(),
+    ) -> None:
+        self.toolsets = frozenset(toolsets)
+        self.tools = frozenset(tools)
+        self.exclude_tools = frozenset(exclude_tools)
 
-    def _is_allowed(self, tags: set[str]) -> bool:
-        """Return True if the tool's tags fall within the allowed tier.
+    def _is_enabled(self, name: str, tags: set[str]) -> bool:
+        """Return whether a tool is part of the advertised surface.
 
-        Fail-closed: tools without a recognized tier tag are denied.
+        Fail-closed: a tool carrying no recognized toolset is refused,
+        so adding one without classifying it cannot expose it.
         """
-        found_tier = False
-        for tier, level in _TIER_LEVELS.items():
-            if tier in tags:
-                found_tier = True
-                if level > self.max_level:
-                    return False
-        return found_tier
+        toolsets = tags & set(VALID_TOOLSETS)
+        if not toolsets or name in self.exclude_tools:
+            return False
+        if name in self.tools:
+            return True
+        if name == _NESTED_READ_TOOL.get() and TOOLSET_INSPECT in toolsets:
+            return True
+        return bool(self.toolsets & toolsets)
 
     async def on_list_tools(
         self,
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Filter tools above the safety tier from the listing."""
+        """Drop tools outside the enabled surface from the listing."""
         tools = await call_next(context)
-        return [tool for tool in tools if self._is_allowed(tool.tags)]
+        return [tool for tool in tools if self._is_enabled(tool.name, tool.tags)]
 
     async def on_call_tool(
         self,
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Block execution of tools above the safety tier."""
+        """Refuse a tool outside the enabled surface."""
         if context.fastmcp_context:
-            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and not self._is_allowed(tool.tags):
+            name = context.message.name
+            tool = await context.fastmcp_context.fastmcp.get_tool(name)
+            if tool and not self._is_enabled(name, tool.tags):
+                enabled = ", ".join(sorted(self.toolsets)) or "(none)"
                 msg = (
-                    f"Tool '{context.message.name}' is not available at the "
-                    f"current safety level. Set LIBTMUX_SAFETY=destructive "
-                    f"to enable destructive tools."
+                    f"Tool {name!r} is not in this server's enabled "
+                    f"toolsets ({enabled}). Set LIBTMUX_TOOLSETS to include "
+                    f"it, or LIBTMUX_TOOLS to enable it by name."
                 )
                 raise ExpectedToolError(msg)
         return await call_next(context)
@@ -219,7 +265,7 @@ def install_fastmcp_validation_log_filter() -> None:
 #: from other clients stay loud. Contrast MemPalace/mempalace#322,
 #: which strips the key, and #647, which whitelists arguments against
 #: the schema — silent dropping would let a mis-named flag on a
-#: mutating tool (e.g. ``enter`` on send_keys) run with defaults.
+#: writing tool (e.g. ``enter`` on send_keys) run with defaults.
 _CLIENT_SCHEDULING_FLAG = "wait_for_previous"
 
 
@@ -375,13 +421,11 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     synthesized suggestion telling the agent which names to drop or
     fix (see :func:`_error_tool_result`).
 
-    Ordering invariant: must sit **outside** ``AuditMiddleware``,
-    ``ReadonlyRetryMiddleware``, and ``SafetyMiddleware``. All three
-    depend on exception semantics — audit detects failures by catching,
-    retry matches ``LibTmuxException`` via ``__cause__``, and safety's
-    tier denials must propagate as exceptions for audit to record them
-    — so converting the exception to a result any deeper in the stack
-    would silently break all three.
+    Ordering invariant: must sit **outside** ``AuditMiddleware`` and
+    ``ToolsetMiddleware``. Both depend on exception semantics: audit detects
+    failures by catching them, and toolset denials must propagate as exceptions
+    for audit to record them. Converting the exception to a result any deeper in
+    the stack would silently break both.
     """
 
     def _log_error(self, error: Exception, context: MiddlewareContext) -> None:
@@ -463,7 +507,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 #: audit log only. ``respawn_pane(shell="env SECRET=... bash")`` and
 #: ``environment={"AWS_SECRET_KEY": "..."}`` may briefly expose the values
 #: via the OS process table and tmux's ``pane_current_command`` metadata
-#: until the spawned shell takes over — see ``docs/topics/safety.md``.
+#: until the spawned shell takes over — see ``docs/topics/trust.md``.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
     {"keys", "text", "command", "value", "content", "shell", "environment"}
 )
@@ -680,132 +724,6 @@ class AuditMiddleware(Middleware):
 DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 
 
-#: Failures a retry cannot fix. Each one names a thing that is not there, or a
-#: request that cannot succeed as written, so re-running it buys a second tmux
-#: round-trip and a backoff window in order to fail identically. They all
-#: descend from :exc:`libtmux.exc.LibTmuxException`, which is the retry
-#: trigger, so without this set they would all be retried.
-#:
-#: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
-#: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
-NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
-    libtmux_exc.ObjectDoesNotExist,
-    libtmux_exc.MultipleObjectsReturned,
-    libtmux_exc.PaneNotFound,
-    libtmux_exc.NoWindowsExist,
-    libtmux_exc.BadSessionName,
-    libtmux_exc.TmuxSessionExists,
-    libtmux_exc.TmuxCommandNotFound,
-)
-
-
-class _SkipDeterministicFailures(RetryMiddleware):
-    """A :class:`RetryMiddleware` that declines to retry what cannot succeed.
-
-    fastmcp decides whether to retry in ``_should_retry``, matching the error
-    and, one hop down, its ``__cause__`` -- which is where the real failure
-    lives, because ``handle_tool_errors`` re-raises every libtmux error as an
-    ``ExpectedToolError`` chained off the original. This narrows that decision
-    with :data:`NON_RETRYABLE_EXCEPTIONS`, checking the same two places.
-    """
-
-    def _should_retry(self, error: Exception) -> bool:
-        """Return ``False`` for a failure a second attempt cannot change."""
-        cause = error.__cause__
-        if isinstance(error, NON_RETRYABLE_EXCEPTIONS) or (
-            cause is not None and isinstance(cause, NON_RETRYABLE_EXCEPTIONS)
-        ):
-            return False
-        return super()._should_retry(error)
-
-
-class ReadonlyRetryMiddleware(Middleware):
-    """Retry transient libtmux failures, but only for readonly tools.
-
-    Wraps fastmcp's :class:`fastmcp.server.middleware.error_handling.RetryMiddleware`
-    so retries are bounded by the safety tier the tool is registered
-    under. Mutating and destructive tools (``send_keys``,
-    ``create_session``, ``kill_server``, …) pass straight through —
-    re-running them on a transient socket error would silently double
-    side effects, which is unacceptable. Readonly tools
-    (``list_sessions``, ``capture_pane``, ``snapshot_pane``, …) are
-    safe to retry because they observe state without mutating it.
-
-    Default retry trigger is :exc:`libtmux.exc.LibTmuxException` —
-    libtmux wraps the subprocess failures we actually want to retry
-    (socket EAGAIN, transient connect errors). The fastmcp default
-    ``(ConnectionError, TimeoutError)`` does NOT match these, so the
-    upstream defaults would be a silent no-op.
-
-    That trigger is a whole family, though, and most of it is not
-    transient: a pane that does not exist will not exist on the second
-    look. :data:`NON_RETRYABLE_EXCEPTIONS` carves those out, so a stale
-    id fails once instead of costing a backoff window and a second tmux
-    round-trip to fail again.
-
-    Place this in the middleware stack **inside** ``AuditMiddleware``
-    (so retried calls are audited once each) and **outside**
-    ``SafetyMiddleware`` (so tier-denied tools never reach retry).
-    """
-
-    def __init__(
-        self,
-        max_retries: int = 1,
-        base_delay: float = 0.1,
-        max_delay: float = 1.0,
-        backoff_multiplier: float = 2.0,
-        retry_exceptions: tuple[type[Exception], ...] = (libtmux_exc.LibTmuxException,),
-        logger_: logging.Logger | None = None,
-    ) -> None:
-        """Configure the underlying retry policy.
-
-        Defaults are deliberately small. ``max_retries=1`` keeps audit
-        log noise minimal (one retry per failed call, not three). The
-        100 ms / 1 s backoff window matches the expected duration of a
-        transient libtmux socket hiccup — a longer backoff would just
-        delay a real failure without adding meaningful retry headroom.
-
-        ``logger_`` defaults to ``logging.getLogger("libtmux_mcp.retry")``
-        when not supplied — keeps retry events on the project's
-        ``libtmux_mcp.*`` namespace so operators routing the audit
-        stream capture them. Without this default, fastmcp's stock
-        ``RetryMiddleware`` would log to ``fastmcp.retry`` and miss
-        any project-namespace log routing.
-        """
-        if logger_ is None:
-            logger_ = logging.getLogger("libtmux_mcp.retry")
-        self._retry = _SkipDeterministicFailures(
-            max_retries=max_retries,
-            base_delay=base_delay,
-            max_delay=max_delay,
-            backoff_multiplier=backoff_multiplier,
-            retry_exceptions=retry_exceptions,
-            logger=logger_,
-        )
-
-    async def on_call_tool(
-        self,
-        context: MiddlewareContext,
-        call_next: t.Any,
-    ) -> t.Any:
-        """Delegate to the upstream retry only for retry-eligible readonly tools.
-
-        ``TAG_SELF_BOUNDED`` tools are excluded even though they are
-        readonly. Their deadline is computed inside the tool body, so a
-        retry restarts the clock: a transient ``LibTmuxException`` at
-        t=29s of a 30s wait would produce a ~59s call and make the wait
-        ceiling a lie. :class:`_SkipDeterministicFailures` cannot cover
-        this — it carves out failures by exception type, and the
-        offending exception here is a genuinely transient one that a
-        retry *would* fix for any other tool.
-        """
-        if context.fastmcp_context:
-            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and TAG_READONLY in tool.tags and TAG_SELF_BOUNDED not in tool.tags:
-                return await self._retry.on_request(context, call_next)
-        return await call_next(context)
-
-
 #: Header prefixed to a truncated response. Intentionally matches the
 #: format used by the per-tool ``capture_pane`` truncation so clients
 #: see a consistent marker regardless of which layer fired.
@@ -823,13 +741,13 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     drop the head instead, prefixing a single truncation-header line
     so callers can detect the cap fired.
 
-    Used as a global backstop for :func:`libtmux_mcp.tools.pane_tools.capture_pane`,
+    Used as a backstop for :func:`libtmux_mcp.tools.pane_tools.capture_pane`,
     :func:`libtmux_mcp.tools.pane_tools.capture_since`,
     :func:`libtmux_mcp.tools.pane_tools.snapshot_pane`, and
-    :func:`libtmux_mcp.tools.pane_tools.search_panes`. Per-tool
-    caps at the tool layer fire first under normal operation; this
-    middleware catches pathological output from future tools that
-    forget to declare their own bounds.
+    :func:`libtmux_mcp.tools.pane_tools.search_panes`, plus
+    :func:`libtmux_mcp.tools.buffer_tools.show_buffer`. Per-tool caps at
+    the tool layer fire first under normal operation; this middleware
+    catches a missed bound within that configured high-volume set.
 
     Error results keep their ``is_error`` flag through truncation.
     The stock truncation path rebuilds the result without it, which

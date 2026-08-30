@@ -119,4 +119,5 @@ $ grok mcp add \
 
 - **Absolute paths**: Some clients require absolute paths in config. Use `$HOME/...` or the full path instead of `~/...`.
 - **Virtual environments**: If using pip install, ensure the venv is activated or the `libtmux-mcp` binary is on your PATH.
-- **Socket isolation**: Set `LIBTMUX_SOCKET` in the `env` block to isolate the MCP server from your default tmux. See {ref}`configuration`.
+- **Socket selection**: Set `LIBTMUX_SOCKET` in the `env` block to address a
+  separate tmux object namespace. See {ref}`configuration`.

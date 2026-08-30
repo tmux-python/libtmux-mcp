@@ -22,7 +22,7 @@ Create a new tmux session.
 :::
 
 :::{grid-item-card} {tooliconl}`kill-server`
-Terminate the tmux daemon. Destructive.
+Terminate the tmux daemon. Not reversible.
 :::
 
 :::{grid-item-card} {tooliconl}`show-option`

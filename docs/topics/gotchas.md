@@ -62,6 +62,23 @@ returns a cursor, and follow-up calls return only output written or rewritten
 after that cursor. If tmux has already trimmed or cleared the needed history,
 the result marks `lines_missed=true` and gives you a fresh cursor.
 
+## Names you pass are stored literally
+
+tmux expands several argument values as formats, where `#H` becomes the
+hostname and `#(cmd)` runs a shell job. Session names, window names, pane
+titles, option names, and `start_directory` all land in such an argument.
+
+This server escapes each of them, so a window named `build #2` or a directory
+named `has#hash` is stored as written. Nothing has to be pre-escaped, and
+doubling a `#` yourself produces a literal doubled `#`.
+
+Values are the exception, and deliberately so. {tooliconl}`set-option` stores
+an option's value unexpanded, because a status format is *supposed* to keep
+its `#{...}`. tmux then runs it when it draws the status line, and again on
+every status interval. `default-command` and `default-shell` decide what
+future panes run. Setting an option is therefore a way to schedule
+execution, not only to configure.
+
 ## Window names are not unique across sessions
 
 Two sessions can each have a window named "editor". Targeting by `window_name` alone is ambiguous — always include `session_name` or use the globally unique `window_id` (e.g., `@0`, `@1`).
@@ -97,4 +114,4 @@ This has been observed with stock Gemini CLI behavior (no extensions involved). 
 
 Tool schemas are strict (`additionalProperties: false`), so the call is rejected with a validation error — classified as expected (WARNING log, `expected: true` in the result's `_meta`) and carrying a suggestion that names the rejected argument and identifies `wait_for_previous` as a client scheduling flag to retry without. Gemini's model reads it, drops the flag, and retries successfully on its own.
 
-The visible symptom is harmless noise: `Error executing tool mcp_tmux_<name>: ... reported an error` lines in Gemini's output for calls that then succeed on retry, and matching WARNING records in the server log. Similar reports in other MCP servers have handled this injected key by stripping it or whitelisting arguments against the schema ([MemPalace/mempalace#816](https://github.com/MemPalace/mempalace/issues/816)). This server deliberately keeps the rejection: silently dropping unknown arguments would also swallow genuine argument typos from every client — on a server with mutating and destructive tools, a mis-named flag (`enter` on {toolref}`send-keys`, say) must fail loudly, not run with defaults.
+The visible symptom is harmless noise: `Error executing tool mcp_tmux_<name>: ... reported an error` lines in Gemini's output for calls that then succeed on retry, and matching WARNING records in the server log. Similar reports in other MCP servers have handled this injected key by stripping it or whitelisting arguments against the schema ([MemPalace/mempalace#816](https://github.com/MemPalace/mempalace/issues/816)). This server deliberately keeps the rejection: silently dropping unknown arguments would also swallow genuine argument typos from every client — on a server that can type into panes and delete them, a mis-named flag (`enter` on {toolref}`send-keys`, say) must fail loudly, not run with defaults.

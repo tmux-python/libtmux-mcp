@@ -26,7 +26,7 @@ Pydantic models for requests and responses.
 :::{grid-item-card} Middleware
 :link: middleware
 :link-type: doc
-Safety-tier enforcement and request hooks.
+Toolset enforcement and request hooks.
 :::
 
 :::{grid-item-card} Utils

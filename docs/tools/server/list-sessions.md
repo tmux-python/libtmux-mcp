@@ -9,7 +9,8 @@ which session to target.
 **Avoid when** you need window or pane details — use {tooliconl}`list-windows` or
 {tooliconl}`list-panes` instead.
 
-**Side effects:** None. Readonly.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

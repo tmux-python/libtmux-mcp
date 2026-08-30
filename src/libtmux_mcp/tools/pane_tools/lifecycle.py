@@ -8,8 +8,10 @@ from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _caller_is_on_server,
+    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
+    _prepare_start_directory,
     _resolve_pane,
     _resolve_window,
     _serialize_pane,
@@ -118,8 +120,8 @@ def respawn_pane(
         the ``shell`` parameter on :func:`split_window` and the
         eventual upstream ``Pane.respawn(shell=)`` API.
     start_directory : str, optional
-        Working directory for the relaunched command (maps to
-        ``respawn-pane -c``).
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     environment : dict or str, optional
         Environment variables to set for the relaunched process. Each
         item becomes one ``-e KEY=VALUE`` flag (tmux's
@@ -165,7 +167,7 @@ def respawn_pane(
         raise ExpectedToolError(msg)
     pane.respawn(
         kill=kill,
-        start_directory=start_directory,
+        start_directory=_prepare_start_directory(start_directory),
         environment=spawn_environment,
         shell=shell,
     )
@@ -216,7 +218,7 @@ def set_pane_title(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.set_title(title)
+    pane.set_title(_escape_tmux_format(title))
     return _serialize_pane(pane)
 
 

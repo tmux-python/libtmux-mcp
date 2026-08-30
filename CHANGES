@@ -6,6 +6,99 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**Toolsets replace safety tiers**
+
+Tools now belong to the unordered `inspect`, `manage`, `execute`, and
+`teardown` sets. `LIBTMUX_TOOLSETS` selects any combination; the default is
+`inspect,manage,execute`, while `teardown` remains opt-in.
+`LIBTMUX_TOOLS` enables individual tools and `LIBTMUX_EXCLUDE_TOOLS` takes
+precedence over every inclusion. Unknown toolset or tool names fail startup.
+
+`LIBTMUX_SAFETY` now fails startup rather than silently widening the exposed
+surface.
+
+**Before**
+
+```console
+$ LIBTMUX_SAFETY=readonly libtmux-mcp
+```
+
+**After**
+
+```console
+$ LIBTMUX_TOOLSETS=inspect libtmux-mcp
+```
+
+The former default maps to `inspect,manage,execute`; the former full surface
+adds `teardown`. See {ref}`migration` and {ref}`trust`. (#128)
+
+**Write-capable batch wrappers are removed**
+
+`call_readonly_tools_batch` becomes
+{tooliconl}`call-read-tools-batch` and accepts `inspect` tools only.
+`call_mutating_tools_batch` and `call_destructive_tools_batch` are removed;
+call write-capable tools directly so client policy sees each tool's own name.
+(#128)
+
+**{tooliconl}`display-message` accepts literals and variables**
+
+`format_string` now accepts literal text and plain `#{variable}` references,
+including hyphenated built-in and user-option names. Modifiers, conditionals,
+padding, and jobs are rejected because they can re-expand values supplied by a
+pane. Run `tmux display-message -p` through {tooliconl}`run-command` when raw
+format syntax is required. (#128)
+
+**Spawn tools require an existing working directory**
+
+A supplied `start_directory` must resolve to an existing directory. Calls that
+previously appeared to succeed while tmux silently placed the pane in `$HOME`
+now fail and identify the invalid path. (#128)
+
+### Fixes
+
+**Names and paths remain literal**
+
+Caller-supplied session names, window names, pane titles, option names, and
+working directories are escaped before tmux format expansion. Values containing
+`#(...)`, `#{...}`, or `#[...]` now arrive intact instead of running a job or
+being rewritten. (#128)
+
+**{tooliconl}`search-panes` stops pathological matching**
+
+Regex matching now has one two-second budget across the call, excluding tmux
+pane-capture time. Pattern length is capped separately, and a pattern that
+exhausts the matching budget returns a correctable error instead of blocking
+the server. (#128)
+
+**Tool annotations account for programmable tmux targets**
+
+Every tool that requests a tmux operation now advertises conservative
+whole-call annotations. Command aliases and `after-*` hooks can replace or
+extend an operation on an existing tmux server, so the project-owned toolsets
+carry the direct-operation distinction that standard MCP hints cannot promise.
+(#128)
+
+**Failed tool calls run once**
+
+The server no longer retries failed inspection calls automatically. A tmux
+alias or hook may already have acted before reporting an error, so the client or
+operator decides whether repeating the request is appropriate. (#128)
+
+**Shutdown leaves tmux buffers alone**
+
+Server shutdown clears only the Python process cache. It no longer deletes
+buffers by a shared name prefix that cannot prove which MCP server instance
+created them. (#128)
+
+**Prompt adapters remain callable through `inspect`**
+
+With `LIBTMUX_MCP_PROMPTS_AS_TOOLS=1`, `list_prompts` and `get_prompt` remain
+visible and callable when the `inspect` toolset is enabled. They render
+server-local text without contacting tmux and retain their narrower
+annotations. (#128)
+
 ### Documentation
 
 #### opencode joins the install picker
@@ -14,6 +107,14 @@ The install widget gains an opencode panel. `opencode mcp add tmux -- <command>`
 is non-interactive once a name and a `--` command are both given, so it is a CLI
 panel rather than a paste-this-JSON one — which also sidesteps opencode's
 unusual entry shape.
+
+**The trust page separates tool filtering from confinement**
+
+The trust page replaces the safety topic and explains what the MCP call gate,
+tmux aliases and hooks, shared sockets, status jobs, and OS isolation each
+control. The old safety URL and renamed batch-tool URL redirect to their current
+pages, and tool catalogs expose each toolset with a copyable label and colored
+badge. (#128)
 
 ### Development
 
@@ -58,6 +159,13 @@ failing; the other two raised `AssertionError`, which the caller did not catch.
 A non-mapping at a container key now raises a `RuntimeError` naming the path for
 every CLI, not just Claude. `scripts/README.md`'s extension guide described
 three branch sites when there were four; it now describes the fields instead.
+
+**`mcp_swap.py` migrates retired safety settings**
+
+`use-local` removes a stored `LIBTMUX_SAFETY` only when
+`LIBTMUX_TOOLSETS` supplies its replacement. Otherwise it stops with migration
+instructions, and `--env LIBTMUX_SAFETY=...` is rejected so a restricted
+configuration cannot widen silently. (#128)
 
 ## libtmux-mcp 0.1.0a20 (2026-08-09)
 
@@ -325,11 +433,11 @@ MCP clients now see the effective server default for `suppress_history` on {tool
 
 {tooliconl}`create-session`, {tooliconl}`create-window`, {tooliconl}`split-window`, and {tooliconl}`respawn-pane` now let callers opt into best-effort no-disk shell-history controls with `suppress_persistent_history=true`. Session controls reach the initial and future panes, while the other tools limit the setting to the process launched by that call.
 
-History suppression reduces accidental persistence, but it is not secret transport: shells can override the controls, and terminal output and other observation surfaces remain visible. See {ref}`history-hygiene` for shell behavior and {ref}`safety` for the remaining boundaries. (#91)
+History suppression reduces accidental persistence, but it is not secret transport: shells can override the controls, and terminal output and other observation surfaces remain visible. See {ref}`history-hygiene` for shell behavior and {ref}`trust` for the remaining boundaries. (#91)
 
 **Per-process environments for windows and panes**
 
-{tooliconl}`create-window` and {tooliconl}`split-window` now accept per-process `environment` mappings or JSON object strings, so callers can configure new windows and panes without changing the tmux session environment. {tooliconl}`respawn-pane` now accepts the same JSON object form for its existing environment input. Values can still surface in host process inspection and child environments; use credential references, not literal credentials. See {ref}`safety` for details. (#91)
+{tooliconl}`create-window` and {tooliconl}`split-window` now accept per-process `environment` mappings or JSON object strings, so callers can configure new windows and panes without changing the tmux session environment. {tooliconl}`respawn-pane` now accepts the same JSON object form for its existing environment input. Values can still surface in host process inspection and child environments; use credential references, not literal credentials. See {ref}`trust` for details. (#91)
 
 ### Documentation
 
@@ -407,7 +515,7 @@ libtmux-mcp 0.1.0a12 hardens the MCP server's read-only and safety surface and a
 
 **Read-only tools no longer evaluate tmux `#()` format jobs**
 
-{tooliconl}`search-panes` and {tooliconl}`display-message` are advertised as read-only, but tmux `#(...)` formats schedule shell jobs during expansion. Both now reject or route around `#()` so a read-only call can never spawn a shell. (#68, #69)
+{tooliconl}`search-panes` and {tooliconl}`display-message` were advertised as read-only, but tmux `#(...)` formats schedule shell jobs during expansion. Both now reject or route around `#()` so those parameters can no longer spawn a shell. (#68, #69)
 
 **Invalid `LIBTMUX_SAFETY` fails closed**
 
@@ -623,7 +731,7 @@ libtmux-mcp 0.1.0a4 adds pane recovery and closes the last gap in the core hiera
 
 ### Documentation
 
-{ref}`safety` now documents {tooliconl}`respawn-pane` as a mutating recovery tool with real process side effects, including the `kill=true` default and the visibility tradeoffs of passing command or environment data through tmux. The same update refreshes socket-guard notes for macOS, tightens guidance around {tooliconl}`display-message` and {tooliconl}`pipe-pane`, and adds dedicated tool pages for the new recovery and metadata tools. (#27)
+{ref}`trust` now documents {tooliconl}`respawn-pane` as a mutating recovery tool with real process side effects, including the `kill=true` default and the visibility tradeoffs of passing command or environment data through tmux. The same update refreshes socket-guard notes for macOS, tightens guidance around {tooliconl}`display-message` and {tooliconl}`pipe-pane`, and adds dedicated tool pages for the new recovery and metadata tools. (#27)
 
 ### Development
 
@@ -667,7 +775,7 @@ for match in search_panes(...).matches:
     ...
 ```
 
-**Minimum `fastmcp>=3.2.4`** (was `>=3.1.0`). The newer FastMCP release is required for {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` and per-parameter input-schema descriptions.
+**Minimum `fastmcp>=3.2.4`** (was `>=3.1.0`). The newer FastMCP release is required for the former `ReadonlyRetryMiddleware` and per-parameter input-schema descriptions.
 
 ### What's new
 
@@ -685,7 +793,7 @@ Four MCP prompts ship for repeatable tmux work: `run_and_wait`, `diagnose_failin
 
 **Middleware for safer long-running automation**
 
-The middleware stack now includes {class}`~libtmux_mcp.middleware.AuditMiddleware` for digest-redacted argument summaries, {class}`~libtmux_mcp.middleware.SafetyMiddleware` for safety-tier visibility, {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` for transient readonly libtmux failures, and {class}`~libtmux_mcp.middleware.TailPreservingResponseLimitingMiddleware` for oversized tool output. Timing and error-handling middleware round out the request path. (#15)
+The middleware stack now includes {class}`~libtmux_mcp.middleware.AuditMiddleware` for digest-redacted argument summaries, the former `SafetyMiddleware` for safety-tier visibility, the former `ReadonlyRetryMiddleware` for transient readonly libtmux failures, and {class}`~libtmux_mcp.middleware.TailPreservingResponseLimitingMiddleware` for oversized tool output. Timing and error-handling middleware round out the request path. (#15)
 
 **Tail-preserving bounded output**
 
@@ -700,11 +808,11 @@ Tool input schemas now include parameter descriptions extracted from docstrings,
 - {tooliconl}`search-panes` neutralizes tmux format-string injection in the regex fast path.
 - The macOS self-kill guard resolves the live tmux socket before falling back to `TMUX_TMPDIR` reconstruction.
 - The `build_dev_workspace` prompt uses real tool parameter names, avoids waiting for prompts after screen-grabbing commands, and replaces a Linux-specific log default with `log_command`.
-- {class}`~libtmux_mcp.middleware.ReadonlyRetryMiddleware` logs retry warnings under `libtmux_mcp.retry`.
+- The former `ReadonlyRetryMiddleware` logs retry warnings under `libtmux_mcp.retry`.
 
 ### Documentation
 
-The tools documentation gains category pages for {doc}`/tools/buffer/index`, {doc}`/tools/hook/index`, and {doc}`/tools/index`. The pane tools docs explain the {class}`~libtmux_mcp.models.SearchPanesResult` migration, while {ref}`safety` documents the audit log, socket caveats, {tooliconl}`pipe-pane`, and {tooliconl}`set-environment`. (#15)
+The tools documentation gains category pages for {doc}`/tools/buffer/index`, {doc}`/tools/hook/index`, and {doc}`/tools/index`. The pane tools docs explain the {class}`~libtmux_mcp.models.SearchPanesResult` migration, while {ref}`trust` documents the audit log, socket caveats, {tooliconl}`pipe-pane`, and {tooliconl}`set-environment`. (#15)
 
 ## libtmux-mcp 0.1.0a1 (2026-04-13)
 

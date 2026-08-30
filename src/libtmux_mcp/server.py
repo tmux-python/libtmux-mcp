@@ -6,7 +6,6 @@ Creates and configures the MCP server with all tools and resources.
 from __future__ import annotations
 
 import contextlib
-import logging
 import os
 import shutil
 import typing as t
@@ -14,19 +13,16 @@ import typing as t
 from fastmcp import FastMCP
 from fastmcp.server.middleware.timing import TimingMiddleware
 
-if t.TYPE_CHECKING:
-    from libtmux.server import Server
-
 from libtmux_mcp.__about__ import __version__
 from libtmux_mcp._history import (
     _configure_history_defaults,
     _resolve_suppress_history,
 )
 from libtmux_mcp._utils import (
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
-    VALID_SAFETY_LEVELS,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    VALID_TOOLSETS,
     _server_cache,
 )
 from libtmux_mcp._wait_policy import (
@@ -37,21 +33,14 @@ from libtmux_mcp._wait_policy import (
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
     AuditMiddleware,
-    ReadonlyRetryMiddleware,
-    SafetyMiddleware,
     TailPreservingResponseLimitingMiddleware,
     ToolErrorResultMiddleware,
+    ToolsetMiddleware,
+    _NestedReadToolVisibility,
     install_fastmcp_validation_log_filter,
 )
-from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
 
-logger = logging.getLogger(__name__)
 install_fastmcp_validation_log_filter()
-
-#: Cache-key shape used by :data:`_server_cache` and the GC helper.
-#: ``(socket_name, socket_path, tmux_bin)`` — see
-#: :func:`libtmux_mcp._utils._get_server`.
-_ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
 
 # ---------------------------------------------------------------------------
 # _BASE_INSTRUCTIONS — composed from named segments.
@@ -101,7 +90,7 @@ _INSTR_METADATA_VS_CONTENT = (
 
 _INSTR_READ_TOOLS = (
     "Prefer snapshot_pane over capture_pane + get_pane_info; capture_since "
-    "for repeated observation/tailing; display_message for tmux formats."
+    "for repeated observation/tailing; display_message for tmux variables."
 )
 
 _INSTR_WAIT_NOT_POLL = (
@@ -116,7 +105,7 @@ _INSTR_WAIT_NOT_POLL = (
 #: comment above for when to add another ``_GAP`` segment vs. push the
 #: explanation into a tool description.
 _INSTR_HOOKS_GAP = (
-    "HOOKS ARE READ-ONLY: inspect via show_hooks/show_hook. "
+    "NO DEDICATED HOOK-WRITE TOOLS: use show_hooks/show_hook. "
     "Write hooks survive process death; keep them in your tmux config file."
 )
 
@@ -140,12 +129,19 @@ _BASE_INSTRUCTIONS = (
 
 _INSTRUCTIONS_MAX_BYTES = 2048
 
+#: Enabled when ``LIBTMUX_TOOLSETS`` is unset. ``teardown`` is not in it:
+#: this server still reaches whichever tmux server the environment points
+#: at, so deletion stays something an operator asks for by name.
+DEFAULT_TOOLSETS: frozenset[str] = frozenset(
+    {TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_EXECUTE}
+)
+
 
 def _build_instructions(
-    safety_level: str = TAG_MUTATING,
+    toolsets: frozenset[str] = DEFAULT_TOOLSETS,
     suppress_history: bool = True,
 ) -> str:
-    """Build server instructions with agent context and safety level.
+    """Build server instructions with agent context and toolsets.
 
     When the MCP server process runs inside a tmux pane, ``TMUX_PANE`` and
     ``TMUX`` environment variables are available. This function appends that
@@ -153,8 +149,8 @@ def _build_instructions(
 
     Parameters
     ----------
-    safety_level : str
-        Active safety tier (readonly, mutating, or destructive).
+    toolsets : frozenset of str
+        Enabled toolsets.
     suppress_history : bool
         Effective MCP default for semantic shell-command suppression.
 
@@ -165,11 +161,12 @@ def _build_instructions(
     """
     parts: list[str] = [_BASE_INSTRUCTIONS]
 
-    # Safety tier context
+    # Toolset context
     parts.append(
-        f"\n\nSafety level: {safety_level} "
-        "(values: readonly, mutating, destructive). "
-        "Set LIBTMUX_SAFETY; off-tier tools are hidden."
+        "\n\nToolsets: "
+        + (", ".join(sorted(toolsets)) or "(none)")
+        + f" (of {', '.join(VALID_TOOLSETS)}), set by LIBTMUX_TOOLSETS. "
+        "Hiding one shapes this list, not what a pane can run."
     )
     history_default = "true" if suppress_history else "false"
     parts.append(
@@ -177,15 +174,12 @@ def _build_instructions(
         "raw send/batch/paste and spawn do not."
     )
 
-    # Tier-conditioned discoverability hint. False-positive activation is
-    # cheap on readonly (worst case: an extra list_panes call) and
-    # expensive on mutating/destructive (where kill_* is one mis-routed
-    # query away). Reuse the existing safety axis instead of shipping a
-    # separate LIBTMUX_DISCOVERABILITY knob.
-    if safety_level == TAG_READONLY:
-        parts.append(
-            "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
-        )
+    # Only when nothing but inspect is enabled: a wrong guess costs one
+    # extra capture, where the same nudge on a surface holding kill_* or
+    # send_keys could cost a pane. Keyed on the enabled toolsets rather
+    # than a separate discoverability variable.
+    if toolsets == frozenset({TOOLSET_INSPECT}):
+        parts.append("\n\nProbe snapshot_pane/list_panes/search_panes if unsure.")
 
     instructions = "".join(parts)
     if len(instructions.encode("utf-8")) > _INSTRUCTIONS_MAX_BYTES:
@@ -263,21 +257,69 @@ def _build_instructions(
     return instructions
 
 
-def _resolve_safety_level(value: str | None) -> str:
-    """Return the effective safety level for a ``LIBTMUX_SAFETY`` value."""
+def _resolve_toolsets(value: str | None) -> frozenset[str]:
+    """Return the enabled toolsets for a ``LIBTMUX_TOOLSETS`` value.
+
+    Parameters
+    ----------
+    value : str or None
+        Comma-separated toolset names. ``None`` takes the default; an
+        empty string enables none, which is legal.
+
+    Returns
+    -------
+    frozenset of str
+        Enabled toolsets.
+
+    Raises
+    ------
+    RuntimeError
+        If a name is not a toolset. A typo silently falling back is how
+        a narrowed surface quietly becomes a wider one.
+    """
     if value is None:
-        return TAG_MUTATING
-    if value in VALID_SAFETY_LEVELS:
-        return value
-    logger.warning(
-        "invalid LIBTMUX_SAFETY=%r, falling back to %s",
-        value,
-        TAG_READONLY,
+        return DEFAULT_TOOLSETS
+    names = [part.strip() for part in value.split(",") if part.strip()]
+    unknown = [name for name in names if name not in VALID_TOOLSETS]
+    if unknown:
+        msg = (
+            f"LIBTMUX_TOOLSETS names unknown toolsets: {', '.join(unknown)}. "
+            f"Valid toolsets: {', '.join(VALID_TOOLSETS)}."
+        )
+        raise RuntimeError(msg)
+    return frozenset(names)
+
+
+def _resolve_tool_names(value: str | None) -> frozenset[str]:
+    """Return a comma-separated tool-name list as a set."""
+    if not value:
+        return frozenset()
+    return frozenset(part.strip() for part in value.split(",") if part.strip())
+
+
+def _reject_retired_safety_env() -> None:
+    """Fail startup when ``LIBTMUX_SAFETY`` is still set.
+
+    The former setting selected an ordered ladder that read as a
+    permission system and was not one. Ignoring the variable would
+    silently widen a surface an operator believes is narrow.
+    """
+    if "LIBTMUX_SAFETY" not in os.environ:
+        return
+    msg = (
+        "LIBTMUX_SAFETY has been removed. Tools are grouped into the "
+        f"unordered toolsets {', '.join(VALID_TOOLSETS)}; select them with "
+        "LIBTMUX_TOOLSETS. The nearest equivalents are "
+        "LIBTMUX_TOOLSETS=inspect, LIBTMUX_TOOLSETS=inspect,manage,execute, "
+        "and LIBTMUX_TOOLSETS=inspect,manage,execute,teardown."
     )
-    return TAG_READONLY
+    raise RuntimeError(msg)
 
 
-_safety_level = _resolve_safety_level(os.environ.get("LIBTMUX_SAFETY"))
+_reject_retired_safety_env()
+_toolsets = _resolve_toolsets(os.environ.get("LIBTMUX_TOOLSETS"))
+_extra_tools = _resolve_tool_names(os.environ.get("LIBTMUX_TOOLS"))
+_excluded_tools = _resolve_tool_names(os.environ.get("LIBTMUX_EXCLUDE_TOOLS"))
 _suppress_history = _resolve_suppress_history(
     os.environ.get("LIBTMUX_SUPPRESS_HISTORY")
 )
@@ -301,63 +343,48 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
 
     Startup
     -------
-    Verifies that a ``tmux`` binary is on ``PATH``. Without this
-    probe, tools fail at first call with a generic ``TmuxCommandNotFound``
-    deep inside libtmux. Failing at server start instead surfaces a
-    clear cold-start error before any tool traffic arrives.
+    Validates named tool includes and exclusions against the transformed
+    catalog, then verifies that a ``tmux`` binary is on ``PATH``. Without
+    the binary probe, tools fail at first call with a generic
+    ``TmuxCommandNotFound`` deep inside libtmux. Failing at server start
+    instead surfaces a clear cold-start error before tool traffic arrives.
 
     Shutdown
     --------
-    Clears the process-wide :data:`_server_cache` so repeated test runs
-    don't share stale Server references and HTTP-transport reload
-    cycles start clean. Also best-effort GC's any leftover
-    ``libtmux_mcp_*`` paste buffers on every cached server — agents
-    are supposed to ``delete_buffer`` after use, but an interrupted
-    call chain can leak. Note: FastMCP lifespan teardown runs on
-    SIGTERM / SIGINT only; ``kill -9`` and OOM bypass it, so this path
-    must not be relied on for any invariant that must survive a hard
-    crash (see the hook_tools module docstring for why write-hooks
-    are explicitly NOT gated on lifespan cleanup).
+    Clears the process-wide :data:`_server_cache` so repeated test runs don't
+    share stale Server references and HTTP-transport reload cycles start clean.
+    Shutdown sends no tmux commands. Buffer tools expose explicit cleanup, and
+    a process-wide prefix does not prove which MCP instance owns a buffer.
     """
+    registered_tool_names = {
+        tool.name for tool in await super(FastMCP, _app).list_tools()
+    }
+    for variable, names in (
+        ("LIBTMUX_TOOLS", _extra_tools),
+        ("LIBTMUX_EXCLUDE_TOOLS", _excluded_tools),
+    ):
+        # FastMCP.list_tools() hides disabled tools. Its provider lookup
+        # retains them and applies the same transforms, including optional
+        # prompt-as-tool adapters.
+        unknown = sorted(names - registered_tool_names)
+        if unknown:
+            msg = f"{variable} names unknown tools: {', '.join(unknown)}"
+            raise RuntimeError(msg)
+
     if shutil.which("tmux") is None:
         msg = "tmux binary not found on PATH"
         raise RuntimeError(msg)
     try:
         yield
     finally:
-        _gc_mcp_buffers(_server_cache)
         _server_cache.clear()
-
-
-def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
-    """Best-effort delete of leaked ``libtmux_mcp_*`` paste buffers.
-
-    Iterates every cached tmux Server, lists buffer names, and deletes
-    anything matching the MCP prefix. Never raises: tmux may be
-    unreachable, buffers may vanish mid-scan, and none of that should
-    block lifespan shutdown. Logs at debug level so operators can
-    still surface leaks via verbose logging.
-    """
-    for server in cache.values():
-        try:
-            result = server.cmd("list-buffers", "-F", "#{buffer_name}")
-        except Exception as err:
-            logger.debug("buffer GC: list-buffers failed: %s", err)
-            continue
-        for name in result.stdout:
-            if not name.startswith(_MCP_BUFFER_PREFIX):
-                continue
-            try:
-                server.delete_buffer(buffer_name=name)
-            except Exception as err:
-                logger.debug("buffer GC: delete-buffer %s failed: %s", name, err)
 
 
 mcp = FastMCP(
     name="tmux",
     version=__version__,
     instructions=_build_instructions(
-        safety_level=_safety_level,
+        toolsets=_toolsets,
         suppress_history=_suppress_history,
     ),
     website_url="https://libtmux-mcp.git-pull.com/",
@@ -372,22 +399,17 @@ mcp = FastMCP(
     #   3. ToolErrorResultMiddleware — converts tool-call failures to
     #      rich ToolResult(is_error=True) results and transforms
     #      resource errors to MCP code -32002. Must stay OUTSIDE the
-    #      audit + retry + safety trio: all three depend on exception
-    #      semantics (audit catches to record outcome=error, retry
-    #      matches LibTmuxException via __cause__, and safety's tier
-    #      denials must propagate as exceptions for audit to record
-    #      them), so converting the exception to a result any deeper
-    #      would silently break all three.
-    #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
+    #      audit + toolset pair: both depend on exception semantics
+    #      (audit catches to record outcome=error, and toolset denials
+    #      must propagate as exceptions for audit to record them), so
+    #      converting the exception to a result any deeper would
+    #      silently break both.
+    #   4. AuditMiddleware — outside ToolsetMiddleware so refusal
     #      events (which raise ExpectedToolError before call_next inside
-    #      Safety) are still logged with outcome=error. Without this
+    #      Toolset) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.
-    #   5. ReadonlyRetryMiddleware — inside Audit so retries are
-    #      audited once each, outside Safety so tier-denied tools
-    #      never reach retry. Only readonly tools are retried;
-    #      mutating/destructive tools pass straight through.
-    #   6. SafetyMiddleware — innermost gate (fail-closed). Denials
+    #   5. ToolsetMiddleware — innermost gate (fail-closed). Refusals
     #      never reach the tool, but the audit record above captures
     #      them for forensic review.
     middleware=[
@@ -398,8 +420,7 @@ mcp = FastMCP(
         ),
         ToolErrorResultMiddleware(transform_errors=True),
         AuditMiddleware(),
-        ReadonlyRetryMiddleware(),
-        SafetyMiddleware(max_tier=_safety_level),
+        ToolsetMiddleware(_toolsets, _extra_tools, _excluded_tools),
     ],
     on_duplicate="error",
 )
@@ -431,20 +452,22 @@ def _register_all() -> None:
 
 
 def _enable_allowed_tools() -> None:
-    """Apply the native FastMCP visibility gate for the active safety tier."""
+    """Apply FastMCP's visibility gate for the enabled toolsets."""
     global _mcp_visibility_configured
     if _mcp_visibility_configured:
         return
 
-    # Use FastMCP's native visibility system as primary gate,
-    # with the SafetyMiddleware as a secondary layer for clear error messages.
-    allowed_tags = {TAG_READONLY}
-    if _safety_level in {TAG_MUTATING, TAG_DESTRUCTIVE}:
-        allowed_tags.add(TAG_MUTATING)
-    if _safety_level == TAG_DESTRUCTIVE:
-        allowed_tags.add(TAG_DESTRUCTIVE)
+    # FastMCP's tag and name visibility is the primary wire filter;
+    # ToolsetMiddleware repeats classification as defense in depth for
+    # tools that reach dispatch.
     mcp.disable(components={"tool"})
-    mcp.enable(tags=allowed_tags, components={"tool"})
+    if _toolsets:
+        mcp.enable(tags=set(_toolsets), components={"tool"})
+    for name in _extra_tools:
+        mcp.enable(components={"tool"}, names={name})
+    if _excluded_tools:
+        mcp.disable(components={"tool"}, names=set(_excluded_tools))
+    mcp.add_transform(_NestedReadToolVisibility(_excluded_tools))
     _mcp_visibility_configured = True
 
 

@@ -13,18 +13,18 @@ from fastmcp.exceptions import ToolError
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_RO,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _prepare_start_directory,
     _serialize_session,
     handle_tool_errors,
 )
@@ -91,7 +91,8 @@ def create_session(
     window_name : str, optional
         Name for the initial window.
     start_directory : str, optional
-        Working directory for the session.
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     x : int, optional
         Width of the initial window.
     y : int, optional
@@ -127,11 +128,12 @@ def create_session(
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}
     if session_name is not None:
-        kwargs["session_name"] = session_name
+        kwargs["session_name"] = _escape_tmux_format(session_name)
     if window_name is not None:
-        kwargs["window_name"] = window_name
-    if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+        kwargs["window_name"] = _escape_tmux_format(window_name)
+    prepared_start_directory = _prepare_start_directory(start_directory)
+    if prepared_start_directory is not None:
+        kwargs["start_directory"] = prepared_start_directory
     if x is not None:
         kwargs["x"] = x
     if y is not None:
@@ -288,12 +290,7 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
 #: discovery-style tool, append it here AND update the prose in
 #: ``_BASE_INSTRUCTIONS`` so the two stay in lockstep.
 SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
-    {
-        "call_destructive_tools_batch",
-        "call_mutating_tools_batch",
-        "call_readonly_tools_batch",
-        "list_servers",
-    }
+    {"call_read_tools_batch", "list_servers"}
 )
 
 
@@ -363,21 +360,27 @@ def list_servers(
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
     mcp.tool(
-        title="List tmux Sessions", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="List tmux Sessions",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )(list_sessions)
     mcp.tool(
-        title="List tmux Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="List tmux Servers",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )(list_servers)
     mcp.tool(
         title="Create tmux Session",
-        annotations=ANNOTATIONS_CREATE,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
     )(create_session)
     mcp.tool(
         title="Kill tmux Server",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_TEARDOWN},
     )(kill_server)
     mcp.tool(
-        title="Get tmux Server Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="Get tmux Server Info",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )(get_server_info)

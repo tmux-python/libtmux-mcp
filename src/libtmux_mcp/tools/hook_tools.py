@@ -1,29 +1,8 @@
-"""Read-only MCP tools for tmux hook introspection.
+"""MCP tools for inspecting tmux hooks.
 
-Why read-only only
-------------------
-Write-hooks (``set-hook`` / ``unset-hook``) are deliberately excluded.
-The reason is side-effect leakage: tmux servers outlive the MCP
-process, so if an MCP agent installs a hook that runs arbitrary shell
-on ``pane-exited`` or ``command-error`` and then the MCP server is
-``kill -9``'d, OOM'd, or crashes via a C-extension fault, the hook
-**stays installed** in the user's persistent tmux server and fires
-forever.
-
-FastMCP ``lifespan`` teardown only runs on graceful SIGTERM/SIGINT, so
-a soft "track what we installed and unset on shutdown" registry cannot
-close this gap. Three plausible future paths are open:
-
-* Install a tmux-side meta-hook on ``client-detached`` that self-cleans
-  all ``libtmux_mcp_*``-namespaced hooks when the MCP client disconnects.
-  Survives hard crashes because tmux enforces it.
-* Require ``LIBTMUX_SAFETY=destructive`` for write-hooks so leakage is
-  an explicit opt-in with user awareness.
-* Expose ``run_hook`` (one-shot fire) but not ``set_hook`` (persistent
-  install) — narrows the risk surface to transient events.
-
-Until one is implemented, the surface here is deliberately visibility
-only.
+Hooks can outlive the MCP process and run tmux command lists. Cleanup cannot be
+guaranteed after SIGKILL, OOM, or a native crash, so this server exposes no
+dedicated hook-write tool. Keep intentional persistent hooks in tmux configuration.
 """
 
 from __future__ import annotations
@@ -34,8 +13,8 @@ from libtmux import exc as libtmux_exc
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
-    TAG_READONLY,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
+    TOOLSET_INSPECT,
     ExpectedToolError,
     _get_server,
     _resolve_pane,
@@ -260,10 +239,14 @@ def show_hook(
 
 
 def register(mcp: FastMCP) -> None:
-    """Register read-only hook tools with the MCP instance."""
-    mcp.tool(title="Show tmux Hooks", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_hooks
-    )
-    mcp.tool(title="Show tmux Hook", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_hook
-    )
+    """Register hook inspection tools with the MCP instance."""
+    mcp.tool(
+        title="Show tmux Hooks",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
+    )(show_hooks)
+    mcp.tool(
+        title="Show tmux Hook",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
+    )(show_hook)

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import typing as t
 
 import pytest
 from fastmcp import FastMCP
 
+from libtmux_mcp._utils import TOOLSET_INSPECT
 from libtmux_mcp.prompts import ENV_PROMPTS_AS_TOOLS, register_prompts
+
+from .conftest import wire_annotations
 
 
 @pytest.fixture
@@ -40,14 +44,37 @@ def test_prompts_as_tools_gated_off_by_default(mcp_with_prompts: FastMCP) -> Non
 def test_prompts_as_tools_enabled_by_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Setting the env var installs PromptsAsTools."""
+    """The opt-in adapters survive production-style tool visibility."""
+    from fastmcp import Client
+
+    from libtmux_mcp.middleware import ToolsetMiddleware
+
     monkeypatch.setenv(ENV_PROMPTS_AS_TOOLS, "1")
-    mcp = FastMCP(name="test-prompts-as-tools")
+    mcp = FastMCP(
+        name="test-prompts-as-tools",
+        middleware=[ToolsetMiddleware({TOOLSET_INSPECT})],
+    )
     register_prompts(mcp)
-    tools = asyncio.run(mcp.list_tools())
-    names = {tool.name for tool in tools}
-    assert "list_prompts" in names
-    assert "get_prompt" in names
+    mcp.disable(components={"tool"})
+    mcp.enable(tags={TOOLSET_INSPECT}, components={"tool"})
+
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    expected = {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    }
+    for name in ("list_prompts", "get_prompt"):
+        assert tools[name].tags == {TOOLSET_INSPECT}
+        assert wire_annotations(tools[name]) == expected
+
+    async def _call_adapter() -> t.Any:
+        async with Client(mcp) as client:
+            return await client.call_tool("list_prompts", {}, raise_on_error=False)
+
+    result = asyncio.run(_call_adapter())
+    assert result.is_error is False
 
 
 def test_run_and_wait_returns_string_template() -> None:

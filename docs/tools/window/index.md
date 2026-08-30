@@ -34,7 +34,7 @@ Reorder a window or move it across sessions.
 :::
 
 :::{grid-item-card} {tooliconl}`kill-window`
-Terminate a window. Destructive.
+Terminate a window. Not reversible.
 :::
 
 ::::

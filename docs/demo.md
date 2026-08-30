@@ -6,13 +6,14 @@ orphan: true
 
 A showcase of the custom Sphinx roles and visual elements available in libtmux-mcp documentation.
 
-## Safety badges
+## Toolset badges
 
 Standalone badges via `{badge}`:
 
-- {badge}`readonly` — green, read-only operations
-- {badge}`mutating` — amber, state-changing operations
-- {badge}`destructive` — red, irreversible operations
+- {badge}`inspect` — read tmux state and terminal output
+- {badge}`manage` — change tmux structure or presentation
+- {badge}`execute` — start or drive pane processes
+- {badge}`teardown` — delete tmux objects or retained scrollback
 
 ## Tool references
 
@@ -50,19 +51,19 @@ Standalone badges via `{badge}`:
 
 These are the actual tool headings as they render on tool pages:
 
-> `capture_pane` {badge}`readonly`
+> `capture_pane` {badge}`inspect`
 
-> `split_window` {badge}`mutating`
+> `split_window` {badge}`execute`
 
-> `kill_session` {badge}`destructive`
+> `kill_session` {badge}`teardown`
 
 ### In a table
 
-| Tool | Tier | Description |
-|------|------|-------------|
-| {toolref}`list-sessions` | {badge}`readonly` | List all sessions |
-| {toolref}`send-keys` | {badge}`mutating` | Send commands to a pane |
-| {toolref}`kill-pane` | {badge}`destructive` | Destroy a pane |
+| Tool | Toolset | Description |
+|------|---------|-------------|
+| {toolref}`list-sessions` | {badge}`inspect` | List all sessions |
+| {toolref}`send-keys` | {badge}`execute` | Send input to a pane |
+| {toolref}`kill-pane` | {badge}`teardown` | Delete a pane |
 
 ### In prose
 
@@ -74,11 +75,11 @@ The fundamental command pattern: {toolref}`run-command` → inspect `exit_status
 
 ## Environment variable references
 
-{envvar}`LIBTMUX_SOCKET` · {envvar}`LIBTMUX_SAFETY` · {envvar}`LIBTMUX_SOCKET_PATH` · {envvar}`LIBTMUX_TMUX_BIN`
+{envvar}`LIBTMUX_SOCKET` · {envvar}`LIBTMUX_TOOLSETS` · {envvar}`LIBTMUX_SOCKET_PATH` · {envvar}`LIBTMUX_TMUX_BIN`
 
 ## Glossary terms
 
-{term}`SIGINT` · {term}`SIGQUIT` · {term}`MCP` · {term}`Safety tier` · {term}`Pane` · {term}`Session`
+{term}`SIGINT` · {term}`SIGQUIT` · {term}`MCP` · {term}`Toolset` · {term}`Pane` · {term}`Session`
 
 ## Admonitions
 
@@ -91,7 +92,7 @@ Do not call {toolref}`capture-pane` immediately after {toolref}`send-keys` — t
 ```
 
 ```{note}
-All tools accept an optional `socket_name` parameter for multi-server support.
+Targeted tools accept an optional `socket_name` parameter for multi-server support.
 ```
 
 ## Badge anatomy
@@ -101,14 +102,14 @@ Each badge renders as:
 ```html
 <span class="sd-badge sd-bg-success"
       role="note"
-      aria-label="Safety tier: readonly">
-  🔍 readonly
+      aria-label="Toolset: inspect">
+  🔍 inspect
 </span>
 ```
 
 Features:
-- **Emoji icon** — 🔍 readonly, ✏️ mutating, 💣 destructive (native system emoji, no filters)
-- **Matte colors** — forest green, smoky amber, matte crimson with 1px border
+- **Emoji icon** — 🔍 inspect, 🔧 manage, ✏️ execute, 💣 teardown (native system emoji, no filters)
+- **Matte colors** — forest green, blue, smoky amber, matte crimson with 1px border
 - **Accessible** — `role="note"` + `aria-label` for screen readers
 - **Non-selectable** — `user-select: none` so copying tool names skips badge text
 - **Context-aware sizing** — slightly larger in headings, smaller inline

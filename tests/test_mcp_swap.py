@@ -251,17 +251,7 @@ def test_load_config_tolerates_empty_json(tmp_path: pathlib.Path) -> None:
 def test_use_local_preserves_existing_env_when_replacing(
     fake_home: pathlib.Path, fake_repo: pathlib.Path
 ) -> None:
-    """Existing ``env`` on a replaced entry survives ``use-local``.
-
-    Regression: ``cmd_use_local`` previously constructed the replacement
-    spec via ``build_local_spec`` (env={}) and wrote it directly,
-    silently dropping client-side settings like ``LIBTMUX_SAFETY`` or
-    ``LIBTMUX_SOCKET`` that the user had set on the prior pinned-PyPI
-    entry. The fix merges ``current.env`` into the new spec; this test
-    locks the behaviour by seeding env on a Cursor entry, running
-    ``use-local``, and asserting both the new local-uv command shape and
-    the original env survived.
-    """
+    """Replacement keeps current env entries and drops retired settings."""
     info = mcp_swap.CLIS["cursor"]
     _write_json(
         info.config_path,
@@ -270,7 +260,11 @@ def test_use_local_preserves_existing_env_when_replacing(
                 "libtmux": {
                     "command": "uvx",
                     "args": ["libtmux-mcp==0.1.0a2"],
-                    "env": {"LIBTMUX_SAFETY": "readonly", "FOO": "bar"},
+                    "env": {
+                        "LIBTMUX_SAFETY": "destructive",
+                        "LIBTMUX_TOOLSETS": "inspect",
+                        "FOO": "bar",
+                    },
                 }
             }
         },
@@ -289,7 +283,7 @@ def test_use_local_preserves_existing_env_when_replacing(
         "run",
         "libtmux-mcp",
     ]
-    assert entry["env"] == {"LIBTMUX_SAFETY": "readonly", "FOO": "bar"}
+    assert entry["env"] == {"LIBTMUX_TOOLSETS": "inspect", "FOO": "bar"}
 
 
 def test_use_local_with_no_prior_entry_writes_empty_env(
@@ -1552,7 +1546,7 @@ def test_use_local_env_flag_wins_over_preserved_env(
                 "libtmux": {
                     "command": "uvx",
                     "args": ["libtmux-mcp==0.1.0a2"],
-                    "env": {"LIBTMUX_SAFETY": "readonly", "KEEP": "me"},
+                    "env": {"LIBTMUX_TOOLSETS": "inspect", "KEEP": "me"},
                 }
             }
         },
@@ -1566,19 +1560,74 @@ def test_use_local_env_flag_wins_over_preserved_env(
             "--cli",
             "cursor",
             "--env",
-            "LIBTMUX_SAFETY=destructive",
+            "LIBTMUX_TOOLSETS=inspect,manage,execute,teardown",
         ]
     )
     assert mcp_swap.cmd_use_local(args) == 0
 
     entry = json.loads(info.config_path.read_text())["mcpServers"]["libtmux"]
-    assert entry["env"] == {"LIBTMUX_SAFETY": "destructive", "KEEP": "me"}
+    assert entry["env"] == {
+        "LIBTMUX_TOOLSETS": "inspect,manage,execute,teardown",
+        "KEEP": "me",
+    }
 
 
 def test_env_pair_rejects_malformed() -> None:
     """``--env`` without ``=`` is an argparse error, not a silent skip."""
     with pytest.raises(SystemExit):
         mcp_swap.build_parser().parse_args(["use-local", "--env", "NOEQUALS"])
+
+
+def test_env_pair_rejects_retired_safety(capsys: pytest.CaptureFixture[str]) -> None:
+    """The swap command names the current setting for a retired env key."""
+    with pytest.raises(SystemExit):
+        mcp_swap.build_parser().parse_args(
+            ["use-local", "--env", "LIBTMUX_SAFETY=destructive"]
+        )
+    assert "LIBTMUX_TOOLSETS" in capsys.readouterr().err
+
+
+def test_use_local_removes_retired_env_from_already_local_entry(
+    fake_home: pathlib.Path, fake_repo: pathlib.Path
+) -> None:
+    """A stale setting prevents the already-local no-op."""
+    info = mcp_swap.CLIS["cursor"]
+    spec = _local_entry(fake_repo)
+    spec["env"] = {
+        "LIBTMUX_SAFETY": "destructive",
+        "LIBTMUX_TOOLSETS": "inspect",
+        "KEEP": "me",
+    }
+    _write_json(info.config_path, {"mcpServers": {"libtmux": spec}})
+
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 0
+
+    entry = json.loads(info.config_path.read_text())["mcpServers"]["libtmux"]
+    assert entry["env"] == {"LIBTMUX_TOOLSETS": "inspect", "KEEP": "me"}
+
+
+def test_use_local_refuses_retired_env_without_replacement(
+    fake_home: pathlib.Path,
+    fake_repo: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A stale setting cannot silently widen to the branch default."""
+    info = mcp_swap.CLIS["cursor"]
+    spec = _local_entry(fake_repo)
+    spec["env"] = {"LIBTMUX_SAFETY": "readonly"}
+    _write_json(info.config_path, {"mcpServers": {"libtmux": spec}})
+    before = info.config_path.read_bytes()
+
+    args = mcp_swap.build_parser().parse_args(
+        ["use-local", "--repo", str(fake_repo), "--cli", "cursor"]
+    )
+    assert mcp_swap.cmd_use_local(args) == 1
+
+    assert info.config_path.read_bytes() == before
+    assert "LIBTMUX_TOOLSETS" in capsys.readouterr().err
 
 
 def test_use_local_env_written_on_already_local_entry(

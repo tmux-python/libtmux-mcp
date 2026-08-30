@@ -8,19 +8,19 @@ from libtmux.constants import WindowDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     DISCOVERY_META,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
+    _prepare_start_directory,
     _resolve_session,
     _serialize_session,
     _serialize_window,
@@ -135,7 +135,8 @@ def create_window(
     window_name : str, optional
         Name for the new window.
     start_directory : str, optional
-        Working directory for the new window.
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     attach : bool, optional
         Whether to make the new window active.
     direction : str, optional
@@ -168,9 +169,10 @@ def create_window(
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
     if window_name is not None:
-        kwargs["window_name"] = window_name
-    if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+        kwargs["window_name"] = _escape_tmux_format(window_name)
+    prepared_start_directory = _prepare_start_directory(start_directory)
+    if prepared_start_directory is not None:
+        kwargs["start_directory"] = prepared_start_directory
     kwargs["attach"] = attach
     if direction is not None:
         direction_map: dict[str, WindowDirection] = {
@@ -219,7 +221,7 @@ def rename_session(
     """
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
-    session = session.rename_session(new_name)
+    session = session.rename_session(_escape_tmux_format(new_name))
     return _serialize_session(session)
 
 
@@ -350,28 +352,32 @@ def register(mcp: FastMCP) -> None:
     """Register session-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Windows",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(list_windows)
     mcp.tool(
-        title="Get tmux Session Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="Get tmux Session Info",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )(get_session_info)
     mcp.tool(
-        title="Create tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+        title="Create tmux Window",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
     )(create_window)
     mcp.tool(
         title="Rename tmux Session",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(rename_session)
     mcp.tool(
         title="Kill tmux Session",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_TEARDOWN},
     )(kill_session)
     mcp.tool(
         title="Select tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(select_window)

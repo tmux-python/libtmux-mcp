@@ -1400,6 +1400,22 @@ def _describe_spec(spec: McpServerSpec, repo: pathlib.Path) -> str:
     return "other"
 
 
+def _replacement_env(
+    current: McpServerSpec | None, extra_env: dict[str, str]
+) -> dict[str, str]:
+    """Merge current env while requiring a replacement for retired safety."""
+    env = dict(current.env) if current else {}
+    retired_safety = env.pop("LIBTMUX_SAFETY", None)
+    env.update(extra_env)
+    if retired_safety is not None and "LIBTMUX_TOOLSETS" not in env:
+        msg = (
+            "LIBTMUX_SAFETY has been removed; rerun with "
+            "--env LIBTMUX_TOOLSETS=<toolsets>"
+        )
+        raise RuntimeError(msg)
+    return env
+
+
 def cmd_use_local(args: argparse.Namespace) -> int:
     """Rewrite each target CLI's config to run the repo's checkout via ``uv``.
 
@@ -1442,21 +1458,20 @@ def cmd_use_local(args: argparse.Namespace) -> int:
             original_bytes = info.config_path.read_bytes()
             config = load_config(info)
             current = get_server(cli, config, server, repo, scope=scope)
+            base_env = _replacement_env(current, extra_env)
             if (
                 current
                 and current.is_local_uv_directory()
                 and current.local_repo_path() == repo
-                and all(current.env.get(k) == v for k, v in extra_env.items())
+                and current.env == base_env
             ):
                 print(f"[{label}] already local (this repo) — no change")
                 continue
             # Preserve the existing entry's env on replacement. ``build_local_spec``
             # writes an empty env, so without this merge a swap would silently drop
-            # client-side settings (LIBTMUX_SAFETY, LIBTMUX_SOCKET, custom dev
+            # client-side settings (LIBTMUX_TOOLSETS, LIBTMUX_SOCKET, custom dev
             # knobs). Symmetric with ``_spec_from_entry`` which round-trips env on
             # the read side.
-            base_env = dict(current.env) if current else {}
-            base_env.update(extra_env)
             cli_spec = (
                 dataclasses.replace(spec, env=base_env)
                 if (current or extra_env)
@@ -1649,6 +1664,9 @@ def _env_pair(raw: str) -> tuple[str, str]:
     key, sep, value = raw.partition("=")
     if not sep or not key:
         msg = f"--env expects KEY=VALUE, got {raw!r}"
+        raise argparse.ArgumentTypeError(msg)
+    if key == "LIBTMUX_SAFETY":
+        msg = "LIBTMUX_SAFETY has been removed; use LIBTMUX_TOOLSETS"
         raise argparse.ArgumentTypeError(msg)
     return key, value
 

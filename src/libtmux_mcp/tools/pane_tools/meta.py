@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _coerce_bool,
@@ -19,6 +21,12 @@ from libtmux_mcp.tools.pane_tools.io import (
     _truncate_lines_tail,
 )
 
+#: One ``#{name}`` reference. The name grammar excludes ``:``, which every
+#: tmux format modifier needs — ``#{E:x}`` re-expands ``x``'s value, where a
+#: job the caller never typed can be waiting. Validating what is allowed,
+#: rather than scanning for what is not, is what makes that unreachable.
+_FORMAT_VARIABLE = re.compile(r"#\{[A-Za-z_@][A-Za-z0-9_-]*\}")
+
 
 @handle_tool_errors
 def display_message(
@@ -29,17 +37,26 @@ def display_message(
     window_id: str | None = None,
     socket_name: str | None = None,
 ) -> str:
-    """Evaluate a tmux format string against a target and return the expanded value.
+    """Read tmux variables against a target and return the substituted text.
 
-    Read-only introspection tool — expands any tmux format variable
-    against a target pane and returns the substituted text. Use this
-    when no dedicated tool covers the field you want, e.g.
+    Use this when no dedicated tool covers the field you want, e.g.
     '#{window_zoomed_flag}', '#{pane_dead}', '#{client_activity}'.
+
+    Accepts literal text and '#{variable}' references. Format modifiers,
+    conditionals, and jobs are refused: tmux expands '#{E:x}' by running
+    x's *value* through the expander again, and a value can arrive from a
+    pane rather than from the caller. For raw format syntax, run
+    'tmux display-message -p' through run_command, where the caller
+    supplies it on a surface labelled execution.
+
+    Returned values can carry text a pane chose, such as a working
+    directory or a running command.
 
     Parameters
     ----------
     format_string : str
-        tmux format string (e.g. '#{cursor_x} #{cursor_y}').
+        Literal text and '#{variable}' references (e.g.
+        '#{cursor_x} #{cursor_y}').
     pane_id : str, optional
         Pane ID (e.g. '%1').
     session_name : str, optional
@@ -55,9 +72,21 @@ def display_message(
     -------
     str
         Expanded format string result.
+
+    Raises
+    ------
+    ExpectedToolError
+        If ``format_string`` carries tmux format syntax other than
+        ``#{variable}`` references.
     """
-    if "#(" in format_string:
-        msg = "tmux format jobs (#(...)) are not allowed in display_message"
+    remainder = _FORMAT_VARIABLE.sub("", format_string)
+    if "#" in remainder:
+        msg = (
+            "format_string accepts literal text and '#{variable}' references "
+            f"only; {format_string!r} carries other tmux format syntax. "
+            "Modifiers such as '#{E:...}' expand a variable's value a second "
+            "time, and a job '#(...)' runs a shell command."
+        )
         raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)

@@ -10,7 +10,8 @@ count, attachment status, activity timestamp) and you already know its
 **Avoid when** you need every session — call {tooliconl}`list-sessions` or iterate
 via the `tmux://sessions` resource.
 
-**Side effects:** None. Readonly.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

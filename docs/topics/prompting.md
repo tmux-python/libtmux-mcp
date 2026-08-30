@@ -29,7 +29,7 @@ known pane, or capture_pane for a one-shot manual inspection.
 ```
 
 The server also dynamically adds:
-- **Safety tier context**: Which tier is active and what tools are available
+- **Toolset context**: Which toolsets are enabled and what tools they carry
 - **Caller pane awareness**: If the server runs inside tmux, it tells the agent which pane is its own (via `TMUX_PANE`). See {ref}`concepts` "Agent self-awareness" for details.
 
 ## Activation and discovery
@@ -79,7 +79,7 @@ These natural-language prompts reliably trigger the right tool sequences:
 |--------|---------|---------------|
 | [Run this command]{.prompt} | Ambiguous — agent may use its own shell instead of tmux | [Run `make test` in a tmux pane]{.prompt} |
 | [Check my terminal]{.prompt} | Which pane? Agent must discover first | [Check the pane running `npm dev`]{.prompt} or [Search all panes for errors]{.prompt} |
-| [Clean up everything]{.prompt} | Too broad for destructive operations | [Kill the `ci-test` session]{.prompt} |
+| [Clean up everything]{.prompt} | Too broad for a call that deletes | [Kill the `ci-test` session]{.prompt} |
 | [Show me the output]{.prompt} | Capture immediately? Or wait? | [Wait for the command to finish, then show me the output]{.prompt} |
 
 ## System prompt fragments
@@ -113,7 +113,7 @@ command may still be running.
 
 Before creating tmux sessions, check list_sessions to avoid duplicates.
 Always use pane_id for targeting — it is globally unique. Never run
-destructive operations (kill_session, kill_server) without confirming
+deletions (kill_session, kill_server) without confirming
 the target with the user first.
 ```
 
@@ -148,4 +148,4 @@ When an agent is unsure which tool to use, these rules help:
 2. **Prefer IDs**: Once you have a `pane_id`, use it for all subsequent calls — it never changes during the pane's lifetime
 3. **Run, wait, or observe deliberately**: For commands the agent authors, prefer {toolref}`run-command`. Use {toolref}`wait-for-channel` only for custom shell composition outside that shape. Use {toolref}`capture-since` for repeated observation, and fall back to {toolref}`wait-for-text` for output the agent doesn't author. Never call {toolref}`capture-pane` in a retry loop.
 4. **Content vs. metadata**: If looking for text *in* a terminal, use {toolref}`search-panes`. If looking for pane *properties* (name, PID, path), use {toolref}`list-panes` or {toolref}`get-pane-info`
-5. **Destructive tools are opt-in**: Never kill sessions, windows, or panes unless the user explicitly asks
+5. **Deletion is opt-in**: Never kill sessions, windows, or panes unless the user explicitly asks

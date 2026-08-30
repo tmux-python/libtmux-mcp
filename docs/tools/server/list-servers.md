@@ -11,7 +11,8 @@ side project.
 **Avoid when** you already know the socket name or path you want to
 target — pass it directly to the tool that needs it via `socket_name`.
 
-**Side effects:** None. Readonly. Stale socket files are filtered
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`. Stale socket files are filtered
 via a kernel-fast UNIX `connect()` probe so the call stays under one
 second even on machines with thousands of orphaned `tmux-<uid>/`
 inodes.

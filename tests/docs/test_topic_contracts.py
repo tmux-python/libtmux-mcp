@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import typing as t
 
 import pytest
+
+from libtmux_mcp._utils import VALID_TOOLSETS
+from libtmux_mcp.tools import register_tools
 
 
 class TopicContractFixture(t.NamedTuple):
@@ -212,7 +216,7 @@ def test_create_session_page_warns_against_literal_credentials(
     assert "Values persist in the new session" in normalized
     assert "initial pane and future panes" in normalized
     assert "Pass credential references instead" in normalized
-    assert "{ref}`safety`" in caution_block
+    assert "{ref}`trust`" in caution_block
     assert "```{fastmcp-tool-input} server_tools.create_session" in text
 
 
@@ -238,11 +242,11 @@ def test_run_command_page_documents_effective_history_policy(
     assert "`true` unless {envvar}`LIBTMUX_SUPPRESS_HISTORY` is `0`" in text
 
 
-def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
+def test_trust_docs_name_history_non_goals_and_secret_reference_guidance(
     docs_dir: pathlib.Path,
 ) -> None:
-    """Safety guidance does not present history suppression as secret transport."""
-    text = (docs_dir / "topics" / "safety.md").read_text(encoding="utf-8")
+    """Trust guidance does not present history suppression as secret transport."""
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
 
     for surface in (
         "pane echo",
@@ -302,6 +306,85 @@ def test_safety_docs_name_history_non_goals_and_secret_reference_guidance(
         "MCP audit redaction",
     ):
         assert boundary in process_visibility
+
+
+def test_trust_docs_state_ambient_tmux_execution(
+    docs_dir: pathlib.Path,
+) -> None:
+    """The trust page separates MCP requests from programmable tmux state."""
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
+    heading = "## The tmux server is programmable"
+    assert heading in text
+    section = text.split(heading, 1)[1].split("\n## ", 1)[0]
+
+    for route in (
+        "command-alias",
+        "after-*",
+        "#(...)",
+        "Hierarchy resource reads",
+        "startup and shutdown",
+        "does not retry",
+    ):
+        assert route in section
+    assert "without any MCP call" in section
+    assert "process confinement" in section
+
+    resources = (docs_dir / "resources.md").read_text(encoding="utf-8")
+    assert "`LIBTMUX_TOOLSETS` filters tools" in resources
+    assert "{ref}`trust`" in resources
+
+
+def test_trust_toolset_labels_are_badged_and_copyable(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Trust inventory badges keep their labels available to selection."""
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
+    section = text.split("## Toolsets gate MCP tool calls, not tmux", 1)[1].split(
+        "\n## ", 1
+    )[0]
+
+    for toolset in VALID_TOOLSETS:
+        assert f"{{badge}}`{toolset}`:" in section
+
+    css = (docs_dir / "_static" / "css" / "project-badges.css").read_text(
+        encoding="utf-8"
+    )
+    normalized_css = " ".join(css.split())
+    assert (
+        "#toolsets-gate-mcp-tool-calls-not-tmux > p"
+        " > .gp-sphinx-badge .gp-sphinx-badge__label" in normalized_css
+    )
+    assert "user-select: text" in css
+    assert "-webkit-user-select: text" in css
+
+
+def test_tool_catalog_groups_every_registered_tool_by_its_wire_tag(
+    docs_dir: pathlib.Path,
+) -> None:
+    """The tool overview derives its grouping contract from MCP metadata."""
+    from fastmcp import Client, FastMCP
+
+    mcp = FastMCP(name="docs-tool-catalog")
+    register_tools(mcp)
+
+    async def _list_tools() -> list[t.Any]:
+        async with Client(mcp) as client:
+            return list(await client.list_tools())
+
+    tools = asyncio.run(_list_tools())
+    text = (docs_dir / "tools" / "index.md").read_text(encoding="utf-8")
+    sections = {
+        toolset: text.split(f"## {toolset.title()}", 1)[1].split("\n## ", 1)[0]
+        for toolset in VALID_TOOLSETS
+    }
+
+    for tool in tools:
+        dumped = tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+        tags = set(dumped.get("_meta", {}).get("fastmcp", {}).get("tags", []))
+        [toolset] = tags & set(VALID_TOOLSETS)
+        marker = f":::{'{'}grid-item-card{'}'} {tool.name}\n"
+        assert text.count(marker) == 1, tool.name
+        assert marker in sections[toolset], tool.name
 
 
 def test_respawn_page_distinguishes_environment_audit_shapes(
@@ -377,7 +460,7 @@ def test_a17_changelog_summarizes_history_features(
     assert "`suppress_persistent_history=true`" in history_entry
     assert "Session controls reach the initial and future panes" in history_entry
     assert "{ref}`history-hygiene`" in history_entry
-    assert "{ref}`safety`" in history_entry
+    assert "{ref}`trust`" in history_entry
     assert "space-prefixed" not in history_entry
 
     assert "{tooliconl}`create-window`" in environment_entry
@@ -389,4 +472,4 @@ def test_a17_changelog_summarizes_history_features(
     assert "{tooliconl}`respawn-pane`" in environment_entry
     assert "same JSON object form" in environment_entry
     assert "credential references, not literal credentials" in environment_entry
-    assert "{ref}`safety`" in environment_entry
+    assert "{ref}`trust`" in environment_entry

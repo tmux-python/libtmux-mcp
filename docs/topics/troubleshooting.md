@@ -54,7 +54,8 @@ can't find targets.
 
 **Symptoms**: Server sees different sessions than expected, or sees nothing.
 
-**Cause**: `LIBTMUX_SOCKET` in the MCP config isolates the server to a specific socket. Your personal sessions are on the default socket.
+**Cause**: `LIBTMUX_SOCKET` in the MCP config selects a different tmux socket.
+Your personal sessions are on the default socket.
 
 **Fix**: Either remove `LIBTMUX_SOCKET` from the config to use the default socket, or ensure sessions exist on the configured socket.
 
@@ -107,13 +108,13 @@ what you expect.
    $ python --version
    ```
 
-## Safety tier blocking tools
+## A toolset is hiding tools
 
-**Symptoms**: Some tools are missing from the tool list, or return "blocked by safety tier" errors.
+**Symptoms**: Some tools are missing from the tool list, or a call returns "not in this server's enabled toolsets".
 
-**Cause**: `LIBTMUX_SAFETY` is set to a restrictive tier.
+**Cause**: `LIBTMUX_TOOLSETS` does not include the tool's toolset.
 
-**Fix**: Check the configured tier. Default is `mutating`, which includes most tools. Only `destructive` enables kill commands. See {ref}`safety`.
+**Fix**: The default is `inspect,manage,execute`. Add `teardown` for the kill commands, or name the tool in `LIBTMUX_TOOLS`. See {ref}`trust`.
 
 ## How to see logs
 

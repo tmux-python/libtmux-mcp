@@ -10,15 +10,11 @@ from fastmcp.exceptions import ToolError
 from libtmux import exc
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
-    ANNOTATIONS_SHELL,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
-    VALID_SAFETY_LEVELS,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
+    VALID_TOOLSETS,
     _apply_filters,
     _get_server,
     _invalidate_server,
@@ -384,7 +380,7 @@ def test_effective_socket_path_prefers_display_message_query(
     being able to reach the server, so if the MCP process's
     ``$TMUX_TMPDIR`` diverges from the running tmux's, the query
     fails and we fall back. The full structural fix requires
-    consulting the caller's ``$TMUX`` path — see ``docs/topics/safety.md``.
+    consulting the caller's ``$TMUX`` path — see ``docs/topics/trust.md``.
     """
     from libtmux_mcp._utils import _effective_socket_path
 
@@ -639,75 +635,22 @@ def test_serialize_pane_is_caller_requires_tmux_env_not_just_pane(
     assert _serialize_pane(mcp_pane).is_caller is False
 
 
-# ---------------------------------------------------------------------------
-# Annotation and tag constants tests
-# ---------------------------------------------------------------------------
-
-_ANNOTATION_KEYS = {
-    "readOnlyHint",
-    "destructiveHint",
-    "idempotentHint",
-    "openWorldHint",
-}
-
-
-def test_annotation_presets_have_correct_keys() -> None:
-    """All annotation presets contain exactly the four MCP annotation keys."""
-    for preset in (
-        ANNOTATIONS_RO,
-        ANNOTATIONS_MUTATING,
-        ANNOTATIONS_CREATE,
-        ANNOTATIONS_SHELL,
-        ANNOTATIONS_DESTRUCTIVE,
-    ):
-        assert set(preset.keys()) == _ANNOTATION_KEYS
-
-
-def test_annotations_ro_is_readonly() -> None:
-    """ANNOTATIONS_RO marks tools as read-only."""
-    assert ANNOTATIONS_RO["readOnlyHint"] is True
-    assert ANNOTATIONS_RO["destructiveHint"] is False
-
-
-def test_annotations_destructive_is_destructive() -> None:
-    """ANNOTATIONS_DESTRUCTIVE marks tools as destructive."""
-    assert ANNOTATIONS_DESTRUCTIVE["destructiveHint"] is True
-    assert ANNOTATIONS_DESTRUCTIVE["readOnlyHint"] is False
-
-
-def test_annotations_shell_is_open_world() -> None:
-    """ANNOTATIONS_SHELL marks shell-driving tools as open-world.
-
-    Shell-driving tools (``send_keys``, ``paste_text``, ``pipe_pane``)
-    interact with arbitrary external state through whatever command the
-    caller runs — the canonical open-world MCP interaction.
-    """
-    assert ANNOTATIONS_SHELL["openWorldHint"] is True
-    assert ANNOTATIONS_SHELL["readOnlyHint"] is False
-    assert ANNOTATIONS_SHELL["destructiveHint"] is False
-    assert ANNOTATIONS_SHELL["idempotentHint"] is False
-
-
-def test_annotations_create_is_closed_world() -> None:
-    """ANNOTATIONS_CREATE does NOT set openWorldHint.
-
-    Create-style mutating tools (``create_session``, ``create_window``,
-    ``split_window``, ``swap_pane``, ``enter_copy_mode``) allocate tmux
-    objects but do not interact with an open-ended environment. The
-    shell-driving case is separately handled by ``ANNOTATIONS_SHELL``.
-    """
-    assert ANNOTATIONS_CREATE["openWorldHint"] is False
-
-
 def test_tag_constants() -> None:
-    """Safety tier tag constants are distinct strings."""
-    tags = {TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE}
+    """Toolset constants are distinct strings."""
+    tags = {TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN}
     assert len(tags) == 3
 
 
-def test_valid_safety_levels_matches_tags() -> None:
-    """VALID_SAFETY_LEVELS contains all tag constants."""
-    assert {TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE} == VALID_SAFETY_LEVELS
+def test_valid_toolsets_lists_every_toolset() -> None:
+    """The advertised set is exactly the four toolset constants."""
+    assert set(VALID_TOOLSETS) == {
+        TOOLSET_INSPECT,
+        TOOLSET_MANAGE,
+        TOOLSET_EXECUTE,
+        TOOLSET_TEARDOWN,
+    }
+    # Order is reported at startup, so it is part of the contract.
+    assert VALID_TOOLSETS[0] == TOOLSET_INSPECT
 
 
 # ---------------------------------------------------------------------------

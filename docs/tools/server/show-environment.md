@@ -5,7 +5,8 @@
 
 **Use when** you need to inspect tmux environment variables.
 
-**Side effects:** None. Readonly.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

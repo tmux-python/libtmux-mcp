@@ -11,7 +11,9 @@ server to start, a build to complete, or a prompt to return.
 {tooliconl}`capture-since`; for command completion you control, use
 {tooliconl}`wait-for-channel`.
 
-**Side effects:** None. Readonly. Blocks until text appears or timeout.
+**Side effects:** Each built-in poll reads data only. The call blocks until text
+appears or the timeout expires. A configured alias or hook can add effects; see
+{ref}`trust`.
 
 **Example:**
 

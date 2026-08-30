@@ -8,19 +8,19 @@ from libtmux.constants import PaneDirection
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
-    ANNOTATIONS_CREATE,
-    ANNOTATIONS_DESTRUCTIVE,
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
     DISCOVERY_META,
-    TAG_DESTRUCTIVE,
-    TAG_MUTATING,
-    TAG_READONLY,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
     _caller_is_on_server,
+    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
+    _prepare_start_directory,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -190,7 +190,8 @@ def split_window(
         Size of the new pane. Use a string with '%%' suffix for
         percentage (e.g. '50%%') or an integer for lines/columns.
     start_directory : str, optional
-        Working directory for the new pane.
+        Existing directory to start in. ``~`` expands; a relative path
+        resolves against the MCP server process's directory.
     shell : str, optional
         Shell command to run in the new pane.
     socket_name : str, optional
@@ -227,12 +228,13 @@ def split_window(
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ExpectedToolError(msg)
 
+    prepared_start_directory = _prepare_start_directory(start_directory)
     if pane_id is not None:
         pane = _resolve_pane(server, pane_id=pane_id)
         new_pane = pane.split(
             direction=pane_dir,
             size=size,
-            start_directory=start_directory,
+            start_directory=prepared_start_directory,
             shell=shell,
             environment=spawn_environment,
         )
@@ -247,7 +249,7 @@ def split_window(
         new_pane = window.split(
             direction=pane_dir,
             size=size,
-            start_directory=start_directory,
+            start_directory=prepared_start_directory,
             shell=shell,
             environment=spawn_environment,
         )
@@ -296,7 +298,7 @@ def rename_window(
         session_name=session_name,
         session_id=session_id,
     )
-    window.rename_window(new_name)
+    window.rename_window(_escape_tmux_format(new_name))
     return _serialize_window(window)
 
 
@@ -498,38 +500,42 @@ def register(mcp: FastMCP) -> None:
     """Register window-level tools with the MCP instance."""
     mcp.tool(
         title="List tmux Panes",
-        annotations=ANNOTATIONS_RO,
-        tags={TAG_READONLY},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
     )(list_panes)
     mcp.tool(
-        title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+        title="Get tmux Window Info",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
     )(get_window_info)
     mcp.tool(
-        title="Split tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
+        title="Split tmux Window",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
     )(split_window)
     mcp.tool(
         title="Rename tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(rename_window)
     mcp.tool(
         title="Kill tmux Window",
-        annotations=ANNOTATIONS_DESTRUCTIVE,
-        tags={TAG_DESTRUCTIVE},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_TEARDOWN},
     )(kill_window)
     mcp.tool(
         title="Select tmux Layout",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(select_layout)
     mcp.tool(
         title="Resize tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(resize_window)
     mcp.tool(
         title="Move tmux Window",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(move_window)

@@ -45,7 +45,8 @@ Most MCP clients render prompts via a slash-command UI
 (``/<server>:<prompt>``). For tools-only clients that don't expose
 prompts, set ``LIBTMUX_MCP_PROMPTS_AS_TOOLS=1`` in the server
 environment to surface them as ``list_prompts`` / ``get_prompt``
-tools instead.
+tools instead. These text-rendering adapters belong to `inspect`; naming them
+in {envvar}`LIBTMUX_TOOLS` also enables them individually.
 ```
 
 ---

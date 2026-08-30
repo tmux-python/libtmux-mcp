@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -11,201 +12,360 @@ import typing as t
 
 import pytest
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
-from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
-
-if t.TYPE_CHECKING:
-    from libtmux.server import Server
-
-    from libtmux_mcp.server import _ServerCacheKey
+from libtmux_mcp._utils import TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN
+from libtmux_mcp.server import (
+    _BASE_INSTRUCTIONS,
+    DEFAULT_TOOLSETS,
+    _build_instructions,
+)
 
 
 class BuildInstructionsFixture(t.NamedTuple):
     """Test fixture for _build_instructions."""
 
     test_id: str
-    safety_level: str
+    toolsets: frozenset[str]
     tmux_pane_env: str | None
     tmux_env: str | None
     expect_agent_context: bool
     expect_pane_id_in_text: str | None
     expect_socket_name: str | None
-    expect_safety_in_text: str | None
+    expect_toolsets_in_text: str
 
 
 BUILD_INSTRUCTIONS_FIXTURES: list[BuildInstructionsFixture] = [
     BuildInstructionsFixture(
         test_id="inside_tmux_full_context",
-        safety_level=TAG_MUTATING,
+        toolsets=DEFAULT_TOOLSETS,
         tmux_pane_env="%42",
         tmux_env="/tmp/tmux-1000/default,12345,0",
         expect_agent_context=True,
         expect_pane_id_in_text="%42",
         expect_socket_name="default",
-        expect_safety_in_text="mutating",
+        expect_toolsets_in_text="execute, inspect, manage",
     ),
     BuildInstructionsFixture(
         test_id="outside_tmux_no_context",
-        safety_level=TAG_MUTATING,
+        toolsets=DEFAULT_TOOLSETS,
         tmux_pane_env=None,
         tmux_env=None,
         expect_agent_context=False,
         expect_pane_id_in_text=None,
         expect_socket_name=None,
-        expect_safety_in_text="mutating",
+        expect_toolsets_in_text="execute, inspect, manage",
     ),
     BuildInstructionsFixture(
         test_id="pane_only_no_tmux_env",
-        safety_level=TAG_MUTATING,
+        toolsets=DEFAULT_TOOLSETS,
         tmux_pane_env="%99",
         tmux_env=None,
         expect_agent_context=True,
         expect_pane_id_in_text="%99",
         expect_socket_name=None,
-        expect_safety_in_text="mutating",
+        expect_toolsets_in_text="execute, inspect, manage",
     ),
     BuildInstructionsFixture(
-        test_id="readonly_safety_level",
-        safety_level=TAG_READONLY,
+        test_id="inspect_only",
+        toolsets=frozenset({TOOLSET_INSPECT}),
         tmux_pane_env=None,
         tmux_env=None,
         expect_agent_context=False,
         expect_pane_id_in_text=None,
         expect_socket_name=None,
-        expect_safety_in_text="readonly",
+        expect_toolsets_in_text="inspect",
     ),
+    # The ladder could not express this: deletion without the typing tools.
     BuildInstructionsFixture(
-        test_id="destructive_safety_level",
-        safety_level=TAG_DESTRUCTIVE,
+        test_id="inspect_and_teardown",
+        toolsets=frozenset({TOOLSET_INSPECT, TOOLSET_TEARDOWN}),
         tmux_pane_env=None,
         tmux_env=None,
         expect_agent_context=False,
         expect_pane_id_in_text=None,
         expect_socket_name=None,
-        expect_safety_in_text="destructive",
+        expect_toolsets_in_text="inspect, teardown",
     ),
 ]
 
 
-class SafetyLevelFixture(t.NamedTuple):
-    """Test fixture for server safety-level resolution."""
+class ToolsetsFixture(t.NamedTuple):
+    """One ``LIBTMUX_TOOLSETS`` value and the surface it selects."""
 
     test_id: str
     env_value: str | None
-    expected_level: str
+    expected: frozenset[str]
 
 
-SAFETY_LEVEL_FIXTURES: list[SafetyLevelFixture] = [
-    SafetyLevelFixture("unset_defaults_mutating", None, TAG_MUTATING),
-    SafetyLevelFixture("valid_readonly", TAG_READONLY, TAG_READONLY),
-    SafetyLevelFixture("valid_mutating", TAG_MUTATING, TAG_MUTATING),
-    SafetyLevelFixture("valid_destructive", TAG_DESTRUCTIVE, TAG_DESTRUCTIVE),
-    SafetyLevelFixture("invalid_fails_closed", "read", TAG_READONLY),
+TOOLSETS_FIXTURES: list[ToolsetsFixture] = [
+    ToolsetsFixture("unset_takes_the_default", None, DEFAULT_TOOLSETS),
+    ToolsetsFixture("single", "inspect", frozenset({"inspect"})),
+    ToolsetsFixture(
+        "teardown_without_execute",
+        "inspect,teardown",
+        frozenset({"inspect", "teardown"}),
+    ),
+    ToolsetsFixture(
+        "whitespace_tolerated", " inspect , manage ", frozenset({"inspect", "manage"})
+    ),
+    ToolsetsFixture("empty_is_legal", "", frozenset()),
 ]
 
 
 @pytest.mark.parametrize(
-    BuildInstructionsFixture._fields,
-    BUILD_INSTRUCTIONS_FIXTURES,
-    ids=[f.test_id for f in BUILD_INSTRUCTIONS_FIXTURES],
+    ToolsetsFixture._fields,
+    TOOLSETS_FIXTURES,
+    ids=[f.test_id for f in TOOLSETS_FIXTURES],
 )
-def test_build_instructions(
-    monkeypatch: pytest.MonkeyPatch,
+def test_resolve_toolsets(
     test_id: str,
-    safety_level: str,
-    tmux_pane_env: str | None,
-    tmux_env: str | None,
-    expect_agent_context: bool,
-    expect_pane_id_in_text: str | None,
-    expect_socket_name: str | None,
-    expect_safety_in_text: str | None,
+    env_value: str | None,
+    expected: frozenset[str],
 ) -> None:
-    """_build_instructions includes agent context and safety level."""
-    if tmux_pane_env is not None:
-        monkeypatch.setenv("TMUX_PANE", tmux_pane_env)
-    else:
-        monkeypatch.delenv("TMUX_PANE", raising=False)
+    """``LIBTMUX_TOOLSETS`` selects an unordered surface."""
+    from libtmux_mcp.server import _resolve_toolsets
 
-    if tmux_env is not None:
-        monkeypatch.setenv("TMUX", tmux_env)
-    else:
-        monkeypatch.delenv("TMUX", raising=False)
+    assert test_id
+    assert _resolve_toolsets(env_value) == expected
 
-    result = _build_instructions(safety_level=safety_level)
 
-    # Base instructions are always present
-    assert _BASE_INSTRUCTIONS in result
+def test_an_unknown_toolset_fails_startup() -> None:
+    """A typo must not silently widen or narrow the surface."""
+    from libtmux_mcp.server import _resolve_toolsets
 
-    if expect_agent_context:
-        assert "Agent context" in result
-    else:
-        assert "Agent context" not in result
-
-    if expect_pane_id_in_text is not None:
-        assert expect_pane_id_in_text in result
-
-    if expect_socket_name is not None:
-        assert expect_socket_name in result
-
-    if expect_safety_in_text is not None:
-        assert f"Safety level: {expect_safety_in_text}" in result
+    with pytest.raises(RuntimeError, match="unknown toolsets: bogus"):
+        _resolve_toolsets("inspect,bogus")
 
 
 @pytest.mark.parametrize(
-    SafetyLevelFixture._fields,
-    SAFETY_LEVEL_FIXTURES,
-    ids=[f.test_id for f in SAFETY_LEVEL_FIXTURES],
+    ("variable", "tool_name"),
+    [
+        ("LIBTMUX_TOOLS", "definitely_not_a_tool"),
+        ("LIBTMUX_EXCLUDE_TOOLS", "definitely_not_a_tool"),
+        ("LIBTMUX_TOOLS", "get_prompt"),
+    ],
+    ids=["include-typo", "exclude-typo", "disabled-prompt-adapter"],
 )
-def test_resolve_safety_level(
-    test_id: str,
-    env_value: str | None,
-    expected_level: str,
+def test_an_unknown_tool_name_fails_server_startup(
+    variable: str,
+    tool_name: str,
 ) -> None:
-    """Safety env values resolve to the server's effective tier."""
-    from libtmux_mcp.server import _resolve_safety_level
+    """A typo in an individual include or exclude fails closed."""
+    code = textwrap.dedent(
+        """
+        import asyncio
 
-    assert test_id
-    assert _resolve_safety_level(env_value) == expected_level
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
 
 
-def test_invalid_safety_env_hides_mutating_tools() -> None:
-    """Invalid ``LIBTMUX_SAFETY`` values expose readonly tools only."""
+        async def main():
+            async with Client(build_mcp_server()):
+                pass
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, variable: tool_name}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode != 0
+    assert f"{variable} names unknown tools: {tool_name}" in proc.stderr
+
+
+@pytest.mark.parametrize("variable", ["LIBTMUX_TOOLS", "LIBTMUX_EXCLUDE_TOOLS"])
+def test_generated_prompt_tool_names_validate_when_enabled(variable: str) -> None:
+    """Validation includes tools produced by the prompt adapter transform."""
+    code = textwrap.dedent(
+        """
+        import asyncio
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+
+        async def main():
+            async with Client(build_mcp_server()):
+                pass
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {
+        **os.environ,
+        "LIBTMUX_MCP_PROMPTS_AS_TOOLS": "1",
+        variable: "get_prompt",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "selection"),
+    [
+        ("send_keys", {"LIBTMUX_TOOLSETS": "inspect"}),
+        ("list_sessions", {"LIBTMUX_EXCLUDE_TOOLS": "list_sessions"}),
+    ],
+    ids=["toolset-omission", "explicit-exclusion"],
+)
+def test_a_hidden_tool_is_unknown_on_the_production_wire(
+    tool_name: str,
+    selection: dict[str, str],
+) -> None:
+    """FastMCP visibility rejects hidden tools before tool dispatch."""
+    code = textwrap.dedent(
+        f"""
+        import asyncio
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                result = await client.call_tool(
+                    {tool_name!r},
+                    {{}},
+                    raise_on_error=False,
+                )
+                print(result.content[0].text)
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, **selection}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0
+    assert f"Unknown tool: '{tool_name}'" in proc.stdout
+
+
+@pytest.mark.parametrize(
+    ("excluded_tool", "nested_success"),
+    [("", True), ("list_servers", False)],
+    ids=["named-wrapper-authority", "explicit-exclusion"],
+)
+def test_named_read_batch_reaches_only_unexcluded_inspect_tools(
+    excluded_tool: str,
+    nested_success: bool,
+    tmp_path: pathlib.Path,
+) -> None:
+    """A named batch carries inspect authority without exposing nested tools."""
     code = textwrap.dedent(
         """
         import asyncio
         import json
 
+        from fastmcp import Client
+
         from libtmux_mcp.server import build_mcp_server
 
+
         async def main():
-            tools = await build_mcp_server().list_tools()
-            names = {tool.name for tool in tools}
-            print(json.dumps({
-                "list_sessions": "list_sessions" in names,
-                "send_keys": "send_keys" in names,
-                "send_keys_batch": "send_keys_batch" in names,
-                "kill_pane": "kill_pane" in names,
-            }))
+            async with Client(build_mcp_server()) as client:
+                tools = await client.list_tools()
+                batch = await client.call_tool(
+                    "call_read_tools_batch",
+                    {
+                        "operations": [
+                            {
+                                "tool": "list_servers",
+                                "arguments": {},
+                            }
+                        ]
+                    },
+                    raise_on_error=False,
+                )
+                direct = await client.call_tool(
+                    "list_servers",
+                    {},
+                    raise_on_error=False,
+                )
+                row = batch.structured_content["results"][0]
+                print(
+                    json.dumps(
+                        {
+                            "tools": [tool.name for tool in tools],
+                            "nested_success": row["success"],
+                            "nested_error": row["error"],
+                            "direct_error": direct.content[0].text,
+                        }
+                    )
+                )
+
 
         asyncio.run(main())
         """
     )
-    env = {**os.environ, "LIBTMUX_SAFETY": "read"}
+    env = {
+        **os.environ,
+        "LIBTMUX_TOOLSETS": "",
+        "LIBTMUX_TOOLS": "call_read_tools_batch",
+        "LIBTMUX_EXCLUDE_TOOLS": excluded_tool,
+        "TMUX_TMPDIR": str(tmp_path),
+    }
     proc = subprocess.run(
         [sys.executable, "-c", code],
-        check=True,
+        check=False,
         capture_output=True,
-        env=env,
         text=True,
+        env=env,
     )
-    result = json.loads(proc.stdout)
 
-    assert result == {
-        "list_sessions": True,
-        "send_keys": False,
-        "send_keys_batch": False,
-        "kill_pane": False,
-    }
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["tools"] == ["call_read_tools_batch"]
+    assert payload["nested_success"] is nested_success
+    assert "Unknown tool: 'list_servers'" in payload["direct_error"]
+    if excluded_tool:
+        assert "Unknown tool: 'list_servers'" in payload["nested_error"]
+    else:
+        assert payload["nested_error"] is None
+
+
+def test_the_retired_safety_variable_fails_startup() -> None:
+    """`LIBTMUX_SAFETY` is gone; ignoring it could widen a surface."""
+    code = textwrap.dedent(
+        """
+        import libtmux_mcp.server
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": "destructive"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode != 0
+    assert "LIBTMUX_SAFETY has been removed" in proc.stderr
+    assert "LIBTMUX_TOOLSETS" in proc.stderr
 
 
 def test_run_server_pins_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -272,13 +432,13 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
 
 
 def test_base_instructions_document_hook_boundary() -> None:
-    """_BASE_INSTRUCTIONS explains hooks are read-only by design.
+    """_BASE_INSTRUCTIONS explains hooks are inspection-only by design.
 
     Without this sentence agents waste a turn asking for ``set_hook`` or
     trying to write hooks through a nonexistent tool. Naming the
     boundary heads off the exploratory call.
     """
-    assert "HOOKS ARE READ-ONLY" in _BASE_INSTRUCTIONS
+    assert "NO DEDICATED HOOK-WRITE TOOLS" in _BASE_INSTRUCTIONS
     assert "show_hooks" in _BASE_INSTRUCTIONS
     assert "tmux config file" in _BASE_INSTRUCTIONS
 
@@ -385,24 +545,30 @@ def test_build_instructions_documents_is_caller_workflow_inside_tmux(
     # Outside tmux: the workflow sentence must NOT appear.
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TMUX", raising=False)
-    outside = _build_instructions(safety_level=TAG_MUTATING)
+    outside = _build_instructions(toolsets=frozenset({TOOLSET_MANAGE}))
     assert "whoami tool" not in outside
     assert "is_caller=true" not in outside
 
     # Inside tmux: the workflow sentence appears.
     monkeypatch.setenv("TMUX_PANE", "%42")
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
-    inside = _build_instructions(safety_level=TAG_MUTATING)
+    inside = _build_instructions(toolsets=frozenset({TOOLSET_MANAGE}))
     assert "is_caller=true" in inside
     assert "whoami tool" in inside
     assert "list_panes" in inside
 
 
-def test_build_instructions_always_includes_safety() -> None:
-    """_build_instructions always includes the safety level."""
-    result = _build_instructions(safety_level=TAG_MUTATING)
-    assert "Safety level:" in result
-    assert "LIBTMUX_SAFETY" in result
+def test_build_instructions_always_names_the_toolsets() -> None:
+    """Instructions name the enabled toolsets and how to change them.
+
+    They also say what hiding one does not do, because a model reading a
+    short list is otherwise free to infer that the rest is unreachable.
+    """
+    result = _build_instructions(toolsets=frozenset({TOOLSET_MANAGE}))
+
+    assert "Toolsets: manage" in result
+    assert "LIBTMUX_TOOLSETS" in result
+    assert "not what a pane can run" in result
 
 
 @pytest.mark.parametrize(
@@ -439,39 +605,39 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
     ids=["history-disabled", "history-enabled"],
 )
 @pytest.mark.parametrize(
-    ("tier", "tmux_pane", "tmux_env"),
+    ("toolset", "tmux_pane", "tmux_env"),
     [
-        (TAG_READONLY, "%42", "/tmp/tmux-1000/default,12345,0"),
-        (TAG_MUTATING, "%42", "/tmp/tmux-1000/default,12345,0"),
-        (TAG_DESTRUCTIVE, "%42", "/tmp/tmux-1000/default,12345,0"),
-        (TAG_READONLY, "", ""),
-        (TAG_MUTATING, "", ""),
-        (TAG_DESTRUCTIVE, "", ""),
+        (TOOLSET_INSPECT, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TOOLSET_MANAGE, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TOOLSET_TEARDOWN, "%42", "/tmp/tmux-1000/default,12345,0"),
+        (TOOLSET_INSPECT, "", ""),
+        (TOOLSET_MANAGE, "", ""),
+        (TOOLSET_TEARDOWN, "", ""),
         # Variable-length stress: longer socket name + multi-digit pane id.
         # Guards against future text additions tipping a realistic case
         # over the 2KB budget. Exercises BOTH axes — a multi-digit pane id
         # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET). Margin
         # ~2 bytes; if a future text addition trips this, either trim
         # further or fall back to a tighter compression form (drop spaces
-        # around ``/`` in HOOKS, drop spaces after colons in the safety
+        # around ``/`` in HOOKS, drop spaces after colons in the toolset
         # paragraph) for additional bytes of margin.
-        (TAG_READONLY, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
+        (TOOLSET_INSPECT, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
     ],
 )
-def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
+def test_full_instructions_under_2kb_across_toolsets_and_tmux_pane(
     monkeypatch: pytest.MonkeyPatch,
     suppress_history: bool,
-    tier: str,
+    toolset: str,
     tmux_pane: str,
     tmux_env: str,
 ) -> None:
     """The transmitted instructions= string fits Claude Code's 2KB budget.
 
     The static ``_BASE_INSTRUCTIONS`` length is not the contract —
-    ``_build_instructions`` appends a safety-tier block, an optional
-    readonly-tier hint, and an optional ``$TMUX_PANE`` agent-context
+    ``_build_instructions`` appends a toolset block, an optional
+    `inspect`-only hint, and an optional ``$TMUX_PANE`` agent-context
     block. The full transmitted string must be ≤ 2048 bytes for every
-    (tier, tmux_pane) combination, otherwise Claude Code silently
+    (toolset, tmux_pane) combination, otherwise Claude Code silently
     truncates the agent-context block — the only server-side fix for
     "current window" anaphora.
 
@@ -488,12 +654,12 @@ def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
         monkeypatch.delenv("TMUX", raising=False)
 
     instructions = _build_instructions(
-        safety_level=tier,
+        toolsets=frozenset({toolset}),
         suppress_history=suppress_history,
     )
     size = len(instructions.encode())
     assert size <= 2048, (
-        f"tier={tier} tmux_pane={tmux_pane!r}: "
+        f"toolset={toolset} tmux_pane={tmux_pane!r}: "
         f"{size} bytes exceeds Claude Code's 2KB ceiling"
     )
 
@@ -512,7 +678,7 @@ def test_instruction_budget_drops_oversized_socket_before_required_text(
     monkeypatch.setenv("TMUX", f"/tmp/tmux-1000/{socket_name},12345,0")
 
     instructions = _build_instructions(
-        safety_level=TAG_READONLY,
+        toolsets=frozenset({TOOLSET_INSPECT}),
         suppress_history=True,
     )
 
@@ -536,7 +702,7 @@ def test_instruction_budget_can_drop_all_oversized_optional_context(
     monkeypatch.setenv("TMUX", f"/tmp/tmux-1000/{'s' * 4096},12345,0")
 
     instructions = _build_instructions(
-        safety_level=TAG_READONLY,
+        toolsets=frozenset({TOOLSET_INSPECT}),
         suppress_history=False,
     )
 
@@ -591,24 +757,24 @@ def test_scope_segment_carries_anti_triggers() -> None:
     assert "clarifying question" in _INSTR_SCOPE
 
 
-@pytest.mark.parametrize("tier", [TAG_READONLY, TAG_MUTATING, TAG_DESTRUCTIVE])
-def test_readonly_hint_visible_only_on_readonly_tier(
-    monkeypatch: pytest.MonkeyPatch, tier: str
+@pytest.mark.parametrize("toolset", [TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN])
+def test_probe_hint_visible_only_on_an_inspect_only_surface(
+    monkeypatch: pytest.MonkeyPatch, toolset: str
 ) -> None:
-    """The 'Readonly mode:' investigation hint appears only on readonly.
+    """The investigation hint appears only when `inspect` is all there is.
 
-    False-positive activation is cheap on readonly (worst case: an
-    extra ``list_panes`` call) and expensive on mutating/destructive
-    (where ``kill_*`` is one mis-routed query away). Reuse the existing
-    safety axis instead of shipping a separate discoverability knob.
+    A wrong guess is cheap there (worst case: an
+    extra ``list_panes`` call) and expensive on a surface holding teardown
+    tools (where ``kill_*`` is one mis-routed query away). Reuse the existing
+    toolset classification instead of shipping a separate discoverability knob.
     """
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TMUX", raising=False)
-    instructions = _build_instructions(safety_level=tier)
-    if tier == TAG_READONLY:
-        assert "Readonly mode:" in instructions
+    instructions = _build_instructions(toolsets=frozenset({toolset}))
+    if toolset == TOOLSET_INSPECT:
+        assert "Probe snapshot_pane" in instructions
     else:
-        assert "Readonly mode:" not in instructions
+        assert "Probe snapshot_pane" not in instructions
 
 
 # ---------------------------------------------------------------------------
@@ -695,7 +861,7 @@ _DISCOVERY_ANCHORS = frozenset(
 
 
 #: Discovery anchors that carry the ``anthropic/alwaysLoad`` per-tool
-#: meta hint. Read-only only — best-effort hint to Claude Code that
+#: meta hint. Inspect only — best-effort hint to Claude Code that
 #: keeps a tiny tmux vocabulary always-visible without preloading
 #: every tool's schema.
 _ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"])
@@ -918,7 +1084,7 @@ def test_lifespan_missing_tmux_raises_runtime_error(
     """Startup raises a clear RuntimeError when tmux is not on PATH."""
     import asyncio
 
-    from libtmux_mcp.server import _lifespan
+    from libtmux_mcp.server import _lifespan, mcp
 
     def _missing_tmux(_name: str) -> None:
         return None
@@ -926,7 +1092,7 @@ def test_lifespan_missing_tmux_raises_runtime_error(
     monkeypatch.setattr("libtmux_mcp.server.shutil.which", _missing_tmux)
 
     async def _enter() -> None:
-        async with _lifespan(_app=None):  # type: ignore[arg-type]
+        async with _lifespan(mcp):
             pytest.fail("lifespan should have raised before yielding")
 
     with pytest.raises(RuntimeError, match="tmux binary not found"):
@@ -934,23 +1100,31 @@ def test_lifespan_missing_tmux_raises_runtime_error(
 
 
 def test_lifespan_clears_server_cache_on_exit() -> None:
-    """Clean lifespan exit empties the process-wide ``_server_cache``."""
+    """Clean lifespan exit drops cached clients without touching tmux."""
     import asyncio
 
     from libtmux_mcp._utils import _server_cache
-    from libtmux_mcp.server import _lifespan
+    from libtmux_mcp.server import _lifespan, mcp
 
-    # Seed the cache with a sentinel entry — the actual value doesn't
-    # matter; we're checking that exit clears it.
-    _server_cache[("sentinel_socket", None, None)] = t.cast("t.Any", object())
+    class RecordingServer:
+        def __init__(self) -> None:
+            self.commands: list[tuple[object, ...]] = []
+
+        def cmd(self, *args: object) -> object:
+            self.commands.append(args)
+            return t.cast("t.Any", object())
+
+    server = RecordingServer()
+    _server_cache[("sentinel_socket", None, None)] = t.cast("t.Any", server)
 
     async def _cycle() -> None:
-        async with _lifespan(_app=None):  # type: ignore[arg-type]
+        async with _lifespan(mcp):
             # While the lifespan is active the cache still holds state.
             assert _server_cache
 
     asyncio.run(_cycle())
     assert _server_cache == {}
+    assert server.commands == []
 
 
 def test_server_constructed_with_lifespan() -> None:
@@ -958,62 +1132,3 @@ def test_server_constructed_with_lifespan() -> None:
     from libtmux_mcp.server import _lifespan, mcp
 
     assert mcp._lifespan is _lifespan
-
-
-@pytest.mark.usefixtures("mcp_session")
-def test_gc_mcp_buffers_deletes_mcp_prefixed_and_spares_others(
-    mcp_server: Server,
-) -> None:
-    """``_gc_mcp_buffers`` deletes ``libtmux_mcp_*`` buffers only.
-
-    Best-effort lifespan GC for leaked paste buffers — agents are
-    supposed to ``delete_buffer`` after use, but an interrupted call
-    chain can leak. The GC must NEVER touch non-MCP buffers (OS
-    clipboard sync, user-authored buffers) — those are the human user's
-    content.
-    """
-    from libtmux_mcp.server import _gc_mcp_buffers
-    from libtmux_mcp.tools.buffer_tools import load_buffer
-
-    # Seed: one MCP-owned buffer via the canonical path, one human-owned
-    # buffer directly via tmux so it is outside the MCP prefix.
-    ref = load_buffer(
-        content="agent-staged",
-        logical_name="leaky",
-        socket_name=mcp_server.socket_name,
-    )
-    mcp_server.cmd("set-buffer", "-b", "human_buffer", "user-content")
-
-    names_before = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
-    assert ref.buffer_name in names_before
-    assert "human_buffer" in names_before
-
-    _gc_mcp_buffers({(mcp_server.socket_name, None, None): mcp_server})
-
-    names_after = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
-    assert ref.buffer_name not in names_after, "GC must delete MCP-namespaced buffers"
-    assert "human_buffer" in names_after, "GC must not touch non-MCP buffers"
-
-    # Clean up the human buffer so the fixture teardown stays tidy.
-    mcp_server.cmd("delete-buffer", "-b", "human_buffer")
-
-
-def test_gc_mcp_buffers_swallows_errors() -> None:
-    """GC logs but never raises when tmux is unreachable."""
-    from libtmux_mcp.server import _gc_mcp_buffers
-
-    class _BrokenServer:
-        def cmd(self, *_a: object, **_kw: object) -> object:
-            msg = "tmux is dead"
-            raise RuntimeError(msg)
-
-    # Must not raise — lifespan shutdown cannot tolerate exceptions here.
-    # Cast is needed because _BrokenServer only implements ``cmd``; the
-    # real cache stores full Server instances, but GC is best-effort and
-    # consumes only the ``cmd`` method so a partial stub is sufficient.
-    _gc_mcp_buffers(
-        t.cast(
-            "t.Mapping[_ServerCacheKey, t.Any]",
-            {(None, None, None): _BrokenServer()},
-        )
-    )

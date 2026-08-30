@@ -7,11 +7,11 @@ import typing as t
 from libtmux.constants import OptionScope
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
     ExpectedToolError,
+    _escape_tmux_format,
     _get_server,
     _resolve_pane,
     _resolve_session,
@@ -94,7 +94,9 @@ def show_option(
         Option name and its value.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
-    value = obj.show_option(option, global_=global_, scope=opt_scope)
+    value = obj.show_option(
+        _escape_tmux_format(option), global_=global_, scope=opt_scope
+    )
     return OptionResult(option=option, value=value)
 
 
@@ -108,6 +110,13 @@ def set_option(
     socket_name: str | None = None,
 ) -> OptionSetResult:
     """Set a tmux option value.
+
+    Some option values are executable. tmux runs a ``#(...)`` job inside
+    the status formats when it draws them, and repeats it on the status
+    interval; ``default-command`` and ``default-shell`` decide what every
+    future pane runs, and ``command-alias`` rewrites later commands. The
+    value is stored verbatim, so an option that interprets it later runs
+    what is stored, not what this call did.
 
     Use to change tmux behavior at runtime. Common uses: adjusting
     history-limit, enabling mouse support, changing status bar format.
@@ -135,15 +144,19 @@ def set_option(
         Confirmation with option name, value, and status.
     """
     obj, opt_scope = _resolve_option_target(socket_name, scope, target)
-    obj.set_option(option, value, global_=global_, scope=opt_scope)
+    obj.set_option(_escape_tmux_format(option), value, global_=global_, scope=opt_scope)
     return OptionSetResult(option=option, value=value, status="set")
 
 
 def register(mcp: FastMCP) -> None:
     """Register option tools with the MCP instance."""
-    mcp.tool(title="Show tmux Option", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_option
-    )
     mcp.tool(
-        title="Set tmux Option", annotations=ANNOTATIONS_MUTATING, tags={TAG_MUTATING}
+        title="Show tmux Option",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
+    )(show_option)
+    mcp.tool(
+        title="Set tmux Option",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
     )(set_option)

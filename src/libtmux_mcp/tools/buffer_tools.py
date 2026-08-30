@@ -17,7 +17,7 @@ the caller can round-trip with
 :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`, and
 :func:`~libtmux_mcp.tools.buffer_tools.delete_buffer` without ambiguity.
 
-``list_buffers`` is **not** exposed in the default safety tier —
+``list_buffers`` is **not** exposed at all —
 buffer contents often include the user's OS clipboard history (passwords,
 private snippets), and a blanket enumeration would leak that to the
 agent. Callers track the buffers they own via the
@@ -35,11 +35,11 @@ import typing as t
 import uuid
 
 from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
-    ANNOTATIONS_RO,
-    ANNOTATIONS_SHELL,
-    TAG_MUTATING,
-    TAG_READONLY,
+    ANNOTATIONS_AMBIENT_UNKNOWN,
+    TOOLSET_EXECUTE,
+    TOOLSET_INSPECT,
+    TOOLSET_MANAGE,
+    TOOLSET_TEARDOWN,
     ExpectedToolError,
     _get_server,
     _resolve_pane,
@@ -380,25 +380,26 @@ def delete_buffer(
 def register(mcp: FastMCP) -> None:
     """Register buffer tools with the MCP instance.
 
-    ``load_buffer`` is tagged with
-    :data:`~libtmux_mcp._utils.ANNOTATIONS_SHELL` because its ``content``
-    argument is arbitrary user text that may carry interactive-environment
-    side effects (commands about to be pasted into a shell). Other buffer
-    tools are plain mutating ops on the tmux buffer store.
+    ``load_buffer`` stages inert content, while ``paste_buffer`` delivers
+    that content to a pane's program. Their toolsets preserve that boundary.
     """
     mcp.tool(
-        title="Load tmux Buffer", annotations=ANNOTATIONS_SHELL, tags={TAG_MUTATING}
+        title="Load tmux Buffer",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE},
     )(load_buffer)
     mcp.tool(
         title="Paste tmux Buffer",
-        annotations=ANNOTATIONS_SHELL,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
     )(paste_buffer)
-    mcp.tool(title="Show tmux Buffer", annotations=ANNOTATIONS_RO, tags={TAG_READONLY})(
-        show_buffer
-    )
+    mcp.tool(
+        title="Show tmux Buffer",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT},
+    )(show_buffer)
     mcp.tool(
         title="Delete tmux Buffer",
-        annotations=ANNOTATIONS_MUTATING,
-        tags={TAG_MUTATING},
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_TEARDOWN},
     )(delete_buffer)
