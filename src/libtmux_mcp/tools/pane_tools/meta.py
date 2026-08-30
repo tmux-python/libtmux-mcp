@@ -25,7 +25,7 @@ from libtmux_mcp.tools.pane_tools.io import (
 #: tmux format modifier needs — ``#{E:x}`` re-expands ``x``'s value, where a
 #: job the caller never typed can be waiting. Validating what is allowed,
 #: rather than scanning for what is not, is what makes that unreachable.
-_FORMAT_VARIABLE = re.compile(r"#\{[A-Za-z_@][A-Za-z0-9_]*\}")
+_FORMAT_VARIABLE = re.compile(r"#\{[A-Za-z_@][A-Za-z0-9_-]*\}")
 
 
 @handle_tool_errors

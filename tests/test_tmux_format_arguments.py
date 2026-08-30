@@ -266,20 +266,24 @@ def test_display_message_accepts_only_variable_references(
         )
 
 
-def test_display_message_expands_plain_variables(
+def test_display_message_expands_plain_and_hyphenated_variables(
     mcp_server: Server,
     mcp_pane: Pane,
 ) -> None:
     """A format of bare ``#{name}`` references still works."""
     from libtmux_mcp.tools.pane_tools import display_message
 
+    mcp_server.cmd("set-option", "-g", "history-limit", "4321")
+    mcp_server.cmd("set-option", "-g", "@plugin-option", "sentinel")
     result = display_message(
-        format_string="id=#{pane_id} zoomed=#{window_zoomed_flag}",
+        format_string=(
+            "id=#{pane_id} history=#{history-limit} plugin=#{@plugin-option}"
+        ),
         pane_id=t.cast("str", mcp_pane.pane_id),
         socket_name=mcp_server.socket_name,
     )
 
-    assert result == f"id={mcp_pane.pane_id} zoomed=0"
+    assert result == f"id={mcp_pane.pane_id} history=4321 plugin=sentinel"
 
 
 def test_the_hash_escaper_owns_only_the_hash_expander() -> None:
