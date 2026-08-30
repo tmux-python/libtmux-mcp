@@ -7,28 +7,18 @@ This record was proposed in
 The
 [full target-state capability model](https://github.com/tmux-python/libtmux-mcp/issues/127#issuecomment-5463166342)
 contains the inventory, manifest columns, CI invariants, and adoption phases.
-This record stays above that implementation design: it states what the project
-commits to and what it refuses to promise.
+This record defines the shared contract for tmux MCP implementations. It stays
+above implementation design: what every implementation commits to and refuses
+to promise.
 
 ## Status
 
-Proposed. Supersedes the former three-level capability model. The
-[four toolsets](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/_utils.py#L385-L395)
-already ship. The manifest, pinned socket lifecycle, target names and removals,
-and generated disclosure surfaces remain proposed. Version 0.1.0a21 still
-exposes
-[`run_command` and per-call socket selection](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/pane_tools/io.py#L327-L338),
-generic
-[`set_option`](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/option_tools.py#L103-L119)
-and
-[`set_environment`](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/env_tools.py#L60-L70),
-and
-[`pipe_pane`](https://github.com/tmux-python/libtmux-mcp/blob/v0.1.0a21/src/libtmux_mcp/tools/pane_tools/pipe.py#L32-L41).
+Proposed. Supersedes the former three-level capability model.
 
 ## Context
 
-libtmux-mcp hands an agent a terminal. Everything downstream of that — which
-tmux objects it can touch, what a client should prompt on, what a reader should
+A tmux MCP hands an agent a terminal. Everything downstream of that — which tmux
+objects it can touch, what a client should prompt on, what a reader should
 believe — depends on describing that capability accurately.
 
 One ordered scale cannot do it. Running a shell command and deleting a tmux
@@ -47,20 +37,20 @@ labels is not communicating with clients; it is corrupting a shared vocabulary.
 
 ## Decision
 
-**CM-1 — The tmux socket is the namespace boundary, and it is only that.** A
+**CM-1 — A tmux socket is a namespace boundary, not a security boundary.** A
 server process pins one socket for its lifetime. That scopes which tmux objects
 the structured tools can name, which is genuine accident isolation for the tool
 surface. It scopes nothing about the filesystem, processes, network, or other
 sockets, and the documentation never implies otherwise.
 
-**CM-2 — Capability is described by independent properties, not a rank.**
+**CM-2 — Describe capability with independent facts, not a rank.**
 Process reach (can this start a process or deliver client-controlled input to
 one) and tmux effect (observe, change, delete) vary independently, and output
 classes describe what a result can carry back. `rename_window` and
 `run_shell_command` both change tmux state; only one can run code. A model with
 two axes says that in one line, and a ladder cannot say it at all.
 
-**CM-3 — Toolsets are unordered inventory sets, resolved once at startup.**
+**CM-3 — Resolve one explicit tool surface at startup.**
 `inspect`, `manage`, `execute`, `teardown`. They determine what this server lists
 and accepts, for context reduction, model routing, and documentation navigation.
 Because they are sets rather than a cumulative scale, `inspect,teardown` is
@@ -73,37 +63,34 @@ and
 [`tools/call`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/server/server.py#L1281-L1288)
 through it.
 
-**CM-4 — Standard MCP annotations describe the whole tool call.** MCP defines
+**CM-4 — Use standard MCP annotations for the whole tool call.** MCP defines
 [`readOnlyHint: true`](https://github.com/modelcontextprotocol/python-sdk/blob/v1.29.1/src/mcp/types.py#L1262-L1266)
-as a claim that the tool does not modify its environment, and
-[FastMCP passes annotations through](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/tools/base.py#L234-L242).
-Tmux operations therefore use conservative hints when aliases or hooks make the
-whole call unknowable. Toolset, process reach, and output classes describe the
-direct operation without redefining the protocol.
+as a claim that the tool does not modify its environment. Tmux operations
+therefore use conservative hints when aliases or hooks make the whole call
+unknowable. Toolset, process reach, and output classes describe the direct
+operation without redefining the protocol.
 
-**CM-5 — One checked-in manifest is the single source of truth, and CI asserts
-against sinks rather than names.** Registration, filtering, generated docs,
-badges, the README inventory, and the capabilities resource all derive from one
-table. Invariants are asserted on where a parameter's value lands in the callee,
-not on what the parameter is called: tmux expands formats in argument positions
-whose names give no hint of it, so a field-name filter would pass a shell sink
-named `start_directory`.
+**CM-5 — Generate public claims from one checked-in manifest.** Registration,
+filtering, generated docs, badges, the README inventory, and the capabilities
+resource all derive from one table. CI asserts where a parameter's value lands
+in the callee, not what the parameter is called: tmux expands formats in
+argument positions whose names give no hint of it, so a field-name filter would
+pass a shell sink named `start_directory`.
 
-**CM-6 — Client-authored host commands have no direct MCP surface.**
+**CM-6 — Do not expose host-command execution as a public tool.**
 `run_shell_command` sends authored commands to a pane, where they are attachable,
 observable, and tied to a completion protocol. No public schema accepts a host
-command, and this server never hands caller text directly to a host-side shell.
+command, and no implementation hands caller text directly to a host-side shell.
 A pane command can still invoke tmux's
 [`run-shell`](https://github.com/tmux/tmux/blob/3.7c/cmd-run-shell.c#L201-L210)
 or install a
 [`#()` status job](https://github.com/tmux/tmux/blob/3.7c/format.c#L416-L422),
 so this is a direct-surface claim, not transitive confinement.
 
-**CM-7 — Disclosure is a product surface, held to the same standard as
-behaviour.** The install statement, the generated opening sentences, the startup
-record, the trust-model page, and the audit record are all deliverables, and a
-repository lint rejects new affirmative sandbox or containment language while
-permitting negative boundary disclosures.
+**CM-7 — Treat disclosure as product behaviour.** The install statement,
+generated opening sentences, startup record, trust-model page, and audit record
+are all deliverables. Repository lint rejects new affirmative sandbox or
+containment language while permitting negative boundary disclosures.
 
 ## What this does not guarantee
 
@@ -112,9 +99,8 @@ Each of these is stated because a reader could otherwise reasonably infer it.
 **Not containment.** Execute tools run commands with the user's full authority.
 A command running in a pane can reach any file, process, or network the user
 can, and can open any other tmux socket by hand. OS accounts, containers, and
-VMs are the isolation boundary; this server is not one. We do not build a
-sandbox because a server that cannot confine its own child processes cannot
-honestly claim to.
+VMs are the isolation boundary; a tmux MCP is not one. Implementations do not
+build a sandbox they cannot enforce.
 
 **Toolset filtering enforces the MCP surface, not authority.** Dropping
 `teardown` removes direct deletion tools from listing and invocation. It does not
@@ -127,7 +113,7 @@ reduce accidents; they do not confine what a pane can do, because a bypass is on
 before dispatch and
 [runs after-hooks](https://github.com/tmux/tmux/blob/3.7c/cmd-queue.c#L649-L663)
 after it. A nominally observational call can therefore execute or mutate.
-Project metadata records the intended direct operation; standard hints make no
+Manifest metadata records the intended direct operation; standard hints make no
 narrower claim.
 
 **The dedicated socket is separation, not exclusive ownership.** Objects on it
@@ -143,18 +129,14 @@ terminal output containing prompt-injection text. Terminal-content reads are
 therefore advertised open-world. Blanket auto-approval of the whole toolset is a
 client's decision to make with that stated, not something the name endorses.
 
-**No payload inspection on typed input.** We do not scan `send_keys` or
-`run_shell_command` for dangerous content. That race is unwinnable, and a filter
-that catches enough examples to look protective is worse than none, because it
-teaches operators to rely on it.
+**No payload inspection on typed input.** Implementations do not scan
+`send_keys` or `run_shell_command` for dangerous content. That race is
+unwinnable, and a filter that catches enough examples to look protective is
+worse than none, because it teaches operators to rely on it.
 
-**Bounded matching is a mechanism we must supply, not something the language
-gives us.** CPython's
-[`re.search`](https://github.com/python/cpython/blob/v3.14.0/Lib/re/__init__.py#L174-L177)
-has no
-execution timeout, so pattern-length caps alone are not a time ceiling. Search
-bounds mean a specific bounded-time engine, named at implementation, or the
-guarantee is not made.
+**Bounded matching requires a bounded mechanism.** Input-size caps alone do not
+bound execution time. Each implementation names and enforces a bounded-time
+matching mechanism, or makes no time-bound claim.
 
 **Redaction and history suppression are scoped.** Audit redaction covers the
 audit record; it does not rewrite shell history, client transcripts, pane
@@ -167,10 +149,9 @@ keyed on an inner tool's name will not fire. That is stated in the tool's own
 description rather than papered over, and it is why the mutating and destructive
 batches do not survive at all.
 
-**Target names are not yet stable.** The model depends on literal tool names as
-client policy hooks, which makes the alpha's renames a one-time break rather than
-a free change. `MIGRATION` records each rename when it lands; the stability
-promise begins after the target surface lands, not before.
+**Tool names are client policy hooks.** Implementations change accepted tool
+names only through an explicit migration. Renaming a public tool is a consent
+surface change, not an internal refactor.
 
 **Self-kill guards protect one process against the direct teardown tools.** They
 cover the pane, window, and session containing this server, only when it lives
@@ -190,17 +171,12 @@ MCP entries. Deriving everything from one manifest means adding a tool is adding
 a row plus a test, and a tool whose claims drift from its behaviour fails CI
 rather than shipping.
 
-The documentation extension and this server share the toolset vocabulary.
-gp-sphinx
-[accepts configured axes](https://github.com/git-pull/gp-sphinx/blob/v0.1.0a38/packages/sphinx-autodoc-fastmcp/src/sphinx_autodoc_fastmcp/__init__.py#L149-L158),
-so releases keep those terms aligned.
-
 Because `exit-empty` defaults on
 ([`options-table.c`](https://github.com/tmux/tmux/blob/3.7c/options-table.c#L375-L380)),
 an agent that removes its own sessions empties its server without a socket-wide
 kill tool, which is why none is offered.
 
-The target is a server that is useful by default, explicit that it can execute
-arbitrary code, precise about the little the socket actually scopes, and
-structured so that a future tool cannot quietly acquire authority the
+The result is a shared model for tmux MCPs that are useful by default, explicit
+that they can execute arbitrary code, precise about the little a socket scopes,
+and structured so that a future tool cannot quietly acquire authority its
 documentation does not admit to.
