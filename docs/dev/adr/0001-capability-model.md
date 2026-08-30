@@ -52,17 +52,12 @@ the result can carry back. `rename_window` changes a name, while
 annotations account separately for execution added by ambient aliases or hooks.
 
 **CM-3 — Resolve one explicit tool surface at startup.**
-`inspect`, `manage`, `execute`, `teardown`. They determine what this server lists
-and accepts, for context reduction, model routing, and documentation navigation.
-Because they are sets rather than a cumulative scale, `inspect,teardown` is
-expressible; under the old ladder, deletion tools could not be enabled without
-the typing tools. FastMCP maps
-[`include_tags` and `exclude_tags`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/mcp_config.py#L139-L146)
-to visibility and filters both
-[`tools/list`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/server/server.py#L651-L678)
-and
-[`tools/call`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/server/server.py#L1281-L1288)
-through it.
+The unordered toolsets are `inspect`, `manage`, `execute`, and `teardown`. At
+startup, expand the selected toolsets, add named inclusions, then remove named
+exclusions; exclusion wins. Reject unknown names and freeze the result for the
+server's lifetime. A tool outside that surface is neither advertised nor
+callable. This supports context reduction, model routing, and documentation
+navigation while keeping combinations such as `inspect,teardown` expressible.
 
 **CM-4 — Use standard MCP annotations for the whole tool call.** MCP defines
 [`readOnlyHint: true`](https://github.com/modelcontextprotocol/python-sdk/blob/v1.29.1/src/mcp/types.py#L1262-L1266)
@@ -103,11 +98,11 @@ can, and can open any other tmux socket by hand. OS accounts, containers, and
 VMs are the isolation boundary; a tmux MCP is not one. Implementations do not
 build a sandbox they cannot enforce.
 
-**Toolset filtering enforces the MCP surface, not authority.** Dropping
-`teardown` removes direct deletion tools from listing and invocation. It does not
-stop an enabled execute tool from typing the equivalent tmux command. Toolsets
-reduce accidents; they do not confine what a pane can do, because a bypass is one
-`send_keys` away.
+**The selected tool surface limits MCP calls, not pane authority.** A surface
+without teardown tools removes direct deletion calls. It does not stop an
+enabled execute tool from typing the equivalent tmux command. Surface reduction
+limits accidents; it does not confine what a pane can do, because a bypass is
+one `send_keys` away.
 
 **Annotations include ambient tmux behaviour.** tmux
 [expands command aliases](https://github.com/tmux/tmux/blob/3.7c/cmd-parse.y#L776-L794)
