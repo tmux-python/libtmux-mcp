@@ -74,6 +74,70 @@ Pane IDs like `%0`, `%5`, `%12` are unique across all sessions and windows withi
 
 However, they reset when the tmux **server** restarts. Do not cache pane IDs across server restarts. After killing and recreating a session, re-discover pane IDs with {tooliconl}`list-panes`.
 
+## Omitting the target means two different things
+
+Tools that DELIVER input — {tooliconl}`send-keys`, {tooliconl}`send-keys-batch`,
+{tooliconl}`paste-text`, {tooliconl}`paste-buffer`, {tooliconl}`run-command` —
+require a target and refuse without one. There is no safe default for a call
+that types something: the pane it would pick is unrelated to what the call is
+for, and the destination reaches the caller only after the keystrokes have
+landed.
+
+Reads still default, to the **oldest** surviving object by tmux id. Not the
+first listed — tmux lists sessions by name, so renaming one would move where
+later untargeted calls went — and not the most recently active, which moves
+whenever any pane produces output. {tooliconl}`show-option`,
+{tooliconl}`show-hooks` and {tooliconl}`show-hook` report `resolved_target` so
+an untargeted read says which object answered.
+
+`create_session`, `create_window` and `split_window` return the new pane's id,
+so an agent that made the pane never needs to look one up.
+
+## Names and titles are literals, not tmux formats
+
+tmux expands `#{...}` in the name argument of `rename-window`,
+`rename-session`, `select-pane -T` and `new-session`, and unlike
+`set-option` there is no `-F` flag to turn it off. Passed through
+unchanged, `rename_window(new_name="#{pane_current_path}")` would name the
+window after a directory, and `#{host}` or `#{pane_pid}` would interpolate
+server state into a name that shows up in the terminal and in
+{tooliconl}`list-panes`.
+
+These tools escape on the way in, so the name you pass is the name you get.
+{tooliconl}`display-message` is the one tool that expands formats, by
+design — compose the two when you want an expanded name:
+
+```console
+$ display_message(format_string="#{pane_current_path}")   # -> /home/you/src
+$ rename_window(new_name="/home/you/src")
+```
+
+For a window that tracks its own state, prefer tmux's own
+`automatic-rename-format` option over re-naming on a timer.
+
+Option **names** are refused rather than escaped. `set-option` expands the
+name too, so `@a#{pane_id}` addresses `@a%0` — but an escaped name cannot be
+read back, because libtmux looks the result up under the name you asked for
+while tmux answers under the name it stored. A name containing `#` would be
+writable and permanently unreadable, so {tooliconl}`set-option` and
+{tooliconl}`show-option` reject it. Option *values* were never affected.
+
+## Signalling a wait channel twice clears its latch
+
+{tooliconl}`signal-channel` is not idempotent. tmux latches a signal
+that has no waiter — that latch is the whole reason to prefer it over
+polling — but a second signal on an already-latched channel with no
+waiter *removes the channel*, latch included, and the next
+{tooliconl}`wait-for-channel` blocks until its ceiling.
+
+It toggles: one signal latches, two clears, three latches again. The
+failure then looks like "the build never finished", because the wait
+simply sits there.
+
+The defensive habit is what triggers it — `tmux wait-for -S done` at the
+end of a command *and* again in a trap or cleanup. Signal in exactly one
+place.
+
 ## Shell-history suppression is best effort
 
 MCP calls to {tooliconl}`run-command` request lightweight suppression by

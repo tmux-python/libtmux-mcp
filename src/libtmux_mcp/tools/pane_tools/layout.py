@@ -4,17 +4,53 @@ from __future__ import annotations
 
 import typing as t
 
-from libtmux_mcp._utils import (
-    ExpectedToolError,
-    _get_server,
-    _resolve_pane,
-    _resolve_window,
-    _serialize_pane,
-    handle_tool_errors,
-)
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._resolve import _resolve_pane, _resolve_window
+from libtmux_mcp._serialize import _serialize_pane
+from libtmux_mcp._servers import _get_server
 from libtmux_mcp.models import (
     PaneInfo,
 )
+
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+
+
+def _raise_if_pane_fills_its_window(pane: Pane) -> None:
+    """Refuse a resize tmux accepts and then does not perform.
+
+    ``resize-pane`` on the only pane in a window exits 0 and changes
+    nothing: the pane already fills the window and there is no
+    neighbour to take rows from. Measured on a lone pane at 30 rows,
+    ``-y 11`` left it at 30 with rc 0.
+
+    Nothing lied about it -- the returned ``PaneInfo`` carries the real
+    size -- but no field said the REQUEST went unmet, and a caller has
+    no reason to suspect the comparison needs making. Refusing follows
+    ``split_window``, which already rejects an unsatisfiable size rather
+    than silently doing something else.
+
+    Only the case where nothing can happen. tmux clamping a resize to
+    what the neighbours can give is its own semantics and is left alone.
+
+    Fails OPEN: an unreadable probe lets the resize proceed, because the
+    guard exists to explain a no-op, not to add a way to fail.
+    """
+    stdout = pane.display_message("#{window_panes}", get_text=True)
+    if not stdout or stdout[0] != "1":
+        return
+    msg = (
+        f"pane {pane.pane_id} is the only pane in its window, so "
+        "resize_pane cannot change its size"
+    )
+    raise ExpectedToolError(
+        msg,
+        suggestion=(
+            "It already fills the window and there is no neighbouring "
+            "pane to take space from. Use resize_window to change the "
+            "window itself, or split_window first."
+        ),
+    )
 
 
 @handle_tool_errors
@@ -57,7 +93,10 @@ def resize_pane(
         Serialized pane object.
     """
     if zoom is not None and (height is not None or width is not None):
-        msg = "Cannot combine zoom with height/width"
+        msg = (
+            f"Cannot combine zoom with height/width (zoom={zoom!r}, "
+            f"height={height!r}, width={width!r}). Resize first, then zoom."
+        )
         raise ExpectedToolError(msg)
 
     server = _get_server(socket_name=socket_name)
@@ -80,6 +119,7 @@ def resize_pane(
         elif not zoom and is_zoomed:
             pane.resize(zoom=True)  # toggle off
     else:
+        _raise_if_pane_fills_its_window(pane)
         pane.resize(height=height, width=width)
     return _serialize_pane(pane)
 
@@ -155,18 +195,13 @@ def select_pane(
     if direction in _DIRECTION_FLAGS:
         window.select_pane(_DIRECTION_FLAGS[direction])
     elif direction in ("next", "previous"):
-        # Compute the target pane by absolute pane_id rather than using
-        # tmux's relative pane-target syntax. Two portability issues
-        # motivate this approach:
-        # 1. A bare `-t +` / `-t -1` resolves against the attached
-        #    client's current window (tmux cmd-find.c), not the window
-        #    we're targeting.
-        # 2. The scoped form `@window_id.+` / `.-` works on tmux 3.6+
-        #    but the relative-offset parser's behavior for prefixed
-        #    window targets varies on older releases (tmux 3.2a still
-        #    falls back to client curw for `@id.+`). Enumerating
-        #    panes and selecting by absolute pane_id sidesteps
-        #    tmux-version variation entirely.
+        # By absolute pane_id, not tmux's relative pane-target syntax:
+        # a bare `-t +` / `-t -1` resolves against the attached client's
+        # current window rather than the targeted one (cmd-find.c), and
+        # the scoped
+        # `@window_id.+` form needs tmux 3.4 -- on 3.2a (this project's
+        # floor) and 3.3a it exits 0, prints nothing, and leaves the
+        # window with NO active pane.
         window.refresh()
         panes = list(window.panes)
         active = next((p for p in panes if p.pane_active == "1"), panes[0])

@@ -13,9 +13,11 @@ what was asked for.
 | ---- | ---------- |
 | `src/libtmux_mcp/server.py` | FastMCP instance: construction, instructions, lifespan |
 | `src/libtmux_mcp/middleware.py` | Safety-tier gating, response limiting, error mapping |
-| `src/libtmux_mcp/_utils.py` | Server cache, object resolvers/serializers, `handle_tool_errors` |
+| `src/libtmux_mcp/_errors.py`, `_safety.py`, `_guards.py`, `_exec.py` | Error shaping, safety tiers, argument guards, bounded tmux execution |
+| `src/libtmux_mcp/_caller.py`, `_servers.py`, `_resolve.py`, `_pane_state.py`, `_serialize.py` | Caller context, server cache, object resolution, pane state, serialization |
+| `src/libtmux_mcp/_tmux_proc.py`, `_bounded_io.py`, `_progress.py`, `_patterns.py`, `_history.py`, `_wait_policy.py` | Async process, wait, capture, and history internals |
 | `src/libtmux_mcp/models.py` | Pydantic models for tool outputs |
-| `src/libtmux_mcp/tools/` | MCP tool implementations: one module per tmux object, plus batch/buffer/hook/wait_for |
+| `src/libtmux_mcp/tools/` | MCP tools by tmux object; pane tools are split by I/O, waits, capture, search, layout, lifecycle, metadata, and pipes |
 | `src/libtmux_mcp/resources/` | `tmux://` URI resources for browsing the hierarchy |
 | `src/libtmux_mcp/prompts/` | MCP prompt templates |
 | `scripts/mcp_swap.py` | Dev script: point agent CLI configs at a local checkout |

@@ -61,17 +61,27 @@ Destructive tools include safeguards against self-harm:
 - {tool}`kill-window` refuses to kill the window containing the MCP pane
 - {tool}`kill-pane` refuses to kill the pane running the MCP server
 
+**Nested tmux.** `TMUX` names only the *innermost* server. Run an agent
+inside tmux and point it at a second tmux, and the pane hosting its
+terminal belongs to the outer server while `TMUX` describes the inner
+one — so a socket comparison alone says "different server" and would
+permit a kill that takes the caller's own terminal with it. The guard
+therefore also asks the caller's own server which terminals are attached
+to it: a client of that server occupies a pane of whatever hosts it, so
+the inner server's `client_tty` is the outer server's `pane_tty`. That
+holds however the nesting arose, including a server that was already
+running and merely attached to.
+
 These protections read both the `TMUX` and `TMUX_PANE` environment variables that tmux injects into pane child processes. The `TMUX` value is formatted `socket_path,server_pid,session_id` — libtmux-mcp parses the socket path and compares it to the target server's so the guard only fires when the caller is actually on the same tmux server. A kill across unrelated sockets is allowed; a kill of the caller's own pane/window/session/server is refused. If the caller's socket can't be determined (rare — `TMUX_PANE` set without `TMUX`), the guard errs on the side of blocking.
 
 ### macOS `TMUX_TMPDIR` caveat
 
 The self-kill guard resolves the target server's socket path in three
-steps ({func}`~libtmux_mcp._utils._effective_socket_path` in
-`src/libtmux_mcp/_utils.py`):
+steps ({func}`~libtmux_mcp._caller._effective_socket_path`):
 
 1. Use {attr}`libtmux.Server.socket_path` if {external+libtmux:doc}`libtmux <index>` already has it.
 2. Otherwise query the running server via `display-message -p '#{socket_path}'` — authoritative because tmux itself reports the path it is actually using, regardless of the MCP process environment. This closes the launchd-vs-interactive-shell gap on macOS where {envvar}`TMUX_TMPDIR` commonly differs between contexts.
-3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and {func}`~libtmux_mcp._utils._caller_is_on_server`'s None-socket branch blocks conservatively.
+3. Fall back to reconstruction from {envvar}`TMUX_TMPDIR` (or `/tmp`) + euid + socket name. Only reached when the target server is unreachable (not running), in which case no self-kill is possible anyway and {func}`~libtmux_mcp._caller._caller_is_on_server`'s None-socket branch blocks conservatively.
 
 The structural fix shipped in 0.1.x; setting {envvar}`TMUX_TMPDIR` explicitly is no longer required for the guard to work, though it remains a useful diagnostic when investigating mismatched-path bug reports.
 
@@ -81,6 +91,24 @@ Most `mutating` tools are bounded: {toolref}`resize-pane` only
 resizes, {toolref}`rename-window` only renames. A few have broader
 reach because tmux itself exposes broader reach. Treat these as
 elevated risk even though they share the default tier:
+
+### Running shell commands
+
+{tool}`run-command` and {tool}`send-keys` execute text in a pane, and a pane's shell can run `tmux`. Measured at `LIBTMUX_SAFETY=mutating`, where {toolref}`kill-window` is not in the tool list at all:
+
+```json
+{"tool": "run_command", "arguments": {
+  "command": "tmux -L <socket> kill-window -t @1", "pane_id": "%1"}}
+```
+
+Returns `exit_status: 0`, and the window is gone.
+
+The tier gates which **tools** are exposed, not what a shell can do once you type into it. That is not a hole to be closed: a verb-level guard on command text is bypassed by `t=tmux; $t kill-window`, and refusing it would break the tool's actual purpose.
+
+What it means in practice:
+
+- `LIBTMUX_SAFETY=mutating` protects you from an agent that reaches for {toolref}`kill-pane`, not from one that reaches for a shell. If the distinction matters for your threat model, `readonly` is the only tier that holds it — it exposes neither the destructive tools nor the ones that type.
+- The audit log records the command text (digested), so a destructive verb sent this way is still visible to a reviewer.
 
 ### Piping pane output
 
@@ -98,7 +126,7 @@ Mitigations:
 
 Mitigations:
 
-- The server audit record replaces the `value` argument with a `{len, sha256_prefix}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
+- The server audit record replaces the `value` argument with a `{len, digest}` digest, so the value does not appear verbatim in `libtmux_mcp.audit`. The digest is keyed with a random per-process secret: identical payloads correlate across lines within one server run, and someone reading the log cannot test a guess against it. (An unkeyed hash would not be enough — a recorded length fixes the search space, and a four-digit PIN was recovered from such an entry in 25 ms.) That redaction does not cover separate library, process, application, or client logs, so operators should still treat the tool as high-privilege.
 - If only a single command needs a non-sensitive env override, prefer having the agent invoke `env VAR=value command` via {tooliconl}`send-keys` instead — the blast radius is one command, not every future child. For credentials, pass a reference that the child resolves instead of a literal value through tmux.
 
 ### Respawning panes
@@ -109,9 +137,9 @@ Unlike other `mutating` tools, the registration carries `destructiveHint=True` a
 
 Mitigations:
 
-- `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get an {exc}`~libtmux_mcp._utils.ExpectedToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
+- `pane_id` is required (no fallback to "first pane in session/window"). Agents that pass only `session_name` get an {exc}`~libtmux_mcp._errors.ExpectedToolError` instead of an unintended kill — resolve via {tool}`list-panes` first.
 - Any `shell` argument is briefly visible in the OS process table and tmux's `pane_current_command` metadata before the spawned shell takes over; the audit log redacts `shell` payloads (see below), but do not pass credentials directly even with redaction.
-- The optional `environment` argument accepts either a mapping of string keys and values or a JSON object string, then maps each item to one tmux `-e KEY=VALUE` flag. For a mapping, the audit log keeps each *key* visible and replaces each *value* with a `{len, sha256_prefix}` digest. A JSON string is redacted as one scalar digest, so its keys are not retained in the audit record. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
+- The optional `environment` argument accepts either a mapping of string keys and values or a JSON object string, then maps each item to one tmux `-e KEY=VALUE` flag. For a mapping, the audit log keeps each *key* visible and replaces each *value* with a `{len, digest}` digest. A JSON string is redacted as one scalar digest, so its keys are not retained in the audit record. The same OS-process-table caveat as `shell` applies: `respawn-pane -e DB_PASSWORD=...` may briefly appear in `ps` output before the spawned process inherits the env.
 - The same self-pane guard that protects the destructive kill commands also refuses to respawn the pane running the MCP server.
 
 ### Raw pane input
@@ -139,7 +167,7 @@ Every tool call emits one `INFO` record on the `libtmux_mcp.audit` logger carryi
 - `outcome` — `ok` or `error`, with `error_type` on failure
 - `duration_ms`
 - `client_id` / `request_id` — from the fastmcp context when available
-- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `command`, `value`, `content`, `shell`, and string-form `environment`) are replaced by `{len, sha256_prefix}`. Mapping-form `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
+- `args` — a summary of arguments. Sensitive scalar keys (`keys`, `text`, `command`, `value`, `content`, `shell`, and string-form `environment`) are replaced by `{len, digest}`. Mapping-form `environment` keeps its keys but digests each value individually. Non-sensitive strings over 200 characters are truncated.
 
 Route this logger to a dedicated sink if you want a durable audit trail; it is deliberately namespaced separately from the main `libtmux_mcp` logger.
 

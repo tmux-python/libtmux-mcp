@@ -5,9 +5,15 @@ from __future__ import annotations
 import typing as t
 
 from libtmux.constants import WindowDirection
+from libtmux.window import Window
 
+from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._filters import _apply_filters
+from libtmux_mcp._guards import _raise_if_start_directory_unusable
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._utils import (
+from libtmux_mcp._resolve import _resolve_session
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
@@ -16,16 +22,10 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _apply_filters,
-    _caller_is_on_server,
-    _get_caller_identity,
-    _get_server,
-    _resolve_session,
-    _serialize_session,
-    _serialize_window,
-    handle_tool_errors,
 )
+from libtmux_mcp._serialize import _serialize_session, _serialize_window
+from libtmux_mcp._servers import _get_server
+from libtmux_mcp._tmux_format import escape_format
 from libtmux_mcp.models import SessionInfo, WindowInfo
 
 if t.TYPE_CHECKING:
@@ -37,7 +37,7 @@ def list_windows(
     session_name: str | None = None,
     session_id: str | None = None,
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, str | bool | int] | str | None = None,
 ) -> list[WindowInfo]:
     """List tmux windows (terminal tabs) in a session, or across the server.
 
@@ -58,6 +58,8 @@ def list_windows(
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"window_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
+        Every field this tool returns is filterable; any libtmux
+        Window attribute works too.
 
     Returns
     -------
@@ -72,7 +74,7 @@ def list_windows(
         windows = session.windows
     else:
         windows = server.windows
-    return _apply_filters(windows, filters, _serialize_window)
+    return _apply_filters(windows, filters, _serialize_window, Window, WindowInfo)
 
 
 # get_session_info completes the core-tmux-hierarchy symmetry alongside
@@ -164,13 +166,14 @@ def create_window(
         environment,
         suppress_persistent_history=suppress_persistent_history,
     )
+    _raise_if_start_directory_unusable(start_directory)
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
     kwargs: dict[str, t.Any] = {}
     if window_name is not None:
-        kwargs["window_name"] = window_name
+        kwargs["window_name"] = escape_format(window_name)
     if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+        kwargs["start_directory"] = escape_format(start_directory)
     kwargs["attach"] = attach
     if direction is not None:
         direction_map: dict[str, WindowDirection] = {
@@ -219,7 +222,7 @@ def rename_session(
     """
     server = _get_server(socket_name=socket_name)
     session = _resolve_session(server, session_name=session_name, session_id=session_id)
-    session = session.rename_session(new_name)
+    session = session.rename_session(escape_format(new_name))
     return _serialize_session(session)
 
 
@@ -271,6 +274,13 @@ def kill_session(
 
     name = session.session_name or session.session_id
     session.kill()
+    # tmux exits when its last session goes, taking every other client
+    # and pane on that socket with it. "Session killed" did not say so.
+    if not server.is_alive():
+        return (
+            f"Session killed: {name} (it was the last session, so the tmux "
+            "server exited)"
+        )
     return f"Session killed: {name}"
 
 
@@ -315,7 +325,7 @@ def select_window(
     server = _get_server(socket_name=socket_name)
 
     if window_id is not None or window_index is not None:
-        from libtmux_mcp._utils import _resolve_window
+        from libtmux_mcp._resolve import _resolve_window
 
         window = _resolve_window(
             server,

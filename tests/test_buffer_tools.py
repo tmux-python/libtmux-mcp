@@ -46,7 +46,7 @@ def test_logical_name_rejects_invalid(name: str) -> None:
 
 def test_buffer_name_rejects_non_namespaced() -> None:
     """Names outside the MCP namespace are rejected."""
-    with pytest.raises(ToolError, match="Invalid buffer name"):
+    with pytest.raises(ToolError, match="is not an MCP-allocated buffer"):
         _validate_buffer_name("clipboard")
 
 
@@ -112,7 +112,7 @@ def test_paste_buffer_requires_mcp_namespace(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """``paste_buffer`` refuses to paste a non-MCP buffer."""
-    with pytest.raises(ToolError, match="Invalid buffer name"):
+    with pytest.raises(ToolError, match="is not an MCP-allocated buffer"):
         paste_buffer(
             buffer_name="clipboard",
             pane_id=mcp_pane.pane_id,
@@ -221,11 +221,11 @@ def test_show_buffer_no_truncation_under_cap(mcp_server: Server) -> None:
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "match_text"),
+    ("tool_name", "subcommand"),
     [
-        ("load_buffer", "load-buffer timeout"),
-        ("show_buffer", "show-buffer timeout"),
-        ("delete_buffer", "delete-buffer timeout"),
+        ("load_buffer", "load-buffer"),
+        ("show_buffer", "show-buffer"),
+        ("delete_buffer", "delete-buffer"),
     ],
 )
 @pytest.mark.usefixtures("mcp_session")
@@ -233,7 +233,7 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     mcp_server: Server,
     monkeypatch: pytest.MonkeyPatch,
     tool_name: str,
-    match_text: str,
+    subcommand: str,
 ) -> None:
     """Hung tmux raises ``TimeoutExpired`` → clear ``ToolError``.
 
@@ -246,8 +246,22 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
     """
     import subprocess
 
-    def _hang(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
+    real_run = subprocess.run
+    # The tmux SUBCOMMAND, never argv[0]: matching on "tmux" hangs the
+    # liveness probe every tool makes first, and the assertion is then
+    # satisfied by an error from a different layer.
+    hung_command = subcommand
+    match_text = f"tmux {subcommand} did not return within"
+
+    def _hang(*args: t.Any, **kwargs: t.Any) -> t.Any:
+        # Only the command under test hangs. Patching every subprocess
+        # call instead also hung the liveness probe every tool makes
+        # first, so the assertion was satisfied by an error from a
+        # different layer.
+        argv = args[0] if args else kwargs.get("args", [])
+        if hung_command in list(argv):
+            raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
+        return real_run(*args, **kwargs)
 
     monkeypatch.setattr("libtmux_mcp.tools.buffer_tools.subprocess.run", _hang)
 
@@ -267,3 +281,84 @@ def test_buffer_subprocess_timeout_surfaces_as_tool_error(
 
     with pytest.raises(ToolError, match=match_text):
         fn(**kwargs)
+
+
+def test_paste_buffer_delete_after_removes_the_buffer(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """``delete_after`` pastes and deletes in one tmux call.
+
+    ``delete_buffer``'s description told agents this call existed
+    before the parameter did, so the failure was an invalid-argument
+    error at the one moment an agent was following instructions.
+    """
+    ref = load_buffer(
+        content="echo DELETE_AFTER_MARKER",
+        logical_name="del_after",
+        socket_name=mcp_server.socket_name,
+    )
+    message = paste_buffer(
+        buffer_name=ref.buffer_name,
+        pane_id=mcp_pane.pane_id,
+        delete_after=True,
+        socket_name=mcp_server.socket_name,
+    )
+    assert "deleted" in message
+    with pytest.raises(ToolError):
+        show_buffer(buffer_name=ref.buffer_name, socket_name=mcp_server.socket_name)
+
+
+def test_tool_descriptions_do_not_document_arguments_that_do_not_exist() -> None:
+    """A description that names a kwarg is a promise the schema must keep.
+
+    ``delete_buffer`` told agents to call
+    ``paste_buffer(delete_after=True)`` while the tool had no such
+    parameter. The prose was true of the libtmux call made underneath
+    and false of the MCP tool, because both are spelled
+    ``paste_buffer`` -- so a reader who knew the internals read it as
+    correct.
+
+    Descriptions are re-read on every call, which makes a wrong one
+    more expensive than a wrong docstring.
+    """
+    import asyncio
+    import re
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.tools import register_tools
+
+    mcp = FastMCP("description-kwarg-audit")
+    register_tools(mcp)
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    pattern = re.compile(r"\b(\w+)\(([^)]*?)(\w+)\s*=")
+    checked = 0
+    for tool in tools.values():
+        # Parameter descriptions too, not just the tool's own: the other
+        # description bug of the same day lived in one, and a scan that
+        # reads only the top level reports a clean sweep it never took.
+        prose = [tool.description or ""]
+        prose += [
+            prop.get("description", "")
+            for prop in tool.parameters.get("properties", {}).values()
+            if isinstance(prop, dict)
+        ]
+        for called, _, kwarg in pattern.findall(" ".join(prose)):
+            target = tools.get(called)
+            if target is None:
+                continue  # not one of ours; nothing to check it against
+            checked += 1
+            assert kwarg in target.parameters["properties"], (
+                f"{tool.name}'s description calls {called}({kwarg}=...), "
+                f"but {called} has no {kwarg} parameter"
+            )
+
+    # "0 mismatches out of 0 checked" is the same result as a clean
+    # sweep, so the count is asserted rather than the absence.
+    # Pinned to what the scan currently reaches. A drop means the
+    # extractor stopped seeing a surface, not that the docs got
+    # cleaner -- "0 mismatches out of 0" reads exactly like a pass.
+    assert checked >= 5, (
+        f"only {checked} kwarg references checked; the extractor lost a surface"
+    )

@@ -2,17 +2,61 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import pathlib
+import shutil
+import tempfile
+import time
 import typing as t
 
 import pytest
+from libtmux.server import Server as _Server
 
-from libtmux_mcp._utils import _server_cache
+from libtmux_mcp._servers import _server_cache
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
     from libtmux.window import Window
+
+#: A socket this old cannot belong to a run that is still going: the
+#: whole suite takes about two minutes. Age-gating matters because
+#: pytest-xdist workers all start at once, and an unconditional reaper
+#: in one worker would kill the servers another worker just created.
+_ABANDONED_SOCKET_AGE_SECONDS = 3600
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Reap tmux daemons left behind by runs that were killed.
+
+    Fixture finalizers do not run when pytest is SIGKILLed or the
+    machine goes down, so an interrupted run leaks a live tmux daemon
+    and its socket permanently, and they accumulate: measured 119 live
+    servers spanning three days on one development box. A clean run
+    leaks none -- verified before/after -- so this is purely about
+    interrupted ones.
+
+    It is not only untidy. ``list_servers`` probes every live socket, so
+    the debris makes that tool slower on every call for as long as it
+    sits there.
+    """
+    tmpdir = pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
+    uid_dir = tmpdir / f"tmux-{os.geteuid()}"
+    if not uid_dir.is_dir():
+        return
+    cutoff = time.time() - _ABANDONED_SOCKET_AGE_SECONDS
+    for entry in uid_dir.glob("libtmux_test*"):
+        try:
+            if not entry.is_socket() or entry.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        with contextlib.suppress(Exception):
+            _Server(socket_name=entry.name).kill()
+        with contextlib.suppress(OSError):
+            entry.unlink()
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +65,42 @@ def _clear_server_cache() -> t.Generator[None, None, None]:
     _server_cache.clear()
     yield
     _server_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tmux_tmpdir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> t.Generator[None, None, None]:
+    """Give every test its own tmux socket directory.
+
+    ``list_servers`` probes every socket in ``TMUX_TMPDIR``, so a test
+    that scans without isolating pays for the machine's accumulated
+    debris -- 1785 sockets on one development box. Quiet, each is about
+    a millisecond and invisible; under load their cost inflates and
+    there are 1785 of them. One such test asserted a duration and so
+    FAILED, visibly, at high load; two others assert only presence and
+    liveness, so they paid the same cost silently. Fixing the one that
+    failed did not fix the class, because the assertion is what made it
+    visible, not the defect.
+
+    Isolating here rather than per-test closes it for tests that do not
+    exist yet. Measured on the two silent ones: 0.10s and 0.25s quiet
+    against 15.8s and 40.4s under load, unisolated.
+
+    Function-scoped on purpose. Teardown runs in reverse, so the
+    ``server`` fixture has already killed its daemon by the time the
+    directory goes -- removing it first would unlink a live socket and
+    orphan the server, which is the leak this suite reaps at startup.
+
+    The prefix is short because a UNIX socket path is capped at 108
+    bytes and tmux appends ``tmux-<uid>/<socket name>`` to this.
+    """
+    root = tempfile.mkdtemp(prefix="ltm-", dir="/tmp")
+    monkeypatch.setenv("TMUX_TMPDIR", root)
+    try:
+        yield
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -92,3 +172,11 @@ def wire_annotations(tool: t.Any) -> dict[str, t.Any]:
         mode="json", by_alias=True, exclude_none=True
     )
     return dumped
+
+
+class FakeServer(t.NamedTuple):
+    """Minimal Server stand-in for tests that only build or read argv."""
+
+    socket_name: str | None
+    socket_path: str | None
+    tmux_bin: str | None = None

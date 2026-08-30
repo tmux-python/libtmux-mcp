@@ -115,6 +115,61 @@ what you expect.
 
 **Fix**: Check the configured tier. Default is `mutating`, which includes most tools. Only `destructive` enables kill commands. See {ref}`safety`.
 
+## A wedged tmux server, and a test run that hangs with nothing red
+
+A tmux server can end up *wedged*: the socket accepts connections and
+the server never answers. It is not the same as a dead one, and the
+difference is what makes it awkward — a dead socket refuses instantly,
+which every tool reports correctly, while a wedged one answers nothing
+at all.
+
+Every MCP tool is bounded against this at **every** round trip, not
+just the first, and refuses in five seconds naming the tmux subcommand
+that stalled:
+
+```
+tmux list-panes did not return within 5.00s; the tmux server is unresponsive
+```
+
+The distinction is the whole difficulty. A tool's liveness probe bounds
+its first round trip only, and most tools make several — `break_pane`
+makes eleven. A socket that answers the probe and then stalls walks
+past the guard, so testing this needs a relay that forwards the first
+connection to a real server and stalls the rest. One that never answers
+is caught by the probe and reports a clean, confident, useless pass.
+
+What is **not** bounded is a FastMCP `Client` context exiting while
+pointed at such a socket: measured, `Client.__aexit__` hangs against a
+wedged server and returns cleanly against a healthy or a killed one.
+
+That matters for test suites rather than for the server. A run that
+hangs with **no failing test and no output** is the signature — there
+is nothing to grep for, because nothing failed.
+
+If you hit it, the cheap first question is whether this machine is
+hosting a wedged tmux server. A wedged one burns CPU proportional to
+its age; an idle one uses almost none, however old it is:
+
+```console
+$ ps -eo pid=,etimes=,cputimes=,comm=,args= \
+  | awk '$4=="tmux:" && $5=="server" && $3>10 && $3>$2*0.5 {print $1, $2"s age", $3"s cpu"}'
+```
+
+Anything it prints is a candidate; silence means no wedged server here.
+
+Match on `comm` fields, not with `ps -C`. tmux renames the server
+process to `tmux: server`, and `ps -C` selects on the command name — so
+`ps -C tmux` finds **no tmux servers at all**. Measured on a box
+hosting 1,248 of them it returned exactly one row, and that row was an
+unrelated shell script that happened to be named `tmux`: a false
+negative and a false positive in one command. `ps -C 'tmux: server'`
+does not work either, because `-C` cannot match a name containing a
+space.
+
+This project's own tests are on the safe side by construction: they
+*kill* servers rather than wedging them, and the two that do build a
+silent socket never open a `Client` against it.
+
 ## How to see logs
 
 The MCP server uses Python's standard {mod}`logging` module. To see debug

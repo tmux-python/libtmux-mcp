@@ -85,6 +85,56 @@ ruff-format:
 ruff:
     uv run ruff check .
 
+# Run the lint gates exactly as CI runs them.
+#
+# `ruff-format` rewrites files and `mypy` takes a find-derived file list, so
+# neither can reproduce a CI lint failure locally: the first fixes what CI
+# rejects, the second checks a different set than `mypy .` does.
+[group: 'lint']
+lint-ci:
+    uv run ruff check .
+    uv run ruff format . --check
+    uv run mypy .
+
+# Assert the package imports with dev dependencies absent, as CI does.
+#
+# A runtime module that imports pytest, ruff or mypy is invisible to every
+# other gate -- they all run where those are present - and fails CI at its
+# earliest step.
+#
+# The throwaway UV_PROJECT_ENVIRONMENT is what makes this real. CI runs its
+# check BEFORE installing dependencies, so `--no-dev` there has nothing to
+# fall back to; locally it reuses .venv, which already has the dev packages,
+# and the check passes without ever testing anything. The recipe asserts the
+# environment is actually dev-free rather than trusting the flag.
+[group: 'lint']
+deps-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    env -u VIRTUAL_ENV UV_PROJECT_ENVIRONMENT="$scratch/venv" \
+        uv run --no-dev -- python -c '
+    import importlib
+    for dev in ("pytest", "ruff", "mypy"):
+        try:
+            importlib.import_module(dev)
+        except ImportError:
+            continue
+        raise SystemExit(f"{dev} is importable; this check is not dev-free")
+    from libtmux_mcp import main
+    from libtmux_mcp.__about__ import __version__
+    print("libtmux-mcp version:", __version__, "(dev-free)")'
+
+# Run the suite the way CI runs it: under xdist, with coverage.
+#
+# `just test` is serial, so a test that depends on ordering or shared state
+# passes it and fails CI. Coverage is included because COV_CORE_* changes
+# process startup, which is itself a difference worth reproducing.
+[group: 'test']
+test-ci:
+    uv run py.test --cov=./ --cov-append --cov-report=xml -n auto --verbose
+
 # Watch files and run ruff on change
 [group: 'lint']
 watch-ruff:

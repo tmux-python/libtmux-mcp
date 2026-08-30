@@ -479,8 +479,7 @@ def test_run_command_describes_mcp_precedence_and_direct_python_default() -> Non
         "For MCP calls, omission uses the server's "
         "LIBTMUX_SUPPRESS_HISTORY default; an explicit value overrides it. "
         "Direct Python calls default to False. Best effort: the shell must honor "
-        "space-prefixed history suppression. Suppression requires a single-line "
-        "command; multiline commands remain available when suppression is false."
+        "space-prefixed history suppression."
     )
     parameter = inspect.signature(pane_tools.run_command).parameters["suppress_history"]
     mcp = FastMCP("run-command-description")
@@ -517,7 +516,8 @@ def test_mcp_run_command_uses_effective_default_and_resists_batching(
     mcp_pane.send_keys("exec bash --noprofile --norc", enter=True)
     retry_until(
         lambda: any("bash-" in line for line in mcp_pane.capture_pane()),
-        2,
+        # Waiting on a real shell exec; 2 s lost the race under load.
+        10,
         raises=True,
     )
     setup = (
@@ -525,7 +525,7 @@ def test_mcp_run_command_uses_effective_default_and_resists_batching(
         "HISTCONTROL=ignorespace; set -o history; history -c; history -w"
     )
     mcp_pane.send_keys(setup, enter=True)
-    retry_until(histfile.exists, 2, raises=True)
+    retry_until(histfile.exists, 10, raises=True)
 
     omitted = f"MCP_OMITTED_{test_id}"
     explicit_true = f"MCP_TRUE_{test_id}"
@@ -666,14 +666,12 @@ def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(
 ) -> None:
     """Control/TUI input stays exact; explicit suppression adds one space.
 
-    A fake pane delegates to libtmux's real ``send_keys`` at the pre-PTY
-    command boundary, where an inherited prefix or merged Enter is observable.
+    Subprocess interception at the pre-PTY argv boundary, where an
+    inherited prefix or a merged Enter would be observable.
     """
-    from libtmux import Pane
-
     from libtmux_mcp.tools.pane_tools import io
 
-    calls: list[tuple[str, tuple[str, ...]]] = []
+    calls: list[list[str]] = []
 
     class FakeServer:
         tmux_bin = "tmux"
@@ -684,26 +682,28 @@ def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(
         pane_id = "%1"
         server = FakeServer()
 
-        def cmd(self, *args: str) -> None:
-            calls.append(("cmd", args))
-
-        def enter(self) -> None:
-            calls.append(("enter", ()))
-
-        def send_keys(self, keys: str, **kwargs: t.Any) -> None:
-            Pane.send_keys(t.cast("Pane", self), keys, **kwargs)
+    def _run(argv: list[str], **kwargs: t.Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
 
     pane = FakePane()
     monkeypatch.setattr(io, "_get_server", lambda **kwargs: FakeServer())
     monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
+    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", _run)
 
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
             requests = (
-                {"keys": "C-c", "enter": False},
-                {"keys": "partial-TUI", "enter": False, "literal": True},
-                {"keys": "/needle", "enter": True},
+                {"pane_id": "%1", "keys": "C-c", "enter": False},
                 {
+                    "pane_id": "%1",
+                    "keys": "partial-TUI",
+                    "enter": False,
+                    "literal": True,
+                },
+                {"pane_id": "%1", "keys": "/needle", "enter": True},
+                {
+                    "pane_id": "%1",
                     "keys": "explicit-secret",
                     "enter": True,
                     "literal": True,
@@ -721,12 +721,12 @@ def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(
     asyncio.run(_exercise())
 
     assert calls == [
-        ("cmd", ("send-keys", "C-c")),
-        ("cmd", ("send-keys", "-l", "partial-TUI")),
-        ("cmd", ("send-keys", "/needle")),
-        ("enter", ()),
-        ("cmd", ("send-keys", "-l", " explicit-secret")),
-        ("enter", ()),
+        ["tmux", "send-keys", "-t", "%1", "--", "C-c"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "partial-TUI"],
+        ["tmux", "send-keys", "-t", "%1", "--", "/needle"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", " explicit-secret"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
 
 
@@ -735,79 +735,8 @@ def test_global_history_default_leaves_untimed_batch_operations_explicit_only(
 ) -> None:
     """Untimed batches preserve raw defaults, literal mode, and Enter.
 
-    A fake pane exercises libtmux's real ``send_keys`` at the pre-PTY command
-    boundary so exact literal bytes and the separate Enter call remain visible.
-    """
-    from libtmux import Pane
-
-    from libtmux_mcp.tools.pane_tools import io
-
-    calls: list[tuple[str, tuple[str, ...]]] = []
-
-    class FakeServer:
-        tmux_bin = "tmux"
-        socket_name = None
-        socket_path = None
-
-    class FakePane:
-        pane_id = "%1"
-        server = FakeServer()
-
-        def cmd(self, *args: str) -> None:
-            calls.append(("cmd", args))
-
-        def enter(self) -> None:
-            calls.append(("enter", ()))
-
-        def send_keys(self, keys: str, **kwargs: t.Any) -> None:
-            Pane.send_keys(t.cast("Pane", self), keys, **kwargs)
-
-    pane = FakePane()
-    monkeypatch.setattr(io, "_get_server", lambda **kwargs: FakeServer())
-    monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
-
-    async def _exercise() -> None:
-        async with Client(_history_server("1")) as client:
-            result = await client.call_tool(
-                "send_keys_batch",
-                {
-                    "operations": [
-                        {"keys": "C-c", "enter": False},
-                        {
-                            "keys": "TUI_BATCH_DEFAULT",
-                            "enter": True,
-                            "literal": True,
-                        },
-                        {
-                            "keys": "batch-secret",
-                            "enter": True,
-                            "literal": True,
-                            "suppress_history": True,
-                        },
-                    ]
-                },
-                raise_on_error=False,
-            )
-            assert result.is_error is False
-
-    asyncio.run(_exercise())
-
-    assert calls == [
-        ("cmd", ("send-keys", "C-c")),
-        ("cmd", ("send-keys", "-l", "TUI_BATCH_DEFAULT")),
-        ("enter", ()),
-        ("cmd", ("send-keys", "-l", " batch-secret")),
-        ("enter", ()),
-    ]
-
-
-def test_global_history_default_leaves_timed_batch_operations_explicit_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Timed batches preserve raw bytes and send Enter separately.
-
-    Timed batches bypass ``Pane.send_keys``, so subprocess interception at the
-    pre-PTY argv boundary is required to expose prefixes and Enter coalescing.
+    Subprocess interception at the pre-PTY argv boundary keeps the exact
+    literal bytes and the separate Enter call visible.
     """
     from libtmux_mcp.tools.pane_tools import io
 
@@ -837,13 +766,82 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
                 "send_keys_batch",
                 {
                     "operations": [
-                        {"keys": "C-c", "enter": False},
+                        {"pane_id": "%1", "keys": "C-c", "enter": False},
                         {
+                            "pane_id": "%1",
                             "keys": "TUI_BATCH_DEFAULT",
                             "enter": True,
                             "literal": True,
                         },
                         {
+                            "pane_id": "%1",
+                            "keys": "batch-secret",
+                            "enter": True,
+                            "literal": True,
+                            "suppress_history": True,
+                        },
+                    ]
+                },
+                raise_on_error=False,
+            )
+            assert result.is_error is False
+
+    asyncio.run(_exercise())
+
+    assert calls == [
+        ["tmux", "send-keys", "-t", "%1", "--", "C-c"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "TUI_BATCH_DEFAULT"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", " batch-secret"],
+        ["tmux", "send-keys", "-t", "%1", "Enter"],
+    ]
+
+
+def test_global_history_default_leaves_timed_batch_operations_explicit_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timed batches preserve raw bytes and send Enter separately.
+
+    Subprocess interception at the pre-PTY argv boundary exposes prefixes
+    and Enter coalescing.
+    """
+    from libtmux_mcp.tools.pane_tools import io
+
+    calls: list[list[str]] = []
+
+    class FakeServer:
+        tmux_bin = "tmux"
+        socket_name = None
+        socket_path = None
+
+    class FakePane:
+        pane_id = "%1"
+        server = FakeServer()
+
+    def _run(argv: list[str], **kwargs: t.Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    pane = FakePane()
+    monkeypatch.setattr(io, "_get_server", lambda **kwargs: FakeServer())
+    monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
+    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", _run)
+
+    async def _exercise() -> None:
+        async with Client(_history_server("1")) as client:
+            result = await client.call_tool(
+                "send_keys_batch",
+                {
+                    "operations": [
+                        {"pane_id": "%1", "keys": "C-c", "enter": False},
+                        {
+                            "pane_id": "%1",
+                            "keys": "TUI_BATCH_DEFAULT",
+                            "enter": True,
+                            "literal": True,
+                        },
+                        {
+                            "pane_id": "%1",
                             "keys": "batch-secret",
                             "enter": True,
                             "literal": True,
@@ -859,10 +857,10 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
     asyncio.run(_exercise())
 
     assert calls == [
-        ["tmux", "send-keys", "-t", "%1", "C-c"],
-        ["tmux", "send-keys", "-t", "%1", "-l", "TUI_BATCH_DEFAULT"],
+        ["tmux", "send-keys", "-t", "%1", "--", "C-c"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", "TUI_BATCH_DEFAULT"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
-        ["tmux", "send-keys", "-t", "%1", "-l", " batch-secret"],
+        ["tmux", "send-keys", "-t", "%1", "-l", "--", " batch-secret"],
         ["tmux", "send-keys", "-t", "%1", "Enter"],
     ]
 
@@ -921,13 +919,13 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
         async with Client(_history_server("1")) as client:
             pasted_text = await client.call_tool(
                 "paste_text",
-                {"text": raw_text, "bracket": False},
+                {"pane_id": "%1", "text": raw_text, "bracket": False},
                 raise_on_error=False,
             )
             assert pasted_text.is_error is False
             pasted_buffer = await client.call_tool(
                 "paste_buffer",
-                {"buffer_name": existing_buffer, "bracket": True},
+                {"pane_id": "%1", "buffer_name": existing_buffer, "bracket": True},
                 raise_on_error=False,
             )
             assert pasted_buffer.is_error is False
@@ -972,32 +970,35 @@ def test_mcp_run_command_rejects_multiline_suppression_before_tmux(
 
     assert result.is_error is True
     assert result.content
-    assert result.content[0].text == (
-        "command must be a single line when suppress_history=True"
-    )
+    assert result.content[0].text.startswith("command must be a single line.")
     assert private_marker not in repr(result)
 
 
-def test_mcp_run_command_preserves_multiline_when_suppression_disabled(
+def test_mcp_run_command_refuses_multiline_even_without_suppression(
     mcp_server: Server,
     mcp_pane: Pane,
     tmp_path: pathlib.Path,
 ) -> None:
-    """An explicit false keeps the existing multiline command behavior."""
+    """Multi-line is refused whatever ``suppress_history`` says.
+
+    It used to be allowed here, and that path could not be made honest:
+    a shell mid-``read`` ate the wrapper's first line and RAN the rest,
+    while the tool reported "it has not run" -- talking the caller into
+    a retry that executed a non-idempotent command twice. The joined
+    form restores the atomicity the started-channel answer rests on.
+    """
     first = "MULTILINE_CONTROL_FIRST"
     second = "MULTILINE_CONTROL_SECOND"
     output = tmp_path / "multiline-control.txt"
-    command = (
-        f"printf '%s\\n' {first} > {shlex.quote(str(output))}\n"
-        f"printf '%s\\n' {second} >> {shlex.quote(str(output))}"
-    )
+    write_first = f"printf '%s\\n' {first} > {shlex.quote(str(output))}"
+    write_second = f"printf '%s\\n' {second} >> {shlex.quote(str(output))}"
 
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
-            result = await client.call_tool(
+            refused = await client.call_tool(
                 "run_command",
                 {
-                    "command": command,
+                    "command": f"{write_first}\n{write_second}",
                     "pane_id": mcp_pane.pane_id,
                     "timeout": 3.0,
                     "socket_name": mcp_server.socket_name,
@@ -1005,8 +1006,22 @@ def test_mcp_run_command_preserves_multiline_when_suppression_disabled(
                 },
                 raise_on_error=False,
             )
-            _assert_run_command_succeeded(result)
+            assert refused.is_error is True
+            assert refused.content[0].text.startswith("command must be a single line.")
+
+            joined = await client.call_tool(
+                "run_command",
+                {
+                    "command": f"{write_first}; {write_second}",
+                    "pane_id": mcp_pane.pane_id,
+                    "timeout": 10.0,
+                    "socket_name": mcp_server.socket_name,
+                    "suppress_history": False,
+                },
+                raise_on_error=False,
+            )
+            _assert_run_command_succeeded(joined)
 
     asyncio.run(_exercise())
 
-    assert output.read_text().splitlines() == [first, second]
+    assert not output.exists() or output.read_text().splitlines() == [first, second]

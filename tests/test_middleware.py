@@ -9,12 +9,13 @@ import typing as t
 
 import pydantic
 import pytest
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.server.middleware import MiddlewareContext
 from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
+from libtmux_mcp._errors import ExpectedToolError
+from libtmux_mcp._safety import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.middleware import (
     AuditMiddleware,
     ReadonlyRetryMiddleware,
@@ -135,16 +136,208 @@ def test_safety_middleware_invalid_tier_falls_back() -> None:
 
 
 # ---------------------------------------------------------------------------
+# SafetyMiddleware — off-tier denial messages.
+#
+# Fast unit coverage against fake registries; ``tests/test_server.py``
+# drives the same paths through a real server process.
+# ---------------------------------------------------------------------------
+
+
+def _fake_fastmcp(
+    *,
+    visible: dict[str, set[str]] | None = None,
+    registered: dict[str, set[str]] | None = None,
+    list_tools_error: Exception | None = None,
+) -> t.Any:
+    """Build a stand-in FastMCP exposing name -> tags for both lookups.
+
+    *visible* is what ``get_tool`` resolves (enabled tools only, matching
+    FastMCP's real behavior of returning None for a disabled tool).
+    *registered* is what ``_list_tools`` returns (every tool, disabled
+    included) — the asymmetry that the fix depends on.
+    """
+
+    class _Tool:
+        def __init__(self, name: str, tags: set[str]) -> None:
+            self.name = name
+            self.tags = tags
+
+    visible_tools = {n: _Tool(n, tags) for n, tags in (visible or {}).items()}
+    all_tools = [_Tool(n, tags) for n, tags in (registered or {}).items()]
+
+    class _FastMCP:
+        async def get_tool(self, name: str) -> t.Any:
+            return visible_tools.get(name)
+
+        async def _list_tools(self) -> list[t.Any]:
+            if list_tools_error is not None:
+                raise list_tools_error
+            return all_tools
+
+    return _FastMCP()
+
+
+def _call_context(tool_name: str, fastmcp: t.Any) -> t.Any:
+    """Build a MiddlewareContext-alike for ``on_call_tool``."""
+    fastmcp_ctx = type("_Ctx", (), {"fastmcp": fastmcp})()
+    return type(
+        "_MW",
+        (),
+        {
+            "message": CallToolRequestParams(name=tool_name, arguments={}),
+            "fastmcp_context": fastmcp_ctx,
+        },
+    )()
+
+
+async def _unreachable(_ctx: t.Any) -> t.Any:
+    """``call_next`` that fails the test if the gate lets a call through."""
+    msg = "call_next must not run for an off-tier tool"
+    raise AssertionError(msg)
+
+
+def test_safety_denial_names_required_and_current_tier() -> None:
+    """A gated tool reports the tier it needs and the tier in force.
+
+    The replaced message hardcoded ``destructive`` for every denial, so
+    a readonly server answered ``send_keys`` by advising kill_server
+    rights in order to type into a pane.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_READONLY)
+    fastmcp = _fake_fastmcp(
+        visible={},
+        registered={"send_keys": {TAG_MUTATING}},
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(mw.on_call_tool(_call_context("send_keys", fastmcp), _unreachable))
+
+    message = str(excinfo.value)
+    assert "'mutating'" in message
+    assert "'readonly'" in message
+    assert "LIBTMUX_SAFETY=mutating" in message
+    assert "destructive" not in message
+
+
+def test_safety_denial_reaches_disabled_tools() -> None:
+    """A tool hidden by the native gate still gets a tier explanation.
+
+    ``get_tool`` returns None for a disabled tool, so the denial must
+    come from the registry snapshot or the agent is told it is unknown.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_MUTATING)
+    fastmcp = _fake_fastmcp(
+        visible={"send_keys": {TAG_MUTATING}},
+        registered={"send_keys": {TAG_MUTATING}, "kill_pane": {TAG_DESTRUCTIVE}},
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        asyncio.run(mw.on_call_tool(_call_context("kill_pane", fastmcp), _unreachable))
+
+    assert "requires safety level 'destructive'" in str(excinfo.value)
+
+
+def test_safety_passes_through_genuinely_unknown_tool() -> None:
+    """An unregistered name is a typo and keeps FastMCP's own error."""
+    mw = SafetyMiddleware(max_tier=TAG_MUTATING)
+    fastmcp = _fake_fastmcp(visible={}, registered={"send_keys": {TAG_MUTATING}})
+    reached = []
+
+    async def _call_next(_ctx: t.Any) -> str:
+        reached.append("yes")
+        return "dispatched"
+
+    result = asyncio.run(
+        mw.on_call_tool(_call_context("sned_keys", fastmcp), _call_next)
+    )
+
+    assert result == "dispatched"
+    assert reached == ["yes"]
+
+
+def test_safety_denies_when_context_is_missing() -> None:
+    """No FastMCP context means no way to prove the tier: deny.
+
+    The previous guard fell through to ``call_next``, fail-OPEN in a
+    gate whose top tier includes ``kill_server``.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_READONLY)
+    context = type(
+        "_MW",
+        (),
+        {
+            "message": CallToolRequestParams(name="kill_server", arguments={}),
+            "fastmcp_context": None,
+        },
+    )()
+
+    with pytest.raises(ToolError, match="safety tier cannot be verified"):
+        asyncio.run(mw.on_call_tool(context, _unreachable))
+
+
+def test_safety_snapshot_failure_degrades_to_passthrough(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken private API costs the explanation, never the server.
+
+    If a fastmcp bump removes ``_list_tools``, the denial degrades to
+    the stock error rather than raising on every call.
+    """
+    mw = SafetyMiddleware(max_tier=TAG_READONLY)
+    fastmcp = _fake_fastmcp(
+        visible={},
+        list_tools_error=AttributeError("no attribute '_list_tools'"),
+    )
+
+    async def _call_next(_ctx: t.Any) -> str:
+        return "dispatched"
+
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(
+            mw.on_call_tool(_call_context("kill_pane", fastmcp), _call_next)
+        )
+
+    assert result == "dispatched"
+    assert "safety tier snapshot unavailable" in caplog.text
+
+
+def test_safety_denies_tool_with_no_tier_tag() -> None:
+    """An untagged but visible tool stays fail-closed, with a bug hint."""
+    mw = SafetyMiddleware(max_tier=TAG_DESTRUCTIVE)
+    fastmcp = _fake_fastmcp(visible={"mystery": set()}, registered={"mystery": set()})
+
+    with pytest.raises(ToolError, match="declares no safety tier"):
+        asyncio.run(mw.on_call_tool(_call_context("mystery", fastmcp), _unreachable))
+
+
+# ---------------------------------------------------------------------------
 # AuditMiddleware
 # ---------------------------------------------------------------------------
 
 
 def test_redact_digest_shape() -> None:
-    """_redact_digest reports length and a 12-char sha256 prefix."""
+    """The digest correlates within a run and is not reversible from it.
+
+    A plain SHA-256 beside an exact length is reversible for anything
+    short, because the length fixes the search space: a four-digit PIN
+    typed into a pane was recovered from its audit entry by brute force
+    in 25 ms. The values named sensitive are sensitive precisely because
+    agents type PINs, 2FA codes and short confirmations into panes.
+
+    Correlation is the reason the digest is deterministic and it
+    survives -- the key is per PROCESS, not per payload, so equal
+    payloads still match within the run an operator reads a log at.
+    """
     payload = "rm -rf /"
     digest = _redact_digest(payload)
     assert digest["len"] == len(payload)
-    assert digest["sha256_prefix"] == hashlib.sha256(payload.encode()).hexdigest()[:12]
+    assert len(digest["digest"]) == 12
+
+    # Keyed: a log reader who knows the payload cannot reproduce the
+    # entry, which is what makes guessing untestable.
+    assert digest["digest"] != hashlib.sha256(payload.encode()).hexdigest()[:12]
+    assert _redact_digest(payload) == digest, "must correlate within the run"
+    assert _redact_digest("rm -rf .") != digest, "distinct payloads must differ"
 
 
 def test_summarize_args_redacts_sensitive_keys() -> None:
@@ -163,7 +356,7 @@ def test_summarize_args_redacts_sensitive_keys() -> None:
     for sensitive in ("keys", "text", "command", "value", "content", "shell"):
         assert isinstance(summary[sensitive], dict)
         assert "len" in summary[sensitive]
-        assert "sha256_prefix" in summary[sensitive]
+        assert "digest" in summary[sensitive]
         raw_value = args[sensitive]
         assert isinstance(raw_value, str)
         assert raw_value not in str(summary[sensitive])
@@ -284,7 +477,7 @@ def test_summarize_args_redacts_command(test_id: str, command: str) -> None:
     summary = _summarize_args({"command": command})
     assert isinstance(summary["command"], dict)
     assert "len" in summary["command"]
-    assert "sha256_prefix" in summary["command"]
+    assert "digest" in summary["command"]
     assert command not in str(summary["command"])
 
 
@@ -311,7 +504,7 @@ def test_summarize_args_redacts_sensitive_dict_values() -> None:
         digest = summary["environment"][key]
         assert isinstance(digest, dict)
         assert "len" in digest
-        assert "sha256_prefix" in digest
+        assert "digest" in digest
     # No value bytes leak into the rendered summary.
     rendered = str(summary)
     assert "hunter2" not in rendered
@@ -343,7 +536,7 @@ def test_summarize_args_redacts_send_keys_batch_operations() -> None:
     for operation in (first, second):
         assert isinstance(operation["keys"], dict)
         assert "len" in operation["keys"]
-        assert "sha256_prefix" in operation["keys"]
+        assert "digest" in operation["keys"]
 
 
 def test_summarize_args_redacts_nested_tool_batch_arguments() -> None:
@@ -581,7 +774,7 @@ def test_audit_middleware_redacts_sensitive_args(
 
     rendered = "\n".join(rec.getMessage() for rec in caplog.records)
     assert payload not in rendered
-    assert "sha256_prefix" in rendered
+    assert "digest" in rendered
     assert "tool=send_keys" in rendered
 
 
@@ -624,6 +817,153 @@ def test_tail_preserving_passthrough_when_under_cap() -> None:
     result = mw._truncate_to_result(payload)
     assert isinstance(result.content[0], TextContent)
     assert result.content[0].text == payload
+
+
+class ErrorTransformFixture(t.NamedTuple):
+    """Test fixture for the caller-caused vs internal error split."""
+
+    test_id: str
+    error: Exception
+    method: str
+    expected_code: int
+    expect_internal_prefix: bool
+
+
+ERROR_TRANSFORM_FIXTURES: list[ErrorTransformFixture] = [
+    ErrorTransformFixture(
+        "expected_on_resource",
+        ExpectedToolError("Session not found: x"),
+        "resources/read",
+        -32002,
+        False,
+    ),
+    ErrorTransformFixture(
+        "resource_error",
+        ResourceError("Window not found: 999"),
+        "resources/read",
+        -32002,
+        False,
+    ),
+    ErrorTransformFixture(
+        "expected_on_prompt",
+        ExpectedToolError("bad arg"),
+        "prompts/get",
+        -32602,
+        False,
+    ),
+    # The control: a real bug must still read as an internal error, or
+    # the fix would be hiding server faults rather than reclassifying
+    # caller mistakes.
+    ErrorTransformFixture(
+        "genuine_bug_stays_internal",
+        RuntimeError("real fault"),
+        "resources/read",
+        -32603,
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ErrorTransformFixture._fields,
+    ERROR_TRANSFORM_FIXTURES,
+    ids=[fixture.test_id for fixture in ERROR_TRANSFORM_FIXTURES],
+)
+def test_expected_failures_never_read_as_internal_errors(
+    test_id: str,
+    error: Exception,
+    method: str,
+    expected_code: int,
+    expect_internal_prefix: bool,
+) -> None:
+    """A caller's mistake is not a server fault, on any message kind.
+
+    fastmcp's transform funnels unrecognized exceptions into ``-32603
+    "Internal error: ..."``. Intercepting ``tools/call`` alone left
+    resources reporting a missing session that way -- the same defect
+    the middleware exists to remove, one fork over.
+    """
+    from libtmux_mcp.middleware import ToolErrorResultMiddleware
+
+    assert test_id
+    middleware = ToolErrorResultMiddleware(transform_errors=True)
+    context = t.cast("t.Any", type("_Ctx", (), {"method": method})())
+
+    transformed = middleware._transform_error(error, context)
+
+    assert transformed.error.code == expected_code  # type: ignore[attr-defined]
+    assert ("Internal error" in str(transformed)) is expect_internal_prefix
+
+
+def _limiter_context(tool_name: str) -> t.Any:
+    """Minimal MiddlewareContext naming the tool the limiter should cap."""
+    return MiddlewareContext(
+        message=CallToolRequestParams(name=tool_name, arguments={}),
+        fastmcp_context=None,
+    )
+
+
+def test_tail_preserving_keeps_structured_content_on_success() -> None:
+    """A truncated SUCCESS must still satisfy the tool's output schema.
+
+    The rebuilt result carried ``content`` only. For a tool declaring an
+    output schema, a spec-compliant client then raises "has an output
+    schema but did not return structured content" and the agent gets no
+    data at all — worse than the truncation this middleware exists to
+    perform. The error branch had already been fixed; the success branch
+    had not.
+    """
+    from fastmcp.tools.base import ToolResult
+    from mcp.types import TextContent
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    payload = ("HEAD_OLDER\n" * 500) + "TAIL_PROMPT $"
+    mw = TailPreservingResponseLimitingMiddleware(max_size=400, tools=["cap"])
+
+    async def _call_next(_ctx: t.Any) -> ToolResult:
+        return ToolResult(
+            content=[TextContent(type="text", text=payload)],
+            structured_content={"result": payload},
+        )
+
+    ctx = _limiter_context("cap")
+    result = asyncio.run(mw.on_call_tool(ctx, _call_next))
+
+    assert result.structured_content is not None
+    assert set(result.structured_content) == {"result"}
+    text = result.structured_content["result"]
+    # Structured payload matches the truncated text, tail preserved.
+    assert text == result.content[0].text
+    assert "TAIL_PROMPT $" in text
+    assert result.is_error is False
+
+
+def test_tail_preserving_reports_an_unrebuildable_shape_as_a_tool_error() -> None:
+    """A shape that cannot be trimmed becomes an actionable tool error.
+
+    Better than emitting a response the client will reject outright: the
+    agent learns to narrow its request.
+    """
+    from fastmcp.tools.base import ToolResult
+    from mcp.types import TextContent
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    payload = "x" * 5000
+    mw = TailPreservingResponseLimitingMiddleware(max_size=400, tools=["cap"])
+
+    async def _call_next(_ctx: t.Any) -> ToolResult:
+        return ToolResult(
+            content=[TextContent(type="text", text=payload)],
+            structured_content={"lines": [payload], "truncated": False},
+        )
+
+    ctx = _limiter_context("cap")
+    result = asyncio.run(mw.on_call_tool(ctx, _call_next))
+
+    assert result.is_error is True
+    assert "narrower range" in result.content[0].text
 
 
 # ---------------------------------------------------------------------------
@@ -706,19 +1046,16 @@ def test_audit_records_safety_denial(
     than skipping the record. Without this ordering, denied access
     attempts would silently bypass forensic logging.
     """
-    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp._errors import ExpectedToolError
 
     audit = AuditMiddleware()
     ctx = _fake_context(name="kill_server", arguments={})
 
-    # SafetyMiddleware.on_call_tool consults
-    # context.fastmcp_context.fastmcp.get_tool(...). With
-    # fastmcp_context=None the safety check short-circuits, so we
-    # simulate the denial more directly: ``call_next`` is a coroutine
-    # that raises the same ``ExpectedToolError`` SafetyMiddleware
-    # would when blocking an over-tier call. The test's invariant is
-    # that the AuditMiddleware sitting *outside* Safety still records
-    # the attempt with outcome=error.
+    # With fastmcp_context=None the safety check short-circuits, so the
+    # denial is simulated: ``call_next`` raises the same
+    # ``ExpectedToolError`` SafetyMiddleware would on an over-tier call.
+    # The invariant is that AuditMiddleware, sitting OUTSIDE Safety, still
+    # records the attempt with outcome=error.
     msg = "Tool 'kill_server' is not available at the current safety level."
 
     async def _safety_denial(_ctx: t.Any) -> None:
@@ -851,7 +1188,7 @@ def test_readonly_retry_skips_self_bounded_tool() -> None:
     """
     from libtmux import exc as libtmux_exc
 
-    from libtmux_mcp._utils import TAG_SELF_BOUNDED
+    from libtmux_mcp._safety import TAG_SELF_BOUNDED
 
     middleware = ReadonlyRetryMiddleware(max_retries=1, base_delay=0.0)
     ctx = _retry_context(tags={TAG_READONLY, TAG_SELF_BOUNDED})
@@ -1064,7 +1401,7 @@ def _error_probe_server() -> t.Any:
     from fastmcp import FastMCP
     from libtmux import exc as libtmux_exc
 
-    from libtmux_mcp._utils import ExpectedToolError, _map_exception_to_tool_error
+    from libtmux_mcp._errors import ExpectedToolError, _map_exception_to_tool_error
     from libtmux_mcp.middleware import ToolErrorResultMiddleware
 
     probe = FastMCP(
@@ -1367,7 +1704,7 @@ def _limiter_probe_server(
     """
     from fastmcp import FastMCP
 
-    from libtmux_mcp._utils import ExpectedToolError
+    from libtmux_mcp._errors import ExpectedToolError
     from libtmux_mcp.middleware import (
         TailPreservingResponseLimitingMiddleware,
         ToolErrorResultMiddleware,
@@ -1392,12 +1729,10 @@ def _limiter_probe_server(
             suggestion="Call list_panes to discover valid pane ids.",
         )
 
-    # output_schema=None: fastmcp wraps even plain-str returns in a
-    # result schema, and the stock truncation path drops structured
-    # content — the MCP SDK client then rejects ANY truncated success
-    # from a schema'd tool. That pre-existing upstream gap is not what
-    # this probe tests; disable the schema so the success case
-    # exercises only the is_error handling.
+    # output_schema=None: fastmcp wraps even plain-str returns in a result
+    # schema, and the stock truncation path drops structured content, so
+    # an SDK client rejects ANY truncated success from a schema'd tool.
+    # That upstream gap is not what this probe tests.
     @probe.tool(output_schema=None)
     def limited_ok() -> str:
         return "y" * 5000
@@ -1630,7 +1965,7 @@ def test_wait_for_text_is_registered_self_bounded_and_still_readonly() -> None:
     """
     from fastmcp import FastMCP
 
-    from libtmux_mcp._utils import TAG_SELF_BOUNDED
+    from libtmux_mcp._safety import TAG_SELF_BOUNDED
     from libtmux_mcp.middleware import SafetyMiddleware
     from libtmux_mcp.tools import register_tools
 
@@ -1690,3 +2025,168 @@ def test_client_label_reads_both_sdk_field_names(
     context = type("_MW", (), {"fastmcp_context": fastmcp_ctx})()
 
     assert _client_label(t.cast("t.Any", context)) == expected
+
+
+def test_audit_redacts_the_arguments_that_search_for_a_secret() -> None:
+    """Redacting delivery and logging verification protects neither.
+
+    ``set_environment(value=...)`` was digested while the natural next
+    step -- searching a pane to check the credential did not leak --
+    wrote it to the audit log verbatim. ``patterns`` and ``stop`` are
+    lists, so naming them sensitive without handling the container
+    would have reproduced the same bug.
+    """
+    secret = "AKIAIOSFODNN7EXAMPLE_LEAKCHECK"
+    delivered = _summarize_args({"name": "AWS_SECRET", "value": secret})
+    assert secret not in repr(delivered)
+
+    for args in (
+        {"pattern": secret},
+        {"patterns": [secret], "timeout": 5},
+        {"stop": [secret]},
+    ):
+        assert secret not in repr(_summarize_args(args)), args
+
+    # The digest still correlates, so an auditor can tell the same value
+    # was searched for without being shown it.
+    assert _summarize_args({"pattern": secret})["pattern"] == delivered["value"]
+
+
+def test_filters_is_redacted_in_both_shapes_it_arrives_in() -> None:
+    """``filters`` is a match expression, the same category as ``pattern``.
+
+    ``{"pane_title__contains": ...}`` says what the caller was hunting
+    for, and it reached the audit log verbatim while ``pattern`` --
+    accepted as sensitive for exactly that reason -- was digested. Same
+    kind of value, opposite treatment, in one middleware.
+
+    Both shapes matter: ``_coerce_dict_arg`` accepts a JSON STRING as
+    well as a dict, so a dict-only entry would have half-fixed it.
+    """
+    secret = "hunter2-PROD-DB-PASSWORD"
+
+    as_dict = repr(_summarize_args({"filters": {"pane_title__contains": secret}}))
+    as_json = repr(
+        _summarize_args({"filters": f'{{"pane_title__contains": "{secret}"}}'})
+    )
+    assert secret not in as_dict
+    assert secret not in as_json
+
+    # Routing metadata is deliberately preserved -- an audit trail that
+    # redacts which pane was targeted is not an audit trail.
+    routing = _summarize_args({"pane_id": "%1", "socket_name": "dev"})
+    assert routing == {"pane_id": "%1", "socket_name": "dev"}
+
+
+def test_a_sensitive_list_is_redacted_whatever_its_items_are() -> None:
+    """Redaction must not depend on a list's item type.
+
+    Every sensitive list argument is ``list[str]`` today, so redacting
+    only ``str`` items worked -- and would keep working silently until
+    an annotation widened, at which point values would start reaching
+    the audit log with nothing failing. ``filters`` widened from
+    ``dict[str, str]`` to admit bools and ints for exactly the reasons
+    that make it plausible here.
+
+    The non-sensitive control matters as much as the sensitive case: a
+    summariser that redacted everything would satisfy the absence check
+    on its own.
+    """
+    from libtmux_mcp.middleware import _summarize_args
+
+    summary = _summarize_args(
+        {
+            "patterns": ["secret-text", 42, True, None],
+            "format_string": "#{pane_id}",
+        }
+    )
+
+    # Asserted structurally, not by substring. The digest is a random
+    # 12-char hex string, and a short needle like "42" turns up inside
+    # one often enough to fail a few runs in a hundred -- a test that
+    # goes red for the reason it is checking against is worse than none.
+    items = summary["patterns"]
+    assert len(items) == 4, "items must not be dropped"
+    for original, redacted in zip(["secret-text", 42, True, None], items, strict=True):
+        assert isinstance(redacted, dict), f"{original!r} passed through raw"
+        assert set(redacted) == {"len", "digest"}
+        assert redacted["len"] == len(str(original))
+    # Control: a non-sensitive argument is still readable, so "absent"
+    # above means redacted rather than "there is no summary".
+    assert summary["format_string"] == "#{pane_id}"
+
+
+#: String arguments the audit log carries verbatim, by deliberate
+#: decision: routing metadata, object names, paths and enums. The
+#: sensitive set is a deny-list, so a new free-text argument is exposed
+#: by OMISSION -- it has to be triaged into one of the two sets, and
+#: this test is what forces that.
+_AUDIT_LOGGED_STRING_ARGS = frozenset(
+    {
+        # Routing.
+        "socket_name",
+        "session_name",
+        "session_id",
+        "window_id",
+        "window_index",
+        "pane_id",
+        "target_window_id",
+        "source_pane_id",
+        "target_pane_id",
+        "destination_index",
+        "destination_session",
+        # Names an operator needs to read the trail.
+        "window_name",
+        "new_name",
+        "logical_name",
+        "buffer_name",
+        "title",
+        "option",
+        "name",
+        "channel",
+        "hook_name",
+        # Paths, decided as legitimate audit content.
+        "start_directory",
+        "output_path",
+        # Enums and fixed vocabularies.
+        "direction",
+        "scope",
+        "target",
+        "on_error",
+        "corner",
+        "layout",
+        "size",
+        # Opaque round-trip token, and a tmux format expression that
+        # names what to READ rather than carrying a payload.
+        "cursor",
+        "format_string",
+    }
+)
+
+
+def test_every_string_argument_is_triaged_for_the_audit_log() -> None:
+    """A new free-text argument must be classified before it ships.
+
+    ``_SENSITIVE_ARG_NAMES`` is a deny-list over a log that defaults to
+    recording what it is given, so the failure mode is silence: an
+    argument nobody weighed is written out in full.
+    """
+    from libtmux_mcp.middleware import _SENSITIVE_ARG_NAMES
+    from libtmux_mcp.server import build_mcp_server
+
+    tools = asyncio.run(build_mcp_server().list_tools())
+    untriaged = {
+        name
+        for tool in tools
+        for name, spec in (tool.parameters.get("properties") or {}).items()
+        if "string"
+        in {spec.get("type")} | {alt.get("type") for alt in spec.get("anyOf", [])}
+        and name not in _SENSITIVE_ARG_NAMES
+        and name not in _AUDIT_LOGGED_STRING_ARGS
+    }
+
+    assert not untriaged, (
+        f"string argument(s) {sorted(untriaged)} reach the audit log without a "
+        "decision; add to _SENSITIVE_ARG_NAMES to digest, or to "
+        "_AUDIT_LOGGED_STRING_ARGS to record verbatim"
+    )

@@ -46,6 +46,43 @@ This matches Claude's conventional dev form and takes advantage of `uv
 run`'s automatic editable install — source edits flow through on the next
 invocation with no reinstall step.
 
+### `--pr N` — point every CLI at a pull request
+
+Review a branch across your agents without checking it out:
+
+```console
+$ uv run scripts/mcp_swap.py use-local --pr 114
+```
+
+Each CLI's entry becomes:
+
+```
+command = "uvx"
+args    = ["--from", "git+<remote>@refs/pull/114/head", "libtmux-mcp"]
+```
+
+`uv` resolves the ref itself, so nothing lands on disk to refresh or
+prune and `revert` restores the config with no extra cleanup. GitHub
+publishes `refs/pull/N/head` on the base repository, so a pull request
+from a fork needs no special handling.
+
+Before writing anything, the swap launches the resolved command once and
+completes an MCP `initialize` round trip. A ref that does not exist, or a
+dependency that cannot resolve, fails there — rather than landing in
+every CLI's config and surfacing later as an opaque startup error inside
+each agent. Pass `--no-preflight` to skip the probe when offline.
+
+`gh` confirms the number exists and labels the output; resolution does
+not depend on it, so an unauthenticated `gh` degrades to an unlabelled
+swap rather than a failure.
+
+A branch whose dependencies need resolver flags can carry them as
+environment, the same way any other setting travels:
+
+```console
+$ uv run scripts/mcp_swap.py use-local --pr 114 --env UV_NO_CONFIG=1
+```
+
 ### `--scope {user,project}` (Claude only)
 
 Claude's `~/.claude.json` supports two config scopes for MCP servers:
@@ -155,8 +192,8 @@ swap and leaves the config rewritten.
 
 A dialect no existing CLI speaks needs a branch in
 `McpServerSpec.to_entry_dict` and its mirror in `_spec_from_entry`; that
-mirror is what keeps `is_local_uv_directory` and `local_repo_path`
-working, and those drive the "already local" short-circuit.
+mirror is what keeps `is_local_uv_directory`, `local_repo_path` and
+`pr_ref` working, and those drive the "already local" short-circuit.
 
 Tests in `tests/test_mcp_swap.py` use a `fake_home` fixture that
 monkeypatches `CLIS` wholesale, so every new CLI must be added there as

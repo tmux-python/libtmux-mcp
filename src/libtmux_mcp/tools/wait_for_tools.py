@@ -40,37 +40,37 @@ import re
 import subprocess
 import typing as t
 
-from libtmux_mcp._tmux_proc import _run_tmux_bounded
-from libtmux_mcp._utils import (
-    ANNOTATIONS_MUTATING,
-    TAG_MUTATING,
-    TAG_SELF_BOUNDED,
-    ExpectedToolError,
-    _get_server,
+from fastmcp import Context
+
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors_async
+from libtmux_mcp._exec import (
+    _LIVENESS_TIMEOUT_SECONDS as _CALL_TIMEOUT_SECONDS,
+    _raise_tmux_exec_error,
     _tmux_argv,
-    handle_tool_errors_async,
 )
+from libtmux_mcp._progress import progress_ticker
+from libtmux_mcp._safety import ANNOTATIONS_MUTATING, TAG_MUTATING, TAG_SELF_BOUNDED
+from libtmux_mcp._servers import _get_server_async
+from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 
 if t.TYPE_CHECKING:
-    from fastmcp import FastMCP
+    from fastmcp import Context, FastMCP
     from libtmux.server import Server
 
-#: Allowed characters and length range for channel names. Channels are
-#: tmux-server-global and names are passed to ``tmux wait-for`` on the
-#: command line — defending against shell-surface escapes / oversized
-#: inputs at the MCP boundary is cheaper than relying on libtmux's
-#: argv handling.
+#: Allowed characters and length for channel names. Channels are
+#: tmux-server-global and the name reaches ``tmux wait-for`` on the
+#: command line, so this bounds it at the MCP boundary rather than
+#: relying on libtmux's argv handling.
 _CHANNEL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
-#: Cap on ``signal_channel`` subprocess. ``wait-for -S`` is a short
-#: server-local operation; 5 s is a generous ceiling that still bounds
-#: pathological hangs (e.g. tmux server deadlock).
-_SIGNAL_TIMEOUT_SECONDS = 5.0
-
-#: Cap on the post-wait liveness re-probe. Same reasoning as
-#: ``_SIGNAL_TIMEOUT_SECONDS``, and it runs at most once per wait.
-_LIVENESS_TIMEOUT_SECONDS = 5.0
+#: Cap on the ``signal_channel`` subprocess. ``wait-for -S`` is a short
+#: server-local operation, so this is the ordinary per-call bound, shared
+#: by the post-wait liveness re-probe. It does NOT bound the wait itself:
+#: ``wait-for`` blocks until signalled and legitimately runs to the wait
+#: ceiling -- see ``_run_tmux_bounded``.
+_SIGNAL_TIMEOUT_SECONDS = _CALL_TIMEOUT_SECONDS
+_LIVENESS_TIMEOUT_SECONDS = _CALL_TIMEOUT_SECONDS
 
 
 async def _server_is_alive(server: Server) -> bool:
@@ -129,11 +129,11 @@ def _validate_channel_name(name: str) -> str:
     >>> _validate_channel_name("has space")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid channel name: 'has space'
+    libtmux_mcp._errors.ExpectedToolError: Invalid channel name: 'has space'
     >>> _validate_channel_name("")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid channel name: ''
+    libtmux_mcp._errors.ExpectedToolError: Invalid channel name: ''
     """
     if not _CHANNEL_NAME_RE.fullmatch(name):
         msg = f"Invalid channel name: {name!r}"
@@ -146,6 +146,7 @@ async def wait_for_channel(
     channel: str,
     timeout: float = 30.0,
     socket_name: str | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """Block until a tmux ``wait-for`` channel is signalled.
 
@@ -200,23 +201,30 @@ async def wait_for_channel(
         signal, so that case is detected by re-probing the server and
         reported rather than passed off as success.
     """
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
     cname = _validate_channel_name(channel)
     effective_timeout = min(timeout, _wait_ceiling_seconds())
     argv = _tmux_argv(server, "wait-for", cname)
-    # FastMCP direct-awaits async tools on its event loop, and ``tmux
-    # wait-for`` blocks for the full timeout, so the child must not run
-    # on the loop. It must not run on a worker thread either:
-    # ``asyncio.to_thread(subprocess.run, ...)`` cannot be interrupted,
-    # so a cancelled call returned instantly while the tmux child stayed
-    # blocked for the rest of its budget — measured at 13 s of orphan
-    # for a 15 s wait cancelled at 2 s. ``_run_tmux_bounded`` owns a
-    # killable async subprocess instead, the same one
-    # :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text` uses.
+    # FastMCP direct-awaits async tools on its event loop and ``tmux
+    # wait-for`` blocks for the full timeout, so the child cannot run on
+    # the loop -- nor on a worker thread, since
+    # ``asyncio.to_thread(subprocess.run, ...)`` cannot be interrupted and
+    # a cancelled call leaves the child blocked for the rest of its budget
+    # (13 s of orphan for a 15 s wait cancelled at 2 s).
     try:
-        returncode, _stdout, stderr = await _run_tmux_bounded(
-            argv, timeout=effective_timeout
-        )
+        # One await, no poll loop, so nothing reaches the client until
+        # it returns -- the same gap run_command had. wait_for_text
+        # reports from inside its loop; this has no loop.
+        async with progress_ticker(
+            ctx,
+            total=effective_timeout,
+            message=lambda elapsed, left: (
+                f"Waiting on channel {cname}: {elapsed:.1f}s elapsed, {left:.1f}s left"
+            ),
+        ):
+            returncode, _stdout, stderr = await _run_tmux_bounded(
+                argv, timeout=effective_timeout
+            )
     except TimeoutError as e:
         msg = (
             f"wait-for timeout: channel {cname!r} was not signalled within "
@@ -227,11 +235,10 @@ async def wait_for_channel(
         detail = stderr.decode(errors="replace").strip()
         msg = f"wait-for failed for channel {cname!r}: {detail or f'exit {returncode}'}"
         raise ExpectedToolError(msg)
-    # A zero exit does NOT mean "signalled". ``tmux wait-for`` also exits
-    # 0 when the server goes away without ever signalling the channel,
-    # and it is silent about it. Measured on tmux 3.7b, all three of
-    # these are rc=0 with empty stderr and therefore indistinguishable
-    # from each other by exit status alone:
+    # A zero exit does NOT mean "signalled": ``tmux wait-for`` also exits
+    # 0, silently, when the server goes away without signalling. Three
+    # outcomes are rc=0 with empty stderr and so indistinguishable by exit
+    # status, identically on every supported tmux from 3.2a to 3.7c:
     #
     # ==================  ====  ==================================
     # how the wait ended  rc    stderr
@@ -242,10 +249,9 @@ async def wait_for_channel(
     # server SIGKILL       1    ``server exited unexpectedly``
     # ==================  ====  ==================================
     #
-    # Only the SIGKILL path was already caught. Re-probe liveness so the
-    # other two stop being reported as success: this tool exists to be
-    # the deterministic primitive the fuzzy ones defer to, and a silent
-    # false "was signalled" is the worst answer it can give.
+    # Only the SIGKILL path is caught by rc alone, so liveness is
+    # re-probed: this is the deterministic primitive the fuzzy tools defer
+    # to, and a silent false "was signalled" is its worst answer.
     if not await _server_is_alive(server):
         msg = (
             f"wait-for returned for channel {cname!r} but the tmux server is "
@@ -263,8 +269,30 @@ async def signal_channel(
 ) -> str:
     """Signal a tmux ``wait-for`` channel, waking any blocked waiters.
 
-    Signalling an unwaited channel is a no-op that still returns
-    successfully — safe to call defensively.
+    **Signal exactly once per channel.** tmux latches a signal nobody is
+    waiting for, which is what makes this better than polling: signal
+    first, wait later, and "did it finish?" becomes a question about the
+    past. A SECOND signal on a latched channel with no waiter destroys
+    the channel, latch included, and the next wait then blocks to its
+    ceiling. It toggles rather than saturating -- measured on tmux 3.7b:
+
+    ==========  ==================  =====================
+    signals     then wait
+    ==========  ==================  =====================
+    1           returns in 0.04s    latch held
+    2           blocks              latch CLEARED
+    3           returns in 0.03s    latch held again
+    ==========  ==================  =====================
+
+    ``cmd_wait_for_signal`` guards the latch with
+    ``TAILQ_EMPTY(&wc->waiters) && !wc->woken``, so an already-woken
+    channel falls through to the wake-the-waiters path, finds none, and
+    calls ``cmd_wait_for_remove``.
+
+    This server does not paper over it: reading the latch first is a
+    race, and there is no non-destructive way to ask. The habit that
+    breaks it is the careful one -- a ``wait-for -S done`` at the end of
+    the command AND another in a cleanup or trap. Put it in one place.
 
     Parameters
     ----------
@@ -278,17 +306,14 @@ async def signal_channel(
     str
         Confirmation message naming the channel.
     """
-    server = _get_server(socket_name=socket_name)
+    server = await _get_server_async(socket_name=socket_name)
     cname = _validate_channel_name(channel)
     argv = _tmux_argv(server, "wait-for", "-S", cname)
-    # Deliberately still a worker thread, unlike every other tmux call
-    # in this package. The orphan-on-cancel defect that pushed the
-    # waits onto ``_run_tmux_bounded`` needs a child that blocks for a
-    # caller-chosen duration; ``wait-for -S`` is edge-triggered and
-    # returns in milliseconds, so the worst case here is a 5 s child
-    # against an already-wedged tmux — and that bound is ours, not the
-    # caller's. Converting it would buy nothing and change this tool's
-    # error messages.
+    # Still a worker thread, unlike every other tmux call here: the
+    # orphan-on-cancel defect needs a child that blocks for a
+    # caller-chosen duration, and ``wait-for -S`` is edge-triggered,
+    # returning in milliseconds. The worst case is a 5 s child against an
+    # already-wedged tmux, on our bound rather than the caller's.
     try:
         await asyncio.to_thread(
             subprocess.run,
@@ -307,17 +332,18 @@ async def signal_channel(
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
         msg = f"signal-channel failed for channel {cname!r}: {stderr or e}"
         raise ExpectedToolError(msg) from e
+    except OSError as e:
+        _raise_tmux_exec_error(e, argv)
     return f"Channel {cname!r} signalled"
 
 
 def register(mcp: FastMCP) -> None:
     """Register wait-for channel tools with the MCP instance."""
-    # ``wait_for_channel``'s ``timeout`` is clamped to the shared wait
-    # ceiling (see ``_wait_policy``), but a 1000-operation batch would
-    # still multiply that ceiling by the operation count. ``TAG_SELF_BOUNDED``
-    # keeps it out of the batch wrappers; the tool is already bounded
-    # per-call by the killable tmux child in ``_run_tmux_bounded``,
-    # which is what the tag asserts.
+    # ``timeout`` is clamped to the shared wait ceiling (see
+    # ``_wait_policy``), but a 1000-operation batch would multiply that
+    # ceiling by the operation count, so ``TAG_SELF_BOUNDED`` keeps this
+    # out of the batch wrappers. What earns the tag: the tool is already
+    # bounded per-call by the killable tmux child in ``_run_tmux_bounded``.
     mcp.tool(
         title="Wait For tmux Channel",
         annotations=ANNOTATIONS_MUTATING,

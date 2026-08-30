@@ -2,74 +2,63 @@
 
 from __future__ import annotations
 
-import re
+import pathlib
 import shlex
 
-from libtmux_mcp._utils import (
-    ExpectedToolError,
-    _get_server,
-    _resolve_pane,
-    handle_tool_errors,
-)
-
-#: A maximal run of ``#``, plus the ``[`` that may follow it. tmux
-#: treats a ``#``-run by what comes next, so the run is the unit that
-#: has to be escaped -- not the individual ``#``.
-_TMUX_HASH_RUN = re.compile(r"(#+)(\[?)")
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._resolve import _resolve_pane
+from libtmux_mcp._servers import _get_server
+from libtmux_mcp._tmux_format import escape_format_time
 
 
-def _escape_tmux_format(value: str) -> str:
-    """Escape ``value`` so tmux's format expander reproduces it literally.
+def _raise_if_unwritable(output_path: str) -> None:
+    """Refuse a destination the redirect cannot possibly write.
 
-    ``pipe-pane`` runs its argument through the format expander before
-    handing it to ``/bin/sh``, so :func:`shlex.quote` alone is not
-    enough -- it guards the shell layer while tmux has already rewritten
-    the string.
+    tmux hands the pipe command to a shell and reports success whatever
+    that shell then does, so a redirect into a missing directory or an
+    unwritable path fails silently and the caller is told its pane is
+    being captured to a file that will never appear. Worse, a stale file
+    already at that path then reads back as if it were live capture.
 
-    There are TWO expansions to escape, not one. ``cmd-pipe-pane.c``
-    calls ``format_expand_time()``, which runs the argument through
-    ``strftime`` as well as the ``#``-format expander, so a ``%`` is as
-    dangerous as a ``#``: ``100%done.log`` became ``10025one.log``
-    (``%d`` -> day of month) and ``date-%Y.log`` became
-    ``date-2026.log``. ``%%`` is strftime's literal escape and is safe
-    to apply to every ``%``.
+    Checked BEFORE piping rather than after. ``#{pane_pipe}`` reads
+    ``1`` immediately after a doomed pipe, because the shell has been
+    spawned and has not yet failed on the redirect; only a later poll
+    sees ``0``. Polling it would work, but the answer is available
+    synchronously and a poll is latency spent on every call.
 
-    Doubling every ``#`` is the obvious escape and it is wrong. A
-    ``#``-run followed by ``[`` is a style sequence, reserved for
-    ``format_draw``, and the expander copies the whole run through
-    verbatim without ever collapsing it. Doubling there corrupts the
-    path in exactly the way this function exists to prevent. Measured
-    against tmux 3.7b:
+    Does what the redirect does rather than predicting it. A stat-based
+    predicate is a proxy for "a shell can append here", and each new
+    stat check is another proxy: measured, an existing DIRECTORY, a
+    DANGLING SYMLINK into an unwritable directory, ``/dev/full`` and a
+    300-character basename all passed a parent-directory-plus-``access``
+    check and captured nothing. Opening the path for append answers the
+    real question and closes all four at once -- the directory raises
+    ``IsADirectoryError``, the dangling link resolves and fails on the
+    real parent, ``/dev/full`` is not a regular file, and the long name
+    raises ``ENAMETOOLONG``.
 
-    ==================  ==================  ==========================
-    input               expands to          note
-    ==================  ==================  ==========================
-    ``#{pane_id}``      ``%0``              substituted
-    ``##{pane_id}``     ``#{pane_id}``      run doubling escapes it
-    ``####{a}``         ``##{a}``           composes for longer runs
-    ``#S``              *(session name)*    legacy single-char alias
-    ``#(echo hi)``      *(command job)*     substituted away
-    ``##(echo hi)``     ``#(echo hi)``      run doubling escapes it
-    ``#[fg=red]``       ``#[fg=red]``       verbatim
-    ``##[fg=red]``      ``##[fg=red]``      verbatim -- never collapses
-    ``issue ##42``      ``issue #42``       ordinary run collapses
-    ==================  ==================  ==========================
-
-    The legacy aliases are the easiest to trip over by accident: a log
-    named ``#Session.log`` loses its ``#S`` to the session name and
-    lands on ``<session>ession.log``.
-
-    So: leave a run alone when ``[`` follows it, double it otherwise,
-    and double every ``%`` for strftime.
+    The regular-file test is separate because ``open`` succeeds on a
+    FIFO with a reader and on a character device: a reader-less FIFO
+    blocks the shell in ``open()`` forever, so it looks healthy and
+    captures nothing, and no poll of any duration can see that.
     """
-
-    def _escape_run(match: re.Match[str]) -> str:
-        run, bracket = match.group(1), match.group(2)
-        if bracket:
-            return f"{run}{bracket}"
-        return run * 2
-
-    return _TMUX_HASH_RUN.sub(_escape_run, value).replace("%", "%%")
+    target = pathlib.Path(output_path)
+    if target.exists() and not target.is_file():
+        kind = "a directory" if target.is_dir() else "not a regular file"
+        msg = (
+            f"cannot pipe to {output_path!r}: it is {kind}. tmux would "
+            "report success and capture nothing."
+        )
+        raise ExpectedToolError(msg)
+    try:
+        with target.open("ab"):
+            pass
+    except OSError as exc:
+        msg = (
+            f"cannot pipe to {output_path!r}: {exc.strerror or exc}. tmux "
+            "would report success and capture nothing."
+        )
+        raise ExpectedToolError(msg) from exc
 
 
 @handle_tool_errors
@@ -142,8 +131,10 @@ def pipe_pane(
         raise ExpectedToolError(msg)
 
     redirect = ">>" if append else ">"
-    # Two layers rewrite this string, so it needs two escapes: tmux
-    # expands its own formats first, then /bin/sh parses what is left.
-    quoted = _escape_tmux_format(shlex.quote(output_path))
+    # Two layers rewrite this string: tmux expands its own formats
+    # first, then /bin/sh parses what is left. pipe-pane is the one
+    # site on tmux's time-expanding path, so ``%`` needs escaping too.
+    quoted = escape_format_time(shlex.quote(output_path))
+    _raise_if_unwritable(output_path)
     pane.pipe(f"cat {redirect} {quoted}")
     return f"Piping pane {pane.pane_id} to {output_path}"

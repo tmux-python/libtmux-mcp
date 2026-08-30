@@ -4,10 +4,24 @@ from __future__ import annotations
 
 import typing as t
 
+from libtmux import exc
+from libtmux.common import get_version_str
 from libtmux.constants import PaneDirection
+from libtmux.pane import Pane
+from libtmux.window import Window
 
+from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._filters import _apply_filters
+from libtmux_mcp._guards import (
+    _raise_if_shell_unrunnable,
+    _raise_if_spawned_pane_is_gone,
+    _raise_if_start_directory_unusable,
+    _raise_spawned_pane_gone,
+)
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._utils import (
+from libtmux_mcp._resolve import _resolve_pane, _resolve_session, _resolve_window
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_MUTATING,
@@ -16,19 +30,11 @@ from libtmux_mcp._utils import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _apply_filters,
-    _caller_is_on_server,
-    _get_caller_identity,
-    _get_server,
-    _resolve_pane,
-    _resolve_session,
-    _resolve_window,
-    _serialize_pane,
-    _serialize_window,
-    handle_tool_errors,
 )
-from libtmux_mcp.models import PaneInfo, WindowInfo
+from libtmux_mcp._serialize import _serialize_pane, _serialize_window
+from libtmux_mcp._servers import _get_server
+from libtmux_mcp._tmux_format import _escaped_or_none, escape_format
+from libtmux_mcp.models import PaneInfo, PaneMoveResult, SplitResult, WindowInfo
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -48,7 +54,7 @@ def list_panes(
     window_id: str | None = None,
     window_index: str | None = None,
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, str | bool | int] | str | None = None,
 ) -> list[PaneInfo]:
     """List tmux panes (terminal multiplexer splits) in a window, session, or server.
 
@@ -75,6 +81,9 @@ def list_panes(
         Django-style filters as a dict
         (e.g. ``{"pane_current_command__contains": "vim"}``)
         or as a JSON string. Some MCP clients require the string form.
+        Every field this tool returns is filterable, including
+        is_caller -- filter ``{"is_caller": true}`` to answer
+        "which pane am I in?". Any libtmux Pane attribute works too.
 
     Returns
     -------
@@ -98,15 +107,13 @@ def list_panes(
         panes = session.panes
     else:
         panes = server.panes
-    return _apply_filters(panes, filters, _serialize_pane)
+    return _apply_filters(panes, filters, _serialize_pane, Pane, PaneInfo)
 
 
-# get_window_info completes the core-tmux-hierarchy symmetry of get_*_info
-# tools: the four hierarchy levels (server, session, window, pane) now each
-# have a targeted single-object read. This is deliberately NOT a license to
-# add get_buffer_info / get_hook_info / get_option_info — those scopes are
-# not part of the hierarchy and the existing show_*/load_* tools already
-# cover their reads.
+# Each of the four hierarchy levels has a targeted single-object read.
+# Not a license for get_buffer_info / get_hook_info / get_option_info:
+# those scopes are outside the hierarchy and show_*/load_* already read
+# them.
 @handle_tool_errors
 def get_window_info(
     window_id: str | None = None,
@@ -151,6 +158,74 @@ def get_window_info(
     return _serialize_window(window)
 
 
+#: A split takes ``size`` for the NEW pane plus one column or row for the
+#: border, so the split pane keeps ``extent - size - 1``. The line is
+#: drawn where tmux stops HONOURING the request, not where the layout
+#: gets cramped -- a one-column source is the caller's choice, but being
+#: told the new pane is 78 when 120 was asked for is a false report.
+_MIN_REMAINING_EXTENT = 1
+
+
+def _raise_if_size_would_flatten_the_source(
+    target: Pane | Window, direction: PaneDirection | None, size: str | int | None
+) -> None:
+    """Refuse a split that would leave the pane being split unusable.
+
+    ``size`` names the NEW pane, the way tmux's ``-l`` does. Measured on
+    an 80-column pane: 78 is the largest value tmux honours (78 + border
+    + 1 for the source), and every larger value -- 79, 80, 120,
+    1_000_000 -- silently CLAMPS the new pane to 78 while leaving the
+    source at one column.
+
+    Those clamped values are what this refuses. The result covers only
+    the new pane, so a caller who asked for 120 was told 78 and shown
+    nothing about their own pane being flattened -- a clean success
+    report for a broken layout, which is worse than tmux's silence
+    because it is actively reassuring.
+
+    A faithful split that happens to leave a narrow source is allowed.
+    That is the caller's layout to choose; the report is true.
+    """
+    if size is None:
+        return
+    source = target if isinstance(target, Pane) else target.active_pane
+    if source is None:
+        return
+    vertical = direction in (PaneDirection.Above, PaneDirection.Below, None)
+    raw = source.pane_height if vertical else source.pane_width
+    try:
+        extent = int(raw or 0)
+    except ValueError:
+        return
+    if extent <= 0:
+        return
+
+    if isinstance(size, str) and size.endswith("%"):
+        try:
+            requested = extent * int(size[:-1]) // 100
+        except ValueError:
+            return  # tmux will reject the spelling itself
+    else:
+        try:
+            requested = int(size)
+        except (TypeError, ValueError):
+            return
+
+    largest = extent - _MIN_REMAINING_EXTENT - 1
+    if requested <= largest:
+        return
+    axis = "rows" if vertical else "columns"
+    msg = (
+        f"size={size!r} leaves the pane being split with "
+        f"{max(extent - requested - 1, 0)} {axis}. size names the NEW pane "
+        f"and one {axis[:-1]} goes to the border, so the source keeps "
+        f"extent - size - 1: at {extent} {axis} the largest usable size is "
+        f"{largest}. tmux reports none of this -- it clamps the new pane and "
+        "leaves the source as a sliver."
+    )
+    raise ExpectedToolError(msg)
+
+
 @handle_tool_errors
 def split_window(
     pane_id: str | None = None,
@@ -166,7 +241,7 @@ def split_window(
     *,
     environment: dict[str, str] | str | None = None,
     suppress_persistent_history: bool = False,
-) -> PaneInfo:
+) -> SplitResult:
     """Split a tmux window to create a new pane.
 
     Creates a new pane by splitting an existing one. Use direction to choose
@@ -187,8 +262,11 @@ def split_window(
     direction : str, optional
         Split direction.
     size : str or int, optional
-        Size of the new pane. Use a string with '%%' suffix for
-        percentage (e.g. '50%%') or an integer for lines/columns.
+        Size of the NEW pane, as tmux's ``-l`` means it -- not the pane
+        being split, which keeps ``extent - size - 1`` after the border.
+        Use a string with '%%' suffix for percentage (e.g. '50%%') or an
+        integer for lines/columns. A size tmux would silently clamp is
+        refused, naming the largest that fits.
     start_directory : str, optional
         Working directory for the new pane.
     shell : str, optional
@@ -210,9 +288,21 @@ def split_window(
 
     Returns
     -------
-    PaneInfo
-        Serialized pane object.
+    SplitResult
+        The new pane, with every ``PaneInfo`` field where it was, plus
+        ``source_pane``: the pane that was split, as it stands after
+        the split. That extent is what constrains the next split of the
+        same region.
     """
+    _raise_if_shell_unrunnable(
+        shell,
+        consequence=(
+            "Splitting with it would report a new pane that no longer "
+            "exists: tmux reports success, the new process exits "
+            "immediately, and the pane goes with it."
+        ),
+    )
+    _raise_if_start_directory_unusable(start_directory)
     spawn_environment = _prepare_spawn_environment(
         environment,
         suppress_persistent_history=suppress_persistent_history,
@@ -227,31 +317,46 @@ def split_window(
             msg = f"Invalid direction: {direction!r}. Valid: {valid}"
             raise ExpectedToolError(msg)
 
+    target: Pane | Window
     if pane_id is not None:
-        pane = _resolve_pane(server, pane_id=pane_id)
-        new_pane = pane.split(
-            direction=pane_dir,
-            size=size,
-            start_directory=start_directory,
-            shell=shell,
-            environment=spawn_environment,
-        )
+        target = _resolve_pane(server, pane_id=pane_id)
     else:
-        window = _resolve_window(
+        target = _resolve_window(
             server,
             window_id=window_id,
             window_index=window_index,
             session_name=session_name,
             session_id=session_id,
         )
-        new_pane = window.split(
+    # A command that cannot run leaves tmux reporting success with no
+    # pane behind it. The window path notices while building the object
+    # and raises a bare "Could not find pane_id"; the pane path returns
+    # a stale object that only fails on the caller's NEXT call.
+    _raise_if_size_would_flatten_the_source(target, pane_dir, size)
+    try:
+        new_pane = target.split(
             direction=pane_dir,
             size=size,
-            start_directory=start_directory,
+            start_directory=_escaped_or_none(start_directory),
             shell=shell,
             environment=spawn_environment,
         )
-    return _serialize_pane(new_pane)
+    except exc.TmuxObjectDoesNotExist:
+        _raise_spawned_pane_gone(shell)
+    _raise_if_spawned_pane_is_gone(new_pane, shell)
+    source = target if isinstance(target, Pane) else target.active_pane
+    source_info: PaneInfo | None = None
+    if source is not None:
+        # Re-read: the in-hand object still describes the pre-split
+        # geometry, which is the number the caller must NOT plan with.
+        try:
+            source.refresh()
+            source_info = _serialize_pane(source)
+        except exc.TmuxObjectDoesNotExist:
+            source_info = None
+    return SplitResult(
+        **_serialize_pane(new_pane).model_dump(), source_pane=source_info
+    )
 
 
 @handle_tool_errors
@@ -296,7 +401,7 @@ def rename_window(
         session_name=session_name,
         session_id=session_id,
     )
-    window.rename_window(new_name)
+    window.rename_window(escape_format(new_name))
     return _serialize_window(window)
 
 
@@ -337,7 +442,18 @@ def kill_window(
             raise ExpectedToolError(msg)
 
     wid = window.window_id
+    session = window.session
+    session_id = session.session_id
+    session_name = session.session_name or session_id
     window.kill()
+    # Killing a session's LAST window destroys the session. Reported
+    # rather than left to be discovered: the tier permits it, but an
+    # agent tidying up a window has no reason to expect it, and the
+    # bare "Window killed" understates the blast radius.
+    if server.sessions.get(session_id=session_id, default=None) is None:
+        return (
+            f"Window killed: {wid} (session {session_name} was its last, and is gone)"
+        )
     return f"Window killed: {wid}"
 
 
@@ -482,6 +598,18 @@ def move_window(
         session_name=session_name,
         session_id=session_id,
     )
+    # Moving a session's LAST window leaves the source with none and tmux
+    # destroys it, while the result names only the destination. Destroying
+    # a session is destructive-tier work, so refuse rather than disclose.
+    if destination_session is not None and len(window.session.windows) == 1:
+        msg = (
+            f"window {window.window_id} is the only window in session "
+            f"{window.session.session_name!r}, so moving it to another "
+            "session would leave that one empty and tmux would destroy it. "
+            "Create another window there first."
+        )
+        raise ExpectedToolError(msg)
+
     window.move_window(
         destination=destination_index,
         session=destination_session,
@@ -492,6 +620,183 @@ def move_window(
     # _serialize_window always reads fresh metadata.
     window.refresh()
     return _serialize_window(window)
+
+
+@handle_tool_errors
+def break_pane(
+    pane_id: str,
+    window_name: str | None = None,
+    socket_name: str | None = None,
+) -> WindowInfo:
+    """Move a pane out into a window of its own.
+
+    Keeps the pane and everything running in it. The alternative --
+    killing it and starting again elsewhere -- loses the process, the
+    scrollback and the pane id, and any cursor a caller is holding
+    against that id.
+
+    The new window may land in a DIFFERENT SESSION. tmux puts it in the
+    current session, and "current" is the most recently active one, not
+    the pane's own -- so breaking a pane out of session A can move it to
+    session B. Measured. The returned ``session_name`` and
+    ``session_id`` are read back afterwards and say where it went, but
+    check them: this is a mutation that has already crossed a session
+    boundary by the time it reports.
+
+    Parameters
+    ----------
+    pane_id : str
+        Pane to break out (e.g. '%1').
+    window_name : str, optional
+        Name for the new window. Defaults to tmux's choice.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    WindowInfo
+        The window the pane now lives in, re-read after the move rather
+        than assumed, so the reported id is the one that exists.
+    """
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(server, pane_id=pane_id)
+
+    # tmux puts the new window in the CURRENT session, not necessarily
+    # the pane's own. Breaking the last pane of a session's last window
+    # leaves it empty and tmux destroys it, while the result reports only
+    # where the pane went. Destroying a session is destructive-tier work
+    # and this tool is mutating, so refuse rather than disclose.
+    source_window = pane.window
+    if (
+        source_window is not None
+        and len(source_window.panes) == 1
+        and len(source_window.session.windows) == 1
+    ):
+        msg = (
+            f"pane {pane_id} is the only pane in the only window of session "
+            f"{source_window.session.session_name!r}, so breaking it out would "
+            "leave that session with no windows and tmux would destroy it. "
+            "Create another window in that session first, or move the pane "
+            "with join_pane, which never empties its source."
+        )
+        raise ExpectedToolError(msg)
+
+    tmux_version = get_version_str(tmux_bin=server.tmux_bin)
+    command_name = window_name
+    if tmux_version == "3.7":
+        command_name = "libtmux"
+    args = ["break-pane", "-d"]
+    if command_name is not None:
+        args.extend(("-n", command_name))
+    args.extend(("-s", pane_id))
+    result = server.cmd(*args)
+    if result.returncode != 0 or result.stderr:
+        detail = " ".join(result.stderr).strip() if result.stderr else ""
+        failure = detail or f"exit {result.returncode}"
+        msg = f"break-pane failed: {failure}; pane state may have changed"
+        raise ExpectedToolError(msg)
+
+    try:
+        moved = server.panes.get(pane_id=pane.pane_id, default=None)
+    except exc.LibTmuxException as error:
+        msg = (
+            f"break-pane completed, but its destination could not be read: {error}; "
+            "pane state may have changed"
+        )
+        raise ExpectedToolError(msg) from error
+    if moved is None or moved.window is None:
+        msg = (
+            f"break-pane completed, but pane {pane_id} could not be resolved; "
+            "pane state may have changed"
+        )
+        raise ExpectedToolError(msg)
+    if window_name is not None and tmux_version == "3.7":
+        try:
+            moved.window.rename_window(escape_format(window_name))
+        except exc.LibTmuxException as error:
+            msg = (
+                f"pane {pane_id} moved, but naming its window failed: {error}; "
+                "pane state may have changed"
+            )
+            raise ExpectedToolError(msg) from error
+    return _serialize_window(moved.window)
+
+
+@handle_tool_errors
+def join_pane(
+    pane_id: str,
+    target_window_id: str,
+    vertical: bool = True,
+    socket_name: str | None = None,
+) -> PaneMoveResult:
+    """Move an existing pane into another window, splitting it.
+
+    The counterpart to :func:`break_pane`, and the reason to prefer both
+    over kill-and-recreate: the process, the scrollback and the pane id
+    all survive the move.
+
+    Parameters
+    ----------
+    pane_id : str
+        Pane to move (e.g. '%1').
+    target_window_id : str
+        Window to move it into (e.g. '@2').
+    vertical : bool
+        Split the target vertically (stacked). False splits it
+        horizontally (side by side).
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    PaneMoveResult
+        The pane after the move, re-read so ``window_id`` reflects where
+        it actually landed, plus whether the source window was DESTROYED
+        by the move. tmux removes a window left with no panes, so
+        consolidating panes deletes windows the caller never named.
+    """
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(server, pane_id=pane_id)
+    window = _resolve_window(server, window_id=target_window_id)
+    source_window = pane.window
+    source_window_id = source_window.window_id if source_window else None
+
+    # A window emptying is inherent to moving its last pane and is
+    # disclosed below. A SESSION emptying is not -- the caller can add a
+    # window first -- and it is destructive-tier work reachable from a
+    # mutating-tier client, which is the same predicate `break_pane`
+    # refuses.
+    if (
+        source_window is not None
+        and len(source_window.panes) == 1
+        and len(source_window.session.windows) == 1
+        and source_window.session.session_id != window.session.session_id
+    ):
+        msg = (
+            f"pane {pane_id} is the only pane in the only window of session "
+            f"{source_window.session.session_name!r}, so moving it away would "
+            "leave that session with no windows and tmux would destroy it. "
+            "Create another window in that session first."
+        )
+        raise ExpectedToolError(msg)
+
+    pane.join(window, vertical=vertical)
+
+    moved = server.panes.get(pane_id=pane.pane_id, default=None)
+    if moved is None:
+        msg = f"pane {pane_id} did not survive join-pane"
+        raise ExpectedToolError(msg)
+    # Asked afterwards rather than predicted from the pane count: the
+    # question is whether the window is still there, and that is
+    # observable.
+    destroyed = source_window_id is not None and (
+        server.windows.get(window_id=source_window_id, default=None) is None
+    )
+    return PaneMoveResult(
+        pane=_serialize_pane(moved),
+        source_window_id=source_window_id,
+        source_window_destroyed=destroyed,
+    )
 
 
 def register(mcp: FastMCP) -> None:
@@ -505,6 +810,16 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(
         title="Get tmux Window Info", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(get_window_info)
+    mcp.tool(
+        title="Break Pane Into Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
+    )(break_pane)
+    mcp.tool(
+        title="Join Pane Into Window",
+        annotations=ANNOTATIONS_MUTATING,
+        tags={TAG_MUTATING},
+    )(join_pane)
     mcp.tool(
         title="Split tmux Window", annotations=ANNOTATIONS_CREATE, tags={TAG_MUTATING}
     )(split_window)

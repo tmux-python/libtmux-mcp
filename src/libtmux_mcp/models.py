@@ -109,6 +109,14 @@ class PaneInfo(BaseModel):
         default=None, description="Active flag ('1' or '0')"
     )
     window_id: str | None = Field(default=None, description="Parent window ID")
+    session_name: str | None = Field(
+        default=None,
+        description=(
+            "Session the pane is in. Present because a pane can change "
+            "session -- break_pane and join_pane both move panes across "
+            "them -- and session_id alone does not name it."
+        ),
+    )
     session_id: str | None = Field(default=None, description="Parent session ID")
     is_caller: bool | None = Field(
         default=None,
@@ -200,19 +208,89 @@ class ServerInfo(BaseModel):
     socket_path: str | None = Field(default=None, description="Socket path")
     session_count: int = Field(description="Number of sessions")
     version: str | None = Field(default=None, description="tmux version")
+    unreachable_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why a server that exists could not be queried, e.g. this tmux "
+            "binary being older than the one that created the socket. When "
+            "set, is_alive=False means 'could not ask', NOT 'not running', "
+            "and session_count=0 carries no information."
+        ),
+    )
+
+
+class SplitResult(PaneInfo):
+    """The new pane, plus what the split did to the pane it split.
+
+    Extends :class:`PaneInfo` rather than nesting it, so every field a
+    caller already read stays exactly where it was.
+
+    ``size`` names the NEW pane, so the source's post-split extent is
+    the number a caller needs to plan the NEXT split -- and it was the
+    one thing the response did not carry. Building three equal panes
+    across 236 columns means splitting the 157-column remainder, not
+    the 78-column pane that is already right; without ``source_pane``
+    that choice needs a ``list_panes`` round trip between every pair of
+    splits, and a caller who does not know to make it gets the wrong
+    layout silently, because each individual response was true.
+    """
+
+    source_pane: PaneInfo | None = Field(
+        default=None,
+        description=(
+            "The pane that was split, as it stands AFTER the split. "
+            "Its extent is what constrains the next split of the same "
+            "region. ``null`` only if tmux stopped reporting it."
+        ),
+    )
 
 
 class OptionResult(BaseModel):
     """Result of a show_option call."""
 
     option: str = Field(description="Option name")
-    value: t.Any = Field(description="Option value")
+    value: t.Any = Field(
+        description=(
+            "Option value. ``null`` means NOT SET AT THE SCOPE QUERIED, "
+            "which is not the same as not set: an option inherited from "
+            "a wider scope reads as null unless ``include_inherited`` "
+            "was passed."
+        )
+    )
+    resolved_target: str | None = Field(
+        default=None,
+        description=(
+            "Session tmux resolved an untargeted query to. tmux picks a "
+            "'current' session from attached clients, and an MCP client has "
+            "none, so which one answered is not otherwise knowable."
+        ),
+    )
+    scope_queried: str = Field(
+        default="server",
+        description="Scope this answer describes, so null is readable.",
+    )
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "True when inherited values were resolved (tmux ``-A``), so "
+            "the value is the one in force rather than only one set at "
+            "this scope."
+        ),
+    )
 
 
 class OptionSetResult(BaseModel):
     """Result of a set_option call."""
 
-    option: str = Field(description="Option name")
+    option: str = Field(description="Option name as supplied by the caller")
+    resolved_option: str | None = Field(
+        default=None,
+        description=(
+            "Option tmux resolved the name to. tmux accepts unambiguous "
+            "prefixes, so 'history-lim' sets 'history-limit' and the caller "
+            "would otherwise have no way to confirm which option changed."
+        ),
+    )
     value: str = Field(description="Value that was set")
     status: str = Field(description="Operation status")
 
@@ -220,15 +298,57 @@ class OptionSetResult(BaseModel):
 class EnvironmentResult(BaseModel):
     """Result of a show_environment call."""
 
-    variables: dict[str, str | bool] = Field(description="Environment variable mapping")
+    scope_queried: str = Field(
+        default="global",
+        description="Scope the variables were read from: 'global' or 'session'.",
+    )
+    variables: dict[str, str] = Field(
+        description="Variables that are SET, mapped to their values."
+    )
+    removed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names tmux marks as explicitly REMOVED from the environment "
+            "(it prints them as ``-NAME``). These are not in ``variables``. "
+            "Distinct from a name that simply never appears, which tmux "
+            "does not report at all."
+        ),
+    )
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "Whether the global environment was merged underneath a "
+            "session's. When false and ``scope_queried`` is 'session', "
+            "``variables`` omits globals that new panes in that session "
+            "will still receive."
+        ),
+    )
 
 
 class EnvironmentSetResult(BaseModel):
     """Result of a set_environment call."""
 
     name: str = Field(description="Variable name")
-    value: str = Field(description="Value that was set")
-    status: str = Field(description="Operation status")
+    value: str | None = Field(
+        default=None,
+        description="Value that was set; null when the variable was unset",
+    )
+    status: str = Field(
+        description=(
+            "'set'; 'unset' when a variable was removed; 'absent' when there "
+            "was nothing to remove AT THE SCOPE TARGETED -- see "
+            "``still_set_globally``."
+        )
+    )
+    still_set_globally: bool = Field(
+        default=False,
+        description=(
+            "True when a session-scoped unset reported 'absent' but the "
+            "name is still set in the GLOBAL environment, so new panes "
+            "keep receiving it. Without this, 'never existed' and "
+            "'still in force everywhere' are the same answer."
+        ),
+    )
 
 
 class WaitForTextResult(BaseModel):
@@ -299,6 +419,17 @@ class WaitForTextResult(BaseModel):
             "``alternate_screen``."
         ),
     )
+    stop_matched_at_entry: bool = Field(
+        default=False,
+        description=(
+            "True when a ``stop`` pattern was already on screen before the "
+            "wait began. The wait only stops on a FRESH stop hit, so this "
+            "does not end it -- but a failure marker left from an earlier "
+            "run is the usual reason a ``timeout`` outcome is misread as "
+            "'still running'. Read it as: check whether you are waiting on "
+            "a run that already failed."
+        ),
+    )
     matched_at_entry: bool = Field(
         default=False,
         description=(
@@ -366,6 +497,18 @@ class RunCommandResult(BaseModel):
         description="Shell exit status, or None when the command timed out",
     )
     timed_out: bool = Field(description="True when the wait timed out")
+    command_may_still_run: bool = Field(
+        default=False,
+        description=(
+            "True when the wait timed out, meaning the command was SENT "
+            "but not observed to finish. It is not cancelled: the "
+            "keystrokes sit in the pane's input buffer and the shell "
+            "runs them whenever it next reads a line, which may be long "
+            "after this call returned. Do NOT retry a non-idempotent "
+            "command on this result -- that is how a `git push` or a "
+            "migration runs twice. Check the pane first."
+        ),
+    )
     elapsed_seconds: float = Field(description="Time spent waiting in seconds")
     output: list[str] = Field(
         default_factory=list,
@@ -399,7 +542,11 @@ class SendKeysOperation(BaseModel):
     keys: str = Field(description="Keys or text to send.")
     pane_id: str | None = Field(
         default=None,
-        description="Pane ID (e.g. '%1').",
+        description=(
+            "Pane ID (e.g. '%1'). Each operation must name its own target "
+            "-- one of pane_id / session_id / session_name / window_id -- "
+            "and is refused individually if it does not."
+        ),
     )
     session_name: str | None = Field(
         default=None,
@@ -533,10 +680,51 @@ class ToolCallBatchResult(BaseModel):
     )
 
 
+class PaneMoveResult(BaseModel):
+    """Result of moving a pane between windows.
+
+    Carries the source-window outcome because the move can DESTROY it:
+    a window with no panes left is removed by tmux, so consolidating
+    panes deletes windows the caller never named. The pane alone cannot
+    express that -- it reports only where it landed.
+    """
+
+    pane: PaneInfo = Field(description="The pane after the move.")
+    source_window_id: str | None = Field(
+        default=None, description="Window the pane was moved out of."
+    )
+    source_window_destroyed: bool = Field(
+        default=False,
+        description=(
+            "Whether the source window was removed because this move left "
+            "it with no panes."
+        ),
+    )
+
+
 class PaneSnapshot(BaseModel):
     """Rich screen capture with metadata: content, cursor, mode, and scroll state."""
 
     pane_id: str = Field(description="Pane ID (e.g. '%1')")
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "Session the pane is in. Present because the server "
+            "instructions recommend this tool over capture_pane + "
+            "get_pane_info, and without it that substitution cannot "
+            "answer which session a pane ended up in -- which break_pane "
+            "can change."
+        ),
+    )
+    window_id: str | None = Field(
+        default=None, description="Window the pane is in (e.g. '@1')."
+    )
+    pane_index: str | None = Field(
+        default=None, description="Pane index within its window."
+    )
+    pane_active: bool | None = Field(
+        default=None, description="Whether this is the window's active pane."
+    )
     content: str = Field(description="Visible pane text")
     cursor_x: int = Field(description="Cursor column (0-based)")
     cursor_y: int = Field(description="Cursor row (0-based)")
@@ -646,11 +834,24 @@ class SearchPanesResult(BaseModel):
         default_factory=list,
         description="PaneContentMatch entries for this page.",
     )
+    searched_scope: t.Literal["visible", "scrollback"] = Field(
+        default="visible",
+        description=(
+            "How much of each pane was read. ``visible`` is the default "
+            "and means ONLY the on-screen rows were searched, so a match "
+            "that has scrolled off is not reported and ``matches: []`` "
+            "does not mean the text is absent. Pass ``content_start`` "
+            "(e.g. -500) to search scrollback."
+        ),
+    )
     truncated: bool = Field(
         default=False,
         description=(
             "True when the result set was truncated by ``limit`` or "
-            "by ``max_matched_lines_per_pane`` on any pane."
+            "by ``max_matched_lines_per_pane`` on any pane. It describes "
+            "those caps ONLY -- it never reports rows left unread "
+            "because the search was scoped to the visible screen; read "
+            "``searched_scope`` for that."
         ),
     )
     truncated_panes: list[str] = Field(
@@ -669,6 +870,38 @@ class SearchPanesResult(BaseModel):
     )
     offset: int = Field(description="The ``offset`` that produced this page.")
     limit: int | None = Field(description="The ``limit`` that produced this page.")
+
+
+class ClientInfo(BaseModel):
+    """One client attached to a tmux server.
+
+    Read with an explicit ``list-clients -F`` rather than through
+    libtmux, whose ``Server.clients`` leaves ``client_tty`` and
+    ``client_pid`` unset -- the same family of unpopulated ``client_*``
+    attributes that makes them unusable as filter fields.
+    """
+
+    client_tty: str | None = Field(default=None, description="Client tty path.")
+    client_pid: int | None = Field(default=None, description="Client process id.")
+    session_name: str | None = Field(
+        default=None, description="Session this client is attached to."
+    )
+    width: int | None = Field(default=None, description="Client width in columns.")
+    height: int | None = Field(default=None, description="Client height in rows.")
+    term_name: str | None = Field(default=None, description="Client TERM value.")
+    control_mode: bool = Field(
+        default=False, description="Whether the client is in control mode."
+    )
+    readonly: bool = Field(default=False, description="Whether the client is readonly.")
+
+
+class ClientListResult(BaseModel):
+    """Result of a list_clients call."""
+
+    clients: list[ClientInfo] = Field(description="Clients attached to the server.")
+    socket_name: str | None = Field(
+        default=None, description="Socket the clients were read from."
+    )
 
 
 class HookEntry(BaseModel):
@@ -702,6 +935,24 @@ class HookListResult(BaseModel):
     """
 
     entries: list[HookEntry] = Field(default_factory=list)
+    include_inherited: bool = Field(
+        default=False,
+        description=(
+            "Whether wider scopes were consulted. When false, an empty "
+            "``entries`` means 'not set at this scope', NOT 'not set' -- "
+            "a hook set globally is in force and still reads as empty."
+        ),
+    )
+    resolved_target: str | None = Field(
+        default=None,
+        description=(
+            "tmux id the query was answered for, or ``null`` for a "
+            "server-scope query, which has no target. Present so an "
+            "untargeted call says which object it picked -- the default "
+            "is the oldest session on the server, which need not be the "
+            "one the caller has in mind."
+        ),
+    )
 
 
 class BufferRef(BaseModel):

@@ -60,22 +60,22 @@ def _exercise_spawned_shell_history(
             pane.refresh()
             return pane.pane_current_command == binary
 
-        retry_until(_shell_is_ready, 3, raises=True)
+        retry_until(_shell_is_ready, 10, raises=True)
         pane.send_keys(config_command(config_path), enter=True)
-        retry_until(config_path.exists, 3, raises=True)
+        retry_until(config_path.exists, 10, raises=True)
         pane.send_keys(
             f"printf '%s\\n' {shlex.quote(sentinel)} >/dev/null",
             enter=True,
         )
         pane.send_keys(memory_command(memory_path), enter=True)
-        retry_until(memory_path.exists, 3, raises=True)
+        retry_until(memory_path.exists, 10, raises=True)
         pane.send_keys("exit", enter=True)
 
         def _pane_is_dead() -> bool:
             rendered = pane.cmd("display-message", "-p", "#{pane_dead}").stdout
             return bool(rendered) and rendered[0].strip() == "1"
 
-        retry_until(_pane_is_dead, 3, raises=True)
+        retry_until(_pane_is_dead, 10, raises=True)
         disk_path = disk_history(home, data_home)
         disk_text = disk_path.read_text() if disk_path.exists() else None
         return config_path.read_text(), memory_path.read_text(), disk_text
@@ -215,7 +215,7 @@ def _exercise_shell_startup_override(
             pane.refresh()
             return pane.pane_current_command == binary
 
-        retry_until(_shell_is_ready, 3, raises=True)
+        retry_until(_shell_is_ready, 10, raises=True)
         pane.send_keys(
             f"printf '%s\\n' {shlex.quote(sentinel)} >/dev/null",
             enter=True,
@@ -226,7 +226,7 @@ def _exercise_shell_startup_override(
             rendered = pane.cmd("display-message", "-p", "#{pane_dead}").stdout
             return bool(rendered) and rendered[0].strip() == "1"
 
-        retry_until(_pane_is_dead, 3, raises=True)
+        retry_until(_pane_is_dead, 10, raises=True)
         return disk_path.read_text() if disk_path.exists() else None
     finally:
         pane.kill()

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import pathlib
+import tempfile
 import typing as t
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from libtmux_mcp.tools.server_tools import (
     create_session,
@@ -17,6 +19,7 @@ from libtmux_mcp.tools.server_tools import (
 )
 
 if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
     from libtmux.server import Server
     from libtmux.session import Session
 
@@ -133,7 +136,7 @@ def test_create_session_environment_accepts_json_string(
     """create_session accepts ``environment`` as a JSON string.
 
     Regression guard for the Cursor composer-1/1.5 dict-stringification
-    bug. Mirrors ``tests/test_utils.py::test_apply_filters`` which
+    bug. Mirrors ``tests/test_filters.py::test_apply_filters`` which
     exercises the same fallback for the ``filters`` parameter on list
     tools. The four fixtures match the filters test's four cases:
     valid JSON object, invalid JSON, JSON that is not an object
@@ -190,7 +193,7 @@ class ListSessionsFilterFixture(t.NamedTuple):
     """Test fixture for list_sessions with filters."""
 
     test_id: str
-    filters: dict[str, str] | None
+    filters: dict[str, str | bool | int] | None
     expected_count: int | None
     expect_error: bool
     error_match: str | None
@@ -251,7 +254,7 @@ LIST_SESSIONS_FILTER_FIXTURES: list[ListSessionsFilterFixture] = [
         filters={"session_name__badop": "test"},
         expected_count=None,
         expect_error=True,
-        error_match="Invalid filter operator",
+        error_match="is not a filter operator",
     ),
     ListSessionsFilterFixture(
         test_id="multiple_filters",
@@ -272,7 +275,7 @@ def test_list_sessions_with_filters(
     mcp_server: Server,
     mcp_session: Session,
     test_id: str,
-    filters: dict[str, str] | None,
+    filters: dict[str, str | bool | int] | None,
     expected_count: int | None,
     expect_error: bool,
     error_match: str | None,
@@ -283,7 +286,7 @@ def test_list_sessions_with_filters(
     if filters is not None:
         session_name = mcp_session.session_name
         assert session_name is not None
-        resolved: dict[str, str] = {}
+        resolved: dict[str, str | bool | int] = {}
         for k, v in filters.items():
             if v == "<session_name>":
                 resolved[k] = session_name
@@ -329,7 +332,7 @@ def test_kill_server_self_kill_guard(
     """kill_server refuses when the caller shares the target's socket."""
     from fastmcp.exceptions import ToolError
 
-    from libtmux_mcp._utils import _effective_socket_path
+    from libtmux_mcp._caller import _effective_socket_path
 
     socket_path = _effective_socket_path(mcp_server)
     monkeypatch.setenv("TMUX", f"{socket_path},12345,$0")
@@ -387,6 +390,41 @@ def test_list_servers_finds_live_socket(mcp_server: Server) -> None:
     assert found.is_alive is True
 
 
+def test_list_servers_reports_a_complete_identity_and_dedups(
+    mcp_server: Server,
+    mcp_session: Session,
+) -> None:
+    """Each row carries both identity fields, and extras do not duplicate.
+
+    The scan holds the full path in the directory entry but reported
+    only the name, so ``socket_path`` was null on every scanned row.
+    Passing the same socket via ``extra_socket_paths`` then listed it a
+    second time with the opposite half of its identity, and nothing tied
+    the two rows together.
+    """
+    import os
+    import pathlib as _pathlib
+
+    assert mcp_session is not None  # forces the tmux server to exist
+    socket_path = (
+        _pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
+        / f"tmux-{os.geteuid()}"
+        / str(mcp_server.socket_name)
+    )
+
+    scanned = [r for r in list_servers() if r.socket_name == mcp_server.socket_name]
+    assert len(scanned) == 1
+    assert scanned[0].socket_path == str(socket_path)
+
+    both = list_servers(extra_socket_paths=[str(socket_path)])
+    same_server = [
+        r
+        for r in both
+        if r.socket_name == mcp_server.socket_name or r.socket_path == str(socket_path)
+    ]
+    assert len(same_server) == 1
+
+
 def test_list_servers_missing_tmpdir_returns_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -421,12 +459,15 @@ def test_list_servers_extra_socket_paths_surfaces_custom_path(
     """
     from libtmux_mcp.models import ServerInfo
 
-    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+    # Where the fixture's socket actually is, read BEFORE the scan is
+    # repointed. Hardcoding /tmp assumed the ambient TMUX_TMPDIR, which
+    # stopped being true once the suite isolated it per test.
     fixture_socket = (
-        pathlib.Path("/tmp")
+        pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
         / f"tmux-{os.geteuid()}"
         / (mcp_server.socket_name or "default")
     )
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
     assert fixture_socket.is_socket(), "fixture socket must exist for the test"
 
     results = list_servers(extra_socket_paths=[str(fixture_socket)])
@@ -459,3 +500,364 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
         extra_socket_paths=[str(bogus), str(regular_file)],
     )
     assert results == []
+
+
+def test_tools_refuse_a_wedged_server_instead_of_hanging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A server that accepts and never answers used to hang every tool.
+
+    ``list_servers`` reports such a socket honestly, so the operator's
+    next call is aimed straight at it -- and ``get_server_info``,
+    ``list_sessions`` and ``capture_pane`` all blocked forever.
+    ``capture_pane`` is the one that shows it was never a
+    ``list_servers`` problem: it does not probe liveness at all, it
+    resolves a pane through ``Server.cmd``, which has no timeout.
+
+    The bound lives in ``_get_server``, which every tool funnels
+    through. A DEAD socket must be unaffected -- it answers immediately,
+    which is not a timeout -- so the control matters as much as the
+    case.
+    """
+    import socket as socket_module
+    import threading
+    import time
+
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp._servers import _server_cache
+    from libtmux_mcp.tools.server_tools import get_server_info
+
+    # A short dir, not ``tmp_path``: UNIX socket paths cap at 108 bytes.
+    # Isolated from the real TMUX_TMPDIR so a parallel worker's scan
+    # cannot see this socket, and so a leak cannot outlive the test.
+    with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+        monkeypatch.setenv("TMUX_TMPDIR", tmpdir)
+        uid_dir = pathlib.Path(tmpdir) / f"tmux-{os.geteuid()}"
+        # 0700 or tmux refuses the directory outright, which answers
+        # instantly and would let this test pass without ever reaching
+        # the socket it built.
+        uid_dir.mkdir(mode=0o700)
+        _server_cache.clear()
+
+        listener = socket_module.socket(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        listener.bind(str(uid_dir / "silent"))
+        listener.listen(8)
+        listener.settimeout(0.2)
+        stop = threading.Event()
+        held: list[socket_module.socket] = []
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except (TimeoutError, OSError):
+                    continue
+                held.append(conn)  # accept, never speak, never close
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            started = time.monotonic()
+            with pytest.raises(ToolError, match="did not answer within"):
+                get_server_info(socket_name="silent")
+            elapsed = time.monotonic() - started
+
+            # Control: a socket with nothing behind it is NOT a timeout.
+            # Without it, a guard that refused every socket would pass.
+            _server_cache.clear()
+            absent = get_server_info(socket_name="absent")
+            assert absent.is_alive is False
+        finally:
+            stop.set()
+            listener.close()
+            for conn in held:
+                conn.close()
+            thread.join(timeout=2)
+            _server_cache.clear()
+
+    assert elapsed < 15.0, f"the refusal took {elapsed:.1f}s"
+
+
+def test_list_servers_survives_a_socket_that_never_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A listener is not a server that replies, and one hung the scan.
+
+    ``_is_tmux_socket_live`` proves only that the connection was
+    accepted. A tmux server spinning inside its own event loop does
+    exactly that and never answers, and ``Server.cmd`` has no timeout --
+    so ONE such socket made ``list_servers`` never return. Measured on a
+    real directory: 2.03s before the silent listener was added, and not
+    finished 85 seconds after.
+
+    The socket is REPORTED rather than dropped. Dropping it would be the
+    same "empty means absent" claim the resource path was fixed for, and
+    a wedged server is the thing an operator is looking for.
+    """
+    import socket as socket_module
+    import threading
+    import time
+
+    from libtmux_mcp.tools.server_tools import _PROBE_TIMEOUT_SECONDS
+
+    # An EMPTY TMUX_TMPDIR, so the measurement is of this code and not of
+    # the machine's socket litter. Unisolated, the scan probes every socket
+    # in the shared directory -- 1785 of them on the development box, ~1 ms
+    # each when quiet, but the per-probe cost inflates under load: 40.38 s
+    # against 0.25 s quiet. The sibling below isolates for the same reason.
+    with (
+        tempfile.TemporaryDirectory(prefix="lsq-") as empty_dir,
+        tempfile.TemporaryDirectory() as tmpdir,
+    ):
+        monkeypatch.setenv("TMUX_TMPDIR", empty_dir)
+        path = pathlib.Path(tmpdir) / "silent.sock"
+        listener = socket_module.socket(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        listener.bind(str(path))
+        listener.listen(8)
+        listener.settimeout(0.2)
+        stop = threading.Event()
+        held: list[socket_module.socket] = []
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except (TimeoutError, OSError):
+                    continue
+                held.append(conn)  # accept, never speak, never close
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            started = time.monotonic()
+            found = list_servers(extra_socket_paths=[str(path)])
+            elapsed = time.monotonic() - started
+        finally:
+            stop.set()
+            listener.close()
+            for conn in held:
+                conn.close()
+            thread.join(timeout=2)
+
+    # Derived from the product's constant, so it moves when that does. One
+    # silent socket costs one probe timeout and the multiple is headroom:
+    # this is a CEILING a working scan returns from in about 2 s. A literal
+    # 10.0 asserts the machine's speed -- it failed at loadavg 90, once by
+    # 28 ms, which is a coin flip rather than a caught defect.
+    ceiling = _PROBE_TIMEOUT_SECONDS * 5
+    assert elapsed < ceiling, (
+        f"list_servers took {elapsed:.1f}s against a silent socket "
+        f"(ceiling {ceiling:.1f}s)"
+    )
+    rows = [row for row in found if row.socket_name == "silent.sock"]
+    assert rows, "the unreachable socket was dropped instead of reported"
+    assert rows[0].is_alive is False
+    assert "did not answer" in (rows[0].unreachable_reason or "")
+
+
+def test_list_servers_is_ordered_and_complete_under_concurrency(
+    TestServer: type[Server], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scan probes sockets in parallel; order must not depend on timing.
+
+    ``ThreadPoolExecutor.map`` preserves input order, so the listing
+    stays sorted by socket name however the probes interleave.
+
+    Not ``tmp_path``: a UNIX socket path is capped at 108 bytes, and
+    under ``pytest-xdist`` the worker and test-name components push
+    ``<tmp_path>/tmux-<uid>/libtmux_test<rand>`` past it. The failure is
+    invisible in a serial run.
+    """
+    with tempfile.TemporaryDirectory(prefix="lsq-") as short_dir:
+        monkeypatch.setenv("TMUX_TMPDIR", short_dir)
+        _assert_scan_is_ordered_and_complete(TestServer)
+
+
+def _assert_scan_is_ordered_and_complete(TestServer: type[Server]) -> None:
+    """Body of the scan test, split out to keep the tmpdir scope tight."""
+    servers = [TestServer() for _ in range(4)]
+    for server in servers:
+        server.new_session(session_name="probe")
+
+    listed = list_servers()
+    names = [row.socket_name for row in listed if row.socket_name is not None]
+    assert names == sorted(names)
+    assert len(names) == len(servers)
+
+
+def test_a_tool_is_bounded_past_the_liveness_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    mcp_server: Server,
+    mcp_pane: Pane,
+) -> None:
+    """The sibling of the never-answers case, and the one that bit.
+
+    A socket that never answers is caught by the 5s liveness probe, so
+    the call *behind* the probe never runs -- that fixture is
+    structurally incapable of producing this defect. A socket that
+    answers the probe and stalls afterwards reaches it: ``break_pane``
+    makes eleven round trips, and every one after the first went
+    through libtmux's untimed ``Popen.communicate()``. Measured before
+    the fix: still running at 150s.
+
+    ``break_pane`` stands in for the class. The bound is installed once
+    at ``tmux_cmd``, so a per-tool test here would say nothing the
+    ``tmux_cmd`` tests do not already say.
+    """
+    import socket as socket_module
+    import threading
+    import time
+
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp import _exec
+    from libtmux_mcp._servers import _server_cache
+    from libtmux_mcp.tools.window_tools import break_pane
+
+    # Exercise the mechanism, not the shipped constant: a 5s bound would
+    # spend 5s of suite time proving what 0.5s proves.
+    monkeypatch.setattr(_exec, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
+    upstream = (
+        pathlib.Path(os.environ.get("TMUX_TMPDIR", "/tmp"))
+        / f"tmux-{os.geteuid()}"
+        / (mcp_server.socket_name or "default")
+    )
+    assert upstream.is_socket(), "fixture socket must exist for the test"
+
+    with tempfile.TemporaryDirectory(dir="/tmp") as tmpdir:
+        monkeypatch.setenv("TMUX_TMPDIR", tmpdir)
+        uid_dir = pathlib.Path(tmpdir) / f"tmux-{os.geteuid()}"
+        uid_dir.mkdir(mode=0o700)  # tmux refuses any other mode, instantly
+        _server_cache.clear()
+
+        listener = socket_module.socket(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        listener.bind(str(uid_dir / "halfwedge"))
+        listener.listen(16)
+        listener.settimeout(0.2)
+        stop = threading.Event()
+        held: list[socket_module.socket] = []
+        forwarded = 0
+
+        def pump(src: socket_module.socket, dst: socket_module.socket) -> None:
+            try:
+                while True:
+                    chunk = src.recv(65536)
+                    if not chunk:
+                        break
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+
+        def serve() -> None:
+            nonlocal forwarded
+            first = True
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except (TimeoutError, OSError):
+                    continue
+                if not first:
+                    held.append(conn)  # accept, never speak, never close
+                    continue
+                first = False
+                up = socket_module.socket(
+                    socket_module.AF_UNIX, socket_module.SOCK_STREAM
+                )
+                up.connect(str(upstream))
+                forwarded += 1
+                for a, b in ((conn, up), (up, conn)):
+                    threading.Thread(target=pump, args=(a, b), daemon=True).start()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        outcome: dict[str, BaseException | None] = {}
+
+        pane_id = mcp_pane.pane_id
+        assert pane_id is not None
+
+        def call() -> None:
+            try:
+                break_pane(pane_id=pane_id, socket_name="halfwedge")
+            except BaseException as err:  # noqa: BLE001
+                outcome["error"] = err
+            else:
+                outcome["error"] = None
+
+        worker = threading.Thread(target=call, daemon=True)
+        started = time.monotonic()
+        worker.start()
+        worker.join(timeout=20.0)
+        elapsed = time.monotonic() - started
+        try:
+            assert not worker.is_alive(), f"still running after {elapsed:.1f}s"
+            assert forwarded == 1, (
+                "the probe was never forwarded, so the call behind it never ran"
+            )
+            error = outcome["error"]
+            assert isinstance(error, ToolError)
+            assert "did not return within" in str(error)
+        finally:
+            stop.set()
+            listener.close()
+            for conn in held:
+                conn.close()
+            thread.join(timeout=2)
+            _server_cache.clear()
+
+
+def test_kill_server_kills_the_server(TestServer: type[Server]) -> None:
+    """The destructive path had no functional test, only tier checks.
+
+    Verified by asking the server rather than by trusting the return
+    string: a tool that returned "Server killed successfully" and killed
+    nothing would have passed on the message alone.
+    """
+    doomed = TestServer()
+    doomed.new_session(session_name="doomed", window_command="sh")
+    assert doomed.is_alive()
+
+    result = kill_server(socket_name=doomed.socket_name)
+
+    assert "killed" in result
+    assert not doomed.is_alive()
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_kill_server_refuses_the_caller_s_own_server(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-kill protection covers the whole server, not just a pane.
+
+    ``$TMUX`` is pointed at the target so the guard sees the caller as
+    living on it -- the situation the refusal exists for. The control
+    above proves the refusal is not simply a tool that never kills.
+
+    ``mcp_session`` is what BOOTS the daemon; the bare ``mcp_server``
+    fixture only constructs an unstarted ``Server``, so asserting it is
+    still alive afterwards would fail whether or not the kill happened.
+
+    The two assertions need two different mutations. Disabling the
+    guard falsifies the ``raises`` block and never reaches the second
+    line; only a guard that raises the right error and kills anyway
+    falsifies ``is_alive``. So the liveness check is load-bearing
+    rather than belt-and-braces -- it catches a tool that refuses in
+    words and kills in fact.
+    """
+    from libtmux_mcp._caller import _effective_socket_path
+
+    socket_path = _effective_socket_path(mcp_server)
+    assert socket_path is not None
+    monkeypatch.setenv("TMUX", f"{socket_path},1,$0")
+    monkeypatch.setenv("TMUX_PANE", "%0")
+
+    with pytest.raises(ToolError, match="Refusing to kill"):
+        kill_server(socket_name=mcp_server.socket_name)
+
+    assert mcp_server.is_alive()

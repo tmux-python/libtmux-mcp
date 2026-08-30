@@ -10,14 +10,13 @@ from fastmcp import Context
 from fastmcp.tools.base import ToolResult
 from pydantic import BaseModel
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors_async
+from libtmux_mcp._safety import (
     ANNOTATIONS_RO,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     TAG_SELF_BOUNDED,
-    ExpectedToolError,
-    handle_tool_errors_async,
 )
 from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
 from libtmux_mcp.models import (
@@ -125,16 +124,19 @@ async def _get_allowed_tool_tier(
 
     tool = await fastmcp.get_tool(operation.tool)
     if tool is None:
-        msg = f"Unknown tool: {operation.tool!r}"
-        raise ExpectedToolError(msg)
+        # None means nonexistent OR disabled by tier, so "Unknown tool"
+        # here would deny that a gated tool exists. Hand it on: the nested
+        # call runs with ``run_middleware=True``, letting
+        # ``SafetyMiddleware`` name the tier while FastMCP still raises
+        # ``NotFoundError`` for a typo.
+        return
 
     # ``max_tier`` is a CEILING, so a readonly tool is reachable through
-    # every batch wrapper, not only the readonly one. The batch loop is
-    # serial with no aggregate deadline and ``MAX_BATCH_OPERATIONS`` is
-    # 1000, so a self-bounded wait batched N times costs N x its
-    # ceiling. Reject per-operation (not pre-loop) so the raise becomes
-    # a ``success=False`` row and ``on_error='continue'`` isolation is
-    # preserved.
+    # every batch wrapper. The loop is serial with no aggregate deadline
+    # and ``MAX_BATCH_OPERATIONS`` is 1000, so a self-bounded wait batched
+    # N times costs N x its ceiling.
+    # Rejected per-operation, not pre-loop, so the raise becomes a
+    # ``success=False`` row and ``on_error='continue'`` still isolates.
     if TAG_SELF_BOUNDED in tool.tags:
         msg = (
             f"Tool {operation.tool!r} enforces its own wait ceiling and "
@@ -259,8 +261,12 @@ async def _call_tools_batch(
     on_error: _OnError,
     max_tier: str,
     ctx: Context | None,
+    timeout: float | None = None,
 ) -> ToolCallBatchResult:
     """Execute nested MCP tool calls serially through FastMCP."""
+    if timeout is not None and timeout <= 0:
+        msg = f"timeout must be positive, or null for no cap (received {timeout})"
+        raise ExpectedToolError(msg)
     if not operations:
         msg = "operations must contain at least one tool call"
         raise ExpectedToolError(msg)
@@ -268,7 +274,7 @@ async def _call_tools_batch(
         msg = f"operations must contain at most {MAX_BATCH_OPERATIONS} tool calls"
         raise ExpectedToolError(msg)
     if on_error not in {"stop", "continue"}:
-        msg = "on_error must be 'stop' or 'continue'"
+        msg = f"on_error must be 'stop' or 'continue' (received {on_error!r})"
         raise ExpectedToolError(msg)
     if ctx is None:
         msg = "FastMCP context is required; call this tool through MCP."
@@ -276,7 +282,28 @@ async def _call_tools_batch(
 
     results: list[ToolCallOperationResult] = []
     stopped_at: int | None = None
+    deadline = time.monotonic() + timeout if timeout is not None else None
     for index, operation in enumerate(operations):
+        # BETWEEN operations is enough because the time is genuinely in
+        # this loop. A thousand mutations take 67 s, and a client giving up
+        # does not stop the server -- 617 further mutations landed after
+        # the caller was gone, with no report of where it stopped.
+        if deadline is not None and time.monotonic() > deadline:
+            assert timeout is not None
+            results.append(
+                ToolCallOperationResult(
+                    index=index,
+                    tool=operation.tool,
+                    success=False,
+                    error=(
+                        f"batch execution exceeded timeout of {timeout}s; "
+                        "operations from this index onward did not run"
+                    ),
+                    elapsed_seconds=0.0,
+                )
+            )
+            stopped_at = index
+            break
         result = await _call_one_tool(
             fastmcp=ctx.fastmcp,
             operation=operation,
@@ -304,6 +331,7 @@ async def _call_tools_batch(
 async def call_readonly_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    timeout: float | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
     """Call readonly MCP tools serially and return per-tool results.
@@ -313,10 +341,33 @@ async def call_readonly_tools_batch(
     middleware, and safety checks. Mutating and destructive tools are
     rejected even if the server process itself is running at a higher
     safety tier.
+
+    Batching trades one transport round trip for one re-paid per-call
+    framework cost, so whether it wins depends on which is bigger --
+    that is, on **how expensive the nested tool is**, not on how many
+    of them there are. There is no general break-even count. Measured
+    over stdio, the ratio at a single operation ranged from 0.71 to
+    1.83 across four read tools, so the same n=1 both wins and loses
+    depending on what is nested.
+
+    Batch when the operations are individually expensive or return a
+    lot: a mixed read of ``get_pane_info`` + ``list_panes`` +
+    ``show_option`` + ``capture_pane`` measured 65 ms batched against
+    120 ms serial. For the cheapest single-value reads the two are
+    close at low counts and batching pulls ahead as the count grows.
+    Per-operation ``elapsed_seconds`` in the result is there so a
+    caller can settle this for its own mix rather than trusting a
+    curve.
+
+    ``timeout`` bounds the WHOLE batch, checked between operations.
+    Without it a batch runs to completion, and the cap is 1000 calls:
+    a client that gives up does not stop the server, so the work keeps
+    applying after the caller is gone.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
+        timeout=timeout,
         max_tier=TAG_READONLY,
         ctx=ctx,
     )
@@ -326,6 +377,7 @@ async def call_readonly_tools_batch(
 async def call_mutating_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    timeout: float | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
     """Call readonly or mutating MCP tools serially and return per-tool results.
@@ -333,10 +385,16 @@ async def call_mutating_tools_batch(
     Use for ordered tmux workflows where every step is still an existing
     typed MCP tool. Destructive tools are rejected regardless of the
     process-wide safety tier.
+
+    ``timeout`` bounds the WHOLE batch, checked between operations.
+    Without it a batch runs to completion, and the cap is 1000 calls:
+    a client that gives up does not stop the server, so the work keeps
+    applying after the caller is gone.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
+        timeout=timeout,
         max_tier=TAG_MUTATING,
         ctx=ctx,
     )
@@ -346,6 +404,7 @@ async def call_mutating_tools_batch(
 async def call_destructive_tools_batch(
     operations: list[ToolCallOperation],
     on_error: _OnError = "stop",
+    timeout: float | None = None,
     ctx: Context | None = None,
 ) -> ToolCallBatchResult:
     """Call readonly, mutating, or destructive MCP tools serially.
@@ -353,10 +412,16 @@ async def call_destructive_tools_batch(
     This wrapper preserves the normal per-tool schemas and middleware
     but its tier permits destructive nested operations. Prefer the
     narrower readonly or mutating wrappers whenever possible.
+
+    ``timeout`` bounds the WHOLE batch, checked between operations.
+    Without it a batch runs to completion, and the cap is 1000 calls:
+    a client that gives up does not stop the server, so the work keeps
+    applying after the caller is gone.
     """
     return await _call_tools_batch(
         operations=operations,
         on_error=on_error,
+        timeout=timeout,
         max_tier=TAG_DESTRUCTIVE,
         ctx=ctx,
     )

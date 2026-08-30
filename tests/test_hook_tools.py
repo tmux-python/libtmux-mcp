@@ -125,6 +125,15 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
             scope="server",
             socket_name=mcp_server.socket_name,
         )
+        # The invariant holds WITHIN a scope, so the default listing is
+        # compared against the default lookup. Comparing against
+        # show_hook(scope="server") is only satisfiable by stapling global
+        # hooks onto a session-scope listing -- a set corresponding to no
+        # tmux scope.
+        defaulted = show_hooks(socket_name=mcp_server.socket_name)
+        defaulted_singular = show_hook(
+            hook_name="pane-focus-in", socket_name=mcp_server.socket_name
+        )
 
         # Control: show_hook finds the -g-set pane hook.
         singular_names = {e.hook_name for e in singular.entries}
@@ -137,6 +146,16 @@ def test_show_hooks_surfaces_globally_set_pane_hook(
         assert "pane-focus-in" in plural_names, (
             f"show_hooks(scope='server') returned {plural_names} "
             f"but show_hook found pane-focus-in — inconsistency."
+        )
+
+        defaulted_names = {e.hook_name for e in defaulted.entries}
+        singular_default = {e.hook_name for e in defaulted_singular.entries}
+        assert ("pane-focus-in" in defaulted_names) == (
+            "pane-focus-in" in singular_default
+        ), (
+            f"show_hooks() returned {defaulted_names} and show_hook() "
+            f"returned {singular_default} — the two must agree at the same "
+            "scope, whichever way."
         )
     finally:
         mcp_server.cmd("set-hook", "-g", "-u", "pane-focus-in")
@@ -192,5 +211,107 @@ def test_show_hooks_target_without_scope(mcp_server: Server) -> None:
     with pytest.raises(ToolError, match="scope is required"):
         show_hooks(
             target="somesession",
+            socket_name=mcp_server.socket_name,
+        )
+
+
+def test_show_hooks_reports_the_scope_it_was_asked_for(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A window- or pane-scoped query must not answer about the session.
+
+    Window and Pane objects default to the SESSION tree, so resolving
+    the object and then dropping the scope silently redirected the
+    query one level up: ``scope="window"`` returned the session's hooks
+    and no spelling reached the window's at all.
+    """
+    window = mcp_session.active_window
+    mcp_session.cmd("set-hook", "alert-activity", "display-message SESSION_MARK")
+    window.cmd("set-hook", "-w", "pane-focus-in", "display-message WINDOW_MARK")
+
+    def marks(**kwargs: t.Any) -> set[str]:
+        result = show_hooks(socket_name=mcp_server.socket_name, **kwargs)
+        return {entry.command.split()[-1] for entry in result.entries}
+
+    assert marks(scope="session", target=mcp_session.session_name) == {"SESSION_MARK"}
+    assert marks(scope="window", target=window.window_id) == {"WINDOW_MARK"}
+
+    # The untargeted listing must contain exactly what a name-targeted
+    # lookup finds with the same defaults. The default is the OLDEST
+    # session on the server, not necessarily this fixture's, so the marks
+    # go where the tool says it will look -- asserting against
+    # mcp_session would pass vacuously once both sides came back empty.
+    default_target = show_hooks(socket_name=mcp_server.socket_name).resolved_target
+    default_session = next(
+        s for s in mcp_server.sessions if s.session_id == default_target
+    )
+    default_session.cmd("set-hook", "alert-silence", "display-message DEFAULT_SESSION")
+    default_session.active_window.cmd(
+        "set-hook", "-w", "pane-set-clipboard", "display-message DEFAULT_WINDOW"
+    )
+    try:
+        listed = marks()
+        assert {"DEFAULT_SESSION", "DEFAULT_WINDOW"} <= listed
+        for hook_name in ("alert-silence", "pane-set-clipboard"):
+            found = show_hook(hook_name=hook_name, socket_name=mcp_server.socket_name)
+            assert found.entries, f"{hook_name} listed but not findable by name"
+            assert found.resolved_target == default_target
+    finally:
+        default_session.cmd("set-hook", "-u", "alert-silence")
+        default_session.active_window.cmd("set-hook", "-wu", "pane-set-clipboard")
+
+    # global_=True has to reach the GLOBAL window tree. Carrying only
+    # scope=="server" into the merge stapled the CURRENT window's hooks
+    # onto the globals, so the two ways of asking for "the globals"
+    # disagreed with each other.
+    mcp_server.cmd("set-hook", "-gw", "pane-died", "display-message GLOBALWIN_MARK")
+    try:
+        assert marks(global_=True) == marks(scope="server")
+    finally:
+        mcp_server.cmd("set-hook", "-gw", "-u", "pane-died")
+
+
+def test_show_hook_finds_a_globally_set_hook_when_asked_to_inherit(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``entries: []`` means "not set at this scope", not "not set".
+
+    A hook set with ``set-hook -g`` is in force and WILL fire, but
+    tmux's ``show-hooks <name>`` does not consult wider scopes, so the
+    default answer is zero rows for a hook that exists. This is the same
+    trap ``show_option`` documents, and it takes the same flag.
+    """
+    mcp_server.cmd("set-hook", "-g", "alert-bell", "display-message inherited")
+
+    at_scope = show_hook(
+        hook_name="alert-bell",
+        scope="session",
+        target=mcp_session.session_name,
+        socket_name=mcp_server.socket_name,
+    )
+    assert at_scope.entries == []
+    assert at_scope.include_inherited is False
+
+    in_force = show_hook(
+        hook_name="alert-bell",
+        scope="session",
+        target=mcp_session.session_name,
+        include_inherited=True,
+        socket_name=mcp_server.socket_name,
+    )
+    assert in_force.include_inherited is True
+    assert [e.command for e in in_force.entries] == ["display-message inherited"]
+
+
+def test_show_hook_inherited_still_rejects_a_typo(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A misspelled hook must not read as an unset one on either path."""
+    with pytest.raises(ToolError):
+        show_hook(
+            hook_name="alert-belll",
+            scope="session",
+            target=mcp_session.session_name,
+            include_inherited=True,
             socket_name=mcp_server.socket_name,
         )

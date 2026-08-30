@@ -8,27 +8,29 @@ import os
 import pathlib
 import socket
 import typing as t
+from concurrent.futures import ThreadPoolExecutor
 
-from fastmcp.exceptions import ToolError
+from libtmux.server import Server
+from libtmux.session import Session
 
+from libtmux_mcp._caller import _caller_is_on_server, _get_caller_identity
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._exec import _run_tmux_sync
+from libtmux_mcp._filters import _apply_filters
+from libtmux_mcp._guards import _raise_if_start_directory_unusable
 from libtmux_mcp._history import _prepare_spawn_environment
-from libtmux_mcp._utils import (
+from libtmux_mcp._safety import (
     ANNOTATIONS_CREATE,
     ANNOTATIONS_DESTRUCTIVE,
     ANNOTATIONS_RO,
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _apply_filters,
-    _caller_is_on_server,
-    _get_caller_identity,
-    _get_server,
-    _invalidate_server,
-    _serialize_session,
-    handle_tool_errors,
 )
-from libtmux_mcp.models import ServerInfo, SessionInfo
+from libtmux_mcp._serialize import _serialize_session
+from libtmux_mcp._servers import _get_server, _invalidate_server, _probe_liveness
+from libtmux_mcp._tmux_format import escape_format
+from libtmux_mcp.models import ClientInfo, ClientListResult, ServerInfo, SessionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ if t.TYPE_CHECKING:
 @handle_tool_errors
 def list_sessions(
     socket_name: str | None = None,
-    filters: dict[str, str] | str | None = None,
+    filters: dict[str, str | bool | int] | str | None = None,
 ) -> list[SessionInfo]:
     """List tmux sessions (terminal workspaces) on a tmux server.
 
@@ -55,6 +57,8 @@ def list_sessions(
     filters : dict or str, optional
         Django-style filters as a dict (e.g. ``{"session_name__contains": "dev"}``)
         or as a JSON string. Some MCP clients require the string form.
+        Every field this tool returns is filterable; any libtmux
+        Session attribute works too.
 
     Returns
     -------
@@ -63,7 +67,27 @@ def list_sessions(
     """
     server = _get_server(socket_name=socket_name)
     sessions = server.sessions
-    return _apply_filters(sessions, filters, _serialize_session)
+    # ``Server.sessions`` degrades to [] for a server it could not reach
+    # as well as for one with no sessions, so an empty answer is the only
+    # ambiguous one. Probe only then: a server that listed anything
+    # cannot be unreachable, and this is the most-called discovery tool.
+    if not sessions:
+        _, unreachable = _probe_liveness(server)
+        if unreachable is not None:
+            msg = (
+                f"tmux server exists but could not be queried: {unreachable}. "
+                "Reporting no sessions would claim it is empty."
+            )
+            raise ExpectedToolError(
+                msg,
+                suggestion=(
+                    "Most often this tmux binary is older than the one that "
+                    "started the server; sockets outlive the binary that made "
+                    "them. Compare `tmux -V` with the server's own version and "
+                    "set LIBTMUX_TMUX_BIN to the matching binary."
+                ),
+            )
+    return _apply_filters(sessions, filters, _serialize_session, Session, SessionInfo)
 
 
 @handle_tool_errors
@@ -100,7 +124,7 @@ def create_session(
         Environment variables to store in the session environment. Accepts
         either a dict of env vars or a JSON-serialized string of the same —
         the latter is the cursor-composer-1 workaround described in
-        :func:`libtmux_mcp._utils._coerce_dict_arg`. Each item appears in the
+        :func:`libtmux_mcp._filters._coerce_dict_arg`. Each item appears in the
         tmux client argv as one ``-eKEY=VALUE`` element and may be visible to
         host process inspection during launch. tmux retains the values in
         tmux session state, where ``show-environment`` can reveal them. They reach
@@ -124,14 +148,15 @@ def create_session(
         environment,
         suppress_persistent_history=suppress_persistent_history,
     )
+    _raise_if_start_directory_unusable(start_directory)
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}
     if session_name is not None:
-        kwargs["session_name"] = session_name
+        kwargs["session_name"] = escape_format(session_name)
     if window_name is not None:
-        kwargs["window_name"] = window_name
+        kwargs["window_name"] = escape_format(window_name)
     if start_directory is not None:
-        kwargs["start_directory"] = start_directory
+        kwargs["start_directory"] = escape_format(start_directory)
     if x is not None:
         kwargs["x"] = x
     if y is not None:
@@ -193,17 +218,15 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
         Server information.
     """
     server = _get_server(socket_name=socket_name)
-    alive = server.is_alive()
+    alive, unreachable = _probe_liveness(server)
     version: str | None = None
     try:
         result = server.cmd("display-message", "-p", "#{version}")
         version = result.stdout[0] if result.stdout else None
     except Exception as err:
-        # Best-effort — tmux ancient versions lack ``#{version}``,
-        # permissions may deny display-message, etc. Mirrors the same
-        # logging style used by ``_probe_server_by_path`` so operators
-        # see a uniform signal when custom sockets fail to report
-        # metadata.
+        # Best-effort: old tmux lacks ``#{version}`` and permissions may
+        # deny display-message. Logged like ``_probe_server_by_path`` so a
+        # socket failing to report metadata reads the same either way.
         logger.debug("get_server_info: version query raised %s", err)
     return ServerInfo(
         is_alive=alive,
@@ -211,6 +234,7 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
         socket_path=str(server.socket_path) if server.socket_path else None,
         session_count=len(server.sessions) if alive else 0,
         version=version,
+        unreachable_reason=unreachable,
     )
 
 
@@ -239,6 +263,88 @@ def _is_tmux_socket_live(path: pathlib.Path) -> bool:
             s.close()
 
 
+def _socket_key(path: pathlib.Path) -> str:
+    """Identity for a socket, stable across symlinks and relative paths."""
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+#: A responsive tmux server answers in single-digit milliseconds. This
+#: is generous by two orders of magnitude and still bounds a scan of a
+#: directory holding thousands of sockets.
+_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+def _probe_socket_bounded(server: Server, *, timeout: float) -> ServerInfo:
+    """Describe a server without trusting it to answer.
+
+    ``_is_tmux_socket_live`` proves a listener accepted the connection,
+    which is not the same as a server that replies: one wedged inside
+    its own event loop does the first and never the second. Every query
+    here is bounded, and a socket that does not answer is REPORTED as
+    unreachable rather than dropped -- dropping it would be the same
+    "empty means absent" claim the resource path was fixed for, and a
+    wedged server is exactly what an operator is looking for.
+    """
+    sessions = _run_tmux_sync(
+        server, "list-sessions", "-F", "#{session_id}", timeout=timeout
+    )
+    if sessions is None:
+        return ServerInfo(
+            is_alive=False,
+            socket_name=server.socket_name,
+            socket_path=str(server.socket_path) if server.socket_path else None,
+            session_count=0,
+            version=None,
+            unreachable_reason=(
+                f"socket has a listener but did not answer within {timeout:g}s"
+            ),
+        )
+    alive = sessions.returncode == 0
+    reason: str | None = None
+    if not alive:
+        detail = sessions.stderr.strip()
+        if detail and "no server running" not in detail.lower():
+            reason = detail
+    version_result = _run_tmux_sync(
+        server, "display-message", "-p", "#{version}", timeout=timeout
+    )
+    version = None
+    if version_result is not None and version_result.returncode == 0:
+        version = version_result.stdout.strip() or None
+    return ServerInfo(
+        is_alive=alive,
+        socket_name=server.socket_name,
+        socket_path=str(server.socket_path) if server.socket_path else None,
+        session_count=len([x for x in sessions.stdout.splitlines() if x])
+        if alive
+        else 0,
+        version=version,
+        unreachable_reason=reason,
+    )
+
+
+def _probe_or_report_unreachable(socket_path: pathlib.Path) -> ServerInfo:
+    """Describe one socket found by scanning, without going through the cache.
+
+    Deliberately NOT ``_get_server``. That funnel refuses a socket which
+    accepts and never answers, which is right for a tool aimed at one
+    and wrong here: a listing that raises because ONE entry is wedged
+    says nothing about the other twenty-five, and the wedged one is what
+    the operator came for. It would also cache every socket in the
+    directory -- over a thousand on this machine -- for a pass that
+    reads each exactly once, and impose its liveness timeout on top of
+    the scan's own shorter one.
+    """
+    kwargs: dict[str, t.Any] = {"socket_path": str(socket_path)}
+    tmux_bin = os.environ.get("LIBTMUX_TMUX_BIN")
+    if tmux_bin is not None:
+        kwargs["tmux_bin"] = tmux_bin
+    return _probe_socket_bounded(Server(**kwargs), timeout=_PROBE_TIMEOUT_SECONDS)
+
+
 def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
     """Return a :class:`ServerInfo` for a live socket at ``socket_path``.
 
@@ -258,35 +364,14 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
         return None
     if not _is_tmux_socket_live(socket_path):
         return None
-    server = _get_server(socket_path=str(socket_path))
-    try:
-        alive = server.is_alive()
-    except Exception as err:
-        logger.debug("probe %s: is_alive raised %s", socket_path, err)
-        return None
-    version: str | None = None
-    try:
-        result = server.cmd("display-message", "-p", "#{version}")
-        version = result.stdout[0] if result.stdout else None
-    except Exception as err:
-        logger.debug("probe %s: version query raised %s", socket_path, err)
-    return ServerInfo(
-        is_alive=alive,
-        socket_name=server.socket_name,
-        socket_path=str(socket_path),
-        session_count=len(server.sessions) if alive else 0,
-        version=version,
-    )
+    return _probe_or_report_unreachable(socket_path)
 
 
-#: Tools that intentionally do NOT accept ``socket_name`` because they
-#: either discover sockets themselves or coordinate nested tools whose
-#: arguments carry their own targeting. Read by
-#: ``test_registered_tools_accept_socket_name`` to enforce the
-#: agent-facing contract advertised in
-#: :data:`libtmux_mcp.server._BASE_INSTRUCTIONS`. When you add a new
-#: discovery-style tool, append it here AND update the prose in
-#: ``_BASE_INSTRUCTIONS`` so the two stay in lockstep.
+#: Tools that intentionally do NOT accept ``socket_name``, because they
+#: discover sockets themselves or coordinate nested tools carrying their
+#: own targeting. A new discovery-style tool belongs here AND in the
+#: :data:`libtmux_mcp.server._BASE_INSTRUCTIONS` prose, which a test
+#: holds in lockstep with this set.
 SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
     {
         "call_destructive_tools_batch",
@@ -295,6 +380,34 @@ SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
         "list_servers",
     }
 )
+
+
+#: Concurrency for the socket scan. Each probe is an independent tmux
+#: subprocess round trip, so the ceiling is start-up latency, not CPU.
+#: Measured at 40 live servers: 536 ms serial, 176 ms at 4, 80 ms at 16,
+#: 76 ms at 32 -- so 16 takes the 6.7x and 32 buys nothing.
+_SCAN_WORKERS = 16
+
+
+def _probe_scanned_socket(entry: pathlib.Path) -> tuple[str, ServerInfo] | None:
+    """Identify one scanned socket, or ``None`` if it is not a live server."""
+    try:
+        if not entry.is_socket():
+            return None
+    except OSError:
+        return None
+    # Cheap liveness probe before the more expensive ``get_server_info``
+    # call. Stale sockets are the common case.
+    if not _is_tmux_socket_live(entry):
+        return None
+    # Addressed by path: a socket name holding a newline does not
+    # round-trip through ``-L``, and dropped a live server silently.
+    info = _probe_or_report_unreachable(entry)
+    # The scan holds the full path, so every row can carry both halves of
+    # the identity.
+    return _socket_key(entry), info.model_copy(
+        update={"socket_name": entry.name, "socket_path": str(entry)}
+    )
 
 
 @handle_tool_errors
@@ -309,6 +422,20 @@ def list_servers(
     with a live listener are reported; stale inodes (a common case on
     long-running systems where ``$TMUX_TMPDIR`` can carry thousands of
     orphans) are silently filtered.
+
+    A listener is not a server that answers: one wedged inside its own
+    event loop accepts the connection and never replies. Every probe is
+    bounded, and such a socket is reported with ``unreachable_reason``
+    set rather than dropped or allowed to hang the listing.
+
+    **Cost is per socket FILE, not per live server**, divided by the
+    probe pool. A dead socket refuses instantly, so the whole scan is
+    Python overhead — measured 883 ms for 1,620 files returning 12
+    servers, against ~10 ms for an ordinary dozen. A WEDGED socket is
+    the expensive one: it pays the full probe timeout, so a directory
+    holding many of those costs ``files / workers x timeout`` rather
+    than milliseconds. Nothing unlinks the socket of a server that
+    died, so this directory only grows.
 
     **Scope caveat**: custom ``tmux -S /some/path/...`` servers that
     live OUTSIDE ``$TMUX_TMPDIR`` are not returned by the scan alone —
@@ -336,28 +463,108 @@ def list_servers(
     """
     tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "/tmp")
     uid_dir = pathlib.Path(tmux_tmpdir) / f"tmux-{os.geteuid()}"
-    results: list[ServerInfo] = []
+    # Keyed by resolved socket path so an extra that names a socket the
+    # scan already found is recognized as the same server rather than
+    # listed a second time with a disjoint half of its identity.
+    # Insertion order preserves "scan results first, extras in order".
+    found: dict[str, ServerInfo] = {}
     if uid_dir.is_dir():
-        for entry in sorted(uid_dir.iterdir()):
-            try:
-                if not entry.is_socket():
-                    continue
-            except OSError:
-                continue
-            # Cheap liveness probe before the more expensive
-            # ``get_server_info`` call. Stale sockets are the common case.
-            if not _is_tmux_socket_live(entry):
-                continue
-            try:
-                info = get_server_info(socket_name=entry.name)
-            except ToolError:
-                continue
-            results.append(info)
+        # ``map`` keeps input order, so the listing stays sorted by
+        # socket name however the probes interleave.
+        entries = sorted(uid_dir.iterdir())
+        with ThreadPoolExecutor(max_workers=_SCAN_WORKERS) as pool:
+            for probed in pool.map(_probe_scanned_socket, entries):
+                if probed is not None:
+                    found[probed[0]] = probed[1]
     for raw_path in extra_socket_paths or []:
-        extra = _probe_server_by_path(pathlib.Path(raw_path))
+        path = pathlib.Path(raw_path)
+        key = _socket_key(path)
+        if key in found:
+            continue
+        extra = _probe_server_by_path(path)
         if extra is not None:
-            results.append(extra)
-    return results
+            # Same completeness rule the scan follows: a row that omits
+            # its name cannot be matched by name against every other row
+            # in the same list.
+            found[key] = extra.model_copy(
+                update={"socket_name": path.name, "socket_path": str(path)}
+            )
+    return list(found.values())
+
+
+def _int_or_none(value: str | None) -> int | None:
+    """Parse a tmux numeric format field, treating an empty one as absent."""
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+#: Field separator for the list-clients format. A literal rather
+#: than libtmux's FORMAT_SEPARATOR, which is not an exported name.
+#: No client field can contain it.
+_CLIENT_FIELD_SEP = "\u241e"
+
+_CLIENT_FIELDS: tuple[str, ...] = (
+    "client_tty",
+    "client_pid",
+    "client_session",
+    "client_width",
+    "client_height",
+    "client_termname",
+    "client_control_mode",
+    "client_readonly",
+)
+
+
+def _parse_client_row(row: str) -> ClientInfo:
+    """Parse one separator-joined ``list-clients`` row."""
+    parts = row.split(_CLIENT_FIELD_SEP)
+    values = dict(zip(_CLIENT_FIELDS, parts, strict=False))
+    return ClientInfo(
+        client_tty=values.get("client_tty") or None,
+        client_pid=_int_or_none(values.get("client_pid")),
+        session_name=values.get("client_session") or None,
+        width=_int_or_none(values.get("client_width")),
+        height=_int_or_none(values.get("client_height")),
+        term_name=values.get("client_termname") or None,
+        control_mode=values.get("client_control_mode") == "1",
+        readonly=values.get("client_readonly") == "1",
+    )
+
+
+@handle_tool_errors
+def list_clients(socket_name: str | None = None) -> ClientListResult:
+    """List the clients attached to a tmux server.
+
+    Answers "who is looking at this server", which nothing else could.
+    Two tool behaviours depend on client state and neither could report
+    it: ``is_caller`` compares against the caller's own client, and an
+    untargeted ``show_option`` resolves through tmux's current session,
+    which is chosen from the attached clients.
+
+    Reads tmux directly rather than through libtmux's ``Server.clients``,
+    which leaves ``client_tty`` and ``client_pid`` unset.
+
+    Returns
+    -------
+    ClientListResult
+        One row per attached client. An empty list means nobody is
+        attached, which is the normal state for an agent-driven server.
+    """
+    server = _get_server(socket_name=socket_name)
+    fmt = _CLIENT_FIELD_SEP.join(f"#{{{field}}}" for field in _CLIENT_FIELDS)
+    result = server.cmd("list-clients", "-F", fmt)
+    if result.stderr:
+        detail = "; ".join(result.stderr)
+        msg = f"list-clients failed: {detail}"
+        raise ExpectedToolError(msg)
+    return ClientListResult(
+        clients=[_parse_client_row(row) for row in result.stdout if row.strip()],
+        socket_name=server.socket_name,
+    )
 
 
 def register(mcp: FastMCP) -> None:
@@ -368,6 +575,9 @@ def register(mcp: FastMCP) -> None:
     mcp.tool(
         title="List tmux Servers", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
     )(list_servers)
+    mcp.tool(
+        title="List tmux Clients", annotations=ANNOTATIONS_RO, tags={TAG_READONLY}
+    )(list_clients)
     mcp.tool(
         title="Create tmux Session",
         annotations=ANNOTATIONS_CREATE,

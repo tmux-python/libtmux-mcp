@@ -493,7 +493,7 @@ def _assert_pane_environment(
             expected in line
             for line in pane.cmd("capture-pane", "-p", "-S", "-50").stdout
         ),
-        3,
+        10,
         raises=True,
     )
 
@@ -538,7 +538,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
         lambda: any(
             "WINDOW_PROCESS:window" in line for line in window_pane.capture_pane()
         ),
-        3,
+        10,
         raises=True,
     )
     assert all(
@@ -612,7 +612,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
             "LATER_PROCESS:<>" in line
             for line in later_pane.cmd("capture-pane", "-p", "-S", "-50").stdout
         ),
-        3,
+        10,
         raises=True,
     )
 
@@ -654,7 +654,7 @@ def test_spawn_tools_forward_process_environment_without_session_leakage(
                     "-50",
                 ).stdout
             ),
-            3,
+            10,
             raises=True,
         )
     finally:
@@ -701,7 +701,7 @@ def test_create_session_history_environment_reaches_future_panes(
                 "SESSION_FUTURE:<>|ignoredups:ignorespace|1|<>|session" in line
                 for line in future_pane.capture_pane()
             ),
-            3,
+            10,
             raises=True,
         )
     finally:
@@ -756,7 +756,7 @@ def test_explicit_false_keeps_inherited_session_history_environment(
                 in line
                 for line in pane.capture_pane()
             ),
-            3,
+            10,
             raises=True,
         )
         rendered = _session_environment(mcp_server, session_name)

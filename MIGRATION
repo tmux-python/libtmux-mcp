@@ -19,6 +19,108 @@ for the full release log.
    [tracker]: https://github.com/tmux-python/libtmux-mcp/discussions
 ```
 
+## libtmux-mcp 0.1.x (unreleased)
+
+### A name or title argument is stored literally
+
+`rename_window`, `rename_session`, `set_pane_title`, `create_window` and
+`create_session` passed your name straight to tmux, which expands `#{...}` in
+it. A name containing one silently became something else.
+
+Nothing changes for an ordinary name. If you were relying on the expansion,
+ask for the value and pass the result:
+
+#### Before
+
+```json
+{"tool": "rename_window", "arguments": {"new_name": "#{pane_current_path}"}}
+```
+
+That stored `/home/you/src`, not the text you wrote.
+
+#### After
+
+```json
+{"tool": "display_message", "arguments": {"format_string": "#{pane_current_path}"}}
+```
+
+```json
+{"tool": "rename_window", "arguments": {"new_name": "/home/you/src"}}
+```
+
+`display_message` is the one tool that still expands formats, by design. For a
+window that should track its own state, tmux's own `automatic-rename-format`
+option is a better fit than renaming on a timer.
+
+The same applies to `start_directory` on `create_session`, `create_window`,
+`split_window` and `respawn_pane`: a `#` in the path was expanded, the result
+did not exist, and the shell silently started in `$HOME` instead.
+
+### An option name containing `#` is refused
+
+`set_option` and `show_option` now raise for an option NAME containing a `#`,
+rather than addressing a different option than the one you named.
+
+Option *values* are unaffected and always were. Only the name is checked, and
+only user options (`@name`) can contain a `#` in the first place, so an
+ordinary call is unchanged. If you need one, use `run_command` with a raw tmux
+command line.
+
+### Tools that deliver input require an explicit target
+
+`send_keys`, `send_keys_batch`, `paste_text`, `paste_buffer` and
+`run_command` accepted no target at all and picked a pane themselves. They now
+refuse, naming the four ways to say where.
+
+Nothing changes for a call that already names a pane. A call that does not gets
+an error rather than a guess, and the fix is one field.
+
+#### Before
+
+```json
+{"tool": "send_keys", "arguments": {"keys": "make test"}}
+```
+
+#### After
+
+```json
+{"tool": "send_keys", "arguments": {"pane_id": "%1", "keys": "make test"}}
+```
+
+`create_session`, `create_window` and `split_window` return the new pane's id
+(`active_pane_id` / `pane_id`), so an agent that made the pane already has the
+value. One that attached to a server it did not create can call `list_panes`.
+
+For `send_keys_batch` the rule is per operation: one untargeted entry among
+targeted ones fails alone rather than being sent somewhere arbitrary.
+
+### An untargeted READ resolves to the oldest object, not the first listed
+
+Reads still default. What changed is which object they pick, and that the
+option and hook tools now pick the same one as everything else.
+
+The old default was the first LISTED object, and tmux lists sessions BY NAME —
+so `rename_session` silently moved where a later untargeted call landed.
+`show_option`, `show_hooks` and `show_hook` did not use that rule at all: they
+omitted tmux's `-t` and let tmux resolve by `activity_time`, which moves
+whenever a pane produces output.
+
+Both are now the oldest surviving object by tmux id, which nothing can move.
+`show_hooks` and `show_hook` join `show_option` in reporting `resolved_target`,
+so an untargeted read says which object answered.
+
+If you relied on an untargeted read describing the most recently active
+session, name it — the destination is no longer activity-sensitive.
+
+### Prompt arguments naming an object are validated
+
+`pane_id` on `run_and_wait`, `diagnose_failing_pane` and `interrupt_gracefully`
+must match `%N`. `session_name` on `build_dev_workspace` may not be empty or
+contain control characters, `:` or `.`.
+
+Free-text arguments (`command`, `log_command`) are unchanged and still carry
+anything.
+
 ## libtmux-mcp 0.1.0a19 (2026-07-25)
 
 ### `wait_for_text` takes `patterns`, and `wait_for_content_change` is gone

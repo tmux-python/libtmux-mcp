@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import hashlib
@@ -11,23 +10,23 @@ import time
 import typing as t
 from dataclasses import dataclass
 
-from libtmux_mcp._utils import (
-    ExpectedToolError,
-    _get_server,
-    _resolve_pane,
-    handle_tool_errors_async,
+from libtmux_mcp._bounded_io import (
+    CAPTURE_DEFAULT_MAX_LINES,
+    _bounded_history_limit,
+    _bounded_pane_state,
+    _resolve_pane_bounded,
+    _run_tmux_lines,
 )
-from libtmux_mcp.models import CaptureSinceResult
-from libtmux_mcp.tools.pane_tools.io import CAPTURE_DEFAULT_MAX_LINES
-from libtmux_mcp.tools.pane_tools.state import (
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors_async
+from libtmux_mcp._pane_state import (
     _PaneState,
     _raise_if_pane_lifecycle_changed,
-    _read_history_limit,
-    _read_pane_state,
 )
+from libtmux_mcp._servers import _get_server_async
+from libtmux_mcp.models import CaptureSinceResult
 
-if t.TYPE_CHECKING:
-    from libtmux.pane import Pane
+if t.TYPE_CHECKING:  # pragma: no cover - typing only
+    from libtmux.server import Server
 
 
 CAPTURE_SINCE_DEFAULT_MAX_LINES = CAPTURE_DEFAULT_MAX_LINES
@@ -46,6 +45,7 @@ class _CaptureCursor:
     pane_pid: str
     history_size: int
     pane_height: int
+    pane_width: int | None
     anchor_abs: int
     anchor_hash: str | None
     below_hashes: tuple[str, ...]
@@ -76,24 +76,38 @@ def _line_hash(line: str) -> str:
     return hashlib.sha256(line.encode("utf-8", "surrogateescape")).hexdigest()
 
 
-def _capture_rows(
-    pane: Pane,
+async def _capture_rows(
+    server: Server,
+    pane_id: str,
     *,
     start: t.Literal["-"] | int | None = None,
     end: t.Literal["-"] | int | None = None,
 ) -> list[str]:
-    """Return pane rows as a concrete list."""
-    rows = pane.capture_pane(start=start, end=end)
-    if rows is None:
-        return []
-    return list(rows)
+    """Return pane rows, bounded and killable.
+
+    Deliberately not ``pane.capture_pane``: libtmux reaches tmux through
+    an untimed ``Popen.communicate()``, and running that in a worker
+    thread cannot be cancelled -- a tmux server that stops answering
+    parks the worker, and ``_python_exit`` joins pool workers untimed at
+    shutdown, so the process can no longer exit. No ``-J`` here, unlike
+    the wait path: ``capture_since`` anchors on physical rows and
+    joining tmux's visual wraps would renumber them.
+    """
+    args = ["capture-pane", "-p", "-t", pane_id]
+    if start is not None:
+        args += ["-S", str(start)]
+    if end is not None:
+        args += ["-E", str(end)]
+    return await _run_tmux_lines(server, *args)
 
 
-def _capture_cursor_rows(pane: Pane, state: _PaneState) -> list[str]:
+async def _capture_cursor_rows(
+    server: Server, pane_id: str, state: _PaneState
+) -> list[str]:
     """Capture rows from the cursor through the visible bottom."""
     if state.cursor_y >= state.pane_height:
         return []
-    return _capture_rows(pane, start=state.cursor_y, end=None)
+    return await _capture_rows(server, pane_id, start=state.cursor_y, end=None)
 
 
 def _same_state(left: _PaneState, right: _PaneState) -> bool:
@@ -101,32 +115,33 @@ def _same_state(left: _PaneState, right: _PaneState) -> bool:
     return left == right
 
 
-def _raise_if_dead_without_baseline(pane: Pane, state: _PaneState) -> None:
+def _raise_if_dead_without_baseline(pane_id: str, state: _PaneState) -> None:
     """Raise a tool error for a dead pane before a cursor exists."""
     if state.pane_dead:
-        msg = f"pane {pane.pane_id} died during pane read"
+        msg = f"pane {pane_id} died during pane read"
         raise ExpectedToolError(msg)
 
 
-def _read_stable_visible(
-    pane: Pane,
+async def _read_stable_visible(
+    server: Server,
+    pane_id: str,
     *,
     baseline_pid: str | None = None,
 ) -> _PaneRead:
     """Capture the visible pane and cursor rows with a stable state snapshot."""
     for _attempt in range(_STABLE_READ_ATTEMPTS):
-        before = _read_pane_state(pane)
+        before = await _bounded_pane_state(server, pane_id)
         if baseline_pid is None:
-            _raise_if_dead_without_baseline(pane, before)
+            _raise_if_dead_without_baseline(pane_id, before)
             expected_pid = before.pane_pid
         else:
             expected_pid = baseline_pid
-            _raise_if_pane_lifecycle_changed(pane.pane_id, before, expected_pid)
+            _raise_if_pane_lifecycle_changed(pane_id, before, expected_pid)
 
-        lines = _capture_rows(pane)
-        cursor_rows = _capture_cursor_rows(pane, before)
-        after = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane.pane_id, after, expected_pid)
+        lines = await _capture_rows(server, pane_id)
+        cursor_rows = await _capture_cursor_rows(server, pane_id, before)
+        after = await _bounded_pane_state(server, pane_id)
+        _raise_if_pane_lifecycle_changed(pane_id, after, expected_pid)
         if _same_state(before, after):
             return _PaneRead(
                 state=after,
@@ -135,15 +150,15 @@ def _read_stable_visible(
                 lines_missed=False,
             )
 
-    state = _read_pane_state(pane)
+    state = await _bounded_pane_state(server, pane_id)
     if baseline_pid is None:
-        _raise_if_dead_without_baseline(pane, state)
+        _raise_if_dead_without_baseline(pane_id, state)
     else:
-        _raise_if_pane_lifecycle_changed(pane.pane_id, state, baseline_pid)
+        _raise_if_pane_lifecycle_changed(pane_id, state, baseline_pid)
     return _PaneRead(
         state=state,
-        cursor_rows=_capture_cursor_rows(pane, state),
-        lines=_capture_rows(pane),
+        cursor_rows=await _capture_cursor_rows(server, pane_id, state),
+        lines=await _capture_rows(server, pane_id),
         lines_missed=True,
     )
 
@@ -157,13 +172,36 @@ def _cursor_anchor_lost(cursor: _CaptureCursor, state: _PaneState) -> bool:
     # anchor regardless of pane height — the grid is reset to zero.
     if state.history_size == 0 and cursor.history_size > 0:
         return True
-    # ``anchor_abs < history_size`` means the anchor has scrolled into
-    # retained history, where ``capture-pane -S`` can still address it
-    # with a negative start offset.
+    # ``anchor_abs < history_size`` means the anchor scrolled into retained
+    # history, which ``capture-pane -S`` still addresses with a negative
+    # start. The ``pane_height`` guard separates resize-grow (rows pulled
+    # back from history, no data freed) from a real trim.
     #
-    # The ``pane_height`` guard distinguishes resize-grow (which pulls
-    # rows from history back into the visible region without freeing
-    # data) from actual trim (where row data is destroyed).
+    # A width change rewraps history, so old-width row coordinates stop
+    # comparing. Widening is caught by the shrink branch below (rewrap
+    # shortens history); narrowing lengthens it and looks like ordinary
+    # new output, replaying already-seen scrollback with lines_missed
+    # false -- at one column of narrowing, not just dramatic resizes.
+    #
+    # ``None`` is a cursor minted before this field existed: reflow cannot
+    # be ruled out, so treat it the same. Self-healing, since the caller
+    # gets back a fresh cursor carrying the width.
+    if cursor.pane_width is None or state.pane_width != cursor.pane_width:
+        return True
+    # A screen RESET moves the cursor up without touching history_size,
+    # which every other check here misses -- they assume an anchor dies by
+    # history shrinking or by passing the bottom row. On a pane at
+    # history_size 0, cursor_y 2, `clear_pane` leaves cursor_y 0, so the
+    # anchor points BELOW the new output and the call returns nothing
+    # under lines_missed=False.
+    #
+    # The conjunction is what makes it safe: ordinary output only moves
+    # the cursor down, scrolling holds it at the bottom row and GROWS
+    # history, and a resize-grow shrinks history while the cursor moves
+    # down. None satisfies both halves.
+    entry_cursor_y = cursor.anchor_abs - cursor.history_size
+    if state.cursor_y < entry_cursor_y and state.history_size <= cursor.history_size:
+        return True
     return state.history_size < cursor.history_size and (
         state.pane_height <= cursor.pane_height
     )
@@ -182,8 +220,40 @@ def _history_limit_trim_risk(
     return cursor.history_size >= risk_floor or state.history_size >= risk_floor
 
 
-def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | None:
-    """Find one retained row sequence matching the cursor fingerprint."""
+def _find_unique_cursor_match(
+    rows: list[str],
+    cursor: _CaptureCursor,
+    state: _PaneState,
+    history_limit: int,
+) -> int | None:
+    """Find one retained row sequence matching the cursor fingerprint.
+
+    *rows* comes from ``capture-pane -S -``, so ``rows[i]`` is absolute
+    grid row ``i``. tmux evicts only from the TOP, so a surviving anchor
+    can only have moved EARLIER than ``cursor.anchor_abs``, never later.
+    Candidates past that row are therefore rejected on position alone,
+    however well they hash.
+
+    That bound is what makes this safe when the fingerprint degenerates
+    to a single hash (``below_hashes`` empty, i.e. the anchor was the
+    last row). The uniqueness rule below asks whether a candidate is
+    unique *in the current buffer*, not unique *in time* — and an agent
+    that starts tailing an idle pane anchors on the shell prompt, a line
+    that recurs verbatim after every command. Once enough output laps
+    the history limit, the evicted anchor's only surviving twin is the
+    CURRENT prompt near the bottom: exactly one candidate, so the
+    uniqueness guard passed and returned a false match far below the
+    real anchor. Everything above it was then dropped as "already seen"
+    and the read reported ``lines_missed=False`` having lost the lot.
+
+    Position alone is necessary but not sufficient: when the anchor was
+    taken near the bottom of an already-full history, its old row and
+    the current prompt's row overlap. So a single-hash fingerprint on a
+    full history additionally refuses to match inside the visible
+    region. Declining costs only a conservative ``lines_missed=True``,
+    which stays honest: a full history means rows above the anchor were
+    evicted whether or not the anchor itself survived.
+    """
     if cursor.anchor_hash is None:
         return None
 
@@ -191,8 +261,31 @@ def _find_unique_cursor_match(rows: list[str], cursor: _CaptureCursor) -> int | 
     if len(rows) < len(fingerprint):
         return None
 
+    # A one-row fingerprint cannot tell the anchor from any other line
+    # with the same text, and on a SATURATED history the surviving twin is
+    # the prompt now on screen. ``index >= history_size`` is that
+    # signature: the candidate sits in the visible region, not scrollback.
+    #
+    # Saturation comes from ``_history_limit_trim_risk``, not
+    # ``history_size == history_limit``: on tmux 3.7c a pane with
+    # ``history-limit 20`` pins at 19, so an exact comparison never fires
+    # on the panes this guards.
+    #
+    # The cost is a false-positive band -- on a 50000-line limit, a loss
+    # reported from roughly 92% full, where trim risk is on but tmux has
+    # not evicted. That costs a pessimistic flag and a full visible read,
+    # never silence. Growth in ``history_size`` would narrow the band, but
+    # a burst that saturates midway grows AND evicts, which would reopen
+    # the silent loss this closes.
+    blind = len(fingerprint) == 1 and _history_limit_trim_risk(
+        cursor, state, history_limit
+    )
+
     match_index: int | None = None
-    for index in range(len(rows) - len(fingerprint) + 1):
+    last_possible = min(len(rows) - len(fingerprint), cursor.anchor_abs)
+    for index in range(last_possible + 1):
+        if blind and index >= state.history_size:
+            continue
         candidate = rows[index : index + len(fingerprint)]
         candidate_hashes = tuple(_line_hash(line) for line in candidate)
         if candidate_hashes != fingerprint:
@@ -228,14 +321,18 @@ def _drop_previously_seen_rows(
     return output
 
 
-def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
+async def _read_delta(
+    server: Server, pane_id: str, cursor: _CaptureCursor
+) -> _PaneRead:
     """Capture rows since ``cursor`` or fall back to visible content on loss."""
-    history_limit = _read_history_limit(pane)
+    history_limit = await _bounded_history_limit(server, pane_id)
     for _attempt in range(_STABLE_READ_ATTEMPTS):
-        before = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane.pane_id, before, cursor.pane_pid)
+        before = await _bounded_pane_state(server, pane_id)
+        _raise_if_pane_lifecycle_changed(pane_id, before, cursor.pane_pid)
         if _cursor_anchor_lost(cursor, before):
-            missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+            missed = await _read_stable_visible(
+                server, pane_id, baseline_pid=cursor.pane_pid
+            )
             return _PaneRead(
                 state=missed.state,
                 cursor_rows=missed.cursor_rows,
@@ -245,23 +342,24 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
 
         trim_risk = _history_limit_trim_risk(cursor, before, history_limit)
         start = cursor.anchor_abs - before.history_size
-        rows = (
-            _capture_rows(pane, start="-", end=None)
-            if trim_risk
-            else (
-                []
-                if start >= before.pane_height
-                else _capture_rows(pane, start=start, end=None)
-            )
-        )
-        cursor_rows = _capture_cursor_rows(pane, before)
-        after = _read_pane_state(pane)
-        _raise_if_pane_lifecycle_changed(pane.pane_id, after, cursor.pane_pid)
+        if trim_risk:
+            rows = await _capture_rows(server, pane_id, start="-", end=None)
+        elif start >= before.pane_height:
+            rows = []
+        else:
+            rows = await _capture_rows(server, pane_id, start=start, end=None)
+        cursor_rows = await _capture_cursor_rows(server, pane_id, before)
+        after = await _bounded_pane_state(server, pane_id)
+        _raise_if_pane_lifecycle_changed(pane_id, after, cursor.pane_pid)
         if _same_state(before, after):
             if trim_risk:
-                match_index = _find_unique_cursor_match(rows, cursor)
+                match_index = _find_unique_cursor_match(
+                    rows, cursor, before, history_limit
+                )
                 if match_index is None:
-                    missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+                    missed = await _read_stable_visible(
+                        server, pane_id, baseline_pid=cursor.pane_pid
+                    )
                     return _PaneRead(
                         state=missed.state,
                         cursor_rows=missed.cursor_rows,
@@ -276,7 +374,7 @@ def _read_delta(pane: Pane, cursor: _CaptureCursor) -> _PaneRead:
                 lines_missed=False,
             )
 
-    missed = _read_stable_visible(pane, baseline_pid=cursor.pane_pid)
+    missed = await _read_stable_visible(server, pane_id, baseline_pid=cursor.pane_pid)
     return _PaneRead(
         state=missed.state,
         cursor_rows=missed.cursor_rows,
@@ -293,6 +391,7 @@ def _build_cursor(pane_id: str, state: _PaneState, cursor_rows: list[str]) -> st
         "pane_pid": state.pane_pid,
         "history_size": state.history_size,
         "pane_height": state.pane_height,
+        "pane_width": state.pane_width,
         "anchor_abs": state.history_size + state.cursor_y,
         "anchor_hash": _line_hash(cursor_rows[0]) if cursor_rows else None,
         "below_hashes": [_line_hash(line) for line in cursor_rows[1:]],
@@ -348,6 +447,11 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
         reason = "unsupported cursor version"
         _raise_invalid_cursor(reason)
 
+    width_value = payload.get("pane_width")
+    if width_value is not None and not isinstance(width_value, int):
+        reason = "invalid pane_width"
+        _raise_invalid_cursor(reason)
+
     anchor_hash_value = payload.get("anchor_hash")
     if anchor_hash_value is not None and not isinstance(anchor_hash_value, str):
         reason = "missing or invalid anchor_hash"
@@ -364,6 +468,7 @@ def _decode_cursor(cursor: str) -> _CaptureCursor:
         pane_pid=_cursor_str(payload, "pane_pid"),
         history_size=_cursor_int(payload, "history_size"),
         pane_height=_cursor_int(payload, "pane_height"),
+        pane_width=width_value,
         anchor_abs=_cursor_int(payload, "anchor_abs"),
         anchor_hash=anchor_hash_value,
         below_hashes=tuple(below_hashes_value),
@@ -491,34 +596,35 @@ async def capture_since(
     ):
         pane_id = decoded.pane_id
 
-    server = _get_server(socket_name=socket_name)
-    pane = _resolve_pane(
+    server = await _get_server_async(socket_name=socket_name)
+    # A killable subprocess, never a worker thread: libtmux reaches tmux
+    # with an untimed ``Popen.communicate()`` that a thread cannot cancel,
+    # and ``_python_exit`` joins pool workers untimed at shutdown. A tmux
+    # server that answers once then stops leaves the call unable to return
+    # AND the process unable to exit, with the event loop still ticking.
+    resolved = await _resolve_pane_bounded(
         server,
         pane_id=pane_id,
         session_name=session_name,
         session_id=session_id,
         window_id=window_id,
     )
-    assert pane.pane_id is not None
 
-    if decoded is not None and pane.pane_id != decoded.pane_id:
-        msg = (
-            f"cursor pane {decoded.pane_id} does not match requested pane "
-            f"{pane.pane_id}"
-        )
+    if decoded is not None and resolved != decoded.pane_id:
+        msg = f"cursor pane {decoded.pane_id} does not match requested pane {resolved}"
         raise ExpectedToolError(msg)
 
     start_time = time.monotonic()
     if decoded is None:
-        read = await asyncio.to_thread(_read_stable_visible, pane)
+        read = await _read_stable_visible(server, resolved)
     else:
-        read = await asyncio.to_thread(_read_delta, pane, decoded)
+        read = await _read_delta(server, resolved, decoded)
 
     limited = _limit_lines(read.lines, max_lines=max_lines, max_bytes=max_bytes)
     elapsed = time.monotonic() - start_time
     return CaptureSinceResult(
-        pane_id=pane.pane_id,
-        cursor=_build_cursor(pane.pane_id, read.state, read.cursor_rows),
+        pane_id=resolved,
+        cursor=_build_cursor(resolved, read.state, read.cursor_rows),
         lines=limited.lines,
         elapsed_seconds=round(elapsed, 3),
         lines_missed=read.lines_missed,

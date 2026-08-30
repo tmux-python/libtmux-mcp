@@ -32,22 +32,20 @@ import typing as t
 
 from libtmux import exc as libtmux_exc
 from libtmux.constants import OptionScope
+from libtmux.pane import Pane
+from libtmux.session import Session
+from libtmux.window import Window
 
-from libtmux_mcp._utils import (
-    ANNOTATIONS_RO,
-    TAG_READONLY,
-    ExpectedToolError,
-    _get_server,
-    _resolve_pane,
-    _resolve_session,
-    _resolve_window,
-    handle_tool_errors,
-)
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._resolve import _resolve_pane, _resolve_session, _resolve_window
+from libtmux_mcp._safety import ANNOTATIONS_RO, TAG_READONLY
+from libtmux_mcp._servers import _get_server
 from libtmux_mcp.models import HookEntry, HookListResult
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
     from libtmux.hooks import HooksMixin
+    from libtmux.options import OptionsMixin
 
 
 _SCOPE_MAP: dict[str, OptionScope] = {
@@ -89,19 +87,55 @@ def _resolve_hook_target(
         raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is None:
-        msg = "scope is required when target is specified"
+        valid = ", ".join(sorted(_SCOPE_MAP))
+        msg = (
+            f"scope is required when target is specified (target={target!r}). "
+            f"Valid: {valid}"
+        )
         raise ExpectedToolError(msg)
 
     if target is not None and opt_scope is not None:
-        # Let the resolved object carry its own scope — passing scope
-        # explicitly is redundant and can mis-build the CLI args.
+        # Session only: its object default IS the session tree, so the
+        # scope is redundant there and passing it mis-builds the argv into
+        # an empty listing. Window and Pane also default to the SESSION
+        # tree, so dropping the scope for them answers about a different
+        # object -- show_hooks(scope="window", target=@0) returns the
+        # session's hooks. They take the explicit scope without the argv
+        # problem.
         if opt_scope == OptionScope.Session:
             return _resolve_session(server, session_name=target), None
         if opt_scope == OptionScope.Window:
-            return _resolve_window(server, window_id=target), None
+            return _resolve_window(server, window_id=target), opt_scope
         if opt_scope == OptionScope.Pane:
-            return _resolve_pane(server, pane_id=target), None
+            return _resolve_pane(server, pane_id=target), opt_scope
+    # Same seam the option tools had: an omitted target returned the
+    # SERVER object, the command went out with no -t, and tmux resolved
+    # it by activity_time while every other read tool resolved in
+    # Python. Server scope genuinely has no target and keeps the server.
+    if opt_scope in (None, OptionScope.Session):
+        return _resolve_session(server), None
+    if opt_scope == OptionScope.Window:
+        return _resolve_window(server), opt_scope
+    if opt_scope == OptionScope.Pane:
+        return _resolve_pane(server), opt_scope
     return server, opt_scope
+
+
+def _target_label(obj: t.Any) -> str | None:
+    """Tmux id the query was answered for, or None for the server.
+
+    Dispatched on TYPE, not on which attribute happens to exist: a
+    libtmux ``Session`` carries ``window_id`` and ``pane_id`` too, so
+    taking the first attribute present reported ``%0`` for a
+    session-scope query.
+    """
+    if isinstance(obj, Pane):
+        return obj.pane_id
+    if isinstance(obj, Window):
+        return obj.window_id
+    if isinstance(obj, Session):
+        return obj.session_id
+    return None
 
 
 def _split_indexed_hook_name(key: str) -> tuple[str, int | None]:
@@ -166,6 +200,13 @@ def show_hooks(
 ) -> HookListResult:
     """List configured tmux hooks at the given scope.
 
+    Enumerates the hooks SET at the requested scope. A name-targeted
+    :func:`show_hook` resolves with tmux's inheritance instead, so it
+    can answer with a session hook when asked at window or pane scope
+    while this returns nothing there. Both are tmux's own semantics --
+    the difference is enumerate-versus-resolve, not a disagreement
+    about what is in force.
+
     ``scope="server"`` enumerates hooks installed via
     ``tmux set-hook -g ...``. tmux splits those globals across two
     options trees by hook category: session-level hooks
@@ -198,21 +239,28 @@ def show_hooks(
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
     raw: dict[str, t.Any] = obj.show_hooks(global_=global_, scope=opt_scope)
 
-    if scope == "server" and target is None:
-        # Also consult the global-window options tree. tmux doesn't
-        # unify ``-g`` listings across the session and window trees;
-        # ``show-hooks -g`` alone misses pane/window-level globals.
-        # Without this merge, ``show_hook(name)`` would find a hook
-        # that ``show_hooks()`` silently drops — the inconsistency
-        # guarded by ``test_show_hooks_surfaces_globally_set_pane_hook``.
-        raw_window = obj.show_hooks(global_=True, scope=OptionScope.Window)
+    if target is None and scope in (None, "server"):
+        # tmux does not unify a listing across the session and window
+        # trees, so one query misses half of what a name-targeted
+        # ``show_hook`` finds.
+        #
+        # WHICH window tree depends on the base query, and the two are not
+        # interchangeable: scope="server" queries the global session tree,
+        # so the global window tree is its counterpart; scope=None queries
+        # THIS session's, so the counterpart is this window's. An explicit
+        # global_=True makes the base global whatever the scope says, so it
+        # must be carried too, or the CURRENT window's hooks land on the
+        # globals.
+        raw_window = obj.show_hooks(
+            global_=global_ or scope == "server", scope=OptionScope.Window
+        )
         for name, value in raw_window.items():
             raw.setdefault(name, value)
 
     entries: list[HookEntry] = []
     for name, value in sorted(raw.items()):
         entries.extend(_flatten_hook_value(name, value))
-    return HookListResult(entries=entries)
+    return HookListResult(entries=entries, resolved_target=_target_label(obj))
 
 
 @handle_tool_errors
@@ -221,42 +269,77 @@ def show_hook(
     scope: t.Literal["server", "session", "window", "pane"] | None = None,
     target: str | None = None,
     global_: bool = False,
+    include_inherited: bool = False,
     socket_name: str | None = None,
 ) -> HookListResult:
     """Look up a specific tmux hook by name.
 
     Returns a :class:`~libtmux_mcp.models.HookListResult` with zero or
-    more :class:`~libtmux_mcp.models.HookEntry` rows — zero if the hook
-    is unset, one if it is a scalar hook, and multiple if it is an
-    array hook with sparse indices.
+    more :class:`~libtmux_mcp.models.HookEntry` rows — one if the hook
+    is a scalar, several if it is an array hook with sparse indices.
+
+    .. warning::
+       ``entries: []`` means "not set AT THIS SCOPE", not "not set". A
+       hook set with ``set-hook -g`` is in force and WILL fire, and this
+       still answers zero for it, because tmux's ``show-hooks <name>``
+       does not consult wider scopes. Pass ``include_inherited=True``
+       (tmux's ``-A``) for the value actually in force, exactly as
+       :func:`~libtmux_mcp.tools.option_tools.show_option` does — the
+       two are the same question about the same underlying store, since
+       tmux keeps hooks in the options table.
 
     Parameters
     ----------
     hook_name : str
         Hook to look up (e.g. ``"pane-exited"``).
+    include_inherited : bool
+        Resolve inherited values (tmux ``-A``) so the answer is the hook
+        in force at this scope rather than only one set on it.
     scope, target, global_, socket_name : see
         :func:`~libtmux_mcp.tools.hook_tools.show_hooks`.
 
     Returns
     -------
     HookListResult
-        One or more :class:`~libtmux_mcp.models.HookEntry` rows, or empty if unset.
+        One or more :class:`~libtmux_mcp.models.HookEntry` rows, or empty
+        if the hook is unset at the scope queried.
     """
     obj, opt_scope = _resolve_hook_target(socket_name, scope, target)
+    if include_inherited:
+        # tmux stores hooks in the options table and only the OPTIONS
+        # lookup honours -A: with `set-hook -g alert-bell`, `show-hooks -t
+        # A alert-bell` is empty while `show-options -A -t A alert-bell`
+        # returns it, flagged `*`, which libtmux strips.
+        return HookListResult(
+            entries=_flatten_hook_value(
+                hook_name,
+                # Every concrete target -- Server, Session, Window,
+                # Pane -- carries both mixins; only libtmux's HooksMixin
+                # does not declare OptionsMixin as a base.
+                t.cast("OptionsMixin", obj).show_option(
+                    hook_name,
+                    global_=global_,
+                    scope=opt_scope,
+                    include_inherited=True,
+                ),
+            ),
+            resolved_target=_target_label(obj),
+            include_inherited=True,
+        )
     try:
         value = obj.show_hook(hook_name, global_=global_, scope=opt_scope)
     except libtmux_exc.OptionError as e:
-        # tmux rejects ``show-hooks <name>`` for *unset* hooks with
-        # "too many arguments" on every build the project supports —
-        # that specific message is the only one treated as the empty
-        # result. Genuine name errors ("unknown hook", "invalid option"
-        # on typos or wrong scope) must surface to the caller so agents
-        # can correct their input instead of silently getting an empty
-        # list they read as "hook is unset".
+        # tmux rejects ``show-hooks <name>`` for an *unset* hook with "too
+        # many arguments" on every supported build, and that message alone
+        # reads as the empty result. A genuine name error must surface, or
+        # an agent reads its own typo as "hook is unset".
         if "too many arguments" in str(e):
-            return HookListResult(entries=[])
+            return HookListResult(entries=[], resolved_target=_target_label(obj))
         raise
-    return HookListResult(entries=_flatten_hook_value(hook_name, value))
+    return HookListResult(
+        entries=_flatten_hook_value(hook_name, value),
+        resolved_target=_target_label(obj),
+    )
 
 
 def register(mcp: FastMCP) -> None:

@@ -11,13 +11,11 @@ import typing as t
 
 import pytest
 
-from libtmux_mcp._utils import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
+from libtmux_mcp._safety import TAG_DESTRUCTIVE, TAG_MUTATING, TAG_READONLY
 from libtmux_mcp.server import _BASE_INSTRUCTIONS, _build_instructions
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
-
-    from libtmux_mcp.server import _ServerCacheKey
 
 
 class BuildInstructionsFixture(t.NamedTuple):
@@ -208,6 +206,188 @@ def test_invalid_safety_env_hides_mutating_tools() -> None:
     }
 
 
+class GatedToolFixture(t.NamedTuple):
+    """Test fixture for off-tier tool calls against a real server."""
+
+    test_id: str
+    safety: str
+    tool: str
+    required_tier: str
+
+
+GATED_TOOL_FIXTURES: list[GatedToolFixture] = [
+    GatedToolFixture(
+        test_id="readonly_denies_send_keys_as_mutating",
+        safety="readonly",
+        tool="send_keys",
+        required_tier="mutating",
+    ),
+    GatedToolFixture(
+        test_id="readonly_denies_kill_pane_as_destructive",
+        safety="readonly",
+        tool="kill_pane",
+        required_tier="destructive",
+    ),
+    GatedToolFixture(
+        test_id="mutating_denies_kill_pane_as_destructive",
+        safety="mutating",
+        tool="kill_pane",
+        required_tier="destructive",
+    ),
+    GatedToolFixture(
+        test_id="mutating_denies_destructive_batch",
+        safety="mutating",
+        tool="call_destructive_tools_batch",
+        required_tier="destructive",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    GatedToolFixture._fields,
+    GATED_TOOL_FIXTURES,
+    ids=[fixture.test_id for fixture in GATED_TOOL_FIXTURES],
+)
+def test_gated_tool_call_explains_the_tier(
+    test_id: str,
+    safety: str,
+    tool: str,
+    required_tier: str,
+) -> None:
+    """Calling an off-tier tool names the tier, not "unknown tool".
+
+    ``disable()`` makes ``get_tool`` answer None, so the guard reading
+    ``if tool and not allowed`` never fired and the agent was told a
+    gated tool does not exist. Runs in a subprocess because the tier is
+    resolved once at server import.
+    """
+    assert test_id
+
+    code = textwrap.dedent(
+        f"""
+        import asyncio
+        import json
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                try:
+                    await client.call_tool({tool!r}, {{}})
+                except Exception as exc:
+                    print(json.dumps({{"error": str(exc)}}))
+                else:
+                    print(json.dumps({{"error": None}}))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": safety}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    error = json.loads(proc.stdout)["error"]
+
+    assert error is not None, f"{tool} should be denied at {safety}"
+    assert "Unknown tool" not in error
+    assert f"requires safety level {required_tier!r}" in error
+    assert f"running at {safety!r}" in error
+    assert f"LIBTMUX_SAFETY={required_tier}" in error
+
+
+def test_batch_distinguishes_gated_tool_from_unknown_tool() -> None:
+    """The batch wrapper must not deny a gated tool's existence either.
+
+    It raised "Unknown tool" on ``get_tool`` returning None, so a gated
+    tool and a misspelled one produced byte-identical rows.
+    """
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                out = {}
+                for label, tool in (("gated", "kill_pane"), ("typo", "sned_keys")):
+                    result = await client.call_tool(
+                        "call_mutating_tools_batch",
+                        {"operations": [{"tool": tool, "arguments": {}}]},
+                    )
+                    out[label] = result.structured_content["results"][0]["error"]
+                print(json.dumps(out))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": "mutating"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    result = json.loads(proc.stdout)
+
+    assert "requires safety level 'destructive'" in result["gated"]
+    assert "Unknown tool" not in result["gated"]
+    # A genuine misspelling must keep the unknown-tool error, or the fix
+    # would trade one misdescription for another.
+    assert "Unknown tool" in result["typo"]
+
+
+def test_disabled_tools_stay_in_the_registry_with_tags() -> None:
+    """Pin the FastMCP behavior the tier explanation depends on.
+
+    ``_list_tools()`` is private and must keep returning disabled tools
+    with their tags, or the explanation silently reverts.
+    """
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from libtmux_mcp.server import build_mcp_server
+
+        async def main():
+            mcp = build_mcp_server()
+            registered = {t.name: sorted(t.tags) for t in await mcp._list_tools()}
+            visible = {t.name for t in await mcp.list_tools()}
+            print(json.dumps({
+                "kill_pane_registered": registered.get("kill_pane"),
+                "kill_pane_visible": "kill_pane" in visible,
+                "registered_exceeds_visible": len(registered) > len(visible),
+            }))
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, "LIBTMUX_SAFETY": "mutating"}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+    result = json.loads(proc.stdout)
+
+    assert result["kill_pane_registered"] == ["destructive"]
+    assert result["kill_pane_visible"] is False
+    assert result["registered_exceeds_visible"] is True
+
+
 def test_run_server_pins_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     """run_server passes an explicit stdio transport to FastMCP."""
     from libtmux_mcp import server as server_mod
@@ -259,7 +439,9 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
     # tool; the instructions must still name it so agents know the
     # "wait for any new output" affordance exists.
     assert "patterns=null" in _BASE_INSTRUCTIONS
-    assert "stop=" in _BASE_INSTRUCTIONS
+    # Phrased as a stop *hit*, not "stop=[] bails" — two readers parsed
+    # the old wording as "the empty list bails", which it does not.
+    assert "stop hit" in _BASE_INSTRUCTIONS
     assert "send_keys_batch" in _BASE_INSTRUCTIONS
     assert _BASE_INSTRUCTIONS.index("run_command") < _BASE_INSTRUCTIONS.index(
         "wait_for_channel"
@@ -447,14 +629,12 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
         (TAG_READONLY, "", ""),
         (TAG_MUTATING, "", ""),
         (TAG_DESTRUCTIVE, "", ""),
-        # Variable-length stress: longer socket name + multi-digit pane id.
-        # Guards against future text additions tipping a realistic case
-        # over the 2KB budget. Exercises BOTH axes — a multi-digit pane id
-        # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET). Margin
-        # ~2 bytes; if a future text addition trips this, either trim
-        # further or fall back to a tighter compression form (drop spaces
-        # around ``/`` in HOOKS, drop spaces after colons in the safety
-        # paragraph) for additional bytes of margin.
+        # Variable-length stress on BOTH axes -- a multi-digit pane id
+        # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET) -- so a
+        # future text addition cannot tip a realistic case over the 2KB
+        # budget. The margin is a couple of bytes: buy more by dropping
+        # spaces around ``/`` in HOOKS or after colons in the safety
+        # paragraph.
         (TAG_READONLY, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
     ],
 )
@@ -617,14 +797,11 @@ def test_readonly_hint_visible_only_on_readonly_tier(
 
 #: Tools whose title must include the word ``tmux``. Hierarchy nouns
 #: (window, session, server, option, environment, hook, buffer, channel)
-#: collide with browser / editor / WM / OS-channel domains; the qualifier
-#: is load-bearing for display surfaces (Claude Code's tool catalog UI,
-#: ``claude mcp list`` outputs). Title is NOT in BM25's search corpus
-#: (verified vs FastMCP's _extract_searchable_text), so this lever is
-#: purely human-readable disambiguation. ``display_message`` is included
-#: because its title was pre-qualified as "Evaluate tmux Format String"
-#: by an earlier rename — pinning it here guards against silent
-#: regression to "Evaluate Format String".
+#: collide with browser, editor, WM and OS-channel domains, so the
+#: qualifier disambiguates display surfaces such as a tool-catalog UI.
+#: Title is NOT in the search corpus, so the lever is human-readable
+#: only. ``display_message`` is pinned here to hold its title at
+#: "Evaluate tmux Format String".
 _TMUX_QUALIFIED_TOOLS = frozenset(
     [
         # 5 server-level
@@ -937,7 +1114,7 @@ def test_lifespan_clears_server_cache_on_exit() -> None:
     """Clean lifespan exit empties the process-wide ``_server_cache``."""
     import asyncio
 
-    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp._servers import _server_cache
     from libtmux_mcp.server import _lifespan
 
     # Seed the cache with a sentinel entry — the actual value doesn't
@@ -988,7 +1165,7 @@ def test_gc_mcp_buffers_deletes_mcp_prefixed_and_spares_others(
     assert ref.buffer_name in names_before
     assert "human_buffer" in names_before
 
-    _gc_mcp_buffers({(mcp_server.socket_name, None, None): mcp_server})
+    _gc_mcp_buffers([mcp_server])
 
     names_after = mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
     assert ref.buffer_name not in names_after, "GC must delete MCP-namespaced buffers"
@@ -1008,12 +1185,36 @@ def test_gc_mcp_buffers_swallows_errors() -> None:
             raise RuntimeError(msg)
 
     # Must not raise — lifespan shutdown cannot tolerate exceptions here.
-    # Cast is needed because _BrokenServer only implements ``cmd``; the
-    # real cache stores full Server instances, but GC is best-effort and
-    # consumes only the ``cmd`` method so a partial stub is sufficient.
-    _gc_mcp_buffers(
-        t.cast(
-            "t.Mapping[_ServerCacheKey, t.Any]",
-            {(None, None, None): _BrokenServer()},
-        )
-    )
+    # GC consumes only ``cmd``, so a partial stub stands in for a Server.
+    _gc_mcp_buffers([t.cast("t.Any", _BrokenServer())])
+
+
+def test_lifespan_teardown_survives_a_cache_write_mid_gc() -> None:
+    """Teardown must not iterate the live cache.
+
+    Buffer GC makes a tmux round trip per cached server, and a tool call
+    caching a new server inside that window resizes the dict under the
+    iterator.
+    """
+    import asyncio
+    import types
+
+    from libtmux_mcp._servers import _server_cache
+    from libtmux_mcp.server import _lifespan
+
+    class _CachesAnotherServer:
+        def cmd(self, *_a: object, **_kw: object) -> t.Any:
+            _server_cache[("raced", None, None)] = t.cast("t.Any", object())
+            return types.SimpleNamespace(stdout=[])
+
+    _server_cache.clear()
+    _server_cache[("scanned", None, None)] = t.cast("t.Any", _CachesAnotherServer())
+
+    async def _cycle() -> None:
+        async with _lifespan(_app=None):  # type: ignore[arg-type]
+            pass
+
+    try:
+        asyncio.run(_cycle())
+    finally:
+        _server_cache.clear()

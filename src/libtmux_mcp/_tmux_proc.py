@@ -19,6 +19,26 @@ thread-based arrangement avoids it (a private pool with
 ``shutdown(wait=False)`` is joined by that same hook).
 
 A subprocess we own can simply be killed, so this module owns it.
+
+Every async tool now reaches tmux this way -- ``wait_for_text``,
+``wait_for_channel``, ``capture_since`` and ``run_command``. The last
+two were converted after a socket that forwards its FIRST connection
+and stalls the rest showed them unable to return AND the process unable
+to exit; a socket that never answers cannot show it, because the
+bounded liveness probe catches that one before the unbounded call is
+reached. The event loop keeps ticking throughout, so no loop-blocking
+test can see this class either.
+
+``asyncio.to_thread`` remains correct for BOUNDED work -- see
+``_run_send_keys``, whose every argv runs under a timeout, so its worker
+always returns. The hazard is the untimed call, not the thread.
+
+``tests/test_pane_tools.py`` enforces this structurally: it reads the
+tree for a tmux call made inline from an async body, and for a libtmux
+method called on any receiver. Both halves of the failure -- the call
+never returning, and the process then unable to exit -- were confirmed
+by two independently built fixtures, each shown to fire when the defect
+is present and to stay silent when it is not.
 """
 
 from __future__ import annotations
@@ -71,7 +91,7 @@ async def _run_tmux_bounded(
     ----------
     argv : list of str
         Full tmux command vector, as built by
-        :func:`~libtmux_mcp._utils._tmux_argv`.
+        :func:`~libtmux_mcp._exec._tmux_argv`.
     timeout : float
         Wall-clock bound in seconds. On expiry the child is killed and
         reaped before ``TimeoutError`` is raised.
@@ -94,13 +114,10 @@ async def _run_tmux_bounded(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    # Deliberately NOT ``wait_for(proc.communicate())``. Measured: a
-    # wedged tmux that leaves a grandchild holding the stdout/stderr
-    # write ends never reaches EOF, and ``await proc.wait()`` after
-    # ``kill()`` then deadlocks — the pipes outlive the process we
-    # killed. ``asyncio.wait`` observes the timeout without cancelling,
-    # so the kill happens first and the read task is torn down after,
-    # when cancelling it can actually succeed.
+    # Not ``wait_for(proc.communicate())``: it cancels the reader on
+    # timeout, and a wedged tmux can leave a grandchild holding the pipe
+    # write ends, so that cancel hangs. ``asyncio.wait`` returns without
+    # cancelling, so the kill can go first.
     task = asyncio.ensure_future(proc.communicate())
     try:
         done, _pending = await asyncio.wait({task}, timeout=timeout)
@@ -109,12 +126,9 @@ async def _run_tmux_bounded(
             raise TimeoutError
         stdout, stderr = task.result()
     except asyncio.CancelledError:
-        # The whole call was cancelled (MCP client hung up). Tear the
-        # child down before letting the cancellation through, or tmux
-        # is orphaned. The cancellation lands on the ``asyncio.wait``
-        # above just as often as on ``task.result()``, so the guard
-        # must span both — otherwise a cancel while waiting orphans the
-        # child.
+        # Reap before propagating, or tmux is orphaned. The guard spans
+        # both await points: a cancel lands on ``asyncio.wait`` as often
+        # as on ``task.result()``.
         await _kill_and_reap(proc, task)
         raise
     assert proc.returncode is not None

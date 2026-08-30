@@ -34,23 +34,23 @@ import tempfile
 import typing as t
 import uuid
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._bounded_io import (
+    CAPTURE_DEFAULT_MAX_LINES,
+    _truncate_lines_tail,
+)
+from libtmux_mcp._errors import ExpectedToolError, handle_tool_errors
+from libtmux_mcp._exec import _LIVENESS_TIMEOUT_SECONDS, _tmux_argv
+from libtmux_mcp._guards import _raise_if_untargeted
+from libtmux_mcp._resolve import _resolve_pane
+from libtmux_mcp._safety import (
     ANNOTATIONS_MUTATING,
     ANNOTATIONS_RO,
     ANNOTATIONS_SHELL,
     TAG_MUTATING,
     TAG_READONLY,
-    ExpectedToolError,
-    _get_server,
-    _resolve_pane,
-    _tmux_argv,
-    handle_tool_errors,
 )
+from libtmux_mcp._servers import _get_server
 from libtmux_mcp.models import BufferContent, BufferRef
-from libtmux_mcp.tools.pane_tools.io import (
-    CAPTURE_DEFAULT_MAX_LINES,
-    _truncate_lines_tail,
-)
 
 #: Default line cap for :func:`~libtmux_mcp.tools.buffer_tools.show_buffer`.
 #: Reuses the scrollback default so agents see one consistent bound across
@@ -59,6 +59,7 @@ SHOW_BUFFER_DEFAULT_MAX_LINES = CAPTURE_DEFAULT_MAX_LINES
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.server import Server
 
 #: Reserved prefix for MCP-allocated buffers. Anything matching this
 #: regex is considered agent-owned; anything else is the human user's
@@ -96,11 +97,11 @@ def _validate_logical_name(name: str) -> str:
     >>> _validate_logical_name("has space")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid logical buffer name: 'has space'
+    libtmux_mcp._errors.ExpectedToolError: Invalid logical buffer name: 'has space'
     >>> _validate_logical_name("with/slash")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid logical buffer name: 'with/slash'
+    libtmux_mcp._errors.ExpectedToolError: Invalid logical buffer name: 'with/slash'
     """
     if name == "":
         return "buf"
@@ -125,15 +126,29 @@ def _validate_buffer_name(name: str) -> str:
     >>> _validate_buffer_name("clipboard")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid buffer name: 'clipboard'
+    libtmux_mcp._errors.ExpectedToolError: 'clipboard' is not an MCP-allocated buffer
     >>> _validate_buffer_name("libtmux_mcp_shortuuid_buf")
     Traceback (most recent call last):
     ...
-    libtmux_mcp._utils.ExpectedToolError: Invalid buffer name: 'libtmux_mcp_...'
+    libtmux_mcp._errors.ExpectedToolError: 'libtmux_mcp_...' is not an MCP-...
     """
     if not _BUFFER_NAME_RE.fullmatch(name):
-        msg = f"Invalid buffer name: {name!r}"
-        raise ExpectedToolError(msg)
+        # Not "invalid": tmux accepts any of these names happily. It is
+        # this server that only touches buffers it allocated, because
+        # tmux buffers can hold OS clipboard history and a tool that
+        # reads arbitrary ones is a clipboard reader.
+        msg = f"{name!r} is not an MCP-allocated buffer"
+        raise ExpectedToolError(
+            msg,
+            suggestion=(
+                "This server only reads and writes buffers it created "
+                "(libtmux_mcp_<32-hex>_<label>), because tmux buffers may "
+                "contain clipboard history. Stage content with load_buffer "
+                "and pass the BufferRef it returns. A buffer created "
+                "outside this server -- a copy-mode yank, or tmux's own "
+                "buffer0 -- is not reachable by design."
+            ),
+        )
     return name
 
 
@@ -217,9 +232,15 @@ def load_buffer(
             f.write(content)
         argv = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
         try:
-            subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+            subprocess.run(
+                argv, check=True, capture_output=True, timeout=_LIVENESS_TIMEOUT_SECONDS
+            )
         except subprocess.TimeoutExpired as e:
-            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
+            msg = (
+                f"tmux load-buffer did not return within "
+                f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {buffer_name!r}; "
+                "the tmux server is unresponsive"
+            )
             raise ExpectedToolError(msg) from e
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
@@ -236,12 +257,27 @@ def paste_buffer(
     buffer_name: str,
     pane_id: str | None = None,
     bracket: bool = True,
+    delete_after: bool = False,
     session_name: str | None = None,
     session_id: str | None = None,
     window_id: str | None = None,
     socket_name: str | None = None,
 ) -> str:
-    """Paste an MCP-owned buffer into a pane.
+    """Paste a staged buffer into a pane, without re-sending its text.
+
+    The delivery half of the staged path: ``load_buffer`` puts text in
+    tmux, this puts it in a pane, and ``delete_buffer`` removes it.
+    Pass the ``buffer_name`` from ``load_buffer``'s
+    :class:`~libtmux_mcp.models.BufferRef` -- the name is namespaced per
+    call and is not the ``logical_name`` you asked for.
+
+    **Prefer** ``paste_text`` for one-shot input: it loads, pastes and
+    deletes in a single call. Come here when the same content goes to
+    more than one pane, when you want ``show_buffer`` to confirm what
+    was staged before it lands, or when staging and delivery are
+    separated in time.
+
+    Requires a target. This types into a pane, so it will not pick one.
 
     Parameters
     ----------
@@ -250,10 +286,18 @@ def paste_buffer(
         :func:`~libtmux_mcp.tools.buffer_tools.load_buffer`.
         Non-MCP buffers are rejected so the tool cannot be turned into
         an arbitrary-buffer reader.
-    pane_id : str, optional
-        Target pane ID.
+    pane_id : str
+        Target pane ID (e.g. '%1'). One of pane_id / session_id /
+        session_name / window_id is REQUIRED: this tool delivers input,
+        so it will not pick a pane for you. ``list_panes`` finds one,
+        and ``create_session`` / ``create_window`` / ``split_window``
+        return the new pane's id directly.
     bracket : bool
         Use tmux bracketed paste mode. Default True.
+    delete_after : bool
+        Delete the buffer once it has been pasted (tmux ``-d``), in the
+        same tmux call. Use it on the LAST paste of a staged buffer;
+        leave it False while the same content still has panes to go to.
     session_name, session_id, window_id : optional
         Pane resolution fallbacks.
     socket_name : str, optional
@@ -262,8 +306,17 @@ def paste_buffer(
     Returns
     -------
     str
-        Confirmation message naming the target pane.
+        Confirmation message naming the target pane, and saying whether
+        the buffer was deleted -- a caller that passed ``delete_after``
+        should not have to issue ``show_buffer`` to find out.
     """
+    _raise_if_untargeted(
+        "paste_buffer",
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
     server = _get_server(socket_name=socket_name)
     cname = _validate_buffer_name(buffer_name)
     pane = _resolve_pane(
@@ -273,8 +326,50 @@ def paste_buffer(
         session_id=session_id,
         window_id=window_id,
     )
-    pane.paste_buffer(buffer_name=cname, bracket=bracket)
+    pane.paste_buffer(buffer_name=cname, bracket=bracket, delete_after=delete_after)
+    if delete_after:
+        return f"Buffer {cname!r} pasted to pane {pane.pane_id} and deleted"
     return f"Buffer {cname!r} pasted to pane {pane.pane_id}"
+
+
+def _read_buffer(server: Server, cname: str, max_lines: int | None) -> BufferContent:
+    """Read one MCP-owned buffer under the bounded-output contract.
+
+    Shared with ``copy_selection`` so a selection and a staged buffer
+    are read the same way, with the same truncation fields.
+    """
+    argv = _tmux_argv(server, "show-buffer", "-b", cname)
+    try:
+        completed = subprocess.run(
+            argv,
+            check=True,
+            capture_output=True,
+            timeout=_LIVENESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as e:
+        msg = (
+            f"tmux show-buffer did not return within "
+            f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {cname!r}; "
+            "the tmux server is unresponsive"
+        )
+        raise ExpectedToolError(msg) from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
+        msg = f"show-buffer failed for {cname!r}: {stderr or e}"
+        raise ExpectedToolError(msg) from e
+    raw = completed.stdout.decode(errors="replace")
+    # Preserve a possible trailing newline so round-tripping through
+    # load_buffer/show_buffer stays byte-identical when truncation
+    # does not fire.
+    lines = raw.splitlines()
+    kept, truncated, dropped = _truncate_lines_tail(lines, max_lines)
+    content = "\n".join(kept) if truncated else raw
+    return BufferContent(
+        buffer_name=cname,
+        content=content,
+        content_truncated=truncated,
+        content_truncated_lines=dropped,
+    )
 
 
 @handle_tool_errors
@@ -313,34 +408,7 @@ def show_buffer(
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_buffer_name(buffer_name)
-    argv = _tmux_argv(server, "show-buffer", "-b", cname)
-    try:
-        completed = subprocess.run(
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=5.0,
-        )
-    except subprocess.TimeoutExpired as e:
-        msg = f"show-buffer timeout after 5s for {cname!r}"
-        raise ExpectedToolError(msg) from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"show-buffer failed for {cname!r}: {stderr or e}"
-        raise ExpectedToolError(msg) from e
-    raw = completed.stdout.decode(errors="replace")
-    # Preserve a possible trailing newline so round-tripping through
-    # load_buffer/show_buffer stays byte-identical when truncation
-    # does not fire.
-    lines = raw.splitlines()
-    kept, truncated, dropped = _truncate_lines_tail(lines, max_lines)
-    content = "\n".join(kept) if truncated else raw
-    return BufferContent(
-        buffer_name=cname,
-        content=content,
-        content_truncated=truncated,
-        content_truncated_lines=dropped,
-    )
+    return _read_buffer(server, cname, max_lines)
 
 
 @handle_tool_errors
@@ -348,7 +416,18 @@ def delete_buffer(
     buffer_name: str,
     socket_name: str | None = None,
 ) -> str:
-    """Delete an MCP-owned buffer.
+    """Delete a staged buffer once it is no longer needed.
+
+    tmux buffers persist until something removes them, and every
+    ``load_buffer`` call allocates a new one. Long-running agents that
+    stage repeatedly will accumulate them, so this is the other end of
+    ``load_buffer``.
+
+    Not needed after ``paste_text``, which deletes its own buffer, or
+    after ``paste_buffer(delete_after=True)``. Only MCP-namespaced
+    buffers are accepted: a caller cannot reach the user's own paste
+    buffers or their clipboard history through this tool, which is the
+    same reason no ``list_buffers`` exists.
 
     Parameters
     ----------
@@ -366,9 +445,15 @@ def delete_buffer(
     cname = _validate_buffer_name(buffer_name)
     argv = _tmux_argv(server, "delete-buffer", "-b", cname)
     try:
-        subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+        subprocess.run(
+            argv, check=True, capture_output=True, timeout=_LIVENESS_TIMEOUT_SECONDS
+        )
     except subprocess.TimeoutExpired as e:
-        msg = f"delete-buffer timeout after 5s for {cname!r}"
+        msg = (
+            f"tmux delete-buffer did not return within "
+            f"{_LIVENESS_TIMEOUT_SECONDS:.2f}s for {cname!r}; "
+            "the tmux server is unresponsive"
+        )
         raise ExpectedToolError(msg) from e
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
@@ -381,7 +466,7 @@ def register(mcp: FastMCP) -> None:
     """Register buffer tools with the MCP instance.
 
     ``load_buffer`` is tagged with
-    :data:`~libtmux_mcp._utils.ANNOTATIONS_SHELL` because its ``content``
+    :data:`~libtmux_mcp._safety.ANNOTATIONS_SHELL` because its ``content``
     argument is arbitrary user text that may carry interactive-environment
     side effects (commands about to be pasted into a shell). Other buffer
     tools are plain mutating ops on the tmux buffer store.

@@ -6,15 +6,18 @@ import asyncio
 import contextlib
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import threading
 import time
 import typing as t
+import uuid
 
 import pytest
 from fastmcp.exceptions import ToolError
 
+from libtmux_mcp import _progress as _progress_module
 from libtmux_mcp.tools.wait_for_tools import (
     _validate_channel_name,
     signal_channel,
@@ -23,6 +26,7 @@ from libtmux_mcp.tools.wait_for_tools import (
 
 if t.TYPE_CHECKING:
     from libtmux.server import Server
+    from libtmux.session import Session
 
 
 @pytest.mark.parametrize(
@@ -91,7 +95,7 @@ def test_wait_for_channel_returns_when_signalled(mcp_server: Server) -> None:
         result = asyncio.run(
             wait_for_channel(
                 channel=channel,
-                timeout=5.0,
+                timeout=20.0,
                 socket_name=mcp_server.socket_name,
             )
         )
@@ -153,7 +157,13 @@ SERVER_DEATH_FIXTURES: list[ServerDeathFixture] = [
     ServerDeathFixture(
         test_id="server_sigkill",
         kill_mode="sigkill",
-        expected_message="server exited unexpectedly",
+        # Two honest outcomes: tmux reports an abrupt death itself, but if
+        # the wait-for child sees a zero exit first the liveness re-probe
+        # catches it and words it differently. Both prove no signal was
+        # claimed. Accepting both hides nothing, since this case passes on
+        # tmux's own error even with the re-probe removed -- the clean
+        # fixtures above are what keep the mechanism honest.
+        expected_message="server exited unexpectedly|no longer running",
     ),
 ]
 
@@ -195,7 +205,7 @@ def test_wait_for_channel_detects_a_vanished_server(
         thread = threading.Thread(target=_kill_after_delay)
         thread.start()
         try:
-            with pytest.raises(ToolError, match=expected_message):
+            with pytest.raises(ToolError) as excinfo:
                 asyncio.run(
                     wait_for_channel(
                         channel="never_signalled",
@@ -205,6 +215,21 @@ def test_wait_for_channel_detects_a_vanished_server(
                 )
         finally:
             thread.join()
+
+    message = str(excinfo.value)
+    # Two honest paths describe a vanished server and which arrives is a
+    # race: if the kill lands before the wait-for child connects, tmux
+    # reports the absence ITSELF and the re-probe under test never runs.
+    # Both raise, but only one exercises the mechanism, so the other is an
+    # unestablished precondition rather than a pass. Killing before the
+    # call gives "no server running on <path>", during it "no longer
+    # running".
+    if "no server running" in message:
+        pytest.skip(
+            "the server died before the wait-for child connected, so tmux "
+            "reported the absence itself and the liveness re-probe never ran"
+        )
+    assert re.search(expected_message, message), message
 
 
 def test_wait_for_channel_still_succeeds_on_a_live_server() -> None:
@@ -348,10 +373,19 @@ def test_wait_for_channel_does_not_block_event_loop(mcp_server: Server) -> None:
         await asyncio.gather(_ticker(), _waiter())
         return ticks
 
-    ticks = asyncio.run(_drive())
-    assert ticks >= 20, (
-        f"ticker advanced only {ticks} times — wait_for_channel is blocking "
-        f"the event loop instead of running the subprocess in a thread"
+    # A blocked loop yields EXACTLY one tick however long the block lasts;
+    # a STARVED loop yields one too, which is the only reason to retry.
+    # Counting to 20 instead assumes the loop ticks at ~100 Hz, which
+    # parallel load breaks.
+    attempts = []
+    for _ in range(3):
+        attempts.append(asyncio.run(_drive()))
+        if attempts[-1] >= 2:
+            break
+    assert max(attempts) >= 2, (
+        f"ticker never advanced past one tick in {len(attempts)} attempts "
+        f"({attempts}) — wait_for_channel is blocking the event loop "
+        "instead of running the subprocess in a thread"
     )
 
 
@@ -439,16 +473,33 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
     socket_name = mcp_server.socket_name
     assert socket_name is not None
 
+    # One constant governs the call's budget and the window the probe
+    # waits in, so they cannot drift: the cancel has to land while the
+    # call is in flight. Both are ceilings, so a generous value is free
+    # except on the loaded box that needs it.
+    call_budget = 20.0
+
     async def _drive() -> list[int]:
         task = asyncio.create_task(
             wait_for_channel(
                 channel=channel,
-                timeout=8.0,
+                timeout=call_budget,
                 socket_name=socket_name,
             )
         )
-        await asyncio.sleep(0.5)
-        assert _tmux_wait_pids(socket_name, channel), (
+
+        # Off the loop: the probe walks every entry in /proc, which is a
+        # blocking call inside the event loop it is measuring.
+        async def _pids() -> list[int]:
+            return await asyncio.to_thread(_tmux_wait_pids, socket_name, channel)
+
+        # Polled, not slept: a fixed wait asserts the child has spawned
+        # by a wall-clock moment, which under parallel load it has not.
+        # The loop exits the moment one appears.
+        deadline = time.monotonic() + call_budget * 0.75
+        while time.monotonic() < deadline and not await _pids():
+            await asyncio.sleep(0.05)
+        assert await _pids(), (
             "no tmux wait-for child observed before the cancel — the probe "
             "is broken, so a later 'no survivors' result would be vacuous"
         )
@@ -458,18 +509,197 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
             await task
 
         # Poll rather than sleep once: the kill is synchronous but the
-        # reap is not instantaneous. The 2 s window is far short of the
-        # ~7.5 s the child still has on its own budget, so a survivor
-        # here is an orphan and not a slow teardown.
+        # reap is not instantaneous. The window is far short of what the
+        # child still has on its own budget, so a survivor here is an
+        # orphan and not a slow teardown.
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            if not _tmux_wait_pids(socket_name, channel):
+            if not await _pids():
                 break
             await asyncio.sleep(0.05)
-        return _tmux_wait_pids(socket_name, channel)
+        return await _pids()
 
     survivors = asyncio.run(_drive())
     assert not survivors, (
         f"cancelled wait_for_channel orphaned tmux child(ren) {survivors}; "
         "the child outlives the cancellation for the rest of its timeout"
     )
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_the_silent_waits_now_report_progress(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two of the three waits told the client nothing until they returned.
+
+    ``wait_for_text`` polls, so it reports from inside its own loop.
+    ``run_command`` and ``wait_for_channel`` each await ONE
+    ``tmux wait-for`` child, so a client watching a thirty-second call
+    saw the same thing whether the command was running or the server had
+    stopped answering.
+    """
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+    channel = f"pgt_{uuid.uuid4().hex[:8]}"
+    monkeypatch.setattr(_progress_module, "_TICK_SECONDS", 0.05)
+    seen: list[str] = []
+    first_tick = asyncio.Event()
+
+    async def _on_progress(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        seen.append(message or f"{progress}/{total}")
+        first_tick.set()
+
+    async def _exercise() -> None:
+        async with Client(build_mcp_server(), progress_handler=_on_progress) as client:
+            waiter = asyncio.create_task(
+                client.call_tool(
+                    "wait_for_channel",
+                    {"channel": channel, "timeout": 8.0, "socket_name": socket_name},
+                    raise_on_error=False,
+                )
+            )
+            # Wait for the first tick, not a fixed window: load can only
+            # DELAY ticks, so a sleep loses this race in one direction --
+            # zero ticks in 0.6 s at loadavg 60+. The ceiling is a bound,
+            # not a spend; it returns the moment a tick lands.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(first_tick.wait(), timeout=5.0)
+            mcp_server.cmd("wait-for", "-S", channel)
+            await waiter
+
+    asyncio.run(_exercise())
+    assert seen, "the client received no progress during the wait"
+    assert any("elapsed" in message for message in seen), seen
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_a_fast_wait_reports_no_progress(mcp_server: Server) -> None:
+    """The ticker must not fire on a call that returns immediately.
+
+    Without this the assertion above is satisfied by a ticker that
+    reports unconditionally, which would put a notification on the wire
+    for every sub-second call.
+    """
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+    channel = f"pgf_{uuid.uuid4().hex[:8]}"
+    seen: list[str] = []
+
+    async def _on_progress(
+        progress: float, total: float | None, message: str | None
+    ) -> None:
+        seen.append(message or "")
+
+    async def _exercise() -> t.Any:
+        async with Client(build_mcp_server(), progress_handler=_on_progress) as client:
+            mcp_server.cmd("wait-for", "-S", channel)
+            return await client.call_tool(
+                "wait_for_channel",
+                {"channel": channel, "timeout": 8.0, "socket_name": socket_name},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_exercise())
+    # An errored call also reports nothing, so the outcome is asserted
+    # first: otherwise this passes for the wrong reason.
+    assert result.is_error is False, result.content
+    assert seen == [], f"a sub-second wait put {len(seen)} notifications on the wire"
+
+
+def test_a_channel_signalled_past_the_flat_bound_still_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+    mcp_server: Server,
+    mcp_session: Session,
+) -> None:
+    """The two bounding strategies are not interchangeable.
+
+    ``tmux wait-for`` blocks until signalled, so ONE tmux call
+    legitimately occupies the whole timeout -- up to the 120s wait
+    ceiling, not the 5s flat bound every other tmux call gets. Routing
+    this path through the flat bound would fail a channel signalled at
+    six seconds, and would report it as ``the tmux server is
+    unresponsive`` while the server was answering normally.
+
+    Pinned because that refactor would pass every other test in the
+    suite: nothing else signals a channel later than the flat bound.
+    """
+    # Exercise the distinction, not the shipped constants: with the flat
+    # bound at 0.5s, a signal at 1.5s is past it by the same logic that
+    # 6s is past 5s, and costs the suite 1.5s instead of 6.
+    from libtmux_mcp import _exec
+
+    monkeypatch.setattr(_exec, "_SYNC_CALL_TIMEOUT_SECONDS", 0.5)
+    channel = f"slow_{uuid.uuid4().hex[:8]}"
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+
+    def signal_later() -> None:
+        time.sleep(1.5)
+        subprocess.run(
+            ["tmux", "-L", socket_name, "wait-for", "-S", channel], check=False
+        )
+
+    thread = threading.Thread(target=signal_later, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    try:
+        result = asyncio.run(
+            wait_for_channel(channel=channel, timeout=20.0, socket_name=socket_name)
+        )
+    finally:
+        thread.join(timeout=5)
+    elapsed = time.monotonic() - started
+
+    assert "was signalled" in result
+    assert elapsed > 0.5, "returned before the flat bound; the wait never blocked"
+
+
+@pytest.mark.parametrize(
+    ("signals", "latched"),
+    [
+        pytest.param(1, True, id="one-signal-latches"),
+        pytest.param(2, False, id="two-signals-clear-the-latch"),
+        pytest.param(3, True, id="three-signals-latch-again"),
+    ],
+)
+@pytest.mark.usefixtures("mcp_session")
+def test_signalling_twice_clears_the_latch(
+    mcp_server: Server, signals: int, latched: bool
+) -> None:
+    """Tmux's signal TOGGLES the latch rather than saturating.
+
+    Pinned because ``signal_channel``'s description asserts it, and a
+    cited measurement goes stale silently. A second signal on a latched
+    channel with no waiter falls past tmux's ``!wc->woken`` guard into
+    the wake-the-waiters path, finds none, and removes the channel --
+    taking the latch with it.
+
+    The cleared case spends its timeout on purpose: a wait that must NOT
+    return is only observable by letting it expire.
+    """
+    channel = f"latch_{signals}"
+    for _ in range(signals):
+        asyncio.run(signal_channel(channel=channel, socket_name=mcp_server.socket_name))
+
+    def _wait() -> str:
+        return asyncio.run(
+            wait_for_channel(
+                channel=channel, timeout=1.0, socket_name=mcp_server.socket_name
+            )
+        )
+
+    if latched:
+        assert "signalled" in _wait()
+    else:
+        with pytest.raises(ToolError, match="was not signalled within"):
+            _wait()

@@ -1,10 +1,14 @@
-"""Shared tmux pane state helpers for read and wait tools."""
+"""Pane grid and lifecycle state, read in one tmux round trip.
+
+Parsing only: no tool lives here, so the bounded-IO layer and the pane
+tools can both depend on it without depending on each other.
+"""
 
 from __future__ import annotations
 
 import typing as t
 
-from libtmux_mcp._utils import ExpectedToolError
+from libtmux_mcp._errors import ExpectedToolError
 
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
@@ -20,8 +24,8 @@ class _PaneState(t.NamedTuple):
 
     Wire format parsed by :func:`_read_pane_state`::
 
-        #{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}
-        |#{alternate_on}
+        #{history_size}|#{cursor_y}|#{pane_height}|#{pane_width}
+        |#{pane_in_mode}|#{pane_pid}|#{pane_dead}|#{alternate_on}
 
     Fields are ``|``-separated: the first three are non-negative
     integers, ``pane_pid`` is a decimal PID string, and ``pane_dead``
@@ -40,45 +44,62 @@ class _PaneState(t.NamedTuple):
     history_size: int
     cursor_y: int
     pane_height: int
+    pane_width: int
+    in_mode: bool
     pane_pid: str
     pane_dead: bool
     alternate_on: bool = False
 
 
-#: tmux format string read by :func:`_read_pane_state`. Exposed as a
-#: constant because the wait tools re-issue the identical read through
-#: a timeout-bounded ``subprocess.run`` rather than libtmux (whose
-#: ``Popen.communicate()`` has no timeout and can wedge a worker
-#: thread). It is a fixed literal — no caller-supplied text is ever
-#: interpolated into a tmux format string, because tmux's format
-#: parser treats ``#`` and ``}`` structurally and a pattern containing
-#: either silently corrupts the surrounding fields.
+#: tmux format string read by :func:`_read_pane_state`. A constant because
+#: the wait tools re-issue the identical read through a timeout-bounded
+#: ``subprocess.run`` rather than libtmux, whose ``Popen.communicate()``
+#: has no timeout. A fixed literal: caller text is never interpolated into
+#: a tmux format, since the parser treats ``#`` and ``}`` structurally and
+#: either one silently corrupts the surrounding fields.
 PANE_STATE_FORMAT = (
-    "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_pid}|#{pane_dead}"
-    "|#{alternate_on}"
+    "#{history_size}|#{cursor_y}|#{pane_height}|#{pane_width}"
+    "|#{pane_in_mode}|#{pane_pid}|#{pane_dead}|#{alternate_on}"
 )
 
 #: ``history-limit`` read, split out for the same reason.
 HISTORY_LIMIT_FORMAT = "#{history_limit}"
 
 
+def _int_or_zero(value: str) -> int:
+    """Parse a tmux numeric format field, treating a missing value as 0.
+
+    A dead pane makes ``display-message`` expand every field to the
+    empty string, so a bare ``int()`` raised
+    ``ValueError: invalid literal for int() with base 10: ''`` from the
+    hot poll path -- a wait whose pane died reported a raw parse crash
+    rather than ``pane_dead``. Same degrade-don't-fail rule the
+    ``alternate_on`` comment below states.
+    """
+    return int(value) if value else 0
+
+
 def _parse_pane_state(raw: str) -> _PaneState:
     """Parse one :data:`PANE_STATE_FORMAT` line into a :class:`_PaneState`."""
-    # ``maxsplit`` is one below the field count so a pane_pid or a
-    # future field containing ``|`` cannot shift the parse. Older tmux
-    # builds that do not know ``alternate_on`` emit the literal format
-    # text rather than a value, so treat anything but ``"1"`` as off
-    # instead of raising — this read is on the hot poll path and must
-    # degrade, not fail, across the CI tmux version matrix.
-    parts = raw.split("|", 5)
-    hs, cy, sy, pid, dead = parts[:5]
-    alternate = parts[5] if len(parts) > 5 else "0"
+    # ``maxsplit`` is one below the field count so a field containing
+    # ``|`` cannot shift the parse. Older tmux builds emit the literal
+    # format text for an unknown ``alternate_on``, so anything but ``"1"``
+    # reads as off -- this is the hot poll path and must degrade.
+    parts = raw.split("|", 7)
+    hs, cy, sy, sx, in_mode, pid, dead = parts[:7]
+    alternate = parts[7] if len(parts) > 7 else "0"
+    # A pane that no longer exists expands EVERY field to empty,
+    # ``pane_dead`` included, so it reads as "0" and cannot report its own
+    # death. A live pane always has a pid, so an empty one is the gone
+    # signal; without it the pid mismatch below calls a kill a respawn.
     return _PaneState(
-        history_size=int(hs),
-        cursor_y=int(cy),
-        pane_height=int(sy),
+        history_size=_int_or_zero(hs),
+        cursor_y=_int_or_zero(cy),
+        pane_height=_int_or_zero(sy),
+        pane_width=_int_or_zero(sx),
+        in_mode=in_mode == "1",
         pane_pid=pid,
-        pane_dead=dead == "1",
+        pane_dead=dead == "1" or not pid,
         alternate_on=alternate == "1",
     )
 
@@ -130,4 +151,4 @@ def _read_history_limit(pane: Pane) -> int:
     """
     stdout = pane.display_message(HISTORY_LIMIT_FORMAT, get_text=True)
     raw = stdout[0] if stdout else "0"
-    return int(raw)
+    return _int_or_zero(raw)

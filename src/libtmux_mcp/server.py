@@ -15,6 +15,8 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware.timing import TimingMiddleware
 
 if t.TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from libtmux.server import Server
 
 from libtmux_mcp.__about__ import __version__
@@ -22,13 +24,13 @@ from libtmux_mcp._history import (
     _configure_history_defaults,
     _resolve_suppress_history,
 )
-from libtmux_mcp._utils import (
+from libtmux_mcp._safety import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     VALID_SAFETY_LEVELS,
-    _server_cache,
 )
+from libtmux_mcp._servers import _drain_server_cache
 from libtmux_mcp._wait_policy import (
     WAIT_MAX_SECONDS_ENV,
     _configure_wait_ceiling,
@@ -48,40 +50,25 @@ from libtmux_mcp.tools.buffer_tools import _MCP_BUFFER_PREFIX
 logger = logging.getLogger(__name__)
 install_fastmcp_validation_log_filter()
 
-#: Cache-key shape used by :data:`_server_cache` and the GC helper.
-#: ``(socket_name, socket_path, tmux_bin)`` — see
-#: :func:`libtmux_mcp._utils._get_server`.
-_ServerCacheKey: t.TypeAlias = tuple[str | None, str | None, str | None]
-
 # ---------------------------------------------------------------------------
-# _BASE_INSTRUCTIONS — composed from named segments.
-#
-# The string handed to FastMCP grew organically from "what does this server
-# do?" toward a hybrid of positive guidance (HIERARCHY, READ_TOOLS,
-# WAIT_NOT_POLL) and *gap-explainers* (HOOKS_GAP, BUFFERS_GAP) that document
-# why a tool the agent might expect is absent. Splitting into named
-# constants keeps additions deliberate: when a new ``_GAP`` segment feels
-# tempting, prefer first to push the explanation into the relevant tool's
-# docstring/description (where the agent encounters it at call time) and
-# only fall back to a server-level segment when the gap is *server-shaped*
-# (e.g. an entire tool family is intentionally missing).
-#
-# Tests assert on substrings of ``_BASE_INSTRUCTIONS``, so the join
-# shape (segment count, ``"\n\n"`` separator) must stay stable even as
-# individual instruction strings evolve.
+# _BASE_INSTRUCTIONS — positive guidance plus gap-explainers for tools an
+# agent might expect to exist. Before adding a ``_GAP`` segment, push the
+# explanation into the relevant tool's docstring, where the agent meets it
+# at call time; a server-level segment is for a server-shaped gap, such as
+# a whole tool family. Tests assert on substrings, so the join shape
+# (segment count, ``"\n\n"`` separator) must stay stable.
 # ---------------------------------------------------------------------------
 
 _INSTR_HIERARCHY = (
     "libtmux MCP server for tmux. "
     "tmux hierarchy: Server > Session > Window > Pane. "
-    "Prefer pane_id (e.g. '%1') for targeting. "
+    "Target with pane_id (e.g. '%1'); input tools require one. "
     "Targeted tmux tools accept socket_name (defaults to LIBTMUX_SOCKET); "
     "list_servers discovers sockets via TMUX_TMPDIR plus extra_socket_paths."
 )
 
-#: Activation rule. Names positive triggers and explicit anti-triggers
-#: so bare 'pane'/'window'/'session' default to tmux but the server
-#: stays out of the way for browser/editor/GUI/Jupyter contexts.
+#: Activation rule: bare 'pane'/'window'/'session' default to tmux, with
+#: anti-triggers keeping browser, editor, GUI and Jupyter contexts clear.
 _INSTR_SCOPE = (
     "TRIGGERS: invoke for tmux objects (panes, windows, sessions). "
     "Bare 'pane', 'split', 'this terminal', 'send keys', 'scrollback', "
@@ -108,13 +95,11 @@ _INSTR_WAIT_NOT_POLL = (
     "WAIT, DON'T POLL: run_command for authored commands needing "
     "status; wait_for_channel for custom tmux wait-for; capture_since "
     "for tailing; wait_for_text for output you don't author "
-    "(patterns=null=any output; stop=[] bails); "
+    "(patterns=null=any output; a stop hit returns at once); "
     "send_keys_batch for raw input."
 )
 
-#: Gap-explainer: write-hook tools are intentionally absent. See module
-#: comment above for when to add another ``_GAP`` segment vs. push the
-#: explanation into a tool description.
+#: Gap-explainer: write-hook tools are intentionally absent.
 _INSTR_HOOKS_GAP = (
     "HOOKS ARE READ-ONLY: inspect via show_hooks/show_hook. "
     "Write hooks survive process death; keep them in your tmux config file."
@@ -124,8 +109,7 @@ _INSTR_HOOKS_GAP = (
 #: buffers can include OS clipboard history. See module comment above.
 _INSTR_BUFFERS_GAP = (
     "BUFFERS: load_buffer stages, paste_buffer delivers, delete_buffer "
-    "removes via returned BufferRef. No list_buffers: tmux buffers may include "
-    "clipboard history."
+    "removes by BufferRef. No list_buffers: they may hold clipboard history."
 )
 
 _BASE_INSTRUCTIONS = (
@@ -177,11 +161,9 @@ def _build_instructions(
         "raw send/batch/paste and spawn do not."
     )
 
-    # Tier-conditioned discoverability hint. False-positive activation is
-    # cheap on readonly (worst case: an extra list_panes call) and
-    # expensive on mutating/destructive (where kill_* is one mis-routed
-    # query away). Reuse the existing safety axis instead of shipping a
-    # separate LIBTMUX_DISCOVERABILITY knob.
+    # Tier-conditioned discoverability hint: a false positive costs an
+    # extra list_panes on readonly, but on mutating/destructive kill_* is
+    # one mis-routed query away.
     if safety_level == TAG_READONLY:
         parts.append(
             "\n\nReadonly mode: probe snapshot_pane/list_panes/search_panes if unsure."
@@ -192,10 +174,9 @@ def _build_instructions(
         msg = "required server instructions exceed the 2048-byte MCP budget"
         raise RuntimeError(msg)
 
-    # Agent tmux context is optional. Prefer the complete form, then discard
-    # the untrusted socket name and explanatory workflow before omitting the
-    # context entirely. Never byte-slice text because UTF-8 characters may be
-    # split across bytes.
+    # Agent tmux context is optional: prefer the complete form, then drop
+    # the untrusted socket name, then the context entirely. Never
+    # byte-slice -- a UTF-8 character may split across bytes.
     tmux_pane = os.environ.get("TMUX_PANE")
     if tmux_pane:
         # Parse TMUX env: "/tmp/tmux-1000/default,48188,10"
@@ -223,26 +204,12 @@ def _build_instructions(
             if len(combined.encode("utf-8")) <= _INSTRUCTIONS_MAX_BYTES:
                 return combined
 
-        # Past this point the is_caller workflow — the only place an
-        # agent learns how to answer "which pane am I in?" — cannot fit.
-        # There are two very different reasons for that, and they need
-        # opposite handling:
-        #
-        #   (a) our own _INSTR_* segments grew until the workflow no
-        #       longer fits alongside them. That is a build-time bug in
-        #       this file, and silently dropping the workflow hides it:
-        #       the budget assertions only check the total size, and
-        #       the degraded form still contains "Agent context", so
-        #       nothing fails. Raise and make the author shorten a
-        #       segment.
-        #
-        #   (b) TMUX_PANE / TMUX are pathologically large. That is
-        #       runtime data we do not control, and refusing to start
-        #       over a hostile environment variable would be a denial
-        #       of service. Degrade, as before.
-        #
-        # A nominal pane id discriminates: if the workflow fits with a
-        # realistic id, only the oversized runtime data pushed us over.
+        # The is_caller workflow no longer fits. A nominal pane id
+        # separates the two causes: if it fits with a realistic id, only
+        # oversized TMUX_PANE/TMUX pushed us over, so degrade rather than
+        # refuse to start over hostile runtime data. If it does not, our
+        # own _INSTR_* segments grew -- a build-time bug, and silently
+        # degrading hides it from the total-size assertions.
         nominal_context = (
             "\n\nAgent context: this MCP runs inside tmux pane %000"
             ". Tool results mark is_caller=true; filter list_panes "
@@ -283,9 +250,8 @@ _suppress_history = _resolve_suppress_history(
 )
 _wait_max_seconds = _resolve_wait_max_seconds(os.environ.get(WAIT_MAX_SECONDS_ENV))
 
-#: Tools covered by the tail-preserving response limiter. Only tools
-#: whose output is terminal scrollback benefit from this backstop;
-#: structured responses from list/get tools stay under the cap naturally.
+#: Tools whose output is terminal scrollback, so they need the
+#: tail-preserving limiter; structured responses stay under the cap.
 _RESPONSE_LIMITED_TOOLS = [
     "capture_pane",
     "capture_since",
@@ -308,9 +274,9 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
 
     Shutdown
     --------
-    Clears the process-wide :data:`_server_cache` so repeated test runs
-    don't share stale Server references and HTTP-transport reload
-    cycles start clean. Also best-effort GC's any leftover
+    Drains the process-wide server cache so repeated test runs don't
+    share stale Server references and HTTP-transport reload cycles
+    start clean. Also best-effort GC's any leftover
     ``libtmux_mcp_*`` paste buffers on every cached server — agents
     are supposed to ``delete_buffer`` after use, but an interrupted
     call chain can leak. Note: FastMCP lifespan teardown runs on
@@ -325,20 +291,19 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
     try:
         yield
     finally:
-        _gc_mcp_buffers(_server_cache)
-        _server_cache.clear()
+        _gc_mcp_buffers(_drain_server_cache())
 
 
-def _gc_mcp_buffers(cache: t.Mapping[_ServerCacheKey, Server]) -> None:
+def _gc_mcp_buffers(servers: Iterable[Server]) -> None:
     """Best-effort delete of leaked ``libtmux_mcp_*`` paste buffers.
 
-    Iterates every cached tmux Server, lists buffer names, and deletes
-    anything matching the MCP prefix. Never raises: tmux may be
-    unreachable, buffers may vanish mid-scan, and none of that should
-    block lifespan shutdown. Logs at debug level so operators can
-    still surface leaks via verbose logging.
+    Lists buffer names on each tmux server and deletes anything matching
+    the MCP prefix. Never raises: tmux may be unreachable, buffers may
+    vanish mid-scan, and none of that should block lifespan shutdown.
+    Logs at debug level so operators can still surface leaks via verbose
+    logging.
     """
-    for server in cache.values():
+    for server in servers:
         try:
             result = server.cmd("list-buffers", "-F", "#{buffer_name}")
         except Exception as err:
@@ -362,34 +327,18 @@ mcp = FastMCP(
     ),
     website_url="https://libtmux-mcp.git-pull.com/",
     lifespan=_lifespan,
-    # Middleware runs outermost-first. Order rationale:
-    #   1. TimingMiddleware — neutral observer; start clock as early
-    #      as possible so timing captures middleware cost too.
-    #   2. TailPreservingResponseLimitingMiddleware — bounds the final
-    #      tool result on the way back out. Tool errors may already be
-    #      ToolResult(is_error=True) here, so truncation preserves that
-    #      flag instead of turning expected failures into schema errors.
-    #   3. ToolErrorResultMiddleware — converts tool-call failures to
-    #      rich ToolResult(is_error=True) results and transforms
-    #      resource errors to MCP code -32002. Must stay OUTSIDE the
-    #      audit + retry + safety trio: all three depend on exception
-    #      semantics (audit catches to record outcome=error, retry
-    #      matches LibTmuxException via __cause__, and safety's tier
-    #      denials must propagate as exceptions for audit to record
-    #      them), so converting the exception to a result any deeper
-    #      would silently break all three.
-    #   4. AuditMiddleware — outside SafetyMiddleware so tier-denial
-    #      events (which raise ExpectedToolError before call_next inside
-    #      Safety) are still logged with outcome=error. Without this
-    #      ordering, denied access attempts would silently bypass the
-    #      audit log — a security-observability gap.
-    #   5. ReadonlyRetryMiddleware — inside Audit so retries are
-    #      audited once each, outside Safety so tier-denied tools
-    #      never reach retry. Only readonly tools are retried;
-    #      mutating/destructive tools pass straight through.
-    #   6. SafetyMiddleware — innermost gate (fail-closed). Denials
-    #      never reach the tool, but the audit record above captures
-    #      them for forensic review.
+    # Middleware runs outermost-first, and positions 2-6 are load-bearing:
+    #   1. Timing — a neutral observer, outermost so the clock covers
+    #      middleware cost too.
+    #   2. TailPreservingResponseLimiting — truncation preserves an
+    #      is_error result instead of making it a schema error.
+    #   3. ToolErrorResult — must stay OUTSIDE audit/retry/safety: all
+    #      three read exception semantics, so converting to a result any
+    #      deeper breaks them.
+    #   4. Audit — outside Safety, or tier denials bypass the audit log.
+    #   5. ReadonlyRetry — inside Audit so each retry is audited, outside
+    #      Safety so a denied tool never reaches retry.
+    #   6. Safety — innermost, fail-closed.
     middleware=[
         TimingMiddleware(),
         TailPreservingResponseLimitingMiddleware(
@@ -421,9 +370,7 @@ def _register_all() -> None:
 
     register_tools(mcp)
     _configure_history_defaults(mcp, _suppress_history)
-    # Publish the resolved wait ceiling to the wait tool module. Same
-    # shape as the history default above: server owns env resolution,
-    # tool modules never import server globals.
+    # Server owns env resolution; tool modules never import server globals.
     _configure_wait_ceiling(_wait_max_seconds)
     register_resources(mcp)
     register_prompts(mcp)
@@ -436,8 +383,11 @@ def _enable_allowed_tools() -> None:
     if _mcp_visibility_configured:
         return
 
-    # Use FastMCP's native visibility system as primary gate,
-    # with the SafetyMiddleware as a secondary layer for clear error messages.
+    # The ENFORCEMENT gate: it holds even for a call that skips the
+    # middleware chain (``call_tool`` accepts ``run_middleware=False``).
+    # ``SafetyMiddleware`` is the EXPLANATION gate -- disabling makes
+    # ``get_tool`` answer None, so FastMCP would otherwise report a gated
+    # tool as ``Unknown tool``.
     allowed_tags = {TAG_READONLY}
     if _safety_level in {TAG_MUTATING, TAG_DESTRUCTIVE}:
         allowed_tags.add(TAG_MUTATING)

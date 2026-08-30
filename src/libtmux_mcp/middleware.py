@@ -28,10 +28,13 @@ Provides the project's middleware infrastructure, in definition order:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
+import secrets
 import time
 import typing as t
 
+from fastmcp.exceptions import PromptError, ResourceError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import (
     ErrorHandlingMiddleware,
@@ -40,16 +43,29 @@ from fastmcp.server.middleware.error_handling import (
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
 from libtmux import exc as libtmux_exc
-from mcp.types import CallToolRequestParams, TextContent
+from mcp import McpError
+from mcp.types import CallToolRequestParams, ErrorData, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
-from libtmux_mcp._utils import (
+from libtmux_mcp._errors import ExpectedToolError
+from libtmux_mcp._safety import (
     TAG_DESTRUCTIVE,
     TAG_MUTATING,
     TAG_READONLY,
     TAG_SELF_BOUNDED,
-    ExpectedToolError,
 )
+
+#: Errors describing a CALLER-caused failure, which must never reach the
+#: ``-32603`` "Internal error" path whichever handler raised them:
+#: ``ExpectedToolError`` from tools, ``ResourceError`` / ``PromptError``
+#: from resources and prompts.
+_CALLER_CAUSED_ERRORS: tuple[type[Exception], ...] = (
+    ExpectedToolError,
+    ResourceError,
+    PromptError,
+)
+
+logger = logging.getLogger(__name__)
 
 _TIER_LEVELS: dict[str, int] = {
     TAG_READONLY: 0,
@@ -57,19 +73,45 @@ _TIER_LEVELS: dict[str, int] = {
     TAG_DESTRUCTIVE: 2,
 }
 
+#: Reverse of :data:`_TIER_LEVELS`, so a middleware configured with an
+#: unrecognized tier can still *name* the tier it fell back to.
+_LEVEL_TIERS: dict[int, str] = {level: tier for tier, level in _TIER_LEVELS.items()}
+
+
+def _highest_tier(tags: t.Collection[str]) -> str | None:
+    """Return the highest safety tier named in *tags*, or None if untagged."""
+    found = [tier for tier in _TIER_LEVELS if tier in tags]
+    if not found:
+        return None
+    return max(found, key=lambda tier: _TIER_LEVELS[tier])
+
 
 class SafetyMiddleware(Middleware):
-    """Gate tools by safety tier.
+    """Explain tier denials that ``_enable_allowed_tools`` enforces.
+
+    FastMCP's native ``disable()`` is the enforcement gate and holds
+    even for a call that skips the middleware chain. It also makes
+    ``get_tool()`` answer **None**, so FastMCP reports an off-tier call
+    as ``Unknown tool`` -- the server denying its own gated tool exists.
+    This gate names the required tier instead, resolving such names
+    against :meth:`_tier_snapshot` (the registry keeps disabled tools).
+
+    Denials must raise *here* so :class:`AuditMiddleware`, which sits
+    outside, records them as denials rather than unknown-tool errors.
 
     Parameters
     ----------
     max_tier : str
-        Maximum allowed tier. One of ``TAG_READONLY``, ``TAG_MUTATING``,
-        or ``TAG_DESTRUCTIVE``.
+        Maximum allowed tier. Unrecognized values fall back to
+        ``TAG_READONLY``.
     """
 
     def __init__(self, max_tier: str = TAG_MUTATING) -> None:
         self.max_level = _TIER_LEVELS.get(max_tier, 0)
+        #: Normalized tier name, so a denial reports where the server
+        #: stands rather than echoing an unrecognized env value back.
+        self.max_tier = _LEVEL_TIERS[self.max_level]
+        self._tier_by_tool: dict[str, str] | None = None
 
     def _is_allowed(self, tags: set[str]) -> bool:
         """Return True if the tool's tags fall within the allowed tier.
@@ -83,6 +125,55 @@ class SafetyMiddleware(Middleware):
                 if level > self.max_level:
                     return False
         return found_tier
+
+    def _denial_message(self, tool_name: str, required_tier: str | None) -> str:
+        """Name the required tier and the active one.
+
+        The message this replaced hardcoded ``destructive`` for every
+        denial, so a readonly server answered ``send_keys`` by advising
+        kill_server rights in order to type into a pane.
+        """
+        if required_tier is None:
+            return (
+                f"Tool {tool_name!r} declares no safety tier and is blocked. "
+                "This is a bug in the server, not a configuration problem; "
+                "please report it."
+            )
+        return (
+            f"Tool {tool_name!r} requires safety level {required_tier!r}, but "
+            f"this server is running at {self.max_tier!r}. Restart it with "
+            f"LIBTMUX_SAFETY={required_tier} to enable it."
+        )
+
+    async def _tier_snapshot(self, fastmcp: t.Any) -> dict[str, str]:
+        """Map every registered tool name to its tier, disabled included.
+
+        Built once. ``_list_tools()`` is FastMCP-private, so a failure
+        degrades to an empty map: the call then falls through to the
+        stock ``NotFoundError``, losing the explanation but nothing
+        else. ``tests/test_server.py`` pins the behavior so a fastmcp
+        bump fails in CI rather than silently reverting this gate.
+        """
+        if self._tier_by_tool is not None:
+            return self._tier_by_tool
+
+        snapshot: dict[str, str] = {}
+        try:
+            registered = await fastmcp._list_tools()
+        except Exception:
+            logger.warning(
+                "safety tier snapshot unavailable; off-tier calls will "
+                "report 'unknown tool'",
+                exc_info=True,
+            )
+        else:
+            for tool in registered:
+                tier = _highest_tier(tool.tags)
+                if tier is not None:
+                    snapshot[tool.name] = tier
+
+        self._tier_by_tool = snapshot
+        return snapshot
 
     async def on_list_tools(
         self,
@@ -98,16 +189,36 @@ class SafetyMiddleware(Middleware):
         context: MiddlewareContext,
         call_next: t.Any,
     ) -> t.Any:
-        """Block execution of tools above the safety tier."""
-        if context.fastmcp_context:
-            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if tool and not self._is_allowed(tool.tags):
-                msg = (
-                    f"Tool '{context.message.name}' is not available at the "
-                    f"current safety level. Set LIBTMUX_SAFETY=destructive "
-                    f"to enable destructive tools."
+        """Block execution of tools above the safety tier.
+
+        Fail-closed except for a name the registry has never heard of,
+        which is a typo and deserves FastMCP's own ``NotFoundError``.
+        """
+        tool_name = context.message.name
+
+        if context.fastmcp_context is None:
+            # No registry to consult: deny, since the top tier includes
+            # kill_server.
+            msg = (
+                f"Tool {tool_name!r} was called without a FastMCP context, so "
+                "its safety tier cannot be verified. Call it through MCP."
+            )
+            raise ExpectedToolError(msg)
+
+        fastmcp = context.fastmcp_context.fastmcp
+
+        tool = await fastmcp.get_tool(tool_name)
+        if tool is not None:
+            if not self._is_allowed(tool.tags):
+                raise ExpectedToolError(
+                    self._denial_message(tool_name, _highest_tier(tool.tags))
                 )
-                raise ExpectedToolError(msg)
+            return await call_next(context)
+
+        # Invisible to ``get_tool``: gated by tier, or nonexistent.
+        gated_tier = (await self._tier_snapshot(fastmcp)).get(tool_name)
+        if gated_tier is not None:
+            raise ExpectedToolError(self._denial_message(tool_name, gated_tier))
         return await call_next(context)
 
 
@@ -136,7 +247,7 @@ def _is_schema_validation_error(error: BaseException) -> bool:
     too early for the ``handle_tool_errors`` decorators to classify.
     Bad arguments are agent-correctable (fix the call and retry), so
     they get the same expected/WARNING treatment as
-    :class:`~libtmux_mcp._utils.ExpectedToolError`.
+    :class:`~libtmux_mcp._errors.ExpectedToolError`.
 
     Output validation cannot be mistaken for this case: fastmcp's tool
     layer converts output-shape failures into error results itself, so
@@ -212,14 +323,11 @@ def install_fastmcp_validation_log_filter() -> None:
         logger.addFilter(_FastMCPValidationLogFilter())
 
 
-#: Scheduling flag some MCP clients (notably Gemini CLI when batching
-#: several tool calls in one turn) merge into the tool's arguments.
-#: Recognized only to *word the rejection helpfully* — the argument is
-#: still rejected, never silently stripped, so genuine argument typos
-#: from other clients stay loud. Contrast MemPalace/mempalace#322,
-#: which strips the key, and #647, which whitelists arguments against
-#: the schema — silent dropping would let a mis-named flag on a
-#: mutating tool (e.g. ``enter`` on send_keys) run with defaults.
+#: Scheduling flag some MCP clients (notably Gemini CLI batching several
+#: tool calls in one turn) merge into the tool's arguments. Recognized
+#: only to word the rejection helpfully: the argument is still rejected,
+#: never silently stripped, so a mis-named flag on a mutating tool
+#: (``enter`` on send_keys) cannot run with defaults.
 _CLIENT_SCHEDULING_FLAG = "wait_for_previous"
 
 
@@ -293,7 +401,7 @@ def _error_tool_result(
       (``__cause__`` when the raise site chained one, so agents see
       ``PaneNotFound`` rather than the ``ToolError`` wrapper).
     * ``expected`` — True for agent-correctable failures
-      (:class:`~libtmux_mcp._utils.ExpectedToolError` and
+      (:class:`~libtmux_mcp._errors.ExpectedToolError` and
       argument-schema validation errors), False for operator faults
       and potential server bugs.
     * ``suggestion`` — recovery hint. Carried by the error when the
@@ -366,7 +474,7 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 
     Logging honors ``FastMCPError.log_level`` (fastmcp >= 3.3): the
     expected failures demoted to WARNING by
-    :class:`~libtmux_mcp._utils.ExpectedToolError` no longer get
+    :class:`~libtmux_mcp._errors.ExpectedToolError` no longer get
     re-shouted at ERROR by the stock ``_log_error``. Argument-schema
     validation failures — raised by fastmcp before tool code can
     classify them — are treated as expected too (see
@@ -430,6 +538,34 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
             except Exception:
                 self.logger.exception("Error in error callback")
 
+    def _transform_error(
+        self,
+        error: Exception,
+        context: MiddlewareContext,
+    ) -> Exception:
+        """Keep caller-caused failures out of the ``-32603`` catch-all.
+
+        The base transform funnels every unrecognized exception into
+        ``"Internal error: ..."``. That is right for a bug and wrong for
+        "that session does not exist". It also runs for EVERY message
+        kind, so intercepting only ``tools/call`` below left resources
+        reporting a caller's mistake as a server fault:
+        ``tmux://sessions/nosuchsession`` answered
+        ``Internal error: Session not found: nosuchsession``.
+
+        Fixed at the fork rather than by adding one resource hook. The
+        property is "an expected failure is never an internal error",
+        and it has to hold on every path this transform serves.
+        """
+        if self.transform_errors and isinstance(error, _CALLER_CAUSED_ERRORS):
+            # -32002 is the MCP code for a resource miss, -32602 for bad
+            # caller arguments. Neither prefixes the message, which
+            # already names the object that was not found.
+            method = context.method or ""
+            code = -32002 if method.startswith("resources/") else -32602
+            return McpError(ErrorData(code=code, message=str(error)))
+        return super()._transform_error(error, context)
+
     async def on_call_tool(
         self,
         context: MiddlewareContext,
@@ -447,31 +583,49 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
 # Audit middleware
 # ---------------------------------------------------------------------------
 
-#: Argument names that carry user-supplied payloads we never want in logs.
-#: ``keys`` (send_keys), ``text`` (paste_text), ``command`` (run_command),
-#: ``value`` (set_environment), ``content`` (load_buffer), ``shell``
-#: (respawn_pane), and ``environment`` (respawn_pane) can contain commands,
-#: secrets, or arbitrary large strings.
-#: Matched by exact name, case-sensitive, to mirror the tool signatures.
+#: Argument names carrying user-supplied payloads that must not reach the
+#: log. Matched by exact name, case-sensitive, to mirror the signatures.
 #:
-#: ``environment`` accepts a mapping or a JSON object string. The redaction
-#: logic in :func:`_summarize_args` digests each mapping *value* while leaving
-#: its *keys* (env var names like ``DATABASE_URL``) visible. A JSON string is
-#: instead redacted as one scalar digest, so its keys are not retained.
+#: ``environment`` as a mapping digests each *value* and leaves its *keys*
+#: (``DATABASE_URL``) visible; as a JSON object string it is redacted as
+#: one scalar digest, so its keys are not retained.
 #:
-#: Note on ``shell`` and ``environment`` redaction: this redacts the MCP
-#: audit log only. ``respawn_pane(shell="env SECRET=... bash")`` and
-#: ``environment={"AWS_SECRET_KEY": "..."}`` may briefly expose the values
-#: via the OS process table and tmux's ``pane_current_command`` metadata
-#: until the spawned shell takes over — see ``docs/topics/safety.md``.
+#: ``pattern``/``patterns``/``stop`` carry what the caller is looking FOR,
+#: and the realistic reason to look for a credential is to check whether
+#: one leaked. Redacting delivery while logging verification protects
+#: neither.
+#:
+#: Scope is the audit log. ``shell`` and ``environment`` values may still
+#: surface in the OS process table and ``pane_current_command`` until the
+#: spawned shell takes over -- see ``docs/topics/safety.md``.
+#:
+#: ``output_path``, ``start_directory`` and the name arguments are
+#: decided: a path is legitimate audit content. This set defaults to "log
+#: it", so a free-text argument added later is exposed by omission unless
+#: it is weighed against those two registers and added here.
 _SENSITIVE_ARG_NAMES: frozenset[str] = frozenset(
-    {"keys", "text", "command", "value", "content", "shell", "environment"}
+    {
+        "keys",
+        "text",
+        "command",
+        "value",
+        "content",
+        "shell",
+        "environment",
+        "pattern",
+        "patterns",
+        "stop",
+        # A caller-supplied MATCH EXPRESSION, same category as ``pattern``:
+        # {"pane_title__contains": ...} says what the caller hunted for.
+        # Both accepted shapes need it -- a dict, and the JSON string that
+        # ``_coerce_dict_arg`` also takes.
+        "filters",
+    }
 )
 
-#: Nested argument containers that may contain sensitive argument names.
-#: ``operations`` is used by ``send_keys_batch`` and the generic tool-batch
-#: wrappers. Preserving routing metadata is useful for audit trails, but
-#: nested payloads must be digested the same way top-level tool calls are.
+#: Nested argument containers that may hold sensitive argument names.
+#: Routing metadata stays readable for the audit trail; nested payloads
+#: are digested the same way top-level ones are.
 _NESTED_ARG_LIST_NAMES: frozenset[str] = frozenset({"operations"})
 
 _NONE_TYPE = type(None)
@@ -493,23 +647,45 @@ _SEND_KEYS_OPERATION_ARG_TYPES: dict[str, tuple[type[t.Any], ...]] = {
 _MAX_LOGGED_STR_LEN: int = 200
 
 
-def _redact_digest(value: str) -> dict[str, t.Any]:
-    """Return a length + SHA-256 prefix summary of ``value``.
+#: Keyed per PROCESS, not per payload. A plain SHA-256 beside an exact
+#: length is reversible for anything short -- the length fixes the search
+#: space, and agents type PINs and 2FA codes into panes.
+#:
+#: Identical payloads still correlate within a server run, the scope an
+#: operator reads a log at; correlation ACROSS runs is what this trades
+#: away, in exchange for a log reader being unable to test a guess.
+_REDACTION_KEY: bytes = secrets.token_bytes(32)
 
-    The digest is stable and deterministic, which lets operators
-    correlate the same payload across log lines without ever recording
-    the payload itself.
+
+def _redact_digest(value: str) -> dict[str, t.Any]:
+    """Return a length + keyed-digest summary of ``value``.
+
+    The field is ``digest`` and not ``sha256_prefix`` on purpose. It
+    holds an HMAC under a per-process key, so an operator who read the
+    old name and computed ``sha256(candidate)`` would find no match and
+    conclude two equal payloads DIFFERED -- a silent wrong answer in the
+    one use case the digest exists to serve. A name that fixes the
+    algorithm also has to change every time the algorithm does.
+
+    Stable within one server run, so operators can correlate the same
+    payload across log lines. NOT reproducible from the payload alone —
+    see :data:`_REDACTION_KEY` for why that matters.
 
     Examples
     --------
-    >>> _redact_digest("hello")
-    {'len': 5, 'sha256_prefix': '2cf24dba5fb0'}
-    >>> _redact_digest("")
-    {'len': 0, 'sha256_prefix': 'e3b0c44298fc'}
+    >>> summary = _redact_digest("hello")
+    >>> summary["len"], len(summary["digest"])
+    (5, 12)
+    >>> _redact_digest("hello") == summary  # correlates within the run
+    True
+    >>> _redact_digest("hellp") == summary  # and only for equal payloads
+    False
     """
     return {
         "len": len(value),
-        "sha256_prefix": hashlib.sha256(value.encode("utf-8")).hexdigest()[:12],
+        "digest": hmac.new(
+            _REDACTION_KEY, value.encode("utf-8"), hashlib.sha256
+        ).hexdigest()[:12],
     }
 
 
@@ -588,6 +764,12 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}
+        elif key in _SENSITIVE_ARG_NAMES and isinstance(value, list):
+            # Coerced like the dict branch rather than redacting only
+            # ``str`` items: every sensitive list is ``list[str]`` today,
+            # so a type test works right up until an annotation widens and
+            # values start reaching the log with nothing failing.
+            summary[key] = [_redact_digest(str(item)) for item in value]
         elif key in _NESTED_ARG_LIST_NAMES:
             if isinstance(value, list):
                 summary[key] = [
@@ -673,21 +855,18 @@ class AuditMiddleware(Middleware):
 # Tail-preserving response limiter
 # ---------------------------------------------------------------------------
 
-#: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`.
-#: Matches FastMCP's stock 1 MB default so normal schema-bearing tool
-#: responses stay below this global backstop. Tool-level caps remain
-#: responsible for terminal-specific truncation metadata.
+#: Default byte ceiling for :class:`TailPreservingResponseLimitingMiddleware`,
+#: matching FastMCP's stock 1 MB. Tool-level caps stay responsible for
+#: terminal-specific truncation metadata.
 DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
 
 
-#: Failures a retry cannot fix. Each one names a thing that is not there, or a
-#: request that cannot succeed as written, so re-running it buys a second tmux
-#: round-trip and a backoff window in order to fail identically. They all
-#: descend from :exc:`libtmux.exc.LibTmuxException`, which is the retry
-#: trigger, so without this set they would all be retried.
-#:
-#: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
-#: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
+#: Failures a retry cannot fix: each names a thing that is not there, or a
+#: request that cannot succeed as written, so re-running buys a round-trip
+#: and a backoff before failing identically. All descend from
+#: :exc:`libtmux.exc.LibTmuxException`, the retry trigger, so without this
+#: set every one would be retried. ``ObjectDoesNotExist`` already covers
+#: :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
 NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     libtmux_exc.ObjectDoesNotExist,
     libtmux_exc.MultipleObjectsReturned,
@@ -812,6 +991,34 @@ class ReadonlyRetryMiddleware(Middleware):
 _TRUNCATION_HEADER_TEMPLATE = "[... truncated {dropped} bytes ...]\n"
 
 
+def _restructure_truncated(
+    original: dict[str, t.Any],
+    truncated: ToolResult,
+) -> ToolResult | None:
+    """Re-attach structured content to a truncated success result.
+
+    Only the single-string result shape is rebuildable: fastmcp wraps a
+    ``-> str`` tool as ``{"result": "..."}``, so swapping in the
+    truncated text keeps the payload schema-valid. Model- and
+    list-shaped results carry the oversize inside their own fields and
+    cannot be trimmed from the flattened text, so they return None and
+    the caller reports a tool error instead of an invalid response.
+    """
+    if set(original) != {"result"} or not isinstance(original["result"], str):
+        return None
+    text = next(
+        (block.text for block in truncated.content if isinstance(block, TextContent)),
+        None,
+    )
+    if text is None:
+        return None
+    return ToolResult(
+        content=truncated.content,
+        structured_content={"result": text},
+        meta=truncated.meta,
+    )
+
+
 class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     """Response-limiter that keeps the tail of oversized output.
 
@@ -860,15 +1067,39 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
             return t.cast("ToolResult", inner)
 
         result = await super().on_call_tool(context, _capture)
-        if result is not inner and isinstance(inner, ToolResult) and inner.is_error:
-            # The base class truncated and rebuilt the result; restore
-            # the error flag it dropped.
+        if result is inner or not isinstance(inner, ToolResult):
+            return result
+
+        # The base class truncated and rebuilt the result, dropping both
+        # ``is_error`` and ``structured_content``.
+        if inner.is_error:
             return ToolResult(
                 content=result.content,
                 meta=result.meta,
                 is_error=True,
             )
-        return result
+        if inner.structured_content is None:
+            return result
+
+        # A tool that declares an output schema and gets a truncated result
+        # with no structured content makes a spec-compliant client raise a
+        # transport error instead of delivering the truncated data.
+        rebuilt = _restructure_truncated(inner.structured_content, result)
+        if rebuilt is not None:
+            return rebuilt
+        # Shape we cannot rebuild: say so as a tool error the agent can
+        # act on, rather than emitting a response its client will reject.
+        msg = (
+            "Response exceeded the server's size limit and could not be "
+            "truncated while satisfying this tool's output schema. Re-run "
+            "with a narrower range (for example a smaller max_lines, or a "
+            "less negative start)."
+        )
+        return ToolResult(
+            content=[TextContent(type="text", text=msg)],
+            meta=result.meta,
+            is_error=True,
+        )
 
     def _truncate_to_result(
         self,

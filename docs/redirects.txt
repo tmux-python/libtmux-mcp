@@ -10,7 +10,7 @@
 "reference/api/resources" "resources"
 "tools/prompts" "prompts"
 "tools/resources" "resources"
-"api/utils" "reference/api/utils"
+"api/utils" "reference/api/internals"
 "architecture" "topics/architecture"
 "concepts" "topics/concepts"
 "safety" "topics/safety"

@@ -61,7 +61,7 @@ Read only content since that cursor:
 
 The cursor carries the original pane id, so the follow-up call does not need
 `pane_id`. If you pass both, they must match; a cursor for another pane raises
-an {exc}`~libtmux_mcp._utils.ExpectedToolError` instead of silently reading the
+an {exc}`~libtmux_mcp._errors.ExpectedToolError` instead of silently reading the
 wrong process.
 
 If nothing new was written after the cursor, `lines` is empty and the response
@@ -74,7 +74,7 @@ needed to compute an exact delta. In that case, `lines` is a conservative
 current visible capture and the response includes a fresh cursor.
 
 Pane lifecycle is part of the cursor contract. If the pane dies or is respawned,
-the call raises an {exc}`~libtmux_mcp._utils.ExpectedToolError` instead of
+the call raises an {exc}`~libtmux_mcp._errors.ExpectedToolError` instead of
 reading from a different process that reused the same pane id.
 
 `truncated`, `truncated_lines`, and `truncated_bytes` are structured metadata.

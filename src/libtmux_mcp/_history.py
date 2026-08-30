@@ -78,7 +78,8 @@ def _prepare_spawn_environment(
         If keys or values are not strings, or a caller value conflicts with a
         required history control.
     """
-    from libtmux_mcp._utils import ExpectedToolError, _coerce_dict_arg
+    from libtmux_mcp._errors import ExpectedToolError
+    from libtmux_mcp._filters import _coerce_dict_arg
 
     coerced = _coerce_dict_arg("environment", environment)
     if coerced is None:
