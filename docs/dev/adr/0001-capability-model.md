@@ -44,11 +44,12 @@ surface. It scopes nothing about the filesystem, processes, network, or other
 sockets, and the documentation never implies otherwise.
 
 **CM-2 — Describe capability with independent facts, not a rank.**
-Process reach (can this start a process or deliver client-controlled input to
-one) and tmux effect (observe, change, delete) vary independently, and output
-classes describe what a result can carry back. `rename_window` and
-`run_shell_command` both change tmux state; only one can run code. A model with
-two axes says that in one line, and a ladder cannot say it at all.
+Direct process reach records whether the requested operation starts a process
+or delivers client-controlled input to one. Direct tmux effect records whether
+that operation observes, changes, or deletes state; output classes describe what
+the result can carry back. `rename_window` changes a name, while
+`run_shell_command` accepts a client-authored pane command. Whole-call MCP
+annotations account separately for execution added by ambient aliases or hooks.
 
 **CM-3 — Resolve one explicit tool surface at startup.**
 `inspect`, `manage`, `execute`, `teardown`. They determine what this server lists
