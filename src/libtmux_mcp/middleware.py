@@ -2,9 +2,9 @@
 
 Provides the project's middleware infrastructure, in definition order:
 
-* :class:`ToolsetMiddleware` filters tools by toolset, from
-  ``LIBTMUX_TOOLSETS``. A tool outside the enabled toolsets is hidden
-  from listing and refused on call.
+* :class:`ToolsetMiddleware` rechecks the configured surface for any
+  tool that reaches dispatch. FastMCP visibility makes tools outside
+  that surface unavailable on the wire first.
 * :class:`ToolErrorResultMiddleware` converts tool-call failures into
   ``ToolResult(is_error=True)`` results that carry the clean error
   message plus a structured ``meta`` payload, instead of fastmcp's
@@ -42,10 +42,9 @@ from libtmux_mcp._utils import VALID_TOOLSETS, ExpectedToolError
 class ToolsetMiddleware(Middleware):
     """Filter tools to the enabled toolsets.
 
-    Filtering shapes what this server advertises. It is not a permission
-    system: an enabled ``execute`` tool can type the equivalent of any
-    tool this hides, so dropping a toolset reduces accidents, not
-    authority.
+    Filtering controls which MCP tool calls this server advertises and
+    accepts. It does not confine tmux: an enabled ``execute`` tool can type
+    the equivalent of any hidden tool.
 
     Parameters
     ----------
@@ -73,11 +72,12 @@ class ToolsetMiddleware(Middleware):
         Fail-closed: a tool carrying no recognized toolset is refused,
         so adding one without classifying it cannot expose it.
         """
-        if name in self.exclude_tools:
+        toolsets = tags & set(VALID_TOOLSETS)
+        if not toolsets or name in self.exclude_tools:
             return False
         if name in self.tools:
             return True
-        return bool(self.toolsets & (tags & set(VALID_TOOLSETS)))
+        return bool(self.toolsets & toolsets)
 
     async def on_list_tools(
         self,
@@ -692,13 +692,13 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     drop the head instead, prefixing a single truncation-header line
     so callers can detect the cap fired.
 
-    Used as a global backstop for :func:`libtmux_mcp.tools.pane_tools.capture_pane`,
+    Used as a backstop for :func:`libtmux_mcp.tools.pane_tools.capture_pane`,
     :func:`libtmux_mcp.tools.pane_tools.capture_since`,
     :func:`libtmux_mcp.tools.pane_tools.snapshot_pane`, and
-    :func:`libtmux_mcp.tools.pane_tools.search_panes`. Per-tool
-    caps at the tool layer fire first under normal operation; this
-    middleware catches pathological output from future tools that
-    forget to declare their own bounds.
+    :func:`libtmux_mcp.tools.pane_tools.search_panes`, plus
+    :func:`libtmux_mcp.tools.buffer_tools.show_buffer`. Per-tool caps at
+    the tool layer fire first under normal operation; this middleware
+    catches a missed bound within that configured high-volume set.
 
     Error results keep their ``is_error`` flag through truncation.
     The stock truncation path rebuilds the result without it, which

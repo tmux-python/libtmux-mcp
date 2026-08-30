@@ -1,4 +1,4 @@
-"""Tests for libtmux MCP safety + audit middleware."""
+"""Tests for libtmux MCP toolset and audit middleware."""
 
 from __future__ import annotations
 
@@ -96,16 +96,18 @@ def test_toolset_middleware_membership(
 
 
 def test_named_tools_join_and_exclusions_win() -> None:
-    """`LIBTMUX_TOOLS` adds by name; `LIBTMUX_EXCLUDE_TOOLS` beats it."""
+    """Named includes override selection, not missing classification."""
     mw = ToolsetMiddleware(
         {TOOLSET_INSPECT},
-        tools={"send_keys"},
+        tools={"mystery", "run_command", "send_keys"},
         exclude_tools={"capture_pane", "send_keys"},
     )
 
     assert mw._is_enabled("send_keys", {TOOLSET_EXECUTE}) is False
     assert mw._is_enabled("capture_pane", {TOOLSET_INSPECT}) is False
     assert mw._is_enabled("list_panes", {TOOLSET_INSPECT}) is True
+    assert mw._is_enabled("run_command", {TOOLSET_EXECUTE}) is True
+    assert mw._is_enabled("mystery", set()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -697,12 +699,12 @@ def test_error_handling_middleware_transforms_errors() -> None:
 def test_audit_records_a_toolset_refusal(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A tool denied by SafetyMiddleware still appears in the audit log.
+    """A tool denied by ToolsetMiddleware still appears in the audit log.
 
-    Composes Audit and Safety in the production order (Audit outside
-    Safety) by manually nesting their ``on_call_tool`` handlers: the
-    inner ``call_next`` from Audit dispatches to Safety, which raises
-    ``ExpectedToolError`` for an over-tier tool. Audit should record
+    Composes Audit and Toolset in the production order (Audit outside
+    Toolset) by manually nesting their ``on_call_tool`` handlers: the
+    inner ``call_next`` from Audit dispatches to Toolset, which raises
+    ``ExpectedToolError`` for a disabled tool. Audit should record
     that as ``outcome=error error_type=ExpectedToolError`` rather
     than skipping the record. Without this ordering, denied access
     attempts would silently bypass forensic logging.
@@ -712,13 +714,13 @@ def test_audit_records_a_toolset_refusal(
     audit = AuditMiddleware()
     ctx = _fake_context(name="kill_server", arguments={})
 
-    # SafetyMiddleware.on_call_tool consults
+    # ToolsetMiddleware.on_call_tool consults
     # context.fastmcp_context.fastmcp.get_tool(...). With
-    # fastmcp_context=None the safety check short-circuits, so we
+    # fastmcp_context=None the toolset check short-circuits, so we
     # simulate the denial more directly: ``call_next`` is a coroutine
-    # that raises the same ``ExpectedToolError`` SafetyMiddleware
-    # would when blocking an over-tier call. The test's invariant is
-    # that the AuditMiddleware sitting *outside* Safety still records
+    # that raises the same ``ExpectedToolError`` ToolsetMiddleware
+    # would when blocking a disabled tool. The test's invariant is
+    # that the AuditMiddleware sitting *outside* Toolset still records
     # the attempt with outcome=error.
     msg = "Tool 'kill_server' is not in this server's enabled toolsets."
 

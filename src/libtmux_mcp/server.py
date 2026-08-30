@@ -89,7 +89,7 @@ _INSTR_METADATA_VS_CONTENT = (
 
 _INSTR_READ_TOOLS = (
     "Prefer snapshot_pane over capture_pane + get_pane_info; capture_since "
-    "for repeated observation/tailing; display_message for tmux formats."
+    "for repeated observation/tailing; display_message for tmux variables."
 )
 
 _INSTR_WAIT_NOT_POLL = (
@@ -104,7 +104,7 @@ _INSTR_WAIT_NOT_POLL = (
 #: comment above for when to add another ``_GAP`` segment vs. push the
 #: explanation into a tool description.
 _INSTR_HOOKS_GAP = (
-    "HOOKS ARE READ-ONLY: inspect via show_hooks/show_hook. "
+    "NO DEDICATED HOOK-WRITE TOOLS: use show_hooks/show_hook. "
     "Write hooks survive process death; keep them in your tmux config file."
 )
 
@@ -299,7 +299,7 @@ def _resolve_tool_names(value: str | None) -> frozenset[str]:
 def _reject_retired_safety_env() -> None:
     """Fail startup when ``LIBTMUX_SAFETY`` is still set.
 
-    The tiers it selected were an ordered ladder that read as a
+    The former setting selected an ordered ladder that read as a
     permission system and was not one. Ignoring the variable would
     silently widen a surface an operator believes is narrow.
     """
@@ -342,10 +342,11 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
 
     Startup
     -------
-    Verifies that a ``tmux`` binary is on ``PATH``. Without this
-    probe, tools fail at first call with a generic ``TmuxCommandNotFound``
-    deep inside libtmux. Failing at server start instead surfaces a
-    clear cold-start error before any tool traffic arrives.
+    Validates named tool includes and exclusions against the transformed
+    catalog, then verifies that a ``tmux`` binary is on ``PATH``. Without
+    the binary probe, tools fail at first call with a generic
+    ``TmuxCommandNotFound`` deep inside libtmux. Failing at server start
+    instead surfaces a clear cold-start error before tool traffic arrives.
 
     Shutdown
     --------
@@ -354,6 +355,21 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
     Shutdown sends no tmux commands. Buffer tools expose explicit cleanup, and
     a process-wide prefix does not prove which MCP instance owns a buffer.
     """
+    registered_tool_names = {
+        tool.name for tool in await super(FastMCP, _app).list_tools()
+    }
+    for variable, names in (
+        ("LIBTMUX_TOOLS", _extra_tools),
+        ("LIBTMUX_EXCLUDE_TOOLS", _excluded_tools),
+    ):
+        # FastMCP.list_tools() hides disabled tools. Its provider lookup
+        # retains them and applies the same transforms, including optional
+        # prompt-as-tool adapters.
+        unknown = sorted(names - registered_tool_names)
+        if unknown:
+            msg = f"{variable} names unknown tools: {', '.join(unknown)}"
+            raise RuntimeError(msg)
+
     if shutil.which("tmux") is None:
         msg = "tmux binary not found on PATH"
         raise RuntimeError(msg)
@@ -440,15 +456,16 @@ def _enable_allowed_tools() -> None:
     if _mcp_visibility_configured:
         return
 
-    # FastMCP's tag visibility is the primary filter; ToolsetMiddleware
-    # repeats the decision so a direct call gets an error naming the
-    # variable rather than an unknown-tool error.
+    # FastMCP's tag and name visibility is the primary wire filter;
+    # ToolsetMiddleware repeats classification as defense in depth for
+    # tools that reach dispatch.
     mcp.disable(components={"tool"})
     if _toolsets:
         mcp.enable(tags=set(_toolsets), components={"tool"})
     for name in _extra_tools:
-        with contextlib.suppress(Exception):
-            mcp.enable(components={"tool"}, names={name})
+        mcp.enable(components={"tool"}, names={name})
+    if _excluded_tools:
+        mcp.disable(components={"tool"}, names=set(_excluded_tools))
     _mcp_visibility_configured = True
 
 

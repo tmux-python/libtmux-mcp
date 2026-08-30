@@ -134,6 +134,134 @@ def test_an_unknown_toolset_fails_startup() -> None:
         _resolve_toolsets("inspect,bogus")
 
 
+@pytest.mark.parametrize(
+    ("variable", "tool_name"),
+    [
+        ("LIBTMUX_TOOLS", "definitely_not_a_tool"),
+        ("LIBTMUX_EXCLUDE_TOOLS", "definitely_not_a_tool"),
+        ("LIBTMUX_TOOLS", "get_prompt"),
+    ],
+    ids=["include-typo", "exclude-typo", "disabled-prompt-adapter"],
+)
+def test_an_unknown_tool_name_fails_server_startup(
+    variable: str,
+    tool_name: str,
+) -> None:
+    """A typo in an individual include or exclude fails closed."""
+    code = textwrap.dedent(
+        """
+        import asyncio
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+
+        async def main():
+            async with Client(build_mcp_server()):
+                pass
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, variable: tool_name}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode != 0
+    assert f"{variable} names unknown tools: {tool_name}" in proc.stderr
+
+
+@pytest.mark.parametrize("variable", ["LIBTMUX_TOOLS", "LIBTMUX_EXCLUDE_TOOLS"])
+def test_generated_prompt_tool_names_validate_when_enabled(variable: str) -> None:
+    """Validation includes tools produced by the prompt adapter transform."""
+    code = textwrap.dedent(
+        """
+        import asyncio
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+
+        async def main():
+            async with Client(build_mcp_server()):
+                pass
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {
+        **os.environ,
+        "LIBTMUX_MCP_PROMPTS_AS_TOOLS": "1",
+        variable: "get_prompt",
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "selection"),
+    [
+        ("send_keys", {"LIBTMUX_TOOLSETS": "inspect"}),
+        ("list_sessions", {"LIBTMUX_EXCLUDE_TOOLS": "list_sessions"}),
+    ],
+    ids=["toolset-omission", "explicit-exclusion"],
+)
+def test_a_hidden_tool_is_unknown_on_the_production_wire(
+    tool_name: str,
+    selection: dict[str, str],
+) -> None:
+    """FastMCP visibility rejects hidden tools before tool dispatch."""
+    code = textwrap.dedent(
+        f"""
+        import asyncio
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                result = await client.call_tool(
+                    {tool_name!r},
+                    {{}},
+                    raise_on_error=False,
+                )
+                print(result.content[0].text)
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {**os.environ, **selection}
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0
+    assert f"Unknown tool: '{tool_name}'" in proc.stdout
+
+
 def test_the_retired_safety_variable_fails_startup() -> None:
     """`LIBTMUX_SAFETY` is gone; ignoring it could widen a surface."""
     code = textwrap.dedent(
@@ -219,13 +347,13 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
 
 
 def test_base_instructions_document_hook_boundary() -> None:
-    """_BASE_INSTRUCTIONS explains hooks are read-only by design.
+    """_BASE_INSTRUCTIONS explains hooks are inspection-only by design.
 
     Without this sentence agents waste a turn asking for ``set_hook`` or
     trying to write hooks through a nonexistent tool. Naming the
     boundary heads off the exploratory call.
     """
-    assert "HOOKS ARE READ-ONLY" in _BASE_INSTRUCTIONS
+    assert "NO DEDICATED HOOK-WRITE TOOLS" in _BASE_INSTRUCTIONS
     assert "show_hooks" in _BASE_INSTRUCTIONS
     assert "tmux config file" in _BASE_INSTRUCTIONS
 
@@ -392,7 +520,7 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
     ids=["history-disabled", "history-enabled"],
 )
 @pytest.mark.parametrize(
-    ("tier", "tmux_pane", "tmux_env"),
+    ("toolset", "tmux_pane", "tmux_env"),
     [
         (TOOLSET_INSPECT, "%42", "/tmp/tmux-1000/default,12345,0"),
         (TOOLSET_MANAGE, "%42", "/tmp/tmux-1000/default,12345,0"),
@@ -406,25 +534,25 @@ def test_build_instructions_defaults_semantic_history_suppression_on() -> None:
         # (TMUX_PANE) and a longer socket name (LIBTMUX_SOCKET). Margin
         # ~2 bytes; if a future text addition trips this, either trim
         # further or fall back to a tighter compression form (drop spaces
-        # around ``/`` in HOOKS, drop spaces after colons in the safety
+        # around ``/`` in HOOKS, drop spaces after colons in the toolset
         # paragraph) for additional bytes of margin.
         (TOOLSET_INSPECT, "%99", "/tmp/tmux-1000/dev-prod,12345,0"),
     ],
 )
-def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
+def test_full_instructions_under_2kb_across_toolsets_and_tmux_pane(
     monkeypatch: pytest.MonkeyPatch,
     suppress_history: bool,
-    tier: str,
+    toolset: str,
     tmux_pane: str,
     tmux_env: str,
 ) -> None:
     """The transmitted instructions= string fits Claude Code's 2KB budget.
 
     The static ``_BASE_INSTRUCTIONS`` length is not the contract —
-    ``_build_instructions`` appends a safety-tier block, an optional
+    ``_build_instructions`` appends a toolset block, an optional
     `inspect`-only hint, and an optional ``$TMUX_PANE`` agent-context
     block. The full transmitted string must be ≤ 2048 bytes for every
-    (tier, tmux_pane) combination, otherwise Claude Code silently
+    (toolset, tmux_pane) combination, otherwise Claude Code silently
     truncates the agent-context block — the only server-side fix for
     "current window" anaphora.
 
@@ -441,12 +569,12 @@ def test_full_instructions_under_2kb_across_tiers_and_tmux_pane(
         monkeypatch.delenv("TMUX", raising=False)
 
     instructions = _build_instructions(
-        toolsets=frozenset({tier}),
+        toolsets=frozenset({toolset}),
         suppress_history=suppress_history,
     )
     size = len(instructions.encode())
     assert size <= 2048, (
-        f"tier={tier} tmux_pane={tmux_pane!r}: "
+        f"toolset={toolset} tmux_pane={tmux_pane!r}: "
         f"{size} bytes exceeds Claude Code's 2KB ceiling"
     )
 
@@ -544,21 +672,21 @@ def test_scope_segment_carries_anti_triggers() -> None:
     assert "clarifying question" in _INSTR_SCOPE
 
 
-@pytest.mark.parametrize("tier", [TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN])
+@pytest.mark.parametrize("toolset", [TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN])
 def test_probe_hint_visible_only_on_an_inspect_only_surface(
-    monkeypatch: pytest.MonkeyPatch, tier: str
+    monkeypatch: pytest.MonkeyPatch, toolset: str
 ) -> None:
     """The investigation hint appears only when `inspect` is all there is.
 
     A wrong guess is cheap there (worst case: an
-    extra ``list_panes`` call) and expensive on a surface holding
-    (where ``kill_*`` is one mis-routed query away). Reuse the existing
-    safety axis instead of shipping a separate discoverability knob.
+    extra ``list_panes`` call) and expensive on a surface holding teardown
+    tools (where ``kill_*`` is one mis-routed query away). Reuse the existing
+    toolset classification instead of shipping a separate discoverability knob.
     """
     monkeypatch.delenv("TMUX_PANE", raising=False)
     monkeypatch.delenv("TMUX", raising=False)
-    instructions = _build_instructions(toolsets=frozenset({tier}))
-    if tier == TOOLSET_INSPECT:
+    instructions = _build_instructions(toolsets=frozenset({toolset}))
+    if toolset == TOOLSET_INSPECT:
         assert "Probe snapshot_pane" in instructions
     else:
         assert "Probe snapshot_pane" not in instructions
@@ -648,7 +776,7 @@ _DISCOVERY_ANCHORS = frozenset(
 
 
 #: Discovery anchors that carry the ``anthropic/alwaysLoad`` per-tool
-#: meta hint. Read-only only — best-effort hint to Claude Code that
+#: meta hint. Inspect only — best-effort hint to Claude Code that
 #: keeps a tiny tmux vocabulary always-visible without preloading
 #: every tool's schema.
 _ALWAYS_LOAD_ANCHORS = frozenset(["list_panes", "list_windows", "snapshot_pane"])
@@ -871,7 +999,7 @@ def test_lifespan_missing_tmux_raises_runtime_error(
     """Startup raises a clear RuntimeError when tmux is not on PATH."""
     import asyncio
 
-    from libtmux_mcp.server import _lifespan
+    from libtmux_mcp.server import _lifespan, mcp
 
     def _missing_tmux(_name: str) -> None:
         return None
@@ -879,7 +1007,7 @@ def test_lifespan_missing_tmux_raises_runtime_error(
     monkeypatch.setattr("libtmux_mcp.server.shutil.which", _missing_tmux)
 
     async def _enter() -> None:
-        async with _lifespan(_app=None):  # type: ignore[arg-type]
+        async with _lifespan(mcp):
             pytest.fail("lifespan should have raised before yielding")
 
     with pytest.raises(RuntimeError, match="tmux binary not found"):
