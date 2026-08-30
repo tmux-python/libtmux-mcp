@@ -3168,6 +3168,67 @@ libtmux-mcp 0.1.0a20 changes no tool behavior. `scripts/mcp_swap.py` gains `use-
 
 ### Documentation
 
+#### opencode joins the install picker
+
+The install widget gains an opencode panel. `opencode mcp add tmux -- <command>`
+is non-interactive once a name and a `--` command are both given, so it is a CLI
+panel rather than a paste-this-JSON one — which also sidesteps opencode's
+unusual entry shape.
+
+### Development
+
+**`mcp_swap.py` covers opencode and pi**
+
+`use-local`, `status`, `revert`, `doctor` and `detect` now reach two more agent
+CLIs.
+
+opencode is the first config the script edits that is not plain JSON or TOML.
+Its `$XDG_CONFIG_HOME/opencode/opencode.jsonc` is JSONC, its server map hangs
+off a top-level `mcp` key rather than `mcpServers`, and one entry packs argv
+into a single `command` array with its environment table spelled
+`environment`. Getting the shape wrong is not a soft failure there: a scalar
+`command` is a decode error that stops opencode starting, and an `env` key is
+dropped without a word. Comments survive a swap, including one written directly
+above the `command` it explains.
+
+pi ships no MCP client — its README says so outright, and the released build
+contains no MCP code. `~/.pi/agent/mcp.json` is read by the third-party
+`pi-mcp-adapter` extension, so a swap written there takes effect only once that
+package is installed. `detect` says so rather than reporting a swap that cannot
+do anything.
+
+**JSONC is edited rather than reserialized**
+
+The JSON writer rebuilds the whole document, which for a commented file would
+mean deleting every comment in it. JSONC values now come from stdlib `json`
+after comments and trailing commas are blanked in place, and writes are applied
+as text splices, so every byte outside a replaced value is untouched. The
+obvious dependency was measured and rejected: `json-five` round-trips comments,
+but raises on the valid JSON string `"C:\\x"` and silently decodes a literal
+`\u0041` to `"A"`.
+
+**Per-CLI behavior is declared, not branched**
+
+`CLIInfo` gained `container` (the key path to the server map) and `dialect` (the
+entry shape) alongside `fmt`. The four `cli in (...)` membership tuples that
+`get_server`, `set_server`, `delete_server` and `_all_server_specs` each carried
+are gone. Two of them ended in a bare `else` that fell through to the TOML key,
+so a CLI registered but forgotten in one tuple reported "no entry" instead of
+failing; the other two raised `AssertionError`, which the caller did not catch.
+A non-mapping at a container key now raises a `RuntimeError` naming the path for
+every CLI, not just Claude. `scripts/README.md`'s extension guide described
+three branch sites when there were four; it now describes the fields instead.
+
+## libtmux-mcp 0.1.0a20 (2026-08-09)
+
+libtmux-mcp 0.1.0a20 changes no tool behavior. ruff's curated default rule
+set is enabled behind a `ruff>=0.16.0` floor, and the CI workflow actions move
+to their current majors. In the documentation, the dataclass identifying an
+MCP caller describes each field instead of reaching the API reference as
+"Alias for field number 0".
+
+### Documentation
+
 #### Caller identity fields are described (#105)
 
 The dataclass identifying an MCP caller now says what each field holds. They
