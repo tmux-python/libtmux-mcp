@@ -9,9 +9,7 @@ import typing as t
 
 import pydantic
 import pytest
-from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import MiddlewareContext
-from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams
 
 from libtmux_mcp._utils import (
@@ -22,7 +20,6 @@ from libtmux_mcp._utils import (
 )
 from libtmux_mcp.middleware import (
     AuditMiddleware,
-    InspectRetryMiddleware,
     ToolsetMiddleware,
     _client_label,
     _redact_digest,
@@ -613,23 +610,18 @@ def test_server_middleware_stack_order() -> None:
 
     The ordering is load-bearing (see server.py comment):
     TimingMiddleware must be outermost so it observes total wall
-    time; AuditMiddleware must sit *outside* SafetyMiddleware so
-    tier-denial events (which raise ``ExpectedToolError`` before
+    time; AuditMiddleware must sit *outside* ToolsetMiddleware so
+    toolset-denial events (which raise ``ExpectedToolError`` before
     ``call_next``) are still recorded — without this ordering,
     forbidden-access attempts silently bypass the audit log. A
-    refactor that swaps Audit and Safety would degrade
+    refactor that swaps Audit and Toolset would degrade
     security observability without an obvious test failure, so pin
     the sequence explicitly.
-
-    InspectRetryMiddleware sits between Audit and Safety so retried
-    calls are audited once each (Audit wraps the retry loop) and
-    tier-denied tools never reach retry (Safety stops them first).
     """
     from fastmcp.server.middleware.timing import TimingMiddleware
 
     from libtmux_mcp.middleware import (
         AuditMiddleware,
-        InspectRetryMiddleware,
         TailPreservingResponseLimitingMiddleware,
         ToolErrorResultMiddleware,
         ToolsetMiddleware,
@@ -640,14 +632,46 @@ def test_server_middleware_stack_order() -> None:
     # FastMCP auto-appends an internal DereferenceRefsMiddleware at the
     # end of the stack; we care about the ordering of the middleware
     # *we* configured. Slice off the suffix before comparing.
-    assert types[:6] == [
+    assert types[:5] == [
         TimingMiddleware,
         TailPreservingResponseLimitingMiddleware,
         ToolErrorResultMiddleware,
         AuditMiddleware,
-        InspectRetryMiddleware,
         ToolsetMiddleware,
     ]
+
+
+def test_failed_inspect_call_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed observation runs once because tmux may add effects."""
+    from fastmcp import Client
+    from libtmux import Server, exc as libtmux_exc
+
+    from libtmux_mcp.server import build_mcp_server
+
+    calls = 0
+
+    def _fail(_self: Server) -> list[t.Any]:
+        nonlocal calls
+        calls += 1
+        msg = "forced failure"
+        raise libtmux_exc.LibTmuxException(msg)
+
+    monkeypatch.setattr(Server, "sessions", property(_fail))
+
+    async def _call() -> t.Any:
+        async with Client(build_mcp_server()) as client:
+            return await client.call_tool(
+                "list_sessions",
+                {"socket_name": "no-retry-boundary"},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+
+    assert result.is_error is True
+    assert calls == 1
 
 
 def test_error_handling_middleware_transforms_errors() -> None:
@@ -714,316 +738,6 @@ def test_audit_records_a_toolset_refusal(
 
 
 # ---------------------------------------------------------------------------
-# InspectRetryMiddleware tests
-# ---------------------------------------------------------------------------
-
-
-class _StubTool:
-    """Minimal tool stand-in for ``get_tool`` lookups."""
-
-    def __init__(self, tags: set[str]) -> None:
-        self.tags = tags
-
-
-class _StubFastMCP:
-    """Awaitable ``get_tool`` returning a single stub tool."""
-
-    def __init__(self, tool: _StubTool) -> None:
-        self._tool = tool
-
-    async def get_tool(self, _name: str) -> _StubTool:
-        return self._tool
-
-
-class _StubFastMCPContext:
-    """Just enough to satisfy ``context.fastmcp_context.fastmcp.get_tool``."""
-
-    def __init__(self, fastmcp: _StubFastMCP) -> None:
-        self.fastmcp = fastmcp
-
-
-def _retry_context(tags: set[str]) -> MiddlewareContext[CallToolRequestParams]:
-    """Build a MiddlewareContext that returns a tool with the given tags."""
-    fastmcp_context = _StubFastMCPContext(_StubFastMCP(_StubTool(tags)))
-    return MiddlewareContext(
-        message=CallToolRequestParams(name="x", arguments={}),
-        fastmcp_context=t.cast("t.Any", fastmcp_context),
-    )
-
-
-class _FlakyCallNext:
-    """Async callable that raises N times before succeeding."""
-
-    def __init__(self, raises_n_times: int, exception: Exception) -> None:
-        self.exception = exception
-        self.remaining = raises_n_times
-        self.calls = 0
-
-    async def __call__(self, _context: t.Any) -> str:
-        self.calls += 1
-        if self.remaining > 0:
-            self.remaining -= 1
-            raise self.exception
-        return "ok"
-
-
-def test_inspect_retry_recovers_from_libtmux_exception() -> None:
-    """An ``inspect`` tool is retried once on ``LibTmuxException``.
-
-    Models the production scenario the middleware exists to fix: a
-    transient socket error from libtmux on the first call, then a
-    successful call after the cache evicts the dead Server. Without
-    the retry the agent would see an expected tool error on the first
-    ``list_sessions``-style call.
-    """
-    from libtmux import exc as libtmux_exc
-
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_INSPECT})
-    call_next = _FlakyCallNext(
-        raises_n_times=1,
-        exception=libtmux_exc.LibTmuxException("transient socket error"),
-    )
-
-    result = asyncio.run(middleware.on_call_tool(ctx, call_next))
-
-    assert result == "ok"
-    assert call_next.calls == 2  # initial failure + one retry
-
-
-def test_inspect_retry_skips_a_writing_tool() -> None:
-    """A writing tool is NOT retried on ``LibTmuxException``.
-
-    Critical safety property: re-running ``send_keys``,
-    ``create_session``, or any other writing call on a transient
-    error would silently double the side effect. This test pins the
-    "only inspect is retried" gate.
-    """
-    from libtmux import exc as libtmux_exc
-
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_MANAGE})
-    call_next = _FlakyCallNext(
-        raises_n_times=1,
-        exception=libtmux_exc.LibTmuxException("transient socket error"),
-    )
-
-    with pytest.raises(libtmux_exc.LibTmuxException, match="transient"):
-        asyncio.run(middleware.on_call_tool(ctx, call_next))
-
-    assert call_next.calls == 1  # no retry — fail on first call
-
-
-def test_inspect_retry_skips_self_bounded_tool() -> None:
-    """An ``inspect`` + self-bounded tool is NOT retried.
-
-    ``wait_for_text`` computes its deadline inside the tool body, so a
-    retry restarts the clock: a transient ``LibTmuxException`` at t=29s
-    of a 30s wait would produce a ~59s call and turn the wait ceiling
-    into a lie. ``_SkipDeterministicFailures`` cannot cover this — it
-    carves out failures by exception *type*, and this exception is a
-    genuinely transient one a retry would fix for any other tool. The
-    exclusion has to be tool-level, and it is a TAG rather than a name
-    list because ``add_tool_transformation`` can rename a tool.
-    """
-    from libtmux import exc as libtmux_exc
-
-    from libtmux_mcp._utils import TAG_SELF_BOUNDED
-
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_INSPECT, TAG_SELF_BOUNDED})
-    call_next = _FlakyCallNext(
-        raises_n_times=1,
-        exception=libtmux_exc.LibTmuxException("transient socket error"),
-    )
-
-    with pytest.raises(libtmux_exc.LibTmuxException, match="transient"):
-        asyncio.run(middleware.on_call_tool(ctx, call_next))
-
-    assert call_next.calls == 1  # no retry — the wait budget is not doubled
-
-
-def test_inspect_retry_skips_non_libtmux_exception() -> None:
-    """Even ``inspect`` tools do not retry outside the trigger set.
-
-    Default ``retry_exceptions=(LibTmuxException,)`` is narrow on
-    purpose — a ``ValueError`` from caller-side input is a
-    programming error, not a transient socket hiccup, and retrying
-    it would just delay the real failure.
-    """
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_INSPECT})
-    call_next = _FlakyCallNext(
-        raises_n_times=1,
-        exception=ValueError("bad caller input"),
-    )
-
-    with pytest.raises(ValueError, match="bad caller input"):
-        asyncio.run(middleware.on_call_tool(ctx, call_next))
-
-    assert call_next.calls == 1  # no retry — wrong exception type
-
-
-def test_inspect_retry_recovers_on_decorated_tool(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End-to-end: retry fires through the production decorator wrap path.
-
-    Regression guard for the fastmcp <3.2.4 production no-op where
-    ``RetryMiddleware._should_retry`` did not walk ``__cause__``.
-    Every libtmux-mcp tool is wrapped by ``handle_tool_errors`` /
-    ``handle_tool_errors_async``, which converts ``LibTmuxException``
-    to ``ExpectedToolError(...) from LibTmuxException``. At the
-    middleware layer the exception type is ``ExpectedToolError``, not
-    ``LibTmuxException`` — so the retry decision must walk
-    ``__cause__`` to see the real failure type.
-
-    The unit tests above use ``_FlakyCallNext`` which raises
-    ``LibTmuxException`` directly, bypassing the decorator. They
-    pass on every fastmcp version. This test invokes the real
-    ``list_sessions`` tool through the middleware, exercising the
-    decorator wrap path that broke in production:
-
-    * On fastmcp 3.2.3: would fail with ``calls == 1`` (no retry).
-    * On fastmcp >= 3.2.4: passes with ``calls == 2``.
-
-    The ``pyproject.toml`` floor (``fastmcp>=3.2.4``) keeps this
-    test green; an accidental downgrade would re-introduce the bug
-    and fail this test loudly.
-    """
-    from libtmux import Server, exc as libtmux_exc
-
-    from libtmux_mcp.tools.server_tools import list_sessions
-
-    calls = {"count": 0}
-
-    def _flaky_sessions(_self: Server) -> list[t.Any]:
-        calls["count"] += 1
-        if calls["count"] == 1:
-            msg = "transient socket error"
-            raise libtmux_exc.LibTmuxException(msg)
-        return []  # second call succeeds with no tmux required
-
-    monkeypatch.setattr(Server, "sessions", property(_flaky_sessions))
-
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_INSPECT})
-
-    async def real_call_next(_context: t.Any) -> t.Any:
-        # ``list_sessions`` is sync + ``@handle_tool_errors`` decorated.
-        # Wrapping the sync call in an async function is enough — the
-        # exception path is what we care about.
-        return list_sessions(socket_name="retry-integration-smoke")
-
-    result = asyncio.run(middleware.on_call_tool(ctx, real_call_next))
-
-    assert result == []
-    assert calls["count"] == 2, (
-        f"retry did not fire (calls={calls['count']}). Likely cause: "
-        f"fastmcp<3.2.4 RetryMiddleware._should_retry not walking "
-        f"__cause__. Bump pyproject.toml fastmcp pin to >=3.2.4."
-    )
-
-
-@pytest.mark.parametrize(
-    "raised",
-    [
-        libtmux_exc.TmuxObjectDoesNotExist("@99"),
-        libtmux_exc.MultipleObjectsReturned(count=2, query={"pane_id": "%0"}),
-        libtmux_exc.PaneNotFound("%99"),
-        libtmux_exc.NoWindowsExist,
-        libtmux_exc.BadSessionName(reason="contains periods", session_name="a.b"),
-        libtmux_exc.TmuxSessionExists("session exists"),
-    ],
-    ids=lambda e: type(e).__name__ if isinstance(e, Exception) else e.__name__,
-)
-def test_inspect_retry_skips_deterministic_failures(raised: Exception) -> None:
-    """A failure a second attempt cannot change is not retried.
-
-    Every one of these descends from ``LibTmuxException``, which is the retry
-    trigger — so without :data:`NON_RETRYABLE_EXCEPTIONS` they would all be
-    retried. None of them can succeed on the second look: a pane that is not
-    there will not appear during a backoff window, and an ambiguous match does
-    not become unambiguous. Retrying buys a second tmux round-trip and 100 ms
-    of latency in order to fail identically.
-    """
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_INSPECT})
-    call_next = _FlakyCallNext(raises_n_times=1, exception=raised)
-
-    with pytest.raises(libtmux_exc.LibTmuxException):
-        asyncio.run(middleware.on_call_tool(ctx, call_next))
-
-    assert call_next.calls == 1, (
-        f"{type(raised).__name__} was retried. It descends from LibTmuxException, "
-        f"so it must be listed in NON_RETRYABLE_EXCEPTIONS."
-    )
-
-
-def test_inspect_retry_skips_not_found_on_decorated_tool(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """End-to-end: a stale id is not retried through the production wrap path.
-
-    The unit test above raises straight into the middleware. This one goes
-    through ``handle_tool_errors``, which re-raises every libtmux failure as an
-    ``ExpectedToolError`` chained off the original — so at the middleware layer
-    the exception is an ``ExpectedToolError`` and the real failure is only
-    visible one hop down, on ``__cause__``. The retry decision walks that hop
-    (which is what makes retries work at all), so the *skip* decision has to
-    walk it too, or it never fires in production.
-
-    Guards the shape libtmux tmux-python/libtmux#718 introduced:
-    ``TmuxObjectDoesNotExist`` became a ``LibTmuxException``, which silently
-    made every stale session or window id retryable.
-    """
-    from libtmux import Server
-
-    from libtmux_mcp.tools.server_tools import list_sessions
-
-    calls = {"count": 0}
-
-    def _missing_sessions(_self: Server) -> list[t.Any]:
-        calls["count"] += 1
-        raise libtmux_exc.TmuxObjectDoesNotExist(
-            obj_key="session_id",
-            obj_id="$99",
-            list_cmd="list-sessions",
-            list_extra_args=None,
-        )
-
-    monkeypatch.setattr(Server, "sessions", property(_missing_sessions))
-
-    middleware = InspectRetryMiddleware(max_retries=1, base_delay=0.0)
-    ctx = _retry_context(tags={TOOLSET_INSPECT})
-
-    async def real_call_next(_context: t.Any) -> t.Any:
-        return list_sessions(socket_name="retry-skip-smoke")
-
-    with pytest.raises(ToolError):
-        asyncio.run(middleware.on_call_tool(ctx, real_call_next))
-
-    assert calls["count"] == 1, (
-        f"a missing object was retried (calls={calls['count']}). The skip must "
-        f"walk __cause__, because handle_tool_errors wraps it in ExpectedToolError."
-    )
-
-
-def test_inspect_retry_logger_uses_project_namespace() -> None:
-    """Retry warnings route through ``libtmux_mcp.retry``, not ``fastmcp.retry``.
-
-    Operators routing logs by the ``libtmux_mcp.*`` namespace prefix
-    (matching ``libtmux_mcp.audit``) need retry events to appear on
-    the same channel. fastmcp's stock ``RetryMiddleware`` defaults
-    to ``fastmcp.retry`` (``error_handling.py:181``); without an
-    explicit override, retry warnings would silently bypass any
-    project-namespace audit-stream routing.
-    """
-    middleware = InspectRetryMiddleware()
-    assert middleware._retry.logger.name == "libtmux_mcp.retry"
-
-
-# ---------------------------------------------------------------------------
 # ToolErrorResultMiddleware tests
 # ---------------------------------------------------------------------------
 
@@ -1032,7 +746,7 @@ def _error_probe_server() -> t.Any:
     """Build a minimal FastMCP instance wired like the production stack.
 
     Only ``ToolErrorResultMiddleware`` is installed — the assertions
-    target error-result conversion, not the audit/retry/safety trio.
+    target error-result conversion, not the audit/toolset pair.
     Tools mirror the three production raise shapes: an expected
     failure with a chained cause (decorator-mapped libtmux error), an
     expected failure with a recovery suggestion, and an unexpected

@@ -37,7 +37,6 @@ from libtmux_mcp._wait_policy import (
 from libtmux_mcp.middleware import (
     DEFAULT_RESPONSE_LIMIT_BYTES,
     AuditMiddleware,
-    InspectRetryMiddleware,
     TailPreservingResponseLimitingMiddleware,
     ToolErrorResultMiddleware,
     ToolsetMiddleware,
@@ -425,22 +424,17 @@ mcp = FastMCP(
     #   3. ToolErrorResultMiddleware — converts tool-call failures to
     #      rich ToolResult(is_error=True) results and transforms
     #      resource errors to MCP code -32002. Must stay OUTSIDE the
-    #      audit + retry + toolset trio: all three depend on exception
-    #      semantics (audit catches to record outcome=error, retry
-    #      matches LibTmuxException via __cause__, and the toolset
-    #      denials must propagate as exceptions for audit to record
-    #      them), so converting the exception to a result any deeper
-    #      would silently break all three.
-    #   4. AuditMiddleware — outside ToolsetMiddleware so a refusal
+    #      audit + toolset pair: both depend on exception semantics
+    #      (audit catches to record outcome=error, and toolset denials
+    #      must propagate as exceptions for audit to record them), so
+    #      converting the exception to a result any deeper would
+    #      silently break both.
+    #   4. AuditMiddleware — outside ToolsetMiddleware so refusal
     #      events (which raise ExpectedToolError before call_next inside
     #      Toolset) are still logged with outcome=error. Without this
     #      ordering, denied access attempts would silently bypass the
     #      audit log — a security-observability gap.
-    #   5. InspectRetryMiddleware — inside Audit so retries are
-    #      audited once each, outside Toolset so refused tools
-    #      never reach retry. Only inspect tools are retried;
-    #      everything else passes straight through.
-    #   6. ToolsetMiddleware — innermost gate (fail-closed). Refusals
+    #   5. ToolsetMiddleware — innermost gate (fail-closed). Refusals
     #      never reach the tool, but the audit record above captures
     #      them for forensic review.
     middleware=[
@@ -451,7 +445,6 @@ mcp = FastMCP(
         ),
         ToolErrorResultMiddleware(transform_errors=True),
         AuditMiddleware(),
-        InspectRetryMiddleware(),
         ToolsetMiddleware(_toolsets, _extra_tools, _excluded_tools),
     ],
     on_duplicate="error",

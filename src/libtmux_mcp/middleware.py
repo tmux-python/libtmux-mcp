@@ -14,9 +14,6 @@ Provides the project's middleware infrastructure, in definition order:
   invocation (name, duration, outcome, client/request ids, and a
   summary of arguments with payload-bearing fields redacted to a
   length + SHA-256 prefix).
-* :class:`InspectRetryMiddleware` retries transient libtmux failures,
-  but only for ``inspect`` tools — re-running anything else would
-  silently repeat its effect.
 * :class:`TailPreservingResponseLimitingMiddleware` is a backstop cap
   for oversized tool output. Unlike FastMCP's stock
   ``ResponseLimitingMiddleware`` it preserves the **tail** of the
@@ -33,22 +30,13 @@ import time
 import typing as t
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.server.middleware.error_handling import (
-    ErrorHandlingMiddleware,
-    RetryMiddleware,
-)
+from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.tools.base import ToolResult
-from libtmux import exc as libtmux_exc
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
-from libtmux_mcp._utils import (
-    TAG_SELF_BOUNDED,
-    TOOLSET_INSPECT,
-    VALID_TOOLSETS,
-    ExpectedToolError,
-)
+from libtmux_mcp._utils import VALID_TOOLSETS, ExpectedToolError
 
 
 class ToolsetMiddleware(Middleware):
@@ -384,13 +372,11 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     synthesized suggestion telling the agent which names to drop or
     fix (see :func:`_error_tool_result`).
 
-    Ordering invariant: must sit **outside** ``AuditMiddleware``,
-    ``InspectRetryMiddleware``, and ``ToolsetMiddleware``. All three
-    depend on exception semantics — audit detects failures by catching,
-    retry matches ``LibTmuxException`` via ``__cause__``, and the toolset gate's
-    tier denials must propagate as exceptions for audit to record them
-    — so converting the exception to a result any deeper in the stack
-    would silently break all three.
+    Ordering invariant: must sit **outside** ``AuditMiddleware`` and
+    ``ToolsetMiddleware``. Both depend on exception semantics: audit detects
+    failures by catching them, and toolset denials must propagate as exceptions
+    for audit to record them. Converting the exception to a result any deeper in
+    the stack would silently break both.
     """
 
     def _log_error(self, error: Exception, context: MiddlewareContext) -> None:
@@ -687,136 +673,6 @@ class AuditMiddleware(Middleware):
 #: responses stay below this global backstop. Tool-level caps remain
 #: responsible for terminal-specific truncation metadata.
 DEFAULT_RESPONSE_LIMIT_BYTES = 1_000_000
-
-
-#: Failures a retry cannot fix. Each one names a thing that is not there, or a
-#: request that cannot succeed as written, so re-running it buys a second tmux
-#: round-trip and a backoff window in order to fail identically. They all
-#: descend from :exc:`libtmux.exc.LibTmuxException`, which is the retry
-#: trigger, so without this set they would all be retried.
-#:
-#: Order the entries most-general-first when reading: ``ObjectDoesNotExist``
-#: already covers :exc:`libtmux.exc.TmuxObjectDoesNotExist`.
-NON_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
-    libtmux_exc.ObjectDoesNotExist,
-    libtmux_exc.MultipleObjectsReturned,
-    libtmux_exc.PaneNotFound,
-    libtmux_exc.NoWindowsExist,
-    libtmux_exc.BadSessionName,
-    libtmux_exc.TmuxSessionExists,
-    libtmux_exc.TmuxCommandNotFound,
-)
-
-
-class _SkipDeterministicFailures(RetryMiddleware):
-    """A :class:`RetryMiddleware` that declines to retry what cannot succeed.
-
-    fastmcp decides whether to retry in ``_should_retry``, matching the error
-    and, one hop down, its ``__cause__`` -- which is where the real failure
-    lives, because ``handle_tool_errors`` re-raises every libtmux error as an
-    ``ExpectedToolError`` chained off the original. This narrows that decision
-    with :data:`NON_RETRYABLE_EXCEPTIONS`, checking the same two places.
-    """
-
-    def _should_retry(self, error: Exception) -> bool:
-        """Return ``False`` for a failure a second attempt cannot change."""
-        cause = error.__cause__
-        if isinstance(error, NON_RETRYABLE_EXCEPTIONS) or (
-            cause is not None and isinstance(cause, NON_RETRYABLE_EXCEPTIONS)
-        ):
-            return False
-        return super()._should_retry(error)
-
-
-class InspectRetryMiddleware(Middleware):
-    """Retry transient libtmux failures, but only for ``inspect`` tools.
-
-    Wraps fastmcp's :class:`fastmcp.server.middleware.error_handling.RetryMiddleware`
-    so retries are bounded by the toolset the tool is registered
-    under. Tools in any other toolset (``send_keys``,
-    ``create_session``, ``kill_server``, …) pass straight through —
-    re-running them on a transient socket error would silently double
-    side effects, which is unacceptable. ``inspect`` tools
-    (``list_sessions``, ``capture_pane``, ``snapshot_pane``, …) are
-    safe to retry because they observe state without changing it.
-
-    Default retry trigger is :exc:`libtmux.exc.LibTmuxException` —
-    libtmux wraps the subprocess failures we actually want to retry
-    (socket EAGAIN, transient connect errors). The fastmcp default
-    ``(ConnectionError, TimeoutError)`` does NOT match these, so the
-    upstream defaults would be a silent no-op.
-
-    That trigger is a whole family, though, and most of it is not
-    transient: a pane that does not exist will not exist on the second
-    look. :data:`NON_RETRYABLE_EXCEPTIONS` carves those out, so a stale
-    id fails once instead of costing a backoff window and a second tmux
-    round-trip to fail again.
-
-    Place this in the middleware stack **inside** ``AuditMiddleware``
-    (so retried calls are audited once each) and **outside**
-    ``ToolsetMiddleware`` (so refused tools never reach retry).
-    """
-
-    def __init__(
-        self,
-        max_retries: int = 1,
-        base_delay: float = 0.1,
-        max_delay: float = 1.0,
-        backoff_multiplier: float = 2.0,
-        retry_exceptions: tuple[type[Exception], ...] = (libtmux_exc.LibTmuxException,),
-        logger_: logging.Logger | None = None,
-    ) -> None:
-        """Configure the underlying retry policy.
-
-        Defaults are deliberately small. ``max_retries=1`` keeps audit
-        log noise minimal (one retry per failed call, not three). The
-        100 ms / 1 s backoff window matches the expected duration of a
-        transient libtmux socket hiccup — a longer backoff would just
-        delay a real failure without adding meaningful retry headroom.
-
-        ``logger_`` defaults to ``logging.getLogger("libtmux_mcp.retry")``
-        when not supplied — keeps retry events on the project's
-        ``libtmux_mcp.*`` namespace so operators routing the audit
-        stream capture them. Without this default, fastmcp's stock
-        ``RetryMiddleware`` would log to ``fastmcp.retry`` and miss
-        any project-namespace log routing.
-        """
-        if logger_ is None:
-            logger_ = logging.getLogger("libtmux_mcp.retry")
-        self._retry = _SkipDeterministicFailures(
-            max_retries=max_retries,
-            base_delay=base_delay,
-            max_delay=max_delay,
-            backoff_multiplier=backoff_multiplier,
-            retry_exceptions=retry_exceptions,
-            logger=logger_,
-        )
-
-    async def on_call_tool(
-        self,
-        context: MiddlewareContext,
-        call_next: t.Any,
-    ) -> t.Any:
-        """Delegate to the upstream retry only for retry-eligible ``inspect`` tools.
-
-        ``TAG_SELF_BOUNDED`` tools are excluded even though they are
-        ``inspect``. Their deadline is computed inside the tool body, so a
-        retry restarts the clock: a transient ``LibTmuxException`` at
-        t=29s of a 30s wait would produce a ~59s call and make the wait
-        ceiling a lie. :class:`_SkipDeterministicFailures` cannot cover
-        this — it carves out failures by exception type, and the
-        offending exception here is a genuinely transient one that a
-        retry *would* fix for any other tool.
-        """
-        if context.fastmcp_context:
-            tool = await context.fastmcp_context.fastmcp.get_tool(context.message.name)
-            if (
-                tool
-                and TOOLSET_INSPECT in tool.tags
-                and TAG_SELF_BOUNDED not in tool.tags
-            ):
-                return await self._retry.on_request(context, call_next)
-        return await call_next(context)
 
 
 #: Header prefixed to a truncated response. Intentionally matches the
