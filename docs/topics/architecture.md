@@ -13,7 +13,7 @@ src/libtmux_mcp/
     server.py             # FastMCP instance and configuration
     _utils.py             # Server caching, resolvers, serializers, error handling
     models.py             # Pydantic output models
-    middleware.py         # Toolset, audit, retry, and error-result middleware
+    middleware.py         # Toolset, audit, and error-result middleware
     tools/
         batch_tools.py    # call_read_tools_batch
         server_tools.py   # list_servers, list_sessions, create_session, kill_server, get_server_info
@@ -41,11 +41,10 @@ MCP Client (Claude, Cursor, etc.)
         → TailPreservingResponseLimitingMiddleware (response size backstop)
           → ToolErrorResultMiddleware (exceptions → is_error results)
             → AuditMiddleware (one log record per call)
-              → InspectRetryMiddleware (retries inspect tools only)
-                → ToolsetMiddleware (membership, fail-closed)
-                  → Tool function (tools/*.py)
-                    → libtmux Python objects
-                      → tmux binary (via subprocess)
+              → ToolsetMiddleware (membership, fail-closed)
+                → Tool function (tools/*.py)
+                  → libtmux Python objects
+                    → tmux binary (via subprocess)
 ```
 
 The libtmux layer is the tmux object hierarchy:
@@ -80,19 +79,19 @@ priority chain: direct ID → name lookup → error.
 
 {class}`~libtmux_mcp.middleware.ToolsetMiddleware` implements
 [FastMCP](https://gofastmcp.com)'s middleware interface. It operates
-as a secondary gate behind FastMCP's native tag visibility system,
-providing clear error messages when a tool above the configured tier
-is invoked.
+as a secondary classification gate behind FastMCP's native tag and name
+visibility. Tools hidden by FastMCP return its unknown-tool error before
+dispatch reaches this middleware.
 
 ### Error handling
 
 Three boundaries split the work:
 
-1. **Tool classification** — the {func}`~libtmux_mcp._utils.handle_tool_errors` decorator wraps tool functions, mapping {external+libtmux:doc}`libtmux <index>` exceptions to {exc}`~libtmux_mcp._utils.ExpectedToolError` (agent-correctable: unknown ids, invalid arguments, transient tmux errors; logged at WARNING) or FastMCP tool errors (operator faults and unexpected bugs; logged at ERROR). The raise chains the original exception via `from e`, which is what lets {class}`~libtmux_mcp.middleware.InspectRetryMiddleware` match transient {exc}`~libtmux.exc.LibTmuxException` causes.
+1. **Tool classification** — the {func}`~libtmux_mcp._utils.handle_tool_errors` decorator wraps tool functions, mapping {external+libtmux:doc}`libtmux <index>` exceptions to {exc}`~libtmux_mcp._utils.ExpectedToolError` (agent-correctable: unknown ids, invalid arguments, transient tmux errors; logged at WARNING) or FastMCP tool errors (operator faults and unexpected bugs; logged at ERROR). The raise chains the original exception via `from e` for logs and debuggers.
 2. **Schema classification** — FastMCP validates tool arguments before tool code runs, so [Pydantic](https://docs.pydantic.dev/) validation failures never reach the decorator. {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` classifies those schema-validation errors as expected, agent-correctable WARNINGs before converting them.
-3. **Conversion** — {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` catches the exception once it has cleared the audit/retry/toolset trio and returns an error `ToolResult` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, and an optional agent-facing `suggestion` for recovery hints such as discovery tools or rejected-argument fixes).
+3. **Conversion** — {class}`~libtmux_mcp.middleware.ToolErrorResultMiddleware` catches the exception once it has cleared the audit/toolset pair and returns an error `ToolResult` carrying the message exactly as raised, plus a `_meta` payload (`error_type`, `expected`, and an optional agent-facing `suggestion` for recovery hints such as discovery tools or rejected-argument fixes).
 
-Errors must stay exceptions through the audit/retry/toolset trio — audit detects failures by catching, retry matches via `__cause__` — so conversion happens only in the outermost error layer. The response limiter sits outside conversion and may truncate large success or error results on the return path; its truncation path preserves `is_error` and `_meta` so oversized expected failures stay tool errors. Level policy lives in {doc}`/topics/logging`.
+Errors must stay exceptions through the audit/toolset pair so audit can detect failures before conversion in the outermost error layer. The response limiter sits outside conversion and may truncate large success or error results on the return path; its truncation path preserves `is_error` and `_meta` so oversized expected failures stay tool errors. Level policy lives in {doc}`/topics/logging`.
 
 ## References
 

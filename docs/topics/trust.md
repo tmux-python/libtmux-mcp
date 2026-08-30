@@ -7,50 +7,111 @@
 This server gives an agent a terminal. What follows is what that does and
 does not bound.
 
-## Toolsets are an inventory, not a permission system
+## Toolsets gate MCP tool calls, not tmux
 
 Tools are grouped into four sets by what they do:
 
 `inspect`
-: Read tmux state and terminal output. Starts no process, and hands no
-  caller input to one — what you supply is IDs, names, bounded patterns,
-  and validated variable names.
+: Request tmux state or terminal output, or render server-local prompt text.
+  The built-in operation does not pass caller input as a tmux or shell
+  command.
 
 `manage`
-: Change tmux structure or presentation: names, sizes, layouts, selections,
-  modes. Starts no process, and takes no caller input that anything later
-  executes.
+: Change tmux-managed structure, presentation, staging, or coordination
+  state. The built-in operation does not supply a shell command, pane input,
+  or a value tmux treats as executable configuration.
 
 `execute`
-: Start a pane process, deliver input to one, or store a value tmux later
-  runs. {tooliconl}`set-option` is here, not in `manage`: a `#(...)` job in
-  a status format runs when tmux draws it and repeats on the status
-  interval, and `default-command` decides what every future pane runs.
+: Start a pane process, deliver input to one, or store state that can control
+  later execution. {tooliconl}`set-option` is here, not in `manage`: a
+  `#(...)` job in a status format runs when tmux draws it and repeats on the
+  status interval, and `default-command` decides what every future pane runs.
 
 `teardown`
 : Delete tmux objects or retained scrollback. Irreversible at the tmux
   level.
 
-The sets are unordered. `LIBTMUX_TOOLSETS=inspect,teardown` is a legal
-surface — an agent that can look and clean up, but not type.
+The sets are unordered. FastMCP visibility and libtmux-mcp middleware both
+enforce which MCP tool calls the server advertises and accepts.
+`LIBTMUX_TOOLSETS=inspect,teardown` is therefore a legal surface — an agent
+that can look and clean up through this server's tools, but not type through
+them.
+
+{envvar}`LIBTMUX_TOOLSETS`, {envvar}`LIBTMUX_TOOLS`, and
+{envvar}`LIBTMUX_EXCLUDE_TOOLS` filter tools only. The `tmux://` hierarchy
+resources and native prompts remain available when every toolset is disabled.
 
 **Dropping a toolset is not containment.** It changes what this server
 advertises. An enabled `execute` tool can type the equivalent of anything
-you hid, because a pane's shell runs with your user's authority. Treat the
-toolsets as inventory configuration and accident reduction. OS accounts,
-containers, and separate tmux sockets are the isolation boundaries.
+you hid, because a pane's shell runs with your user's authority. Existing pane
+processes and other clients of the same tmux server also remain outside the MCP
+call gate.
+
+## The tmux server is programmable
+
+tmux is a separate, long-lived process. A configured `command-alias` can
+replace a command this server sends, and an `after-*` hook can run a command
+list after many built-in commands. A nominal `inspect` call can therefore
+change state or run a shell without receiving executable input from the MCP
+caller.
+
+Hierarchy resource reads are a separate MCP surface, but they send the same
+class of tmux queries as `inspect` tools. A `resources/read` request can
+therefore activate aliases and hooks too. Resources have no ToolAnnotations
+and do not produce this server's tool-call audit record. Native prompts only
+return text and do not contact tmux.
+
+Execution can occur without any MCP call. A `#(...)` job in a status format
+runs when tmux redraws the status line and can repeat on the status interval.
+No MCP tool filter can intercept work that never passes through this server.
+
+libtmux-mcp startup and shutdown send no tmux commands. Failed tool calls run
+once: the server does not retry them automatically because tmux may already
+have applied an alias or hook effect before reporting an error.
+
+A toolset describes the built-in operation its tools request. It does not
+describe everything the target tmux server may do around that request.
+
+### Responsibility by layer
+
+| Layer | Owns |
+| --- | --- |
+| libtmux-mcp | Input validation and refusal, tmux argv construction, the advertised and callable tool surface, direct-operation classification, wait ceilings, selected high-volume output caps, resource disclosure, and tool-call audit redaction. |
+| Model or agent | Chooses requested calls and command text, but is not an enforcement boundary against its own errors or prompt injection. |
+| MCP client and user | Whether to request and confirm a call, whether to retry it, and which credentials the agent receives. |
+| tmux operator | The target socket, configuration, aliases, hooks, key bindings, status formats, pane programs, and other clients. |
+| OS and deployment | Process identity and limits on filesystem, network, credentials, privileges, and resources. |
+
+For local stdio use, the launching client and OS account are the trust context;
+FastMCP has no OAuth token to authorize. A remote HTTP deployment must
+authenticate users and enforce authorization on the server as well as asking
+for client-side confirmation. See [FastMCP authorization](https://gofastmcp.com/servers/authorization).
+
+### Guarantee by topology
+
+| Topology | Strongest guarantee |
+| --- | --- |
+| Existing or shared tmux server | The MCP tool-call gate and libtmux-mcp's input handling; tmux configuration and peer activity remain unknown and mutable. |
+| Fresh, separately supervised tmux server with a minimal config | A separate tmux object namespace and known startup configuration for that daemon generation; same-user clients and pane processes can still reconfigure it. |
+| OS identity, container, or VM boundary | Effects are limited by the configured process, filesystem, network, credential, privilege, and resource policy. tmux still executes processes inside that boundary. |
+
+A socket alone is an endpoint, not process confinement. Starting a normal tmux
+client with `-f` also does not prove that configuration was used: if the server
+already exists, tmux keeps the configuration from that daemon's startup.
 
 ## `inspect` does not mean safe
 
-An `inspect` tool does not interpret what you give it as a command. That is
-a property of these implementations, and it is the only thing the name
-claims.
+An `inspect` tool's built-in command sequence does not pass caller input as a
+tmux or shell command. That is a property of these implementations, and it is
+the only thing the name claims. A target tmux server may still replace or
+extend the requested command through its aliases and hooks.
 
-It is not a claim that the result is harmless. A capture returns whatever
-the pane holds: credentials someone typed, a command line with a token in
-it, output from a remote host, text written by another agent. Those reads
-advertise `openWorldHint: true` for that reason. Auto-approving the whole
-set is a decision to make with that in mind, not one the name endorses.
+It is not a claim that the result is harmless. A capture returns whatever the
+pane holds: credentials someone typed, a command line with a token in it,
+output from a remote host, text written by another agent. Auto-approving the
+whole set is a decision to make with that in mind, not one the name endorses.
+Treat pane and hierarchy-resource output as untrusted data, never as
+instructions.
 
 ## Configuration
 
@@ -81,10 +142,10 @@ than a server that will not start.
 
 ### How it works
 
-Two layers, both keyed on the same tags. [FastMCP](https://gofastmcp.com)
-tag visibility filters the listing; a middleware repeats the decision on
-call so a direct invocation gets an error naming the variable rather than
-an unknown-tool error.
+Two layers use the same tags and names. [FastMCP](https://gofastmcp.com)
+visibility is the primary wire filter: omitted or excluded tools disappear
+from listings, and direct calls return an unknown-tool error. Middleware
+rechecks the classification for tools that reach dispatch.
 
 Both fail closed: a tool carrying no recognized toolset is refused, so
 adding one without classifying it cannot expose it by accident.
@@ -117,16 +178,19 @@ The structural fix shipped in 0.1.x; setting {envvar}`TMUX_TMPDIR` explicitly is
 Most `manage` tools are bounded: {toolref}`resize-pane` only
 resizes, {toolref}`rename-window` only renames. A few have broader
 reach because tmux itself exposes broader reach. Treat these as
-elevated risk even though they share the default tier:
+elevated risk even though the default enables their toolset:
 
 ### Piping pane output
 
-{tool}`pipe-pane` pipes a pane's output to a shell command that the server runs. In practice this means the caller chooses an arbitrary path or pipeline on the server host. There is no allow-list. Assume it can create files anywhere the server process can write.
+{tool}`pipe-pane` pipes a pane's output through a fixed shell redirection. The
+caller chooses the destination path. There is no path allow-list; assume it can
+create files anywhere the server process can write.
 
 Mitigations:
 
 - Run the server as an unprivileged user with a scoped home directory.
-- Consider `LIBTMUX_TOOLSETS=inspect` for untrusted MCP clients.
+- Exclude `execute` when pane control is unnecessary. This narrows the direct
+  tool surface; it does not establish trust or confinement.
 - Audit log records (see below) capture the `output_path` argument so reviewers can spot unexpected destinations.
 
 ### Setting tmux environment
@@ -142,7 +206,8 @@ Mitigations:
 
 {tool}`respawn-pane` restarts a pane's process while preserving the pane id and layout — exactly what an agent wants when a shell wedges. Default `kill=True` terminates the running process before relaunch. The `pane_id` and layout are preserved (the point of the tool), but any unsaved REPL state, ssh session, or in-flight job in that pane is lost. Repeated calls are *not* idempotent — each call kills a new process.
 
-The registration advertises `destructiveHint=True` and `idempotentHint=False` while staying in `manage`, so recovery remains available by default without understating what the call does.
+The tool belongs to `execute`: it terminates one pane process and starts
+another, even when the replacement command is omitted.
 
 Mitigations:
 
@@ -153,7 +218,10 @@ Mitigations:
 
 ### Raw pane input
 
-These can execute anything the pane's shell accepts. There is no payload validation. The server audit log stores a digest of the content, not the content itself, so a secret typed via {tooliconl}`send-keys` or {tooliconl}`send-keys-batch` does not land in that audit record.
+These can execute anything the pane's shell accepts. There is no shell-syntax
+allow-list. The server audit log stores a digest of the content, not the
+content itself, so a secret typed via {tooliconl}`send-keys` or
+{tooliconl}`send-keys-batch` does not land in that audit record.
 
 ### History suppression is not secret transport
 
@@ -182,69 +250,28 @@ Route this logger to a dedicated sink if you want a durable audit trail; it is d
 
 ## Tool annotations
 
-Every tool advertises the four MCP annotation hints. They are hints for client
-presentation, not authorization: a client may ignore them, and this server
-cannot enforce them.
+[MCP defines](https://modelcontextprotocol.io/specification/2026-07-28/schema#toolannotations)
+four standard hints for the behavior of the whole tool call.
+[Clients may use positive hints](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/)
+to skip confirmation or retry a call. This server can target an
+existing tmux server selected by each call, and it cannot establish that the
+server has no aliases or hooks or that another client will not add them. Every
+tool that requests a tmux operation therefore advertises the same conservative
+static hints:
 
-`destructiveHint: false` is a claim that a tool performs **only additive
-updates**, so a tool that replaces a name, a size, or a layout advertises
-`true` even though nothing is destroyed. `openWorldHint: true` says the tool
-reaches, or returns text from, outside tmux — a spawned process runs with your
-user's authority, and a pane holds whatever was printed into it.
+| readOnlyHint | destructiveHint | idempotentHint | openWorldHint |
+| --- | --- | --- | --- |
+| false | true | false | true |
 
-| Tool | Toolset | readOnlyHint | destructiveHint | idempotentHint | openWorldHint |
-|------|---------|--------------|-----------------|----------------|---------------|
-| {toolref}`call-read-tools-batch` | {badge}`inspect` | true | false | true | true |
-| {toolref}`capture-pane` | {badge}`inspect` | true | false | true | true |
-| {toolref}`capture-since` | {badge}`inspect` | true | false | true | true |
-| {toolref}`display-message` | {badge}`inspect` | true | false | true | true |
-| {toolref}`find-pane-by-position` | {badge}`inspect` | true | false | true | false |
-| {toolref}`get-pane-info` | {badge}`inspect` | true | false | true | false |
-| {toolref}`get-server-info` | {badge}`inspect` | true | false | true | false |
-| {toolref}`get-session-info` | {badge}`inspect` | true | false | true | false |
-| {toolref}`get-window-info` | {badge}`inspect` | true | false | true | false |
-| {toolref}`list-panes` | {badge}`inspect` | true | false | true | false |
-| {toolref}`list-servers` | {badge}`inspect` | true | false | true | false |
-| {toolref}`list-sessions` | {badge}`inspect` | true | false | true | false |
-| {toolref}`list-windows` | {badge}`inspect` | true | false | true | false |
-| {toolref}`search-panes` | {badge}`inspect` | true | false | true | true |
-| {toolref}`show-buffer` | {badge}`inspect` | true | false | true | true |
-| {toolref}`show-environment` | {badge}`inspect` | true | false | true | false |
-| {toolref}`show-hook` | {badge}`inspect` | true | false | true | false |
-| {toolref}`show-hooks` | {badge}`inspect` | true | false | true | false |
-| {toolref}`show-option` | {badge}`inspect` | true | false | true | false |
-| {toolref}`snapshot-pane` | {badge}`inspect` | true | false | true | true |
-| {toolref}`wait-for-text` | {badge}`inspect` | true | false | true | true |
-| {toolref}`enter-copy-mode` | {badge}`manage` | false | true | false | false |
-| {toolref}`exit-copy-mode` | {badge}`manage` | false | true | true | false |
-| {toolref}`load-buffer` | {badge}`manage` | false | false | false | false |
-| {toolref}`move-window` | {badge}`manage` | false | true | true | false |
-| {toolref}`rename-session` | {badge}`manage` | false | true | true | false |
-| {toolref}`rename-window` | {badge}`manage` | false | true | true | false |
-| {toolref}`resize-pane` | {badge}`manage` | false | true | true | false |
-| {toolref}`resize-window` | {badge}`manage` | false | true | true | false |
-| {toolref}`select-layout` | {badge}`manage` | false | true | true | false |
-| {toolref}`select-pane` | {badge}`manage` | false | true | true | false |
-| {toolref}`select-window` | {badge}`manage` | false | true | true | false |
-| {toolref}`set-pane-title` | {badge}`manage` | false | true | true | false |
-| {toolref}`signal-channel` | {badge}`manage` | false | true | false | false |
-| {toolref}`swap-pane` | {badge}`manage` | false | true | false | false |
-| {toolref}`wait-for-channel` | {badge}`manage` | false | true | false | false |
-| {toolref}`create-session` | {badge}`execute` | false | false | false | true |
-| {toolref}`create-window` | {badge}`execute` | false | false | false | true |
-| {toolref}`paste-buffer` | {badge}`execute` | false | true | false | true |
-| {toolref}`paste-text` | {badge}`execute` | false | true | false | true |
-| {toolref}`pipe-pane` | {badge}`execute` | false | true | false | true |
-| {toolref}`respawn-pane` | {badge}`execute` | false | true | false | true |
-| {toolref}`run-command` | {badge}`execute` | false | true | false | true |
-| {toolref}`send-keys` | {badge}`execute` | false | true | false | true |
-| {toolref}`send-keys-batch` | {badge}`execute` | false | true | false | true |
-| {toolref}`set-environment` | {badge}`execute` | false | true | true | true |
-| {toolref}`set-option` | {badge}`execute` | false | true | true | true |
-| {toolref}`split-window` | {badge}`execute` | false | true | false | true |
-| {toolref}`clear-pane` | {badge}`teardown` | false | true | false | false |
-| {toolref}`delete-buffer` | {badge}`teardown` | false | true | false | false |
-| {toolref}`kill-pane` | {badge}`teardown` | false | true | false | false |
-| {toolref}`kill-server` | {badge}`teardown` | false | true | false | false |
-| {toolref}`kill-session` | {badge}`teardown` | false | true | false | false |
-| {toolref}`kill-window` | {badge}`teardown` | false | true | false | false |
+These values are hints, not authorization. They do not say that every call
+modifies state, destroys data, has an additional effect when repeated, or
+reaches outside tmux. They decline to promise otherwise for every target. The
+project-owned `inspect`, `manage`, `execute`, and `teardown` toolsets preserve
+the direct-operation distinctions that the standard hints cannot express here.
+Clients that ignore project tags cannot recover those distinctions from the
+four hints alone; they must use the tool name, schema, description, or an
+operator-selected tool surface.
+
+The optional `list_prompts` and `get_prompt` adapter tools do not contact tmux.
+They belong to `inspect` because they render server-local prompt text without
+changing tmux, and advertise `true`, `false`, `true`, `false` respectively.

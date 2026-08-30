@@ -17,7 +17,7 @@ send_keys(
 wait_for_channel("tests_done", timeout=60)
 ```
 
-The `; tmux wait-for -S NAME` suffix is the load-bearing safety contract — `wait-for` is edge-triggered, so a crash before the signal would deadlock until the wait's `timeout`. The shell separator `;` runs the next statement unconditionally, so the signal fires on both success and failure paths.
+The `; tmux wait-for -S NAME` suffix is the load-bearing completion contract. The shell separator `;` runs the signal after either command success or failure; if the shell exits before reaching it, the wait remains bounded by `timeout`.
 
 The payload deliberately does not append `exit $?` — in an interactive
 shell that exits the shell itself, taking single-pane sessions down

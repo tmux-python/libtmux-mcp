@@ -380,7 +380,7 @@ def test_effective_socket_path_prefers_display_message_query(
     being able to reach the server, so if the MCP process's
     ``$TMUX_TMPDIR`` diverges from the running tmux's, the query
     fails and we fall back. The full structural fix requires
-    consulting the caller's ``$TMUX`` path — see ``docs/topics/safety.md``.
+    consulting the caller's ``$TMUX`` path — see ``docs/topics/trust.md``.
     """
     from libtmux_mcp._utils import _effective_socket_path
 

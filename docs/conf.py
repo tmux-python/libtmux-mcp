@@ -204,6 +204,7 @@ conf["fastmcp_toolsets"] = (
 )
 conf["fastmcp_section_badge_map"] = {
     "Inspect": "inspect",
+    "Manage": "manage",
     "Execute": "execute",
     "Teardown": "teardown",
 }

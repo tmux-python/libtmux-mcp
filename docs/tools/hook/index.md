@@ -1,20 +1,16 @@
 # Hook tools
 
-tmux hooks let you attach commands to lifecycle events — `pane-exited`, `session-renamed`, `command-error`, and so on. libtmux-mcp exposes **read-only** hook introspection so agents can audit what hooks the human user has configured before running automation that might trigger them.
+tmux hooks attach commands to lifecycle events — `pane-exited`,
+`session-renamed`, `command-error`, and so on. libtmux-mcp exposes hook
+inspection, but no dedicated tool that installs or removes one.
 
 ## Why no `set_hook`?
 
-Write-hooks are deliberately not exposed. tmux servers outlive the MCP
-process, and [FastMCP](https://gofastmcp.com)'s `lifespan` teardown
-runs only on graceful SIGTERM/SIGINT — it's bypassed on `kill -9`,
-OOM-kill, and C-extension-fault crashes. Any cleanup registry in
-Python could be silently bypassed, leaking agent-installed shell hooks
-into the user's persistent tmux server where they would fire forever.
-Three plausible future paths exist (a tmux-side `client-detached`
-meta-hook for self-cleanup, requiring `teardown` in `LIBTMUX_TOOLSETS`, or
-exposing one-shot `run_hook` only); none is in scope.
-
-Until one of those paths is implemented, the surface here is visibility only.
+The hook API is deliberately inspection-only. tmux servers outlive the MCP
+process and can run tmux command lists. Cleanup is not guaranteed after
+SIGKILL, OOM, or a native crash, so this server exposes no dedicated
+hook-write tool.
+Keep intentional persistent hooks in tmux configuration.
 
 ## Inspect
 

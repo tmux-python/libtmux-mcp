@@ -6,7 +6,8 @@
 **Use when** you need to check a tmux configuration value — buffer limits,
 history size, status bar settings, etc.
 
-**Side effects:** None. Reads only.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

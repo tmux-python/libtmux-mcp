@@ -55,7 +55,7 @@ leave socket selection inside each nested tool's arguments. See
 - Signal a waiter → {tool}`signal-channel`
 
 **Batching typed tool calls?**
-- Read-only observations → {tool}`call-read-tools-batch`
+- Several `inspect` calls → {tool}`call-read-tools-batch`
 - Anything that writes → call the tool directly; a batch would hide its
   name from a client rule keyed on it
 
@@ -82,8 +82,9 @@ shell-agnostic guidance.
 
 ## Inspect
 
-Read tmux state and terminal output. Starts no process, and hands no input
-of yours to one.
+Request tmux state or terminal output, or render server-local prompt text. The
+built-in operation does not pass caller input as a tmux or shell command.
+Configured tmux aliases and hooks may still execute; see {ref}`trust`.
 
 ::::{grid} 1 2 3 3
 :gutter: 2 2 3 3
@@ -193,7 +194,7 @@ Rich capture: content + cursor + mode + scroll.
 :::{grid-item-card} display_message
 :link: display-message
 :link-type: ref
-Query arbitrary tmux format strings.
+Read literal text and validated tmux variables.
 :::
 
 :::{grid-item-card} show_buffer
@@ -218,12 +219,110 @@ Inspect a single tmux hook by name.
 
 ## Manage
 
-Change tmux structure or presentation. Takes no input of yours that anything
-later executes.
+Change tmux-managed structure, presentation, staging, or coordination state.
+The built-in operation does not supply a shell command, pane input, or a value
+tmux treats as executable configuration. Configured aliases and hooks may still
+execute; see {ref}`trust`.
+
+::::{grid} 1 2 3 3
+:gutter: 2 2 3 3
+
+:::{grid-item-card} rename_session
+:link: rename-session
+:link-type: ref
+Rename a session.
+:::
+
+:::{grid-item-card} rename_window
+:link: rename-window
+:link-type: ref
+Rename a window.
+:::
+
+:::{grid-item-card} resize_pane
+:link: resize-pane
+:link-type: ref
+Adjust pane dimensions.
+:::
+
+:::{grid-item-card} resize_window
+:link: resize-window
+:link-type: ref
+Adjust window dimensions.
+:::
+
+:::{grid-item-card} select_layout
+:link: select-layout
+:link-type: ref
+Set window layout.
+:::
+
+:::{grid-item-card} set_pane_title
+:link: set-pane-title
+:link-type: ref
+Set pane title.
+:::
+
+:::{grid-item-card} select_pane
+:link: select-pane
+:link-type: ref
+Focus a pane by ID or direction.
+:::
+
+:::{grid-item-card} select_window
+:link: select-window
+:link-type: ref
+Focus a window by ID, index, or direction.
+:::
+
+:::{grid-item-card} swap_pane
+:link: swap-pane
+:link-type: ref
+Exchange positions of two panes.
+:::
+
+:::{grid-item-card} move_window
+:link: move-window
+:link-type: ref
+Move window to another index or session.
+:::
+
+:::{grid-item-card} enter_copy_mode
+:link: enter-copy-mode
+:link-type: ref
+Enter copy mode for scrollback.
+:::
+
+:::{grid-item-card} exit_copy_mode
+:link: exit-copy-mode
+:link-type: ref
+Exit copy mode.
+:::
+
+:::{grid-item-card} load_buffer
+:link: load-buffer
+:link-type: ref
+Stage multi-line text into an MCP-namespaced tmux buffer.
+:::
+
+:::{grid-item-card} wait_for_channel
+:link: wait-for-channel
+:link-type: ref
+Block until a tmux ``wait-for`` channel is signalled.
+:::
+
+:::{grid-item-card} signal_channel
+:link: signal-channel
+:link-type: ref
+Wake clients blocked on a ``wait-for`` channel.
+:::
+
+::::
 
 ## Execute
 
-Start a pane process, deliver input to one, or store a value tmux later runs.
+Start a pane process, deliver input to one, or store state that can control
+later execution.
 
 ::::{grid} 1 2 3 3
 :gutter: 2 2 3 3
@@ -264,48 +363,6 @@ Send several ordered raw-input operations.
 Run a shell command and report exit status.
 :::
 
-:::{grid-item-card} rename_session
-:link: rename-session
-:link-type: ref
-Rename a session.
-:::
-
-:::{grid-item-card} rename_window
-:link: rename-window
-:link-type: ref
-Rename a window.
-:::
-
-:::{grid-item-card} resize_pane
-:link: resize-pane
-:link-type: ref
-Adjust pane dimensions.
-:::
-
-:::{grid-item-card} resize_window
-:link: resize-window
-:link-type: ref
-Adjust window dimensions.
-:::
-
-:::{grid-item-card} select_layout
-:link: select-layout
-:link-type: ref
-Set window layout.
-:::
-
-:::{grid-item-card} set_pane_title
-:link: set-pane-title
-:link-type: ref
-Set pane title.
-:::
-
-:::{grid-item-card} clear_pane
-:link: clear-pane
-:link-type: ref
-Clear pane content.
-:::
-
 :::{grid-item-card} respawn_pane
 :link: respawn-pane
 :link-type: ref
@@ -324,46 +381,10 @@ Set a tmux option.
 Set a tmux environment variable.
 :::
 
-:::{grid-item-card} select_pane
-:link: select-pane
-:link-type: ref
-Focus a pane by ID or direction.
-:::
-
-:::{grid-item-card} select_window
-:link: select-window
-:link-type: ref
-Focus a window by ID, index, or direction.
-:::
-
-:::{grid-item-card} swap_pane
-:link: swap-pane
-:link-type: ref
-Exchange positions of two panes.
-:::
-
-:::{grid-item-card} move_window
-:link: move-window
-:link-type: ref
-Move window to another index or session.
-:::
-
 :::{grid-item-card} pipe_pane
 :link: pipe-pane
 :link-type: ref
 Stream pane output to a file.
-:::
-
-:::{grid-item-card} enter_copy_mode
-:link: enter-copy-mode
-:link-type: ref
-Enter copy mode for scrollback.
-:::
-
-:::{grid-item-card} exit_copy_mode
-:link: exit-copy-mode
-:link-type: ref
-Exit copy mode.
 :::
 
 :::{grid-item-card} paste_text
@@ -372,28 +393,10 @@ Exit copy mode.
 Paste multi-line text via tmux buffer.
 :::
 
-:::{grid-item-card} load_buffer
-:link: load-buffer
-:link-type: ref
-Stage multi-line text into an MCP-namespaced tmux buffer.
-:::
-
 :::{grid-item-card} paste_buffer
 :link: paste-buffer
 :link-type: ref
 Paste an MCP buffer into a target pane.
-:::
-
-:::{grid-item-card} wait_for_channel
-:link: wait-for-channel
-:link-type: ref
-Block until a tmux ``wait-for`` channel is signalled.
-:::
-
-:::{grid-item-card} signal_channel
-:link: signal-channel
-:link-type: ref
-Wake clients blocked on a ``wait-for`` channel.
 :::
 
 ::::
@@ -404,6 +407,12 @@ Delete tmux objects or retained scrollback. Not reversible.
 
 ::::{grid} 1 2 3 3
 :gutter: 2 2 3 3
+
+:::{grid-item-card} clear_pane
+:link: clear-pane
+:link-type: ref
+Clear pane content and scrollback.
+:::
 
 :::{grid-item-card} kill_session
 :link: kill-session

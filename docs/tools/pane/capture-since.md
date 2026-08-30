@@ -15,7 +15,8 @@ output in one typed result. If you need a one-shot content + metadata
 view, use {tooliconl}`snapshot-pane`; if you do not know which pane
 contains text, use {tooliconl}`search-panes`.
 
-**Side effects:** None. Reads only.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

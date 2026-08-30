@@ -137,9 +137,9 @@ on itself fails loudly instead of silently terminating the host
 environment the agent is running in. [`LIBTMUX_TOOLSETS`](https://libtmux-mcp.git-pull.com/configuration/#envvar-LIBTMUX_TOOLSETS)
 (`inspect`, `manage`, `execute`, `teardown`) drops whole toolsets from the
 client's tool list before any prompt is built. The sets are unordered, so
-`inspect,teardown` is a legal surface. Dropping one is inventory
-configuration, not containment: an enabled `execute` tool can type the
-equivalent of anything it hides.
+`inspect,teardown` is a legal surface. Dropping one is inventory and MCP
+tool-call configuration, not containment: an enabled `execute` tool can type
+the equivalent of anything it hides.
 
 ## Documentation
 

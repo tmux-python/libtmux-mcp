@@ -4,7 +4,9 @@
 
 Terminal control for AI agents, built on [libtmux](https://libtmux.git-pull.com) and [FastMCP](https://gofastmcp.com).
 
-This server maps tmux's object hierarchy — sessions, windows, panes — into MCP tools. Some tools read state. Some mutate it. Some destroy. The distinction is explicit and enforced.
+This server maps tmux's object hierarchy — sessions, windows, panes — into
+MCP tools grouped by the operation they request. The server enforces the
+selected groups at the MCP tool boundary.
 
 ```{warning}
 **Pre-alpha.** APIs may change. [Feedback welcome](https://github.com/tmux-python/libtmux-mcp/issues).
@@ -69,21 +71,42 @@ Config blocks for Claude Desktop, Claude Code, Cursor, and others.
 
 ### Inspect
 
-Read tmux state without changing anything.
+Request tmux state and terminal output.
 
-{toolref}`list-sessions` · {toolref}`capture-pane` · {toolref}`capture-since` · {toolref}`snapshot-pane` · {toolref}`get-pane-info` · {toolref}`find-pane-by-position` · {toolref}`search-panes` · {toolref}`wait-for-text` · {toolref}`display-message` · {toolref}`call-read-tools-batch`
+{toolref}`list-sessions` · {toolref}`capture-pane` ·
+{toolref}`capture-since` · {toolref}`snapshot-pane` ·
+{toolref}`get-pane-info` · {toolref}`find-pane-by-position` ·
+{toolref}`search-panes` · {toolref}`wait-for-text` ·
+{toolref}`display-message` · {toolref}`call-read-tools-batch`
+
+### Manage
+
+Change tmux structure or presentation.
+
+{toolref}`rename-session` · {toolref}`resize-pane` ·
+{toolref}`select-layout` · {toolref}`select-pane` ·
+{toolref}`move-window` · {toolref}`enter-copy-mode` ·
+{toolref}`load-buffer` · {toolref}`wait-for-channel`
 
 ### Execute
 
-Create or modify tmux objects.
+Start or drive pane processes, or store state that can control later
+execution.
 
-{toolref}`create-session` · {toolref}`send-keys` · {toolref}`send-keys-batch` · {toolref}`run-command` · {toolref}`paste-text` · {toolref}`create-window` · {toolref}`split-window` · {toolref}`select-pane` · {toolref}`select-window` · {toolref}`move-window` · {toolref}`resize-pane` · {toolref}`pipe-pane` · {toolref}`set-option`
+{toolref}`create-session` · {toolref}`create-window` ·
+{toolref}`split-window` · {toolref}`respawn-pane` ·
+{toolref}`send-keys` · {toolref}`send-keys-batch` ·
+{toolref}`run-command` · {toolref}`paste-text` ·
+{toolref}`paste-buffer` · {toolref}`pipe-pane` ·
+{toolref}`set-option` · {toolref}`set-environment`
 
 ### Teardown
 
-Tear down tmux objects. Not reversible.
+Delete tmux objects or retained scrollback. Not reversible.
 
-{toolref}`kill-session` · {toolref}`kill-window` · {toolref}`kill-pane` · {toolref}`kill-server`
+{toolref}`clear-pane` · {toolref}`kill-session` ·
+{toolref}`kill-window` · {toolref}`kill-pane` ·
+{toolref}`kill-server` · {toolref}`delete-buffer`
 
 ### Example: keep test runs out of persistent history
 

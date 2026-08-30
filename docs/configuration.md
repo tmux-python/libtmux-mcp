@@ -9,7 +9,7 @@ Runtime configuration for the libtmux-mcp server. For MCP client setup, see {ref
 ```{envvar} LIBTMUX_SOCKET
 ```
 
-tmux socket name (`-L`). Isolates the MCP server to a specific tmux socket.
+tmux socket name (`-L`). Selects the tmux server the MCP process addresses.
 
 - **Type:** string
 - **Default:** (none — uses the default tmux socket)
@@ -39,8 +39,9 @@ Comma list of toolsets to advertise. See {ref}`trust`.
 - **Default:** `inspect,manage,execute`
 - **Values:** any of `inspect`, `manage`, `execute`, `teardown`; may be empty
 
-An unknown name fails startup rather than being ignored. Filtering shapes
-what this server advertises, not what tmux or a pane's shell can do.
+An unknown name fails startup rather than being ignored. The setting filters
+tools only; an empty value still leaves `tmux://` resources and native prompts
+available. Filtering does not constrain what tmux or a pane's shell can do.
 
 ```{envvar} LIBTMUX_TOOLS
 ```
@@ -120,16 +121,22 @@ Set environment variables in your MCP client config:
 }
 ```
 
-## Socket isolation
+## Socket selection
 
-By default, the MCP server connects to the default tmux socket. Set {envvar}`LIBTMUX_SOCKET` to isolate AI agent activity from your personal tmux sessions:
+By default, the MCP server connects to the default tmux socket. Set
+{envvar}`LIBTMUX_SOCKET` to address a separate tmux object namespace:
 
 ```json
 "env": { "LIBTMUX_SOCKET": "ai_workspace" }
 ```
 
-The agent will only see sessions on the `ai_workspace` socket, not your personal sessions.
+The agent sees sessions on the `ai_workspace` socket through calls that use
+that default. A socket does not confine processes, prevent same-user clients
+from connecting, or prove which configuration started an existing server. See
+{ref}`trust`.
 
-## All tools accept `socket_name`
+## Targeted tools accept `socket_name`
 
-Every tool accepts an optional `socket_name` parameter that overrides {envvar}`LIBTMUX_SOCKET` for that call. This allows agents to work across multiple tmux servers in a single session.
+Tools that address one tmux server accept an optional `socket_name` parameter
+that overrides {envvar}`LIBTMUX_SOCKET` for that call. This allows agents to
+work across multiple tmux servers in a single session.

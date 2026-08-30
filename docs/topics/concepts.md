@@ -41,28 +41,22 @@ Most tools accept multiple targeting parameters. The resolution order is:
 
 For pane tools, you can combine parameters to narrow the search: `session_name` + `window_id` → find the pane in that specific window.
 
-## Discovery vs. mutation
+## Toolsets
 
-Tools fall into three categories:
+Tools belong to four unordered sets:
 
-- **Discovery** — Read-only operations: {toolref}`list-sessions`,
-  {toolref}`list-windows`, {toolref}`list-panes`,
-  {toolref}`capture-pane`, {toolref}`capture-since`,
-  {toolref}`get-pane-info`, {toolref}`find-pane-by-position`,
-  {toolref}`search-panes`, {toolref}`wait-for-text`,
-  {toolref}`show-option`, {toolref}`show-environment`
-- **Mutation** — Create, modify, or send input:
-  {toolref}`create-session`, {toolref}`create-window`,
-  {toolref}`split-window`, {toolref}`send-keys`,
-  {toolref}`send-keys-batch`, {toolref}`rename-session`,
-  {toolref}`rename-window`, {toolref}`resize-pane`,
-  {toolref}`resize-window`, {toolref}`set-pane-title`,
-  {toolref}`clear-pane`, {toolref}`select-layout`,
-  {toolref}`set-option`, {toolref}`set-environment`
-- **Destruction** — Remove tmux objects: {toolref}`kill-server`,
-  {toolref}`kill-session`, {toolref}`kill-window`, {toolref}`kill-pane`
+- **Inspect** requests tmux state or terminal output, or renders server-local
+  prompt text. Its built-in operation does not pass caller input as a tmux or
+  shell command.
+- **Manage** changes tmux-managed structure, presentation, staging, or
+  coordination state.
+- **Execute** starts or drives pane processes, or stores state that can
+  control later execution.
+- **Teardown** deletes tmux objects or retained scrollback.
 
-These map to {ref}`toolsets <trust>`.
+The selected sets determine which MCP tools this server advertises and
+accepts. Configured tmux aliases and hooks can add effects to any tmux
+request; see {ref}`trust`.
 
 ## Agent self-awareness
 
@@ -72,7 +66,8 @@ When the MCP server runs inside a tmux pane (detected via the `TMUX_PANE` enviro
 - Annotates the caller's own pane with `is_caller=true` in tool results
 - Prevents the `teardown` tools from killing the caller's own pane, window, session, or server
 
-This means agents can safely explore and manage tmux without accidentally terminating themselves.
+These checks prevent the teardown tools from terminating their own MCP pane.
+They do not constrain tmux aliases, hooks, other clients, or pane processes.
 
 ## Server caching
 

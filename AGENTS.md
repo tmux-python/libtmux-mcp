@@ -12,7 +12,7 @@ what was asked for.
 | Path | What it is |
 | ---- | ---------- |
 | `src/libtmux_mcp/server.py` | FastMCP instance: construction, instructions, lifespan |
-| `src/libtmux_mcp/middleware.py` | Safety-tier gating, response limiting, error mapping |
+| `src/libtmux_mcp/middleware.py` | Toolset gating, response limiting, error mapping |
 | `src/libtmux_mcp/_utils.py` | Server cache, object resolvers/serializers, `handle_tool_errors` |
 | `src/libtmux_mcp/models.py` | Pydantic models for tool outputs |
 | `src/libtmux_mcp/tools/` | MCP tool implementations: one module per tmux object, plus batch/buffer/hook/wait_for |

@@ -9,7 +9,8 @@ empty when the hook is unset; raises an
 unknown hook names (typos, wrong scope) so input mistakes don't
 masquerade as "nothing configured".
 
-**Side effects:** None. Reads only.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 ```{fastmcp-tool-input} hook_tools.show_hook
 ```

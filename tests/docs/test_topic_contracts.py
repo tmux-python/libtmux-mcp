@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import typing as t
 
 import pytest
+
+from libtmux_mcp._utils import VALID_TOOLSETS
+from libtmux_mcp.tools import register_tools
 
 
 class TopicContractFixture(t.NamedTuple):
@@ -241,7 +245,7 @@ def test_run_command_page_documents_effective_history_policy(
 def test_trust_docs_name_history_non_goals_and_secret_reference_guidance(
     docs_dir: pathlib.Path,
 ) -> None:
-    """Safety guidance does not present history suppression as secret transport."""
+    """Trust guidance does not present history suppression as secret transport."""
     text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
 
     for surface in (
@@ -302,6 +306,61 @@ def test_trust_docs_name_history_non_goals_and_secret_reference_guidance(
         "MCP audit redaction",
     ):
         assert boundary in process_visibility
+
+
+def test_trust_docs_state_ambient_tmux_execution(
+    docs_dir: pathlib.Path,
+) -> None:
+    """The trust page separates MCP requests from programmable tmux state."""
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
+    heading = "## The tmux server is programmable"
+    assert heading in text
+    section = text.split(heading, 1)[1].split("\n## ", 1)[0]
+
+    for route in (
+        "command-alias",
+        "after-*",
+        "#(...)",
+        "Hierarchy resource reads",
+        "startup and shutdown",
+        "does not retry",
+    ):
+        assert route in section
+    assert "without any MCP call" in section
+    assert "process confinement" in section
+
+    resources = (docs_dir / "resources.md").read_text(encoding="utf-8")
+    assert "`LIBTMUX_TOOLSETS` filters tools" in resources
+    assert "{ref}`trust`" in resources
+
+
+def test_tool_catalog_groups_every_registered_tool_by_its_wire_tag(
+    docs_dir: pathlib.Path,
+) -> None:
+    """The tool overview derives its grouping contract from MCP metadata."""
+    from fastmcp import Client, FastMCP
+
+    mcp = FastMCP(name="docs-tool-catalog")
+    register_tools(mcp)
+
+    async def _list_tools() -> list[t.Any]:
+        async with Client(mcp) as client:
+            return list(await client.list_tools())
+
+    tools = asyncio.run(_list_tools())
+    text = (docs_dir / "tools" / "index.md").read_text(encoding="utf-8")
+    sections = {
+        toolset: text.split(f"## {toolset.title()}", 1)[1].split("\n## ", 1)[0]
+        for toolset in VALID_TOOLSETS
+    }
+
+    for tool in tools:
+        dumped = tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+        tags = set(dumped.get("_meta", {}).get("fastmcp", {}).get("tags", []))
+        [toolset] = tags & set(VALID_TOOLSETS)
+        marker = f":::{'{'}grid-item-card{'}'} {tool.name}\n"
+        assert text.count(marker) == 1, tool.name
+        assert marker in sections[toolset], tool.name
 
 
 def test_respawn_page_distinguishes_environment_audit_shapes(
@@ -390,41 +449,3 @@ def test_a17_changelog_summarizes_history_features(
     assert "same JSON object form" in environment_entry
     assert "credential references, not literal credentials" in environment_entry
     assert "{ref}`trust`" in environment_entry
-
-
-def test_annotation_table_matches_the_registered_surface(
-    docs_dir: pathlib.Path,
-) -> None:
-    """The hand-written hint table says what clients are actually told."""
-    import asyncio
-    import re
-
-    from fastmcp import FastMCP
-
-    from libtmux_mcp.tools import register_tools
-
-    # Register into a fresh server rather than reading the production one:
-    # its tier filter is fixed at import, so the visible surface would
-    # depend on which test imported it first.
-    mcp = FastMCP(name="test-annotation-table")
-    register_tools(mcp)
-    tools = asyncio.run(mcp.list_tools())
-    assert len(tools) > 1
-
-    hints = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
-    from libtmux_mcp._utils import VALID_TOOLSETS
-
-    expected = set()
-    for tool in tools:
-        annotations = tool.annotations
-        assert annotations is not None, tool.name
-        dumped = annotations.model_dump(mode="json", by_alias=True)
-        cells = " | ".join(str(dumped[hint]).lower() for hint in hints)
-        toolset = next(name for name in VALID_TOOLSETS if name in tool.tags)
-        slug = tool.name.replace("_", "-")
-        expected.add(f"| {{toolref}}`{slug}` | {{badge}}`{toolset}` | {cells} |")
-
-    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
-    documented = set(re.findall(r"^\| \{toolref\}`.+\|$", text, flags=re.MULTILINE))
-
-    assert documented == expected

@@ -53,17 +53,17 @@ These are the actual tool headings as they render on tool pages:
 
 > `capture_pane` {badge}`inspect`
 
-> `split_window` {badge}`manage`
+> `split_window` {badge}`execute`
 
 > `kill_session` {badge}`teardown`
 
 ### In a table
 
-| Tool | Tier | Description |
-|------|------|-------------|
+| Tool | Toolset | Description |
+|------|---------|-------------|
 | {toolref}`list-sessions` | {badge}`inspect` | List all sessions |
-| {toolref}`send-keys` | {badge}`manage` | Send commands to a pane |
-| {toolref}`kill-pane` | {badge}`teardown` | Destroy a pane |
+| {toolref}`send-keys` | {badge}`execute` | Send input to a pane |
+| {toolref}`kill-pane` | {badge}`teardown` | Delete a pane |
 
 ### In prose
 
@@ -75,7 +75,7 @@ The fundamental command pattern: {toolref}`run-command` → inspect `exit_status
 
 ## Environment variable references
 
-{envvar}`LIBTMUX_SOCKET` · {envvar}`LIBTMUX_SAFETY` · {envvar}`LIBTMUX_SOCKET_PATH` · {envvar}`LIBTMUX_TMUX_BIN`
+{envvar}`LIBTMUX_SOCKET` · {envvar}`LIBTMUX_TOOLSETS` · {envvar}`LIBTMUX_SOCKET_PATH` · {envvar}`LIBTMUX_TMUX_BIN`
 
 ## Glossary terms
 
@@ -92,7 +92,7 @@ Do not call {toolref}`capture-pane` immediately after {toolref}`send-keys` — t
 ```
 
 ```{note}
-All tools accept an optional `socket_name` parameter for multi-server support.
+Targeted tools accept an optional `socket_name` parameter for multi-server support.
 ```
 
 ## Badge anatomy
@@ -108,8 +108,8 @@ Each badge renders as:
 ```
 
 Features:
-- **Emoji icon** — 🔍 inspect, ✏️ manage, 💣 teardown (native system emoji, no filters)
-- **Matte colors** — forest green, smoky amber, matte crimson with 1px border
+- **Emoji icon** — 🔍 inspect, 🔧 manage, ✏️ execute, 💣 teardown (native system emoji, no filters)
+- **Matte colors** — forest green, blue, smoky amber, matte crimson with 1px border
 - **Accessible** — `role="note"` + `aria-label` for screen readers
 - **Non-selectable** — `user-select: none` so copying tool names skips badge text
 - **Context-aware sizing** — slightly larger in headings, smaller inline

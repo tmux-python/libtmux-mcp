@@ -15,10 +15,6 @@ All loggers are children of ``libtmux_mcp``. The primary streams
 are:
 
 - ``libtmux_mcp.audit`` — one structured line per tool call, emitted by {class}`~libtmux_mcp.middleware.AuditMiddleware`. Includes tool name, digest-redacted arguments, latency, and outcome. See {doc}`/topics/trust` for the argument-redaction rules. It does not record tool return values.
-- ``libtmux_mcp.retry`` — warnings from
-  {class}`~libtmux_mcp.middleware.InspectRetryMiddleware` when an
-  `inspect` tool retried after a transient
-  {exc}`~libtmux.exc.LibTmuxException`.
 - ``libtmux_mcp.server`` / ``libtmux_mcp.tools.*`` / etc. — ad-hoc
   warnings and debug messages from the codebase.
 - ``fastmcp.errors`` — one record per failed tool call, emitted by

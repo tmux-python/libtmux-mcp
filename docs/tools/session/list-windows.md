@@ -8,7 +8,8 @@ session before selecting a window to work with.
 
 **Avoid when** you need pane-level detail — use {tooliconl}`list-panes`.
 
-**Side effects:** None. Reads only.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

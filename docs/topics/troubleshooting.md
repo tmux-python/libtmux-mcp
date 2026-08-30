@@ -54,7 +54,8 @@ can't find targets.
 
 **Symptoms**: Server sees different sessions than expected, or sees nothing.
 
-**Cause**: `LIBTMUX_SOCKET` in the MCP config isolates the server to a specific socket. Your personal sessions are on the default socket.
+**Cause**: `LIBTMUX_SOCKET` in the MCP config selects a different tmux socket.
+Your personal sessions are on the default socket.
 
 **Fix**: Either remove `LIBTMUX_SOCKET` from the config to use the default socket, or ensure sessions exist on the configured socket.
 

@@ -8,7 +8,8 @@ or inspect server-level state before creating sessions.
 
 **Avoid when** you only need session names — use {tooliconl}`list-sessions`.
 
-**Side effects:** None. Reads only.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 

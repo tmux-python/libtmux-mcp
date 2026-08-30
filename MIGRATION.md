@@ -76,9 +76,13 @@ format runs when tmux draws it and repeats on the status interval, and
 
 The safety topic is now the trust page. The old URL redirects.
 
-### What did not change
+### MCP annotations
 
-The MCP annotation hints. `readOnlyHint`, `destructiveHint`,
-`idempotentHint` and `openWorldHint` are the protocol's fields with the
-protocol's meanings. The tiers were this project's own invention, and only
-they are withdrawn.
+Every tool that requests a tmux operation now explicitly advertises
+`readOnlyHint: false`,
+`destructiveHint: true`, `idempotentHint: false`, and `openWorldHint: true`.
+An existing tmux server can use aliases and hooks to replace or extend the
+operation libtmux-mcp requests, so no stronger static promise holds for every
+target. The optional prompt adapter tools render text without contacting tmux
+and retain their narrower hints. Use the project-owned toolsets to distinguish
+the direct operation libtmux-mcp requests.

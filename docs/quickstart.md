@@ -73,6 +73,6 @@ return only new pane output.
 ## Next steps
 
 - {ref}`concepts` — Understand the tmux hierarchy and how tools target panes
-- {ref}`configuration` — Environment variables and socket isolation
+- {ref}`configuration` — Environment variables and socket selection
 - {ref}`trust` — Control which tools are available
 - {ref}`Tools <tools-overview>` — Browse all available tools

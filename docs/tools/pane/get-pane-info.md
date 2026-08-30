@@ -8,7 +8,8 @@ other metadata without reading the terminal content.
 
 **Avoid when** you need the actual text — use {tooliconl}`capture-pane`.
 
-**Side effects:** None. Reads only.
+**Side effects:** The built-in request reads data only. A configured alias or
+hook can add effects; see {ref}`trust`.
 
 **Example:**
 
