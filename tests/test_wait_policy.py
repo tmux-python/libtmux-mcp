@@ -50,9 +50,8 @@ from libtmux_mcp._wait_policy import (
 def test_resolve_wait_max_seconds(raw: str | None, expected: float) -> None:
     """Env resolution clamps and degrades instead of raising.
 
-    Mirrors ``_resolve_safety_level``: an operator typo must not stop
-    the server from starting, and an out-of-range value must not
-    silently become an unbounded wait.
+    An operator typo must not stop the server from starting, and an
+    out-of-range value must not silently become an unbounded wait.
     """
     assert _resolve_wait_max_seconds(raw) == expected
 

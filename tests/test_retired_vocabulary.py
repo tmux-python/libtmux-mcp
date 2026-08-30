@@ -1,70 +1,126 @@
-"""The tier vocabulary must not come back.
-
-`readonly` / `mutating` / `destructive` described an ordered ladder this
-server does not have. Tools are grouped into unordered toolsets instead.
-The words are easy to reintroduce by habit, so a gate holds the line.
-"""
+"""Retired toolset identifiers, configuration, and headings stay retired."""
 
 from __future__ import annotations
 
 import pathlib
 import re
 
-import pytest
-
-#: Words that named the retired tiers. Matched whole and case-insensitively.
-RETIRED = ("readonly", "mutating", "destructive", "safety tier", "safety level")
-
-#: MCP defines these fields and their meanings; they are the protocol's
-#: vocabulary, not ours, and they stay.
-PROTOCOL_NAMES = (
-    "readOnlyHint",
-    "destructiveHint",
-    "read_only_hint",
-    "destructive_hint",
+RETIRED_IDENTIFIERS = frozenset(
+    {
+        "ANNOTATIONS_ALLOCATE",
+        "ANNOTATIONS_CHANGE",
+        "ANNOTATIONS_DEFERRED_EXEC",
+        "ANNOTATIONS_DELETE",
+        "ANNOTATIONS_OBSERVE",
+        "ANNOTATIONS_OBSERVE_CONTENT",
+        "ANNOTATIONS_PANE_INPUT",
+        "ANNOTATIONS_SPAWN",
+        "InspectRetryMiddleware",
+        "ReadonlyRetryMiddleware",
+        "SafetyMiddleware",
+        "TAG_DESTRUCTIVE",
+        "TAG_MUTATING",
+        "TAG_READONLY",
+        "VALID_SAFETY_LEVELS",
+        "call_destructive_tools_batch",
+        "call_mutating_tools_batch",
+        "call_readonly_tools_batch",
+    }
 )
 
-#: Files allowed to name what they replace.
-EXEMPT = (
-    "CHANGES",
-    "MIGRATION.md",
-    "tests/test_retired_vocabulary.py",
-    # The startup error has to say the variable it is refusing, and the
-    # test that proves it fires has to set it.
-    "src/libtmux_mcp/server.py",
-    "tests/test_server.py",
-    # A redirect must name the old path to serve it.
-    "docs/redirects.txt",
+RETIRED_CONFIG_KEYS = frozenset({"LIBTMUX_SAFETY"})
+
+RETIRED_HEADINGS = frozenset(
+    {
+        "Discovery vs. mutation",
+        "Safety levels",
+        "Safety tiers",
+    }
+)
+
+_RETIRED_TERM_PATTERN = re.compile(
+    r"\b(?:safety[ -]tiers?|mutating tools?|default tiers?)\b",
+    re.IGNORECASE,
+)
+
+HISTORICAL_FILES = frozenset({pathlib.Path("CHANGES"), pathlib.Path("MIGRATION.md")})
+
+CONFIG_REJECTION_FILES = frozenset(
+    {
+        pathlib.Path("src/libtmux_mcp/server.py"),
+        pathlib.Path("tests/test_server.py"),
+    }
 )
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
-_PATTERN = re.compile("|".join(re.escape(word) for word in RETIRED), re.IGNORECASE)
+_IDENTIFIER_PATTERN = re.compile(
+    rf"\b(?:{'|'.join(map(re.escape, sorted(RETIRED_IDENTIFIERS)))})\b"
+)
+_CONFIG_PATTERN = re.compile(
+    rf"\b(?:{'|'.join(map(re.escape, sorted(RETIRED_CONFIG_KEYS)))})\b"
+)
+_HEADING_PATTERN = re.compile(
+    rf"^#{{1,6}}\s+(?:{'|'.join(map(re.escape, sorted(RETIRED_HEADINGS)))})\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def _tracked_sources() -> list[pathlib.Path]:
-    """Return the files this gate covers."""
-    paths: list[pathlib.Path] = []
-    for pattern in ("src/**/*.py", "tests/**/*.py", "docs/**/*.md", "*.md"):
-        paths.extend(
+    """Return source, tests, scripts, skills, and user documentation."""
+    paths: set[pathlib.Path] = set()
+    for pattern in (
+        ".agents/**/*.md",
+        ".github/**/*.md",
+        "src/**/*.py",
+        "tests/**/*.py",
+        "scripts/**/*.py",
+        "docs/**/*.md",
+        "*.md",
+    ):
+        paths.update(
             path
             for path in _ROOT.glob(pattern)
-            if "_build" not in path.parts and str(path.relative_to(_ROOT)) not in EXEMPT
+            if "_build" not in path.parts and path != pathlib.Path(__file__).resolve()
         )
-    return paths
+    paths.add(_ROOT / "CHANGES")
+    paths.add(_ROOT / "pyproject.toml")
+    return sorted(paths)
 
 
-@pytest.mark.parametrize("path", _tracked_sources(), ids=lambda p: str(p.name))
-def test_no_file_reintroduces_the_tier_vocabulary(path: pathlib.Path) -> None:
-    """No source or page names a tier that no longer exists."""
-    text = path.read_text(encoding="utf-8")
-    for name in PROTOCOL_NAMES:
-        text = text.replace(name, "")
+def test_retired_contract_names_do_not_return() -> None:
+    """Removed API names stay gone without banning ordinary security prose."""
+    offenders: list[str] = []
 
-    offenders = sorted({match.group(0).lower() for match in _PATTERN.finditer(text)})
+    for path in _tracked_sources():
+        relative = path.relative_to(_ROOT)
+        if relative in HISTORICAL_FILES:
+            continue
+        text = path.read_text(encoding="utf-8")
+        offenders.extend(
+            f"{relative}: term {match.group(0)}"
+            for match in _RETIRED_TERM_PATTERN.finditer(text)
+        )
+        offenders.extend(
+            f"{relative}: identifier {match.group(0)}"
+            for match in _IDENTIFIER_PATTERN.finditer(text)
+        )
+        if relative not in CONFIG_REJECTION_FILES:
+            offenders.extend(
+                f"{relative}: config {match.group(0)}"
+                for match in _CONFIG_PATTERN.finditer(text)
+            )
+        if path.suffix == ".md":
+            offenders.extend(
+                f"{relative}: heading {match.group(0)}"
+                for match in _HEADING_PATTERN.finditer(text)
+            )
 
-    assert not offenders, (
-        f"{path.relative_to(_ROOT)} names the retired tiers {offenders}. "
-        f"Tools belong to unordered toolsets: inspect, manage, execute, "
-        f"teardown. If this file must name what it replaced, add it to "
-        f"EXEMPT with a reason."
-    )
+    assert not offenders, "Retired contract names returned:\n" + "\n".join(offenders)
+
+
+def test_retired_term_pattern_uses_whole_tokens() -> None:
+    """Ordinary words containing the retired stems remain legal."""
+    assert _RETIRED_TERM_PATTERN.search("a safety tier")
+    assert _RETIRED_TERM_PATTERN.search("a mutating tool")
+    assert _RETIRED_TERM_PATTERN.search("the default tier")
+    assert _RETIRED_TERM_PATTERN.search("entire mutations") is None

@@ -255,7 +255,7 @@ def test_use_local_preserves_existing_env_when_replacing(
 
     Regression: ``cmd_use_local`` previously constructed the replacement
     spec via ``build_local_spec`` (env={}) and wrote it directly,
-    silently dropping client-side settings like ``LIBTMUX_SAFETY`` or
+    silently dropping client-side settings like ``LIBTMUX_TOOLSETS`` or
     ``LIBTMUX_SOCKET`` that the user had set on the prior pinned-PyPI
     entry. The fix merges ``current.env`` into the new spec; this test
     locks the behaviour by seeding env on a Cursor entry, running

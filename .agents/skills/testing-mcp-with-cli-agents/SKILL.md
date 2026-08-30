@@ -59,8 +59,8 @@ tool list, a couple of representative calls, an error path. Use this to answer
 "is the tool surface and result shape correct?" before spending a CLI on it.
 
 Shape-normalization gotchas seen in practice — normalize before asserting:
-- Match the current `LIBTMUX_SAFETY` tier: destructive-batch wrappers are hidden
-  at the default tier, so don't assert they're visible.
+- Match the current `LIBTMUX_TOOLSETS` selection: excluded toolsets are hidden
+  when omitted from the selection, so don't assert they're visible.
 - List-returning tools surface `structuredContent` as `{"result": [...]}`;
   `capture_pane` output can come back under `result` as a string. Don't assume a
   top-level `count`.
@@ -75,7 +75,7 @@ handshake, codex's `mcp get` only parses config, and agy has no proof short of a
 model call. `references/cli-matrix.md` has the verified per-CLI invocation,
 isolation lever, and approval-bypass flag for all six. Two things that surprise
 people: some `mcp list`/`list-tools` subcommands read the *ambient* config and
-ignore your isolated one, and a mutating tool call needs a per-CLI
+ignore your isolated one, and a write-capable tool call needs a per-CLI
 approval-bypass flag or it hangs on a no-TTY prompt. Flags drift — re-verify with
 `--help`.
 
@@ -230,7 +230,7 @@ not add new keys, so inject `LIBTMUX_SOCKET=mcp-target` via each CLI's native
 real CLI configs, so dry-run first, record the pre-existing swap state, and
 revert only what you swapped.
 
-**Prefer zero-mutation isolation for a test.** mcp_swap is for a swap you *want*
+**Prefer no-config-write isolation for a test.** mcp_swap is for a swap you *want*
 to persist. To just exercise a checkout, use each CLI's throwaway config-home /
 project-config lever instead — `references/cli-matrix.md` gives the verified one
 per CLI (codex `CODEX_HOME` or `-c` overrides, grok `GROK_HOME`, agy
@@ -275,7 +275,7 @@ Claude, which has two layers) and preview with `--dry-run`. State is keyed by
 `(cli, scope)`, so two swaps of the same layer collapse into one entry — there
 is no chain to unwind one step at a time. Re-run `status`/`doctor` and compare
 against the state you recorded before starting. If you stayed on the
-zero-mutation path there is nothing to revert.
+no-config-write path there is nothing to revert.
 
 ## When NOT to reach for the full harness
 

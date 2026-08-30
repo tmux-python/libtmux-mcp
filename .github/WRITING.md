@@ -22,7 +22,7 @@ The most useful editing operation is deleting the introductory sentence.
 Lead with verbs and name concrete things. Put identifiers in backticks.
 Prefer short declarative sentences, one operational fact each. Do not
 explain Python to Python developers; do explain this project's semantics —
-what a safety tier does, what a tool will and will not touch, what a stale
+what a toolset does, what a tool will and will not touch, what a stale
 pane object means.
 
 Type annotations describe shape. Documentation describes meaning. A
@@ -77,7 +77,7 @@ Rules that follow:
   common call, then the one argument a few will tune, then the lower-level
   primitive. Each step is for a smaller audience than the last.
 - **Name the trade-off.** If a call costs something — an extra tmux
-  round-trip, a stale object needing a refresh, a wider safety tier — say
+  round-trip, a stale object needing a refresh, a wider tool surface — say
   so, and say what it buys. State it; do not sell it.
 
 ## README
@@ -164,7 +164,7 @@ its title is chrome, not disambiguation. The title is not part of the
 search corpus above; it is a human-readable label only.
 
 **`anthropic/alwaysLoad` is a scarce hint, not a default.** A handful of
-high-traffic, read-only tools (list/inspect operations a session usually
+high-traffic `inspect` tools (list/inspect operations a session usually
 starts with) carry this per-tool `meta` flag so a client can keep a small
 tmux vocabulary visible without preloading every tool's schema. Reserve it
 for tools nearly every session needs early; adding it broadly defeats the
@@ -187,7 +187,7 @@ recovery suggestion rather than folding it into the sentence — "call
 model has to parse for the actionable part. Reserve the loud, unrecoverable
 category (a missing `tmux` binary, a genuine bug in this server) for
 failures an operator — not the calling agent — has to fix; an
-agent-correctable failure like a bad id or a tier denial should not read as
+agent-correctable failure like a bad id or a toolset denial should not read as
 loud as a crash.
 
 ## Documentation site voice
@@ -226,12 +226,12 @@ answer the operator's questions:
 - **Use when** describes the practical workflow.
 - **Avoid when** names the common wrong turn and points to the better
   tool.
-- **Side effects** states the safety consequence plainly.
+- **Side effects** states the operational consequence plainly.
 - **Examples** stay copyable, minimal, and realistic.
 
 ### What stays precise
 
-Warm the framing, never the facts. Safety tiers, exact tool names,
+Warm the framing, never the facts. Toolsets, exact tool names,
 parameter names, environment variables, error strings, tmux targets,
 format strings, JSON/TOML examples, and class or function
 cross-references carry meaning in their exact form. Leave them exact and
@@ -244,12 +244,12 @@ of any symbol that has a useful destination on that page:
 
 - `{class}`, `{meth}`, `{func}`, `{mod}`, `{exc}`, `{attr}` — Python
   objects.
-- `{tool}` — code chip + full safety badge (text + icon). Use in headers,
+- `{tool}` — code chip + full toolset badge (text + icon). Use in headers,
   bulleted lists, and tables where the badge gives scannable context.
 - `{tooliconl}` — code chip + small colored icon (left). Use in inline
   paragraph text where the full badge is too heavy.
 - `{toolref}` — code chip only, no badge. Use for dense inline sequences
-  or where the safety tier is already established.
+  or where the toolset is already established.
 - `{tooliconil}` / `{tooliconir}` — bare emoji inside a code chip. Use for
   compact lists and scan-heavy surfaces.
 - `{ref}` / `{doc}` — documentation pages and section anchors.

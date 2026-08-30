@@ -111,7 +111,7 @@ RUN_COMMAND_FIXTURES: list[RunCommandFixture] = [
 
 RUN_COMMAND_STATUS_ISOLATION_FIXTURES: list[RunCommandStatusIsolationFixture] = [
     RunCommandStatusIsolationFixture(
-        "path_mutation",
+        "path_change",
         "PATH=/tmp; printf 'RUN_COMMAND_PATH_OK\\n'",
         0,
         "RUN_COMMAND_PATH_OK",
@@ -1383,7 +1383,7 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
             "for i in $(seq 1 120); do printf 'CAPTURE_SINCE_TRIM_%03d\\n' \"$i\"; done"
         )
         _signal_after_shell_payload(mcp_server, fresh_pane, payload)
-        # Guarantee anchor destruction: tmux 3.6 can retain the original
+        # Guarantee anchor removal: tmux 3.6 can retain the original
         # prompt hash in scrollback even after flooding past history-limit.
         fresh_pane.cmd("clear-history")
         _signal_after_shell_payload(
