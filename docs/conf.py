@@ -173,33 +173,38 @@ conf["fastmcp_model_classes"] = (
     "BufferRef",
     "BufferContent",
 )
-# sphinx-autodoc-fastmcp ships no default vocabulary: it documents
-# projects whose tags it does not choose. Declaration order is
-# precedence, and the summary tables follow it.
-conf["fastmcp_toolsets"] = (
+# Our tags sit on one axis: the capability name implies the risk, so
+# declaration order runs most destructive first and the summary tables
+# follow it.
+conf["fastmcp_axes"] = (
     {
-        "tag": "teardown",
-        "tone": "red",
-        "tooltip": "Teardown \u2014 deletes tmux objects or scrollback",
-        "icon": "\U0001f4a3",
-    },
-    {
-        "tag": "execute",
-        "tone": "amber",
-        "tooltip": "Execute \u2014 starts or drives a pane process",
-        "icon": "\u270f\ufe0f",
-    },
-    {
-        "tag": "manage",
-        "tone": "blue",
-        "tooltip": "Manage \u2014 changes tmux structure or presentation",
-        "icon": "\U0001f527",
-    },
-    {
-        "tag": "inspect",
-        "tone": "green",
-        "tooltip": "Inspect \u2014 reads tmux state and terminal output",
-        "icon": "\U0001f50d",
+        "name": "capability",
+        "terms": (
+            {
+                "term": "teardown",
+                "tone": "red",
+                "tooltip": "Teardown \u2014 deletes tmux objects or scrollback",
+                "icon": "\U0001f4a3",
+            },
+            {
+                "term": "execute",
+                "tone": "amber",
+                "tooltip": "Execute \u2014 starts or drives a pane process",
+                "icon": "\u270f\ufe0f",
+            },
+            {
+                "term": "manage",
+                "tone": "blue",
+                "tooltip": "Manage \u2014 changes tmux structure or presentation",
+                "icon": "\U0001f527",
+            },
+            {
+                "term": "inspect",
+                "tone": "green",
+                "tooltip": "Inspect \u2014 reads tmux state and terminal output",
+                "icon": "\U0001f50d",
+            },
+        ),
     },
 )
 conf["fastmcp_section_badge_map"] = {
