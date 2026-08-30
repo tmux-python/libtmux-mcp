@@ -16,6 +16,7 @@ import pydantic
 import pytest
 from fastmcp.exceptions import ToolError
 from libtmux import exc as libtmux_exc
+from libtmux.common import has_gte_version
 from libtmux.test.retry import retry_until
 
 from libtmux_mcp import _progress as _progress_module
@@ -7054,6 +7055,10 @@ def test_send_keys_reports_an_oversized_payload_as_the_caller_s_problem(
 # ---------------------------------------------------------------------------
 
 _COPYSEL_MARKER = "COPYSEL_MARKER_XYZ"
+_requires_copy_selection = pytest.mark.skipif(
+    not has_gte_version("3.4"),
+    reason="copy_selection requires tmux 3.4 or newer",
+)
 
 
 def _select_whole_screen(mcp_server: Server, pane: Pane, marker: str) -> None:
@@ -7070,6 +7075,7 @@ def _select_whole_screen(mcp_server: Server, pane: Pane, marker: str) -> None:
     pane.cmd("send-keys", "-N", "40", "-X", "cursor-down")
 
 
+@_requires_copy_selection
 def test_copy_selection_returns_the_selected_text(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -7090,6 +7096,7 @@ def test_copy_selection_returns_the_selected_text(
     )
 
 
+@_requires_copy_selection
 def test_copy_selection_leaves_the_selection_intact(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -7101,12 +7108,14 @@ def test_copy_selection_leaves_the_selection_intact(
     assert state[0] == "copy-mode 1"
 
 
+@_requires_copy_selection
 def test_copy_selection_requires_copy_mode(mcp_server: Server, mcp_pane: Pane) -> None:
     """A pane not in copy mode is a loud, explained refusal."""
     with pytest.raises(ToolError, match="not in copy mode"):
         copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
 
 
+@_requires_copy_selection
 def test_copy_selection_rejects_another_mode(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -7117,6 +7126,7 @@ def test_copy_selection_rejects_another_mode(
         copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
 
 
+@_requires_copy_selection
 def test_copy_selection_refuses_when_nothing_is_selected(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -7130,6 +7140,7 @@ def test_copy_selection_refuses_when_nothing_is_selected(
         copy_selection(pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name)
 
 
+@_requires_copy_selection
 def test_copy_selection_buffer_is_reachable_by_the_buffer_tools(
     mcp_server: Server, mcp_pane: Pane, mcp_window: Window
 ) -> None:
@@ -7148,6 +7159,7 @@ def test_copy_selection_buffer_is_reachable_by_the_buffer_tools(
     delete_buffer(buffer_name=result.buffer_name, socket_name=mcp_server.socket_name)
 
 
+@_requires_copy_selection
 def test_copy_selection_truncates_like_show_buffer(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -7175,6 +7187,7 @@ def test_copy_selection_truncates_like_show_buffer(
     )
 
 
+@_requires_copy_selection
 def test_copy_selection_rejects_an_overlong_label(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
