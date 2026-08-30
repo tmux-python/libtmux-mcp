@@ -74,11 +74,15 @@ not on what the parameter is called: tmux expands formats in argument positions
 whose names give no hint of it, so a field-name filter would pass a shell sink
 named `start_directory`.
 
-**CM-6 — There is one canonical surface for client-authored shell commands, and
-none for host commands.** `run_shell_command` runs authored commands in a pane,
-where they are attachable, observable, and tied to a completion protocol. No
-public tool runs client-authored code outside a pane. This is an architecture
-and observability claim, not confinement.
+**CM-6 — Client-authored host commands have no direct MCP surface.**
+`run_shell_command` sends authored commands to a pane, where they are attachable,
+observable, and tied to a completion protocol. No public schema accepts a host
+command, and this server never hands caller text directly to a host-side shell.
+A pane command can still invoke tmux's
+[`run-shell`](https://github.com/tmux/tmux/blob/3.7c/cmd-run-shell.c#L201-L210)
+or install a
+[`#()` status job](https://github.com/tmux/tmux/blob/3.7c/format.c#L416-L422),
+so this is a direct-surface claim, not transitive confinement.
 
 **CM-7 — Disclosure is a product surface, held to the same standard as
 behaviour.** The install statement, the generated opening sentences, the startup
