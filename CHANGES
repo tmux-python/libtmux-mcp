@@ -6,6 +6,17 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a21 (2026-08-30)
+
+libtmux-mcp 0.1.0a21 replaces cumulative safety tiers with independently
+selectable `inspect`, `manage`, `execute`, and `teardown` toolsets, including an
+opt-in teardown surface. Caller-supplied names, paths, formats, and regular
+expressions now stay within declared bounds, while conservative annotations and
+the new {ref}`trust` page state how tmux hooks, client consent, and OS isolation
+divide responsibility. Write-capable batch wrappers are removed so client
+policy sees each operation, and `mcp_swap.py` adds opencode and pi while
+migrating local configurations away from `LIBTMUX_SAFETY`.
+
 ### Breaking changes
 
 **Toolsets replace safety tiers**
