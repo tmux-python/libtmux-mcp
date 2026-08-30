@@ -334,6 +334,39 @@ def test_trust_docs_state_ambient_tmux_execution(
     assert "{ref}`trust`" in resources
 
 
+def test_project_navigation_publishes_architecture_decisions(
+    docs_dir: pathlib.Path,
+) -> None:
+    """The contributor landing page exposes the numbered ADR collection."""
+    project = (docs_dir / "project" / "index.md").read_text(encoding="utf-8")
+    index = (docs_dir / "dev" / "adr" / "index.md").read_text(encoding="utf-8")
+
+    assert ":::{grid-item-card} Architecture decisions" in project
+    assert ":link: ../dev/adr/index" in project
+    assert "\n../dev/adr/index\n" in project
+    assert "(architecture-decisions)=" in index
+    assert "# Architecture decisions" in index
+    assert "\n0001-capability-model\n" in index
+
+
+def test_capability_adr_preserves_the_source_decision(
+    docs_dir: pathlib.Path,
+) -> None:
+    """ADR 0001 retains the proposed capability model and its provenance."""
+    text = (docs_dir / "dev" / "adr" / "0001-capability-model.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "(adr-capability-model)=" in text
+    assert "# ADR 0001: Capability model" in text
+    assert "## Status\n\nProposed." in text
+    assert "issues/127#issuecomment-5463431049" in text
+    for number in range(1, 8):
+        assert f"**CM-{number} —" in text
+    assert "## What this does not guarantee" in text
+    assert "## Consequences" in text
+
+
 def test_trust_toolset_labels_are_badged_and_copyable(
     docs_dir: pathlib.Path,
 ) -> None:
