@@ -358,13 +358,23 @@ def test_capability_adr_preserves_the_source_decision(
     )
 
     assert "(adr-capability-model)=" in text
-    assert "# ADR 0001: Capability model" in text
+    assert text.startswith("(adr-capability-model)=\n\n# ADR 0001:")
     assert "## Status\n\nProposed." in text
     assert "issues/127#issuecomment-5463431049" in text
     for number in range(1, 8):
-        assert f"**CM-{number} —" in text
-    assert "## What this does not guarantee" in text
-    assert "## Consequences" in text
+        assert f"### CM-{number}:" in text
+    for section in (
+        "## Abstract",
+        "## Scope and non-goals",
+        "## Terminology",
+        "## Conformance",
+        "## Architectural decisions",
+        "## Consequences",
+        "## Rejected alternatives",
+        "## Security and reliability considerations",
+        "## When to reconsider",
+    ):
+        assert section in text
 
 
 def test_trust_toolset_labels_are_badged_and_copyable(

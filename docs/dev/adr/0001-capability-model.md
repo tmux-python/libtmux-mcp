@@ -1,182 +1,376 @@
 (adr-capability-model)=
 
-# ADR 0001: Capability model
+# ADR 0001: Capability boundaries for tmux MCP implementations
 
-This record was proposed in
-[issue #127's source comment](https://github.com/tmux-python/libtmux-mcp/issues/127#issuecomment-5463431049).
-The
-[full target-state capability model](https://github.com/tmux-python/libtmux-mcp/issues/127#issuecomment-5463166342)
-contains the inventory, manifest columns, CI invariants, and adoption phases.
-This record defines the shared contract for tmux MCP implementations. It stays
-above implementation design: what every implementation commits to and refuses
-to promise.
+## Abstract
+
+This record defines the shared capability contract for tmux Model Context
+Protocol (MCP) implementations. It specifies how implementations describe
+available operations, how a tmux socket limits the structured tool namespace,
+and what MCP annotations do and do not express. It does not prescribe an
+implementation language, internal class design, or rollout sequence.
 
 ## Status
 
 Proposed. Supersedes the former three-level capability model.
 
-## Context
+## Context and problem
 
-A tmux MCP hands an agent a terminal. Everything downstream of that — which tmux
-objects it can touch, what a client should prompt on, what a reader should
-believe — depends on describing that capability accurately.
+A tmux MCP gives an agent a terminal. The implementation must describe that
+authority without confusing tmux object selection, process execution, client
+consent, and operating-system confinement.
 
-One ordered scale cannot do it. Running a shell command and deleting a tmux
-window are different powers, not different amounts of one power, and a ladder
-that ranks them forces every tool to be described by its position rather than
-its behaviour. The practical symptom is that a rung has to lie about one axis to
-speak about the other, and the honest statement a user needs — _this can execute
-code as you_ — ends up implied by a tier name instead of stated in the tool's
-own description.
-
-The second problem is that the words available are not ours alone. MCP defines
+One ordered safety scale cannot describe those independent concerns. Running a
+shell command and deleting a tmux window are different capabilities, not
+different amounts of one capability. MCP also defines
 [`readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`](https://github.com/modelcontextprotocol/python-sdk/blob/v1.29.1/src/mcp/types.py#L1247-L1294)
-with specific meanings and explicitly frames them as untrusted hints for client
-presentation, not authorization. A server that repurposes them as severity
-labels is not communicating with clients; it is corrupting a shared vocabulary.
+for client presentation. Reusing those annotations as severity labels would
+change their protocol meaning.
 
-## Decision
+## Scope and non-goals
 
-**CM-1 — A tmux socket is a namespace boundary, not a security boundary.** A
-server process pins one socket for its lifetime. That scopes which tmux objects
-the structured tools can name, which is genuine accident isolation for the tool
-surface. It scopes nothing about the filesystem, processes, network, or other
-sockets, and the documentation never implies otherwise.
+This record applies to MCP servers that expose structured tmux operations. It
+defines their shared capability vocabulary, tool-surface behavior, annotation
+semantics, execution boundary, and disclosure obligations.
 
-**CM-2 — Describe capability with independent facts, not a rank.**
-Direct process reach records whether the requested operation starts a process
-or delivers client-controlled input to one. Direct tmux effect records whether
-that operation observes, changes, or deletes state; output classes describe what
-the result can carry back. `rename_window` changes a name, while
-`run_shell_command` accepts a client-authored pane command. Whole-call MCP
-annotations account separately for execution added by ambient aliases or hooks.
+This record does not define operating-system isolation, decide which shell
+commands an operator permits, or make the model an enforcement boundary. It
+does not track implementation progress or prescribe a programming language,
+framework, storage format, or build system.
 
-**CM-3 — Resolve one explicit tool surface at startup.**
-The unordered toolsets are `inspect`, `manage`, `execute`, and `teardown`. At
-startup, expand the selected toolsets, add named inclusions, then remove named
-exclusions; exclusion wins. Reject unknown names and freeze the result for the
-server's lifetime. A tool outside that surface is neither advertised nor
-callable. This supports context reduction, model routing, and documentation
-navigation while keeping combinations such as `inspect,teardown` expressible.
+## Terminology
 
-**CM-4 — Use standard MCP annotations for the whole tool call.** MCP defines
-[`readOnlyHint: true`](https://github.com/modelcontextprotocol/python-sdk/blob/v1.29.1/src/mcp/types.py#L1262-L1266)
-as a claim that the tool does not modify its environment. Tmux operations
-therefore use conservative hints when aliases or hooks make the whole call
-unknowable. Toolset, process reach, and output classes describe the direct
-operation without redefining the protocol.
+**tmux MCP implementation**
+: An MCP server implementation that exposes structured tools for tmux.
 
-**CM-5 — Generate public claims from one checked-in manifest.** Registration,
-filtering, generated docs, badges, the README inventory, and the capabilities
-resource all derive from one table. CI asserts where a parameter's value lands
-in the callee, not what the parameter is called: tmux expands formats in
-argument positions whose names give no hint of it, so a field-name filter would
-pass a shell sink named `start_directory`.
+**server process**
+: One running instance of a tmux MCP implementation.
 
-**CM-6 — Do not expose host-command execution as a public tool.**
-`run_shell_command` sends authored commands to a pane, where they are attachable,
-observable, and tied to a completion protocol. No public schema accepts a host
-command, and no implementation hands caller text directly to a host-side shell.
-A pane command can still invoke tmux's
-[`run-shell`](https://github.com/tmux/tmux/blob/3.7c/cmd-run-shell.c#L201-L210)
-or install a
-[`#()` status job](https://github.com/tmux/tmux/blob/3.7c/format.c#L416-L422),
-so this is a direct-surface claim, not transitive confinement.
+**structured tool**
+: A typed MCP operation that targets tmux or a program running in a tmux pane.
 
-**CM-7 — Treat disclosure as product behaviour.** The install statement,
-generated opening sentences, startup record, trust-model page, and audit record
-are all deliverables. Repository lint rejects new affirmative sandbox or
-containment language while permitting negative boundary disclosures.
+**selected socket**
+: The single tmux server socket chosen by a server process at startup.
 
-## What this does not guarantee
+**direct operation**
+: The operation a structured tool requests, excluding behavior already
+  configured in tmux, such as command aliases and hooks.
 
-Each of these is stated because a reader could otherwise reasonably infer it.
+**workload process**
+: A pane or host process whose behavior can be influenced by caller input. A
+  control-plane process used only to issue a tmux request is not a workload
+  process.
 
-**Not containment.** Execute tools run commands with the user's full authority.
-A command running in a pane can reach any file, process, or network the user
-can, and can open any other tmux socket by hand. OS accounts, containers, and
-VMs are the isolation boundary; a tmux MCP is not one. Implementations do not
-build a sandbox they cannot enforce.
+**whole-call MCP annotation**
+: A standard MCP annotation describing the observable tool call as a whole,
+  including configured tmux behavior activated by the direct operation.
 
-**The selected tool surface limits MCP calls, not pane authority.** A surface
-without teardown tools removes direct deletion calls. It does not stop an
-enabled execute tool from typing the equivalent tmux command. Surface reduction
-limits accidents; it does not confine what a pane can do, because a bypass is
-one `send_keys` away.
+**structured tool surface**
+: The fixed set of tools a server process advertises and accepts.
 
-**Annotations include ambient tmux behaviour.** tmux
-[expands command aliases](https://github.com/tmux/tmux/blob/3.7c/cmd-parse.y#L776-L794)
-before dispatch and
-[runs after-hooks](https://github.com/tmux/tmux/blob/3.7c/cmd-queue.c#L649-L663)
-after it. A nominally observational call can therefore execute or mutate.
-Manifest metadata records the intended direct operation; standard hints make no
-narrower claim.
+**host command**
+: Client-authored executable input handed directly to a process outside a tmux
+  pane.
 
-**The dedicated socket is separation, not exclusive ownership.** Objects on it
-are reachable by every process of the same user that connects — a server left by
-a previous run, a session made by hand, a second concurrent instance. Exclusive
-ownership would need an advisory lease and an explicit adoption step for a
-server of unknown provenance. Until that exists we say separation from the
-user's ordinary tmux world, and never "only this agent's objects."
+**minimal tmux configuration**
+: Configuration supplied by the implementation that loads no user configuration,
+  plugin, hook, or status job.
 
-**`inspect` means "does not interpret client input as executable", not "safe".**
-Inspect tools can return credentials, command lines, environment values, and
-terminal output containing prompt-injection text. Terminal-content reads are
-therefore advertised open-world. Blanket auto-approval of the whole toolset is a
-client's decision to make with that stated, not something the name endorses.
+## Conformance
 
-**No payload inspection on typed input.** Implementations do not scan
-`send_keys` or `run_shell_command` for dangerous content. That race is
-unwinnable, and a filter that catches enough examples to look protective is
-worse than none, because it teaches operators to rely on it.
+In this record, uppercase **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and
+**MAY** use the meanings defined by
+[BCP 14](https://datatracker.ietf.org/doc/html/rfc8174). Lowercase forms have
+their ordinary English meanings.
 
-**Bounded matching requires a bounded mechanism.** Input-size caps alone do not
-bound execution time. Each implementation names and enforces a bounded-time
-matching mechanism, or makes no time-bound claim.
+A **conforming tmux MCP implementation** satisfies every applicable **MUST** and
+**MUST NOT** requirement in this record. The Terminology, Conformance,
+Architectural decisions, and Security and reliability considerations sections
+are normative. Sections and paragraphs labeled informative do not define
+conformance requirements.
 
-**Redaction and history suppression are scoped.** Audit redaction covers the
-audit record; it does not rewrite shell history, client transcripts, pane
-scrollback, process arguments, or OS observation surfaces. History suppression
-is best-effort hygiene, not secret transport.
+## Architectural decisions
 
-**Aggregate calls do not preserve per-inner client approval.** The single read
-batch that survives aggregates authority under its own name, so a client policy
-keyed on an inner tool's name will not fire. That is stated in the tool's own
-description rather than papered over, and it is why the mutating and destructive
-batches do not survive at all.
+### CM-1: A tmux socket limits addressable tmux objects; it is not a security boundary
 
-**Tool names are client policy hooks.** Implementations change accepted tool
-names only through an explicit migration. Renaming a public tool is a consent
-surface change, not an internal refactor.
+A server process **MUST** select exactly one tmux socket before exposing
+structured tools. The server process **MUST** retain that socket for its
+lifetime. A structured tool **MUST NOT** accept a per-call socket selector. A
+structured tool **MUST NOT** address tmux objects outside the selected socket.
 
-**Self-kill guards protect one process against the direct teardown tools.** They
-cover the pane, window, and session containing this server, only when it lives
-on the pinned socket, and only against those typed tools — not against an
-equivalent command typed through an execute tool, and not at all for a server
-launched outside tmux.
+The default configuration **MUST** select a product-scoped dedicated socket. A
+server process that creates the tmux server on that socket **MUST** use a minimal
+tmux configuration. Selecting an inherited or user-configured socket **MUST**
+require explicit operator configuration. A server process that finds an existing
+server on the selected socket **MUST NOT** claim that server has minimal
+configuration provenance.
+
+The selected socket limits which tmux sessions, windows, and panes structured
+tools can name. It does not restrict filesystem access, process execution,
+network access, credentials, or access through commands running in a pane.
+
+**Rationale, informative.** Socket pinning prevents accidental cross-server
+object selection. It does not provide operating-system isolation and must not be
+described as a sandbox.
+
+### CM-2: Independent properties describe each tool's direct capability
+
+Every structured tool **MUST** declare its direct process reach, direct tmux
+effect, and output classes. An implementation **MUST NOT** collapse those
+properties into an ordered safety level.
+
+Direct process reach **MUST** use one of these values:
+
+- `none`: starts no workload process and delivers no client-controlled input to
+  one.
+- `configured-process`: starts a pane workload process without accepting a
+  command payload or client-controlled tmux-format input.
+- `pane-input`: delivers client-controlled keys or text to a pane program.
+- `pane-command`: runs a client-authored shell command in a pane.
+
+A conforming implementation **MUST** reserve `host-command` to describe a
+prohibited public capability.
+
+Direct tmux effect **MUST** be a set containing one or more of `observe`,
+`change`, and `delete`. Output classes **MUST** be a set drawn from
+`tmux-metadata`, `terminal-content`, `process-environment`, and
+`configured-command`. An implementation **MUST** separately record whether a
+tool may expose secrets or return untrusted content.
+
+These properties describe the direct operation. Whole-call MCP annotations
+separately account for execution or mutation added by configured aliases and
+hooks.
+
+**Example, informative.** `rename_window` changes tmux state without accepting
+executable input. `run_shell_command` also changes tmux state and accepts a
+client-authored pane command. Their tmux effects overlap; their process reach
+does not.
+
+### CM-3: One startup decision defines the advertised and callable tool surface
+
+Every structured tool **MUST** belong to exactly one unordered toolset:
+`inspect`, `manage`, `execute`, or `teardown`.
+
+On the default dedicated socket with minimal tmux configuration, an
+implementation **MUST** enable all four toolsets by default. On an inherited or
+user-configured socket, an implementation **MUST** require explicit operator
+selection before enabling `teardown`. It **MUST** apply the same requirement to
+an existing server whose configuration provenance is unknown.
+
+At startup, an implementation **MUST** expand the selected toolsets. It **MUST**
+then add named inclusions. It **MUST** then remove named exclusions. A named
+exclusion **MUST** win over every inclusion path.
+
+An implementation **MUST** reject unknown toolset and tool names at startup. It
+**MUST** freeze the effective structured tool surface for the server process's
+lifetime. A tool outside that surface **MUST NOT** be advertised. A tool outside
+that surface **MUST NOT** be callable by name.
+
+An aggregate tool **MAY** invoke a nested operation that is not separately
+advertised. The aggregate tool **MUST** declare that nested operation as part of
+its own authority. A named exclusion **MUST** remove an operation from every
+aggregate tool's nested authority.
+
+The toolsets support inventory configuration, context reduction, model routing,
+and documentation navigation. They do not restrict what an enabled pane-input
+or pane-command tool can cause a pane program to do.
+
+**Rationale, informative.** Unordered toolsets permit combinations such as
+`inspect,teardown`. Applying the same effective surface to discovery and
+invocation prevents a hidden tool from remaining callable.
+
+### CM-4: MCP annotations describe an entire tool call
+
+An implementation **MUST** use standard MCP annotations only with their protocol
+meanings. A whole-call MCP annotation **MUST** account for the direct operation
+and configured tmux behavior that the operation activates. An implementation
+**MUST NOT** use standard annotations as authorization decisions or project
+severity labels.
+
+Direct process reach, direct tmux effect, and output classes **MUST** remain
+separate from standard MCP annotations. Without evidence for the whole-call
+claim, an implementation **MUST** set `readOnlyHint` to `false`. Without evidence
+for the whole-call claim, an implementation **MUST** set `destructiveHint` to
+`true`. Without evidence for the whole-call claim, an implementation **MUST** set
+`idempotentHint` to `false`. Without evidence for the whole-call claim, an
+implementation **MUST** set `openWorldHint` to `true`.
+
+An implementation **MUST** set `readOnlyHint` to `true` only when the whole call
+cannot modify its environment. It **MUST** set `destructiveHint` to `false` only
+when the whole call performs additive updates at most. It **MUST** set
+`idempotentHint` to `true` only when repeating the call with the same arguments
+has no additional effect. It **MUST** set `openWorldHint` to `false` only when the
+whole call cannot interact with external entities.
+
+MCP annotations support client consent interfaces. They do not enforce tool
+authorization, operating-system confinement, or command policy.
+
+### CM-5: One authoritative capability definition governs every public claim
+
+An implementation **MUST** maintain one authoritative, machine-readable
+capability definition for its structured tools. Tool registration, the effective
+structured tool surface, tool descriptions, documentation, and capability
+reporting **MUST** agree with that definition.
+
+The capability definition **MUST** classify every caller-controlled input by the
+interpreter boundary it reaches. An implementation **MUST** validate capability
+claims against those input sinks rather than infer behavior from parameter
+names.
+
+**Rationale, informative.** tmux expands formats in argument positions whose
+names do not reveal the interpreter boundary. A shared manifest generated or
+validated during CI is one implementation approach, not a required storage
+format.
+
+### CM-6: Public tools do not execute client-authored host commands
+
+A conforming implementation **MUST NOT** expose a structured tool with
+`host-command` process reach. It **MUST NOT** hand caller text directly to a
+host-side shell. Client-authored shell commands **MAY** run through a
+`pane-command` tool, where the process is represented by a tmux pane.
+
+This rule constrains the direct MCP surface. It does not prevent a pane command
+from invoking tmux's
+[`run-shell`](https://github.com/tmux/tmux/blob/3.2a/cmd-run-shell.c#L177-L181),
+installing a
+[`#()` status job](https://github.com/tmux/tmux/blob/3.2a/format.c#L392-L399),
+or starting any process available to the tmux user's account.
+
+### CM-7: Capability disclosure is part of the product contract
+
+Every structured tool description **MUST** begin with a plain-language statement
+of its direct process reach and tmux effect. An implementation **MUST** publish
+its effective structured tool surface and selected socket. Installation and
+trust documentation **MUST** state that execute tools run with the tmux user's
+authority.
+
+Documentation **MUST** distinguish socket-scoped object selection from
+operating-system confinement. Documentation **MUST** distinguish tool-surface
+filtering from authorization. Documentation **MUST** describe whole-call MCP
+annotations as consent metadata rather than enforcement.
+
+An implementation **MUST NOT** describe a dedicated socket, restricted tool
+surface, payload filter, or MCP annotation as a sandbox or security boundary.
 
 ## Consequences
 
-The conservative annotation policy costs prompt granularity: tmux operations
-decline every positive safety claim, so clients may prompt more. Direct-operation
-distinctions move into toolset, reach, and the opening sentence, which are ours
-to define.
+Conservative whole-call annotations may cause clients to prompt more often.
+That cost preserves the protocol meaning of the annotations.
 
-Removing per-call socket arguments means two tmux servers require two configured
-MCP entries. Deriving everything from one manifest means adding a tool is adding
-a row plus a test, and a tool whose claims drift from its behaviour fails CI
-rather than shipping.
+Pinning one socket per server process requires separate configured MCP entries
+to control separate tmux sockets. The selected socket reduces accidental object
+selection without claiming exclusive ownership.
 
-Because `exit-empty` defaults on
-([`options-table.c`](https://github.com/tmux/tmux/blob/3.7c/options-table.c#L375-L380)),
-tmux becomes eligible to exit only after every session is removed; attached
-clients can delay exit further
-([`server.c`](https://github.com/tmux/tmux/blob/3.7c/server.c#L281-L292)).
-Removing one MCP instance's sessions therefore does not stop a shared server
-while another session remains. Socket-wide termination stays an operator action
-because it may destroy sessions the caller does not own.
+Maintaining one authoritative capability definition adds review and validation
+work. It also makes capability drift detectable across registration,
+documentation, and runtime disclosure.
 
-The result is a shared model for tmux MCPs that are useful by default, explicit
-that they can execute arbitrary code, precise about the little a socket scopes,
-and structured so that a future tool cannot quietly acquire authority its
-documentation does not admit to.
+Stable tool names become part of the client-consent surface. Renaming a public
+tool therefore requires an explicit migration rather than an internal refactor.
+
+## Rejected alternatives
+
+**An ordered safety scale.** One rank cannot represent independent process
+reach, tmux effect, and output sensitivity without hiding one of them.
+
+**Tool filtering as authorization.** An enabled pane-input or pane-command tool
+can express operations omitted from the structured tool surface. Filtering is
+still useful for inventory control and accident reduction.
+
+**Payload blocklists.** Shell and terminal input are composable. A filter that
+recognizes selected strings cannot establish a command boundary and would invite
+operators to rely on incomplete protection.
+
+**Per-call socket selection.** A caller-selected socket expands every tool's
+object namespace and makes one server process represent several trust contexts.
+
+**Public host-command tools.** Host-side commands would bypass the observable
+pane process and its completion boundary.
+
+**Generic mutating or destructive aggregates.** A wrapper hides the names on
+which client consent policies depend and turns one approval into authority over
+unrelated operations.
+
+## Security and reliability considerations
+
+### Ambient tmux behavior
+
+**Background, informative.** tmux
+[expands command aliases](https://github.com/tmux/tmux/blob/3.2a/cmd-parse.y#L698-L715)
+before dispatch and
+[runs after-hooks](https://github.com/tmux/tmux/blob/3.2a/cmd-queue.c#L617-L627)
+after many commands. A nominally observational direct operation can therefore
+execute or mutate through existing configuration. Independent pane processes,
+plugins, event hooks, and status jobs can also run without an MCP call.
+
+A conforming implementation **MUST NOT** claim that it prevents all subprocess
+execution. A conforming implementation **MUST** describe ambient tmux behavior
+separately from direct process reach.
+
+### Shared sockets
+
+**Boundary, informative.** Every process with access to the selected socket can
+create or alter objects on it. A dedicated socket separates the structured
+namespace from another tmux server; it does not establish exclusive ownership.
+
+An implementation **MUST NOT** claim ownership of every object on a shared
+socket. A self-kill guard **MUST** be described as protection against direct
+teardown tools only, not against equivalent pane commands or other clients.
+
+**Shutdown behavior, informative.** With the default `exit-empty` enabled and
+`exit-unattached` disabled
+([tmux option defaults](https://github.com/tmux/tmux/blob/3.2a/options-table.c#L256-L268)),
+tmux waits for every session to be removed and for clients to disconnect before
+exiting
+([tmux exit logic](https://github.com/tmux/tmux/blob/3.2a/server.c#L268-L286)).
+Removing one MCP instance's sessions does not stop a shared server while another
+session remains. Socket-wide termination remains an operator action because it
+may destroy sessions the caller does not own.
+
+### Untrusted and sensitive output
+
+**Background, informative.** Terminal output, environment values, configured
+commands, and tmux metadata can contain secrets or untrusted instructions.
+
+An `inspect` tool **MUST NOT** be described as safe merely because its direct
+operation is observational. An implementation **MUST** disclose when a tool may
+return untrusted content. It **MUST** disclose when a tool may expose secrets.
+
+### Aggregate authority
+
+An aggregate tool **MUST** disclose the complete set of nested tools it can
+invoke. Its effective authority **MUST NOT** exceed its advertised nested tool
+set. A conforming implementation **MUST NOT** expose a generic mutating or
+destructive aggregate.
+
+### Bounded operations
+
+An implementation that claims bounded pattern matching **MUST** bound both input
+size and matching execution time. A capture or transport deadline **MUST NOT** be
+misreported as a matching timeout.
+
+### Redaction and history suppression
+
+**Boundary, informative.** Audit redaction applies only to the audit record.
+History suppression is best-effort shell hygiene.
+
+An implementation **MUST NOT** claim that either mechanism removes data from
+client transcripts, pane scrollback, process arguments, shell history outside
+its control, or operating-system observation surfaces.
+
+## When to reconsider
+
+Reconsider this decision if MCP gains enforceable authorization or nested-call
+annotation semantics, if tmux exposes a public command mode that suppresses all
+relevant ambient behavior, or if deployments require a stronger multi-user
+boundary than one operating-system account and socket can provide.
+
+Reconsider the shared vocabulary if an implementation cannot express a required
+capability without weakening an existing term. Add a new independent property
+instead of stretching an old one into a severity rank.
+
+## References
+
+- [Issue #127: tool visibility is not operating-system confinement](https://github.com/tmux-python/libtmux-mcp/issues/127)
+- [Source decision for ADR 0001](https://github.com/tmux-python/libtmux-mcp/issues/127#issuecomment-5463431049)
+- [Detailed target-state capability model](https://github.com/tmux-python/libtmux-mcp/issues/127#issuecomment-5463166342)
