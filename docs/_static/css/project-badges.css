@@ -1,0 +1,5 @@
+#toolsets-gate-mcp-tool-calls-not-tmux > p
+  > .gp-sphinx-badge .gp-sphinx-badge__label {
+  user-select: text;
+  -webkit-user-select: text;
+}

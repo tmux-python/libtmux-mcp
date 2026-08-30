@@ -11,25 +11,22 @@ does not bound.
 
 Tools are grouped into four sets by what they do:
 
-`inspect`
-: Request tmux state or terminal output, or render server-local prompt text.
-  The built-in operation does not pass caller input as a tmux or shell
-  command.
+{badge}`inspect`: Request tmux state or terminal output, or render
+server-local prompt text. The built-in operation does not pass caller input as
+a tmux or shell command.
 
-`manage`
-: Change tmux-managed structure, presentation, staging, or coordination
-  state. The built-in operation does not supply a shell command, pane input,
-  or a value tmux treats as executable configuration.
+{badge}`manage`: Change tmux-managed structure, presentation, staging, or
+coordination state. The built-in operation does not supply a shell command,
+pane input, or a value tmux treats as executable configuration.
 
-`execute`
-: Start a pane process, deliver input to one, or store state that can control
-  later execution. {tooliconl}`set-option` is here, not in `manage`: a
-  `#(...)` job in a status format runs when tmux draws it and repeats on the
-  status interval, and `default-command` decides what every future pane runs.
+{badge}`execute`: Start a pane process, deliver input to one, or store state
+that can control later execution. {tooliconl}`set-option` is here, not in
+`manage`: a `#(...)` job in a status format runs when tmux draws it and repeats
+on the status interval, and `default-command` decides what every future pane
+runs.
 
-`teardown`
-: Delete tmux objects or retained scrollback. Irreversible at the tmux
-  level.
+{badge}`teardown`: Delete tmux objects or retained scrollback. Irreversible
+at the tmux level.
 
 The sets are unordered. FastMCP visibility and libtmux-mcp middleware both
 enforce which MCP tool calls the server advertises and accepts.

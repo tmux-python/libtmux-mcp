@@ -334,6 +334,30 @@ def test_trust_docs_state_ambient_tmux_execution(
     assert "{ref}`trust`" in resources
 
 
+def test_trust_toolset_labels_are_badged_and_copyable(
+    docs_dir: pathlib.Path,
+) -> None:
+    """Trust inventory badges keep their labels available to selection."""
+    text = (docs_dir / "topics" / "trust.md").read_text(encoding="utf-8")
+    section = text.split("## Toolsets gate MCP tool calls, not tmux", 1)[1].split(
+        "\n## ", 1
+    )[0]
+
+    for toolset in VALID_TOOLSETS:
+        assert f"{{badge}}`{toolset}`:" in section
+
+    css = (docs_dir / "_static" / "css" / "project-badges.css").read_text(
+        encoding="utf-8"
+    )
+    normalized_css = " ".join(css.split())
+    assert (
+        "#toolsets-gate-mcp-tool-calls-not-tmux > p"
+        " > .gp-sphinx-badge .gp-sphinx-badge__label" in normalized_css
+    )
+    assert "user-select: text" in css
+    assert "-webkit-user-select: text" in css
+
+
 def test_tool_catalog_groups_every_registered_tool_by_its_wire_tag(
     docs_dir: pathlib.Path,
 ) -> None:
