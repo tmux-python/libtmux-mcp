@@ -58,13 +58,13 @@ the typing tools. Tag-based inventory filtering is also how the surrounding
 ecosystem already works — [FastMCP](https://gofastmcp.com)'s own config layer
 exposes `include_tags` / `exclude_tags` over the same mechanism.
 
-**CM-4 — Standard MCP annotations are used strictly as the protocol defines
-them.** `destructiveHint: false` asserts additive-only updates and `true` is the
-cautious default, so replacement operations advertise `true` even when that
-produces a coarser prompt profile than we would like. Nuance is carried by our
-own vocabulary — toolset, process reach, output classes, and a generated opening
-sentence — never by bending a shared hint. A client that understands only the
-standard hints behaves conservatively, which is the correct outcome.
+**CM-4 — Standard MCP annotations describe the whole tool call.** MCP defines
+[`readOnlyHint: true`](https://github.com/modelcontextprotocol/python-sdk/blob/v1.29.1/src/mcp/types.py#L1262-L1266)
+as a claim that the tool does not modify its environment, and
+[FastMCP passes annotations through](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/tools/base.py#L234-L242).
+Tmux operations therefore use conservative hints when aliases or hooks make the
+whole call unknowable. Toolset, process reach, and output classes describe the
+direct operation without redefining the protocol.
 
 **CM-5 — One checked-in manifest is the single source of truth, and CI asserts
 against sinks rather than names.** Registration, filtering, generated docs,
@@ -103,15 +103,13 @@ execute tool from typing the equivalent tmux command. We ship it as inventory
 configuration and accident reduction, and refuse to describe it as a permission
 system, because a bypass that is one `send_keys` away is not a boundary.
 
-**Annotations describe the direct operation this server issues, never the
-ambient tmux around it.** tmux is programmable: roughly half of its command
-entries declare
-[`CMD_AFTERHOOK`](https://github.com/tmux/tmux/blob/3.7c/cmd-queue.c), and a
-hook can `run-shell`. So a nominally read-only call can trigger a configured
-mutation on an inherited or user-configured server. The manifest records hook
-activation separately; the hints stay a statement about our own issued command,
-and on unknown configurations clients must not read them as a claim about
-ambient behaviour.
+**Annotations include ambient tmux behaviour.** tmux
+[expands command aliases](https://github.com/tmux/tmux/blob/3.7c/cmd-parse.y#L776-L794)
+before dispatch and
+[runs after-hooks](https://github.com/tmux/tmux/blob/3.7c/cmd-queue.c#L649-L663)
+after it. A nominally observational call can therefore execute or mutate.
+Project metadata records the intended direct operation; standard hints make no
+narrower claim.
 
 **The dedicated socket is separation, not exclusive ownership.** Objects on it
 are reachable by every process of the same user that connects — a server left by
@@ -162,12 +160,10 @@ launched outside tmux.
 
 ## Consequences
 
-The honest annotation policy costs prompt granularity: many `manage` tools
-become `destructive: true`, and clients that gate on that hint will prompt more.
-That is accepted. The signal a client needs to distinguish a rename from a shell
-command moves into toolset, reach, and the opening sentence, which are ours to
-define and are visible in the standard description field rather than in metadata
-a client may ignore.
+The conservative annotation policy costs prompt granularity: tmux operations
+decline every positive safety claim, so clients may prompt more. Direct-operation
+distinctions move into toolset, reach, and the opening sentence, which are ours
+to define.
 
 Removing per-call socket arguments means two tmux servers require two configured
 MCP entries. Deriving everything from one manifest means adding a tool is adding
