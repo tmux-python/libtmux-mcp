@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -260,6 +262,89 @@ def test_a_hidden_tool_is_unknown_on_the_production_wire(
 
     assert proc.returncode == 0
     assert f"Unknown tool: '{tool_name}'" in proc.stdout
+
+
+@pytest.mark.parametrize(
+    ("excluded_tool", "nested_success"),
+    [("", True), ("list_servers", False)],
+    ids=["named-wrapper-authority", "explicit-exclusion"],
+)
+def test_named_read_batch_reaches_only_unexcluded_inspect_tools(
+    excluded_tool: str,
+    nested_success: bool,
+    tmp_path: pathlib.Path,
+) -> None:
+    """A named batch carries inspect authority without exposing nested tools."""
+    code = textwrap.dedent(
+        """
+        import asyncio
+        import json
+
+        from fastmcp import Client
+
+        from libtmux_mcp.server import build_mcp_server
+
+
+        async def main():
+            async with Client(build_mcp_server()) as client:
+                tools = await client.list_tools()
+                batch = await client.call_tool(
+                    "call_read_tools_batch",
+                    {
+                        "operations": [
+                            {
+                                "tool": "list_servers",
+                                "arguments": {},
+                            }
+                        ]
+                    },
+                    raise_on_error=False,
+                )
+                direct = await client.call_tool(
+                    "list_servers",
+                    {},
+                    raise_on_error=False,
+                )
+                row = batch.structured_content["results"][0]
+                print(
+                    json.dumps(
+                        {
+                            "tools": [tool.name for tool in tools],
+                            "nested_success": row["success"],
+                            "nested_error": row["error"],
+                            "direct_error": direct.content[0].text,
+                        }
+                    )
+                )
+
+
+        asyncio.run(main())
+        """
+    )
+    env = {
+        **os.environ,
+        "LIBTMUX_TOOLSETS": "",
+        "LIBTMUX_TOOLS": "call_read_tools_batch",
+        "LIBTMUX_EXCLUDE_TOOLS": excluded_tool,
+        "TMUX_TMPDIR": str(tmp_path),
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["tools"] == ["call_read_tools_batch"]
+    assert payload["nested_success"] is nested_success
+    assert "Unknown tool: 'list_servers'" in payload["direct_error"]
+    if excluded_tool:
+        assert "Unknown tool: 'list_servers'" in payload["nested_error"]
+    else:
+        assert payload["nested_error"] is None
 
 
 def test_the_retired_safety_variable_fails_startup() -> None:

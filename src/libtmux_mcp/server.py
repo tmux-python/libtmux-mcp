@@ -36,6 +36,7 @@ from libtmux_mcp.middleware import (
     TailPreservingResponseLimitingMiddleware,
     ToolErrorResultMiddleware,
     ToolsetMiddleware,
+    _NestedReadToolVisibility,
     install_fastmcp_validation_log_filter,
 )
 
@@ -466,6 +467,7 @@ def _enable_allowed_tools() -> None:
         mcp.enable(components={"tool"}, names={name})
     if _excluded_tools:
         mcp.disable(components={"tool"}, names=set(_excluded_tools))
+    mcp.add_transform(_NestedReadToolVisibility(_excluded_tools))
     _mcp_visibility_configured = True
 
 

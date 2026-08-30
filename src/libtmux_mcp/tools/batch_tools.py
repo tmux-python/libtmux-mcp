@@ -17,7 +17,7 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     handle_tool_errors_async,
 )
-from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES
+from libtmux_mcp.middleware import DEFAULT_RESPONSE_LIMIT_BYTES, _allow_nested_read_tool
 from libtmux_mcp.models import (
     ToolCallBatchResult,
     ToolCallOperation,
@@ -167,19 +167,20 @@ async def _call_one_tool(
     """Call one nested tool and convert its outcome to a batch result row."""
     start = time.monotonic()
     try:
-        await _check_operation_allowed(
-            fastmcp=fastmcp,
-            operation=operation,
-        )
+        with _allow_nested_read_tool(operation.tool):
+            await _check_operation_allowed(
+                fastmcp=fastmcp,
+                operation=operation,
+            )
 
-        result = _ensure_tool_result(
-            operation.tool,
-            await fastmcp.call_tool(
+            result = _ensure_tool_result(
                 operation.tool,
-                operation.arguments,
-                run_middleware=True,
-            ),
-        )
+                await fastmcp.call_tool(
+                    operation.tool,
+                    operation.arguments,
+                    run_middleware=True,
+                ),
+            )
 
         error = _result_error_text(result)
         return ToolCallOperationResult(

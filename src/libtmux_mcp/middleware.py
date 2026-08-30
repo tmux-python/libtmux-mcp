@@ -24,6 +24,8 @@ Provides the project's middleware infrastructure, in definition order:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import logging
 import time
@@ -32,11 +34,56 @@ import typing as t
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
+from fastmcp.server.transforms import Transform, Visibility
 from fastmcp.tools.base import ToolResult
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
-from libtmux_mcp._utils import VALID_TOOLSETS, ExpectedToolError
+from libtmux_mcp._utils import TOOLSET_INSPECT, VALID_TOOLSETS, ExpectedToolError
+
+if t.TYPE_CHECKING:
+    from fastmcp.server.transforms import GetToolNext
+    from fastmcp.tools.base import Tool
+    from fastmcp.utilities.versions import VersionSpec
+
+
+_NESTED_READ_TOOL = contextvars.ContextVar[str | None](
+    "libtmux_mcp_nested_read_tool",
+    default=None,
+)
+
+
+@contextlib.contextmanager
+def _allow_nested_read_tool(name: str) -> t.Iterator[None]:
+    """Scope one nested read-batch operation to ``name``."""
+    token = _NESTED_READ_TOOL.set(name)
+    try:
+        yield
+    finally:
+        _NESTED_READ_TOOL.reset(token)
+
+
+class _NestedReadToolVisibility(Transform):
+    """Expose the current read-batch operation to FastMCP lookup."""
+
+    def __init__(self, exclude_tools: t.AbstractSet[str]) -> None:
+        self.exclude_tools = frozenset(exclude_tools)
+
+    async def get_tool(
+        self,
+        name: str,
+        call_next: GetToolNext,
+        *,
+        version: VersionSpec | None = None,
+    ) -> Tool | None:
+        """Enable only the tool scoped by the read-batch validator."""
+        if name != _NESTED_READ_TOOL.get() or name in self.exclude_tools:
+            return await call_next(name, version=version)
+        return await Visibility(
+            True,
+            names={name},
+            components={"tool"},
+        ).get_tool(name, call_next, version=version)
 
 
 class ToolsetMiddleware(Middleware):
@@ -76,6 +123,8 @@ class ToolsetMiddleware(Middleware):
         if not toolsets or name in self.exclude_tools:
             return False
         if name in self.tools:
+            return True
+        if name == _NESTED_READ_TOOL.get() and TOOLSET_INSPECT in toolsets:
             return True
         return bool(self.toolsets & toolsets)
 
