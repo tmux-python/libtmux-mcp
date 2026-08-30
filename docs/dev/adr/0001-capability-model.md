@@ -50,13 +50,17 @@ classes describe what a result can carry back. `rename_window` and
 two axes says that in one line, and a ladder cannot say it at all.
 
 **CM-3 — Toolsets are unordered inventory sets, resolved once at startup.**
-`inspect`, `manage`, `execute`, `teardown`. They shape what this server
-advertises, for context reduction, model routing, and documentation navigation.
+`inspect`, `manage`, `execute`, `teardown`. They determine what this server lists
+and accepts, for context reduction, model routing, and documentation navigation.
 Because they are sets rather than a cumulative scale, `inspect,teardown` is
 expressible; under the old ladder, deletion tools could not be enabled without
-the typing tools. Tag-based inventory filtering is also how the surrounding
-ecosystem already works — [FastMCP](https://gofastmcp.com)'s own config layer
-exposes `include_tags` / `exclude_tags` over the same mechanism.
+the typing tools. FastMCP maps
+[`include_tags` and `exclude_tags`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/mcp_config.py#L139-L146)
+to visibility and filters both
+[`tools/list`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/server/server.py#L651-L678)
+and
+[`tools/call`](https://github.com/jlowin/fastmcp/blob/v3.4.7/fastmcp_slim/fastmcp/server/server.py#L1281-L1288)
+through it.
 
 **CM-4 — Standard MCP annotations describe the whole tool call.** MCP defines
 [`readOnlyHint: true`](https://github.com/modelcontextprotocol/python-sdk/blob/v1.29.1/src/mcp/types.py#L1262-L1266)
@@ -101,11 +105,11 @@ VMs are the isolation boundary; this server is not one. We do not build a
 sandbox because a server that cannot confine its own child processes cannot
 honestly claim to.
 
-**Toolset filtering is not authorization.** Dropping `teardown` removes the
-direct deletion tools from the advertised inventory. It does not stop an enabled
-execute tool from typing the equivalent tmux command. We ship it as inventory
-configuration and accident reduction, and refuse to describe it as a permission
-system, because a bypass that is one `send_keys` away is not a boundary.
+**Toolset filtering enforces the MCP surface, not authority.** Dropping
+`teardown` removes direct deletion tools from listing and invocation. It does not
+stop an enabled execute tool from typing the equivalent tmux command. Toolsets
+reduce accidents; they do not confine what a pane can do, because a bypass is one
+`send_keys` away.
 
 **Annotations include ambient tmux behaviour.** tmux
 [expands command aliases](https://github.com/tmux/tmux/blob/3.7c/cmd-parse.y#L776-L794)
