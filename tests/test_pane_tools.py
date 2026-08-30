@@ -1957,9 +1957,16 @@ def test_respawn_pane_replaces_shell(mcp_server: Server, mcp_session: Session) -
         socket_name=mcp_server.socket_name,
     )
     assert result.pane_id == new_pane.pane_id
-    # pane_current_command reflects the relaunched command.
-    assert result.pane_current_command is not None
-    assert "sleep" in result.pane_current_command
+
+    # tmux reports the shell briefly while the child crosses exec(2).
+    command = result.pane_current_command
+    deadline = time.monotonic() + 1.0
+    while (command is None or "sleep" not in command) and time.monotonic() < deadline:
+        time.sleep(0.01)
+        new_pane.refresh()
+        command = new_pane.pane_current_command
+    assert command is not None
+    assert "sleep" in command
 
     new_pane.kill()
 
