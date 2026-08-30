@@ -169,8 +169,12 @@ rather than shipping.
 
 Because `exit-empty` defaults on
 ([`options-table.c`](https://github.com/tmux/tmux/blob/3.7c/options-table.c#L375-L380)),
-an agent that removes its own sessions empties its server without a socket-wide
-kill tool, which is why none is offered.
+tmux becomes eligible to exit only after every session is removed; attached
+clients can delay exit further
+([`server.c`](https://github.com/tmux/tmux/blob/3.7c/server.c#L281-L292)).
+Removing one MCP instance's sessions therefore does not stop a shared server
+while another session remains. Socket-wide termination stays an operator action
+because it may destroy sessions the caller does not own.
 
 The result is a shared model for tmux MCPs that are useful by default, explicit
 that they can execute arbitrary code, precise about the little a socket scopes,
