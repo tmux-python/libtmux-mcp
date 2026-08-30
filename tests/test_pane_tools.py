@@ -2342,6 +2342,33 @@ def test_search_panes_bounds_matching_time(
     assert time.monotonic() - started < 5
 
 
+def test_search_panes_excludes_capture_time_from_matching_deadline(
+    mcp_server: Server,
+    mcp_session: Session,
+    mcp_pane: Pane,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed pane capture does not spend the regex matching budget."""
+    marker = "CAPTURE_OUTSIDE_MATCH_DEADLINE"
+
+    def delayed_capture(*args: object, **kwargs: object) -> list[str]:
+        time.sleep(0.05)
+        return [marker]
+
+    monkeypatch.setattr(search, "SEARCH_MATCH_MAX_SECONDS", 0.02)
+    monkeypatch.setattr(type(mcp_pane), "capture_pane", delayed_capture)
+
+    result = search_panes(
+        pattern=marker,
+        regex=True,
+        session_id=mcp_session.session_id,
+        content_start=0,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert [match.pane_id for match in result.matches] == [mcp_pane.pane_id]
+
+
 def test_search_panes_rejects_an_oversized_pattern(
     mcp_server: Server,
 ) -> None:

@@ -314,11 +314,7 @@ def search_panes(
     # tail-truncated to keep the most recent matches.
     all_matches: list[PaneContentMatch] = []
     per_pane_truncated = False
-    # Computed once, so the budget spans every pane rather than resetting
-    # per pane. No test separates the two: the first pane to exhaust the
-    # budget aborts the call either way, so they differ only for a
-    # workload that is cheap per pane and expensive in total.
-    deadline = time.monotonic() + SEARCH_MATCH_MAX_SECONDS
+    matching_seconds_left = SEARCH_MATCH_MAX_SECONDS
     for pane_id_str in matching_pane_ids:
         pane = server.panes.get(pane_id=pane_id_str, default=None)
         if pane is None:
@@ -329,7 +325,13 @@ def search_panes(
             end=content_end,
             join_wrapped=True,
         )
-        matched_lines = _match_lines(compiled, lines, deadline)
+        match_started = time.monotonic()
+        matched_lines = _match_lines(
+            compiled,
+            lines,
+            match_started + matching_seconds_left,
+        )
+        matching_seconds_left -= time.monotonic() - match_started
 
         if not matched_lines:
             continue
