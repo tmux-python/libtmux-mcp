@@ -21,26 +21,50 @@ for the full release log.
 
 ## libtmux-mcp 0.1.0a21 (2026-08-30)
 
-### Safety tiers become toolsets
+### `LIBTMUX_SAFETY` now crashes the server on load
 
 `readonly`, `mutating` and `destructive` are gone. Tools belong to four
 unordered toolsets named for what they do.
+
+A server started with `LIBTMUX_SAFETY` still set raises while the module
+loads, before it serves a request. Every value crashes, the former default
+`mutating` included. Your MCP client reports a server that failed to start;
+the message naming the replacement goes to the process's stderr, so read the
+client's server log if the failure looks silent.
+
+The variable is not ignored, and that is deliberate: one that silently
+stopped working would leave you believing a surface was narrower than it is.
+
+#### The new default names no environment variables
+
+An unset `LIBTMUX_TOOLSETS` selects `inspect,manage,execute` — the surface
+`mutating` gave you. If you were on the old default, delete `LIBTMUX_SAFETY`
+from your client config and put nothing in its place:
+
+```json
+{
+  "mcpServers": {
+    "tmux": {
+      "command": "uvx",
+      "args": ["libtmux-mcp"]
+    }
+  }
+}
+```
+
+Name a variable only to move off that default.
 
 #### Environment variables
 
 | Before | After |
 | --- | --- |
 | `LIBTMUX_SAFETY=readonly` | `LIBTMUX_TOOLSETS=inspect` |
-| `LIBTMUX_SAFETY=mutating` (the default) | `LIBTMUX_TOOLSETS=inspect,manage,execute` (the default) |
+| `LIBTMUX_SAFETY=mutating` (the default) | nothing — the default is `inspect,manage,execute` |
 | `LIBTMUX_SAFETY=destructive` | `LIBTMUX_TOOLSETS=inspect,manage,execute,teardown` |
-
-A server started with `LIBTMUX_SAFETY` set now fails at startup naming the
-replacement. It is not ignored: a variable that silently stopped working
-would leave you believing a surface was narrower than it is.
 
 Two variables are new. `LIBTMUX_TOOLS` enables individual tools regardless
 of toolset, and `LIBTMUX_EXCLUDE_TOOLS` refuses them regardless of every
-enable above. An unknown name in any of the three fails startup.
+enable above. An unknown name in any of the three fails startup the same way.
 
 ### Surfaces the tiers could not express
 
