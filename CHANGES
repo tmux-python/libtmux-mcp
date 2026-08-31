@@ -6,6 +6,17 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Documentation
+
+**The toolset migration notes reach the migration page**
+
+The 0.1.0a21 notes mapping the retired tiers onto `inspect`, `manage`,
+`execute` and `teardown` lived in a second file the documentation did not
+include, so {ref}`migration` ended at 0.1.0a19. They are now a dated section
+of `MIGRATION`, and they state that `LIBTMUX_SAFETY` raises while the server
+module loads — every value, the former default `mutating` included — and that
+the former default is reached by removing the variable and setting nothing.
+
 ## libtmux-mcp 0.1.0a21 (2026-08-30)
 
 libtmux-mcp 0.1.0a21 replaces cumulative safety tiers with independently
