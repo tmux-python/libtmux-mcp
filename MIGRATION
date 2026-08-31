@@ -37,7 +37,7 @@ stopped working would leave you believing a surface was narrower than it is.
 
 #### The new default names no environment variables
 
-An unset `LIBTMUX_TOOLSETS` selects `inspect,manage,execute` — the surface
+An unset {envvar}`LIBTMUX_TOOLSETS` selects `inspect,manage,execute` — the surface
 `mutating` gave you. If you were on the old default, delete `LIBTMUX_SAFETY`
 from your client config and put nothing in its place:
 
@@ -62,8 +62,9 @@ Name a variable only to move off that default.
 | `LIBTMUX_SAFETY=mutating` (the default) | nothing — the default is `inspect,manage,execute` |
 | `LIBTMUX_SAFETY=destructive` | `LIBTMUX_TOOLSETS=inspect,manage,execute,teardown` |
 
-Two variables are new. `LIBTMUX_TOOLS` enables individual tools regardless
-of toolset, and `LIBTMUX_EXCLUDE_TOOLS` refuses them regardless of every
+Two variables are new. {envvar}`LIBTMUX_TOOLS` enables individual tools
+regardless of toolset, and {envvar}`LIBTMUX_EXCLUDE_TOOLS` refuses them
+regardless of every
 enable above. An unknown name in any of the three fails startup the same way.
 
 ### Surfaces the tiers could not express
@@ -81,30 +82,34 @@ An agent that can look and clean up, but not type.
 
 | Before | After |
 | --- | --- |
-| `call_readonly_tools_batch` | `call_read_tools_batch` |
+| `call_readonly_tools_batch` | {tooliconl}`call-read-tools-batch` |
 | `call_mutating_tools_batch` | removed — call the tool directly |
 | `call_destructive_tools_batch` | removed — call the tool directly |
 
 A batch gives every nested call the wrapper's name, so a client rule keyed
-on `kill_session` never fires for a `kill_session` run inside one. That is
+on {tooliconl}`kill-session` never fires for a `kill_session` run inside one. That is
 tolerable for reads and not for writes.
 
 ### Which toolset a tool is in
 
 `inspect`
-: Every `list_*`, `get_*`, `show_*`, `capture_*`, `snapshot_pane`,
-  `search_panes`, `find_pane_by_position`, `display_message`,
-  `wait_for_text`, `call_read_tools_batch`.
+: Every `list_*`, `get_*`, `show_*`, `capture_*`, {toolref}`snapshot-pane`,
+  {toolref}`search-panes`, {toolref}`find-pane-by-position`,
+  {toolref}`display-message`, {toolref}`wait-for-text`,
+  {toolref}`call-read-tools-batch`.
 
 `manage`
-: `rename_*`, `select_*`, `resize_*`, `move_window`, `swap_pane`,
-  `set_pane_title`, `enter_copy_mode`, `exit_copy_mode`,
-  `wait_for_channel`, `signal_channel`, `load_buffer`.
+: `rename_*`, `select_*`, `resize_*`, {toolref}`move-window`,
+  {toolref}`swap-pane`, {toolref}`set-pane-title`, {toolref}`enter-copy-mode`,
+  {toolref}`exit-copy-mode`, {toolref}`wait-for-channel`,
+  {toolref}`signal-channel`, {toolref}`load-buffer`.
 
 `execute`
-: `create_session`, `create_window`, `split_window`, `respawn_pane`,
-  `run_command`, `send_keys`, `send_keys_batch`, `paste_text`,
-  `paste_buffer`, `pipe_pane`, `set_option`, `set_environment`.
+: {toolref}`create-session`, {toolref}`create-window`,
+  {toolref}`split-window`, {toolref}`respawn-pane`, {toolref}`run-command`,
+  {toolref}`send-keys`, {toolref}`send-keys-batch`, {toolref}`paste-text`,
+  {toolref}`paste-buffer`, {toolref}`pipe-pane`, {toolref}`set-option`,
+  {toolref}`set-environment`.
 
 `set_option` and `set_environment` are here rather than in `manage`
 because tmux runs some stored values later: a `#(...)` job in a status
@@ -112,12 +117,12 @@ format runs when tmux draws it and repeats on the status interval, and
 `default-command` decides what every future pane runs.
 
 `teardown`
-: `kill_pane`, `kill_window`, `kill_session`, `kill_server`, `clear_pane`,
-  `delete_buffer`.
+: {toolref}`kill-pane`, {toolref}`kill-window`, {toolref}`kill-session`,
+  {toolref}`kill-server`, {toolref}`clear-pane`, {toolref}`delete-buffer`.
 
 ### Documentation
 
-The safety topic is now the trust page. The old URL redirects.
+The safety topic is now the {ref}`trust` page. The old URL redirects.
 
 ### MCP annotations
 
@@ -134,7 +139,7 @@ the direct operation libtmux-mcp requests.
 
 ### `wait_for_text` takes `patterns`, and `wait_for_content_change` is gone
 
-`wait_for_text` accepted a single `pattern` string. It now takes `patterns`, a
+{tooliconl}`wait-for-text` accepted a single `pattern` string. It now takes `patterns`, a
 list — or `null` to wait for any new output at all. The schema rejects the old
 argument rather than silently ignoring it, so a call written against the old
 signature fails loudly with `Remove or correct the unrecognized argument(s):
@@ -163,8 +168,9 @@ which the old tool did not.
 
 ### Waits are capped by the server
 
-`wait_for_text`, `wait_for_channel`, and `run_command` are all bounded by
-`LIBTMUX_MCP_WAIT_MAX_SECONDS` (30 seconds by default, clamped to `[1, 120]`).
+{toolref}`wait-for-text`, {toolref}`wait-for-channel`, and
+{toolref}`run-command` are all bounded by
+{envvar}`LIBTMUX_MCP_WAIT_MAX_SECONDS` (30 seconds by default, clamped to `[1, 120]`).
 An over-large `timeout` is **clamped, not rejected** — the call succeeds and
 reports the value actually enforced, so read `effective_timeout` rather than
 assuming your value was honoured. A wait that previously blocked for an hour
@@ -179,14 +185,16 @@ The result's loose booleans are replaced by one `outcome` field taking
 `matched`, `any_output`, `stopped`, `alternate_screen`, or `timeout`.
 `risk_band_warned` is removed; the history-limit trim signal is delivered as an
 MCP warning notification instead. Clients that cannot surface notifications
-should compose `tmux wait-for -S` into the command and use `wait_for_channel`,
+should compose `tmux wait-for -S` into the command and use
+{tooliconl}`wait-for-channel`,
 which does not read the pane at all.
 
 ### Self-bounded tools cannot be batched
 
-`run_command`, `wait_for_text`, and `wait_for_channel` are rejected by the
+{toolref}`run-command`, {toolref}`wait-for-text`, and
+{toolref}`wait-for-channel` are rejected by the
 batch wrappers per operation, because batching one multiplied the wait ceiling
-by the operation count. Use `send_keys_batch` for command sequences, or call
+by the operation count. Use {tooliconl}`send-keys-batch` for command sequences, or call
 the tool directly.
 
 ## libtmux-mcp 0.1.0a6 (2026-05-09)
