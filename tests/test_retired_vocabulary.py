@@ -43,7 +43,7 @@ _RETIRED_TERM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-HISTORICAL_FILES = frozenset({pathlib.Path("CHANGES"), pathlib.Path("MIGRATION.md")})
+HISTORICAL_FILES = frozenset({pathlib.Path("CHANGES"), pathlib.Path("MIGRATION")})
 
 CONFIG_REJECTION_FILES = frozenset(
     {
@@ -85,6 +85,7 @@ def _tracked_sources() -> list[pathlib.Path]:
             if "_build" not in path.parts and path != pathlib.Path(__file__).resolve()
         )
     paths.add(_ROOT / "CHANGES")
+    paths.add(_ROOT / "MIGRATION")
     paths.add(_ROOT / "pyproject.toml")
     return sorted(paths)
 
