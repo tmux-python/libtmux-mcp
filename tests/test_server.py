@@ -897,6 +897,17 @@ _VERBS_OF_ART = frozenset(
 )
 
 
+def test_camelcase_bridge_is_disabled_for_the_suite() -> None:
+    """The suite runs without fastmcp's camelCase compatibility shims.
+
+    The root ``conftest.py`` clears the setting through the environment,
+    which only takes effect if nothing imported fastmcp first.
+    """
+    import fastmcp
+
+    assert fastmcp.settings.mcp_camelcase_compat is False
+
+
 def test_server_advertised_as_tmux() -> None:
     """``serverInfo.name`` aligns with the README registration slug.
 
