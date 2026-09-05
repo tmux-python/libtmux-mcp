@@ -140,6 +140,8 @@ sphinx-gp-sitemap = false
 sphinx-gp-theme = false
 sphinx-ux-autodoc-layout = false
 sphinx-ux-badges = false
+fastmcp = false
+fastmcp-slim = false
 
 [tool.mypy]
 strict = true
