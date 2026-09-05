@@ -6,6 +6,7 @@ import json
 import typing as t
 
 from fastmcp.exceptions import ResourceError
+from fastmcp.resources import ResourceSecurity
 
 from libtmux_mcp._utils import (
     _get_server,
@@ -30,6 +31,22 @@ _JSON_MIME = "application/json"
 #: render it as HTML.
 _TEXT_MIME = "text/plain"
 
+#: Path screening for the ``tmux://`` templates.
+#:
+#: FastMCP screens extracted template parameters before a handler runs.
+#: Its absolute-path check reads two legitimate tmux identifiers as
+#: filesystem paths: the socket paths ``list_servers`` reports, and any
+#: ``<letter>:<rest>`` session name, which tmux accepts. Both must reach
+#: the handler so ``tmux://`` and the equivalent tools agree on which
+#: sessions and servers exist.
+#:
+#: Traversal and null-byte screening stay on: ``socket_name`` reaches
+#: ``tmux -L``, which appends it to the socket directory without
+#: normalising, so ``../..`` really does place the socket elsewhere.
+#: Set per template rather than server-wide so a future resource that
+#: does join a parameter onto a path keeps the secure default.
+_TMUX_PATH_SECURITY = ResourceSecurity(reject_absolute_paths=False)
+
 
 def register(mcp: FastMCP) -> None:
     """Register hierarchy resources with the FastMCP instance."""
@@ -38,6 +55,7 @@ def register(mcp: FastMCP) -> None:
         "tmux://sessions{?socket_name}",
         title="All Sessions",
         mime_type=_JSON_MIME,
+        security=_TMUX_PATH_SECURITY,
     )
     def get_sessions(socket_name: str | None = None) -> str:
         """List all tmux sessions.
@@ -60,6 +78,7 @@ def register(mcp: FastMCP) -> None:
         "tmux://sessions/{session_name}{?socket_name}",
         title="Session Detail",
         mime_type=_JSON_MIME,
+        security=_TMUX_PATH_SECURITY,
     )
     def get_session(
         session_name: str,
@@ -94,6 +113,7 @@ def register(mcp: FastMCP) -> None:
         "tmux://sessions/{session_name}/windows{?socket_name}",
         title="Session Windows",
         mime_type=_JSON_MIME,
+        security=_TMUX_PATH_SECURITY,
     )
     def get_session_windows(
         session_name: str,
@@ -126,6 +146,7 @@ def register(mcp: FastMCP) -> None:
         "tmux://sessions/{session_name}/windows/{window_index}{?socket_name}",
         title="Window Detail",
         mime_type=_JSON_MIME,
+        security=_TMUX_PATH_SECURITY,
     )
     def get_window(
         session_name: str,
@@ -168,6 +189,7 @@ def register(mcp: FastMCP) -> None:
         "tmux://panes/{pane_id}{?socket_name}",
         title="Pane Detail",
         mime_type=_JSON_MIME,
+        security=_TMUX_PATH_SECURITY,
     )
     def get_pane(pane_id: str, socket_name: str | None = None) -> str:
         """Get details of a specific pane.
@@ -196,6 +218,7 @@ def register(mcp: FastMCP) -> None:
         "tmux://panes/{pane_id}/content{?socket_name}",
         title="Pane Content",
         mime_type=_TEXT_MIME,
+        security=_TMUX_PATH_SECURITY,
     )
     def get_pane_content(pane_id: str, socket_name: str | None = None) -> str:
         """Capture and return the content of a pane.
