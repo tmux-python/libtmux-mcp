@@ -7,6 +7,8 @@ import typing as t
 
 from fastmcp.exceptions import ResourceError
 from fastmcp.resources import ResourceSecurity
+from libtmux import exc as libtmux_exc
+from mcp.types import ResourceTemplateReference
 
 from libtmux_mcp._utils import (
     _get_server,
@@ -46,6 +48,46 @@ _TEXT_MIME = "text/plain"
 #: Set per template rather than server-wide so a future resource that
 #: does join a parameter onto a path keeps the secure default.
 _TMUX_PATH_SECURITY = ResourceSecurity(reject_absolute_paths=False)
+
+
+def register_completions(mcp: FastMCP) -> None:
+    """Answer argument completion for the ``tmux://`` templates.
+
+    The templates take live tmux identifiers, which a reader cannot guess
+    and the template listing does not carry — MCP publishes only the URI
+    template itself, never its parameter domain. A completion handler is
+    the protocol's way to offer them.
+
+    Agent clients do not send ``completion/complete``; human-facing hosts
+    (the MCP Inspector's UI, VS Code) do, which is who this serves.
+    """
+
+    @mcp.completion
+    def complete_tmux_argument(
+        ref: t.Any,
+        argument: t.Any,
+        context: t.Any,
+    ) -> list[str] | None:
+        """Return live tmux identifiers matching what has been typed."""
+        if not isinstance(ref, ResourceTemplateReference):
+            return None
+        supplied = (getattr(context, "arguments", None) or {}) if context else {}
+        try:
+            server = _get_server(socket_name=supplied.get("socket_name"))
+            if argument.name == "session_name":
+                pool = [s.session_name or "" for s in server.sessions]
+            elif argument.name == "pane_id":
+                pool = [p.pane_id or "" for p in server.panes]
+            elif argument.name == "window_index":
+                pool = [w.window_index or "" for w in server.windows]
+            else:
+                return None
+        except (libtmux_exc.LibTmuxException, OSError):
+            # A completion is a convenience; a dead or missing tmux server
+            # must not turn it into a failed request.
+            return None
+        prefix = argument.value or ""
+        return [value for value in pool if value.startswith(prefix)]
 
 
 def register(mcp: FastMCP) -> None:

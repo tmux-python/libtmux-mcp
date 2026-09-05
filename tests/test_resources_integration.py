@@ -6,6 +6,7 @@ import asyncio
 import json
 import typing as t
 
+import mcp.types as mt
 import pytest
 from fastmcp import Client
 from mcp.shared.exceptions import MCPError
@@ -260,3 +261,33 @@ def test_socket_name_traversal_never_reaches_tmux() -> None:
         _run(_read(f"tmux://sessions?socket_name={socket_name}"))
 
     assert (socket_name, None, None) not in _server_cache
+
+
+def test_completion_offers_live_tmux_identifiers(
+    mcp_server: Server, mcp_session: Session, mcp_pane: Pane
+) -> None:
+    """Template parameters complete from the live server, filtered by prefix.
+
+    MCP publishes a template's URI but never its parameter domain, so a
+    reader has no way to discover a valid session or pane id from the
+    listing alone. Completion is the protocol's answer.
+    """
+
+    async def _complete(name: str, value: str) -> list[str]:
+        ref = mt.ResourceTemplateReference(
+            type="ref/resource",
+            uri="tmux://sessions/{session_name}{?socket_name}",
+        )
+        async with Client(mcp) as client:
+            result = await client.complete(
+                ref,
+                {"name": name, "value": value},
+                context_arguments={"socket_name": mcp_server.socket_name},
+            )
+        return list(result.values)
+
+    session_name = mcp_session.session_name or ""
+    assert session_name in _run(_complete("session_name", ""))
+    assert _run(_complete("session_name", session_name)) == [session_name]
+    assert mcp_pane.pane_id in _run(_complete("pane_id", "%"))
+    assert _run(_complete("not_a_parameter", "")) == []
