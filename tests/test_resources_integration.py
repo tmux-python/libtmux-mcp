@@ -152,6 +152,24 @@ def _socket_path(server: Server) -> str:
     return server.cmd("display-message", "-p", "#{socket_path}").stdout[0]
 
 
+def _require_stored_verbatim(server: Server, name: str) -> None:
+    """Skip unless tmux stored ``name`` as given.
+
+    tmux before 3.7 rewrites ``:`` and ``.`` in a session name to ``_``
+    — ``a:1`` becomes ``a_1`` — and still exits 0 with no stderr, so the
+    caller cannot tell from the result. A name tmux will not store
+    cannot exercise the screening these tests cover, and asserting on it
+    reports a missing session rather than the tmux behaviour that caused
+    it.
+    """
+    stored = [session.session_name for session in server.sessions]
+    if name not in stored:
+        pytest.skip(
+            f"tmux rewrote session name {name!r} to one of {stored}; "
+            f"storing it verbatim needs tmux >= 3.7",
+        )
+
+
 class PathLikeResourceFixture(t.NamedTuple):
     """A ``tmux://`` template read with path-like parameter values.
 
@@ -217,6 +235,10 @@ def test_resource_read_accepts_path_like_parameters(
         mcp_session.session_id,
         PATH_LIKE_SESSION_NAME,
     )
+    # Only the templates that carry the name depend on tmux keeping it;
+    # the absolute socket path is screened the same on every version.
+    if "{session_name}" in uri_template:
+        _require_stored_verbatim(mcp_server, PATH_LIKE_SESSION_NAME)
     socket_path = _socket_path(mcp_server)
     _server_cache[(socket_path, None, None)] = mcp_server
 
@@ -237,6 +259,7 @@ def test_resource_and_tool_agree_on_path_like_session_names(
 ) -> None:
     """A session readable through a tool is readable through ``tmux://``."""
     mcp_server.cmd("new-session", "-d", "-s", session_name)
+    _require_stored_verbatim(mcp_server, session_name)
 
     payload = json.loads(_run(_read(f"tmux://sessions/{session_name}")))
     info = get_session_info(
