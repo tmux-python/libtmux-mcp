@@ -41,7 +41,7 @@ include = [
 
 dependencies = [
   "libtmux>=0.62.0,<1.0",
-  "fastmcp>=3.4.2,<4.0.0",
+  "fastmcp>=4.0.2,<5.0.0",
   "regex>=2024.11.6",
 ]
 
@@ -73,6 +73,8 @@ dev = [
   "syrupy>=5.1.0",
   # scripts/mcp_swap.py (PEP 723 script; dep listed here so tests can import it)
   "tomlkit>=0.13",
+  # tests/docs/test_compatibility.py compares version ranges, not strings.
+  "packaging",
   # Coverage
   "codecov",
   "coverage",
@@ -138,6 +140,8 @@ sphinx-gp-sitemap = false
 sphinx-gp-theme = false
 sphinx-ux-autodoc-layout = false
 sphinx-ux-badges = false
+fastmcp = false
+fastmcp-slim = false
 
 [tool.mypy]
 strict = true

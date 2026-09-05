@@ -6,7 +6,82 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Dependencies
+
+**FastMCP releases are adopted without waiting out the cooldown**
+
+The dependency cooldown held every FastMCP release back, so a refreshed lock
+resolved to a patch behind the one being tested against. `fastmcp` and its
+`fastmcp-slim` companion are now exempt from it.
+
+**Minimum `fastmcp>=4.0.2`** (was `>=3.4.2,<4.0.0`)
+
+libtmux-mcp now tracks the FastMCP 4 line. FastMCP 4 builds on MCP Python
+SDK v2, which brings `mcp>=2.0.0`, `mcp-types`, and pydantic 2.12 with it,
+and replaces httpx with httpx2 across FastMCP's HTTP stack. No tool,
+resource, or prompt changes shape, and one server serves both the
+session-based and the sessionless `2026-07-28` protocol eras, negotiated
+per connection.
+
+### What's new
+
+**`tmux://` templates answer argument completion**
+
+The templates take live tmux identifiers, and MCP publishes a template's URI
+but never its parameter domain — so a reader had no way to discover a valid
+session name or pane id from the listing. A completion handler now offers
+them from the live server, filtered by what has been typed and scoped by an
+already-supplied `socket_name`.
+
+This serves human-facing hosts: the MCP Inspector's browser UI and VS Code
+send `completion/complete`. Measured against five agent CLIs, none do, so this
+changes nothing for an agent.
+
+### Fixes
+
+**`tmux://` reads keep accepting tmux names that look like paths**
+
+FastMCP 4 screens templated resource parameters before a handler runs.
+Its absolute-path check does not fit tmux identifiers: it rejects the
+socket paths `list_servers` reports, and reads any `<letter>:<rest>`
+session name — which tmux accepts — as a Windows drive-relative path.
+Both stay readable, so `tmux://` and the equivalent tools continue to
+agree on which sessions and servers exist.
+
+Traversal and null-byte screening remain on, and are set per template
+rather than server-wide. `socket_name` reaches `tmux -L`, which appends
+it to the socket directory without normalising, so `../..` really does
+place the socket elsewhere; exempting the parameter outright would drop
+that guard along with the absolute-path check.
+
+**A `tmux://` read that fails now says so as `-32603`**
+
+FastMCP's `ErrorHandlingMiddleware` matches not-found exceptions by
+exact class, so only an unknown resource URI still maps to `-32002`. A
+missing session raises `ResourceError`, and a rejected path raises
+`ResourceSecurityError` — a `NotFoundError` subclass, and so not an
+exact match — and both now reach the client as `-32603` "Internal
+error". The message is unchanged; only clients matching on the numeric
+code are affected.
+
+**A wait tool survives a context that carries no session**
+
+`Context.session` raises rather than degrading when there is no request
+context, so `ctx.warning` and `ctx.report_progress` took the whole tool call
+down in any execution that lacks one. The wait helpers now check before
+delivering: the call returns its normal result, without notifications, instead
+of failing. Notification delivery on an ordinary request is unchanged.
+
 ### Documentation
+
+**The completion topic describes the handlers the server registers**
+
+The page stated that libtmux-mcp registers no completion handlers and offered
+workarounds for the gap. It now describes what the `tmux://` templates
+complete and moves the caveat where it belongs: whether suggestions appear
+depends on the client, since measured agent CLIs do not send
+`completion/complete`. The retired claims are pinned as forbidden text, so the
+page cannot drift back to underclaiming a shipped feature.
 
 **The toolset migration notes reach the migration page**
 
@@ -16,6 +91,34 @@ include, so {ref}`migration` ended at 0.1.0a19. They are now a dated section
 of `MIGRATION`, and they state that `LIBTMUX_SAFETY` raises while the server
 module loads — every value, the former default `mutating` included — and that
 the former default is reached by removing the variable and setting nothing.
+
+### Development
+
+**Path-like session-name tests skip on tmux below 3.7**
+
+tmux before 3.7 rewrites `:` and `.` in a session name to `_`, turning
+`a:1` into `a_1`, and exits 0 with no stderr — so a caller cannot tell
+from the result. The resource tests that need such a name now check what
+tmux stored and skip when it differs, naming the rewrite. They ran only
+against the developer's newer tmux before, and reported the resulting
+absent session as a failed read on every supported tmux in CI.
+
+**The test suite runs without FastMCP's camelCase compatibility shims**
+
+FastMCP 4 answers MCP SDK v1 attribute spellings such as
+`tool.inputSchema` through warn-once shims it plans to remove. Neither
+gate catches a test that depends on one: the type checker sees `Any`,
+and the warning fires once per attribute for the whole run. The suite
+now sets `FASTMCP_MCP_CAMELCASE_COMPAT=false`, so a surviving camelCase
+read raises `AttributeError` and fails the test that made it.
+
+**The compatibility reference is bound to the manifest**
+
+The dependency table restated floors by hand and had drifted: it named
+libtmux 0.55 against a manifest requiring 0.62, and omitted `regex`
+entirely. A test now compares the table against `[project].dependencies`
+as version ranges, so the next floor that moves without its
+documentation fails the suite.
 
 ## libtmux-mcp 0.1.0a21 (2026-08-30)
 

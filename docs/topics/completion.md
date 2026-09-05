@@ -5,7 +5,8 @@
 The
 [MCP completion](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/completion)
 protocol lets clients ask a server for argument suggestions. libtmux-mcp
-does not currently register custom completion handlers.
+answers it for the ``tmux://`` resource templates, offering the session
+names, window indexes and pane ids the live server currently has.
 
 ## What the spec does
 
@@ -17,20 +18,29 @@ session picker popup when filling ``session_name=`` on
 
 ## What libtmux-mcp currently exposes
 
-- **Prompt arguments** — the four recipes ({doc}`/prompts`)
-  advertise their argument names and types through their schemas.
-- **Resource template parameters** —
-  {doc}`/resources` URIs carry ``{session_name}``,
-  ``{window_index}``, ``{pane_id}``, and ``{?socket_name}``
-  placeholders.
+- **Resource template parameters** — {doc}`/resources` URIs carry
+  ``{session_name}``, ``{window_index}``, ``{pane_id}`` and
+  ``{?socket_name}``. The first three complete from the live server,
+  filtered by what has been typed. Supplying ``socket_name`` first
+  scopes the suggestions to that server; a server that is gone yields
+  no suggestions rather than an error.
+- **Prompt arguments** — the four recipes ({doc}`/prompts`) advertise
+  their argument names and types through their schemas. They take free
+  text rather than tmux identifiers, so they have no domain to
+  enumerate.
+
+MCP publishes a template's URI but never its parameter domain, so
+without this a reader has no way to discover a valid session name or
+pane id from the template listing alone.
 
 ```{warning}
-Clients should not rely on ``completion/complete`` returning live tmux
-suggestions, schema-derived examples, or enum-like values today.
-Adding live suggestions requires dedicated completion handlers.
+Whether you see suggestions depends on the client, not the server.
+Completion serves human-facing hosts — the MCP Inspector's browser UI
+and VS Code send ``completion/complete``. Measured against five agent
+CLIs, none send it, so an agent sees no difference.
 ```
 
-## Workarounds for clients that need live enumeration
+## Enumerating from a client that does not complete
 
 Agents that need to pick a real session / window / pane can call
 {tool}`list-sessions`, {tool}`list-windows`, or {tool}`list-panes`

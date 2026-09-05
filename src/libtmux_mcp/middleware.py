@@ -35,7 +35,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.server.transforms import Transform, Visibility
-from fastmcp.tools.base import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
@@ -43,7 +43,7 @@ from libtmux_mcp._utils import TOOLSET_INSPECT, VALID_TOOLSETS, ExpectedToolErro
 
 if t.TYPE_CHECKING:
     from fastmcp.server.transforms import GetToolNext
-    from fastmcp.tools.base import Tool
+    from fastmcp.tools import Tool
     from fastmcp.utilities.versions import VersionSpec
 
 
@@ -406,9 +406,18 @@ class ToolErrorResultMiddleware(ErrorHandlingMiddleware):
     intercepts tool-call exceptions first (``on_call_tool`` is the
     innermost hook of a middleware's chain) and returns
     :func:`_error_tool_result` instead; non-tool messages fall through
-    to the inherited ``on_message``, preserving the MCP ``-32002``
-    resource-not-found transform this middleware was originally
-    adopted for.
+    to the inherited ``on_message``.
+
+    That inherited transform matches the not-found exception types by
+    exact class -- ``error_type in (FileNotFoundError, KeyError,
+    NotFoundError)`` -- so only an unknown resource URI, which fastmcp
+    raises as ``NotFoundError`` itself, reaches a client as ``-32002``.
+    The ``tmux://`` handlers raise :exc:`~fastmcp.exceptions.ResourceError`
+    for a missing session, and path screening raises
+    ``ResourceSecurityError``, a ``NotFoundError`` *subclass*; neither is
+    an exact match, so both arrive as ``-32603`` "Internal error" -- the
+    code that tells a client the server is broken, for what is really an
+    absent or disallowed target.
 
     Logging honors ``FastMCPError.log_level`` (fastmcp >= 3.3): the
     expected failures demoted to WARNING by
