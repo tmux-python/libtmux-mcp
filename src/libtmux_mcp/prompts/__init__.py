@@ -30,7 +30,7 @@ from libtmux_mcp.prompts.recipes import (
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
-    from fastmcp.tools.base import Tool
+    from fastmcp.tools import Tool
 
 #: Env-var gate that enables exposing prompts as tools for clients that
 #: do not speak the MCP prompts protocol. Off by default — a sprawling

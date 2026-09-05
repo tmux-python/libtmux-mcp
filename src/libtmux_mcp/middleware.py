@@ -35,7 +35,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.server.transforms import Transform, Visibility
-from fastmcp.tools.base import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
@@ -43,7 +43,7 @@ from libtmux_mcp._utils import TOOLSET_INSPECT, VALID_TOOLSETS, ExpectedToolErro
 
 if t.TYPE_CHECKING:
     from fastmcp.server.transforms import GetToolNext
-    from fastmcp.tools.base import Tool
+    from fastmcp.tools import Tool
     from fastmcp.utilities.versions import VersionSpec
 
 
