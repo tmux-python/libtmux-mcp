@@ -73,6 +73,8 @@ dev = [
   "syrupy>=5.1.0",
   # scripts/mcp_swap.py (PEP 723 script; dep listed here so tests can import it)
   "tomlkit>=0.13",
+  # tests/docs/test_compatibility.py compares version ranges, not strings.
+  "packaging",
   # Coverage
   "codecov",
   "coverage",
