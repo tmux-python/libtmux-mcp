@@ -74,6 +74,15 @@ of failing. Notification delivery on an ordinary request is unchanged.
 
 ### Documentation
 
+**The completion topic describes the handlers the server registers**
+
+The page stated that libtmux-mcp registers no completion handlers and offered
+workarounds for the gap. It now describes what the `tmux://` templates
+complete and moves the caveat where it belongs: whether suggestions appear
+depends on the client, since measured agent CLIs do not send
+`completion/complete`. The retired claims are pinned as forbidden text, so the
+page cannot drift back to underclaiming a shipped feature.
+
 **The toolset migration notes reach the migration page**
 
 The 0.1.0a21 notes mapping the retired tiers onto `inspect`, `manage`,

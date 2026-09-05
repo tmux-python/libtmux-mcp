@@ -31,6 +31,19 @@ TOPIC_CONTRACT_FIXTURES: list[TopicContractFixture] = [
         "topics/pagination.md",
         "pagination automatically",
     ),
+    # The server registers tmux:// completion handlers. These are the
+    # claims the page carried before it did, kept as forbidden text so
+    # the page cannot drift back to underclaiming a shipped feature.
+    TopicContractFixture(
+        "completion_no_handlers",
+        "topics/completion.md",
+        "does not currently register custom completion handlers",
+    ),
+    TopicContractFixture(
+        "completion_needs_handlers",
+        "topics/completion.md",
+        "Adding live suggestions requires dedicated completion handlers",
+    ),
 ]
 
 
