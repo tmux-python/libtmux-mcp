@@ -85,6 +85,15 @@ the former default is reached by removing the variable and setting nothing.
 
 ### Development
 
+**Path-like session-name tests skip on tmux below 3.7**
+
+tmux before 3.7 rewrites `:` and `.` in a session name to `_`, turning
+`a:1` into `a_1`, and exits 0 with no stderr — so a caller cannot tell
+from the result. The resource tests that need such a name now check what
+tmux stored and skip when it differs, naming the rewrite. They ran only
+against the developer's newer tmux before, and reported the resulting
+absent session as a failed read on every supported tmux in CI.
+
 **The test suite runs without FastMCP's camelCase compatibility shims**
 
 FastMCP 4 answers MCP SDK v1 attribute spellings such as
