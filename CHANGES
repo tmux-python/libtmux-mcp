@@ -6,6 +6,16 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+## libtmux-mcp 0.1.0a22 (2026-09-06)
+
+libtmux-mcp 0.1.0a22 runs on FastMCP 4, which brings MCP Python SDK v2 with
+it. The `tmux://` resources keep accepting the socket paths and session names
+tmux allows but a generic screen reads as filesystem paths, so the resource and
+tool views continue to agree on what exists. The templates answer argument
+completion for the hosts that ask for it, a failed read reports a different
+error code, and a wait tool no longer takes down its own call when the
+execution carries no session.
+
 ### Dependencies
 
 **Minimum `fastmcp>=4.0.2`** (was `>=3.4.2,<4.0.0`)
