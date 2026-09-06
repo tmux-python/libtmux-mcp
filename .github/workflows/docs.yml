@@ -74,7 +74,7 @@ jobs:
       - name: Build documentation
         if: env.PUBLISH == 'true'
         run: |
-          cd docs && just html
+          cd docs && just sphinxopts="-W --keep-going" html
 
       - name: Configure AWS Credentials
         if: env.PUBLISH == 'true'
