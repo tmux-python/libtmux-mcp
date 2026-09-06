@@ -28,6 +28,12 @@ def docs_dir() -> pathlib.Path:
 
 
 @pytest.fixture
+def repo_root() -> pathlib.Path:
+    """Absolute path to the repository checkout."""
+    return _REPO_ROOT
+
+
+@pytest.fixture
 def real_widget_srcdir(tmp_path: pathlib.Path, docs_dir: pathlib.Path) -> pathlib.Path:
     """Minimal Sphinx srcdir pre-populated with the real ``mcp-install`` widget."""
     srcdir = tmp_path / "src"

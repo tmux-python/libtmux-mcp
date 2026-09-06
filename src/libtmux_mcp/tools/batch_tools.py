@@ -7,7 +7,7 @@ import time
 import typing as t
 
 from fastmcp import Context
-from fastmcp.tools.base import ToolResult
+from fastmcp.tools import ToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (

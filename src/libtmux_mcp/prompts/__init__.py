@@ -30,7 +30,7 @@ from libtmux_mcp.prompts.recipes import (
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
-    from fastmcp.tools.base import Tool
+    from fastmcp.tools import Tool
 
 #: Env-var gate that enables exposing prompts as tools for clients that
 #: do not speak the MCP prompts protocol. Off by default — a sprawling
@@ -39,10 +39,10 @@ ENV_PROMPTS_AS_TOOLS = "LIBTMUX_MCP_PROMPTS_AS_TOOLS"
 
 _PROMPT_TOOL_NAMES = frozenset({"list_prompts", "get_prompt"})
 _PROMPT_TOOL_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=True,
-    destructiveHint=False,
-    idempotentHint=True,
-    openWorldHint=False,
+    read_only_hint=True,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=False,
 )
 
 __all__ = ["ENV_PROMPTS_AS_TOOLS", "register_prompts"]

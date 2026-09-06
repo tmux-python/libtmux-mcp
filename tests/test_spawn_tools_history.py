@@ -137,7 +137,7 @@ def test_spawn_environment_schemas_disclose_visibility() -> None:
     tools = asyncio.run(_list_tools())
 
     for name in ("create_window", "split_window"):
-        description = tools[name].inputSchema["properties"]["environment"][
+        description = tools[name].input_schema["properties"]["environment"][
             "description"
         ]
         for fragment in (
@@ -151,7 +151,7 @@ def test_spawn_environment_schemas_disclose_visibility() -> None:
         ):
             assert fragment in description
 
-    session_description = tools["create_session"].inputSchema["properties"][
+    session_description = tools["create_session"].input_schema["properties"][
         "environment"
     ]["description"]
     for fragment in (

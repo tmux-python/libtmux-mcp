@@ -3933,6 +3933,10 @@ def test_wait_for_text_reports_progress(mcp_server: Server, mcp_pane: Pane) -> N
     progress_calls: list[tuple[float, float | None, str]] = []
 
     class _StubContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(
             self,
             progress: float,
@@ -3997,6 +4001,10 @@ def test_wait_for_text_propagates_unexpected_progress_error(
     import asyncio
 
     class _FaultyContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(
             self,
             progress: float,
@@ -4040,6 +4048,10 @@ def test_wait_for_text_suppresses_broken_resource_error(
     import anyio
 
     class _BrokenContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(
             self,
             progress: float,
@@ -4083,6 +4095,10 @@ def test_wait_for_text_warns_on_invalid_regex(
     log_calls: list[tuple[str, str]] = []
 
     class _RecordingContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(
             self,
             progress: float,
@@ -4128,6 +4144,10 @@ def test_wait_for_text_warns_on_timeout(mcp_server: Server, mcp_pane: Pane) -> N
     log_calls: list[tuple[str, str]] = []
 
     class _RecordingContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(
             self,
             progress: float,
@@ -4193,6 +4213,10 @@ def test_wait_for_text_warns_in_history_limit_risk_band(
     log_calls: list[tuple[str, str]] = []
 
     class _RecordingContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(
             self,
             progress: float,
@@ -4276,6 +4300,10 @@ def test_wait_for_text_warns_when_already_in_risk_band(
     log_calls: list[tuple[str, str]] = []
 
     class _RecordingContext:
+        #: A live Context always has one during a request; the wait
+        #: helpers skip delivery when it is absent.
+        request_context = object()
+
         async def report_progress(self, *args: t.Any, **kwargs: t.Any) -> None:
             return
 
@@ -5588,3 +5616,46 @@ def test_pane_read_tools_return_pydantic_models(
         result = maybe_result
     assert type(result).__name__ == expected_type
     assert hasattr(result, "model_dump"), "expected a Pydantic BaseModel instance"
+
+
+def test_wait_for_text_survives_a_context_with_no_session(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A Context carrying no request context must not take the call down.
+
+    ``Context.session`` raises rather than degrading when there is no
+    request context, so an unguarded ``ctx.warning`` / ``report_progress``
+    turns any ctx-less execution into a failed tool call. The wait must
+    still return its normal timeout result, just without notifications.
+    """
+    import asyncio
+
+    class _SessionlessContext:
+        request_context = None
+
+        async def report_progress(
+            self,
+            progress: float,
+            total: float | None = None,
+            message: str = "",
+        ) -> None:
+            msg = "report_progress must not be called without a session"
+            raise AssertionError(msg)
+
+        async def warning(self, message: str) -> None:
+            msg = "warning must not be called without a session"
+            raise AssertionError(msg)
+
+    result = asyncio.run(
+        wait_for_text(
+            patterns=["never-going-to-match-zzz"],
+            pane_id=mcp_pane.pane_id,
+            timeout=0.3,
+            interval=0.05,
+            socket_name=mcp_server.socket_name,
+            ctx=t.cast("t.Any", _SessionlessContext()),
+        )
+    )
+
+    assert result.found is False
+    assert result.outcome == "timeout"

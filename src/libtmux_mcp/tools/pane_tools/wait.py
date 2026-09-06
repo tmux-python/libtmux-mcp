@@ -101,14 +101,18 @@ async def _maybe_report_progress(
     """Call ``ctx.report_progress`` if a Context is available.
 
     Tests call the wait tools with ``ctx=None`` so progress plumbing is
-    optional. Only transport-closed exceptions are suppressed — a
+    optional, and a ``Context`` with no ``request_context`` has no session
+    to deliver through -- reading ``ctx.session`` there raises rather than
+    degrading, so check before calling.
+
+    Only transport-closed exceptions are suppressed — a
     progress report that fails because the client has disconnected is
     unsurprising and must not take down the tool call. Everything else
     (programming errors, kwarg mismatches, FastMCP internal failures)
     propagates so it shows up in logs and tests instead of being
     silently swallowed.
     """
-    if ctx is None:
+    if ctx is None or ctx.request_context is None:
         return
     try:
         await ctx.report_progress(progress=progress, total=total, message=message)
@@ -134,7 +138,7 @@ async def _maybe_log(
     contract: silent only when the transport is gone, propagating
     everything else so programming errors stay loud.
     """
-    if ctx is None:
+    if ctx is None or ctx.request_context is None:
         return
     method = getattr(ctx, level)
     try:

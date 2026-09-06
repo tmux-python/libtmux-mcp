@@ -13,3 +13,4 @@ def register_resources(mcp: FastMCP) -> None:
     from libtmux_mcp.resources import hierarchy
 
     hierarchy.register(mcp)
+    hierarchy.register_completions(mcp)
