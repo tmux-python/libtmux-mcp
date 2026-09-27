@@ -1,5 +1,14 @@
 # libtmux-mcp
 
+<!-- libtmux-logo -->
+<p align="center">
+  <picture>
+    <source srcset="docs/_static/img/libtmux.svg" type="image/svg+xml">
+    <img src="https://raw.githubusercontent.com/tmux-python/libtmux-mcp/main/docs/_static/img/libtmux.png" width="128" height="128" alt="libtmux for Python MCP">
+  </picture>
+</p>
+<!-- /libtmux-logo -->
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [tmux](https://github.com/tmux/tmux), built on [libtmux](https://libtmux.git-pull.com).
 
 [![Python Version](https://img.shields.io/pypi/pyversions/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
