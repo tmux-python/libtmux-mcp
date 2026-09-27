@@ -88,6 +88,8 @@ conf = merge_sphinx_config(
         ),
     },
     html_favicon="_static/favicon.ico",
+    ogp_image="_static/img/opengraph.png",
+    ogp_image_alt="libtmux for Python MCP",
     html_extra_path=["manifest.json"],
     rediraffe_redirects="redirects.txt",
     copybutton_selector="div.highlight pre, div.admonition.prompt > p:last-child",
@@ -114,6 +116,11 @@ conf = merge_sphinx_config(
         ("IBM Plex Mono", 700, "normal"),
     ],
 )
+
+conf["html_context"] = {
+    **conf.get("html_context", {}),
+    "brand_twitter_image": f"{about['__url__'].rstrip('/')}/_static/img/twitter.png",
+}
 
 conf["myst_enable_extensions"] = [*conf["myst_enable_extensions"], "attrs_inline"]
 conf["exclude_patterns"] = [

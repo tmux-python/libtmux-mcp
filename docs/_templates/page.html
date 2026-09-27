@@ -9,6 +9,23 @@
 #}
 {% extends "!page.html" %}
 
+{% block extrahead %}
+{{ super() }}
+<link rel="manifest" href="{{ pathto('manifest.json', 1) }}">
+<link rel="icon" type="image/svg+xml" sizes="any" href="{{ pathto('_static/img/libtmux.svg', 1) }}">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ pathto('_static/img/icons/icon-32x32.png', 1) }}">
+<link rel="apple-touch-icon" sizes="180x180" href="{{ pathto('_static/img/icons/apple-touch-icon.png', 1) }}">
+<link rel="mask-icon" color="#3572A5" href="{{ pathto('_static/img/icons/safari-pinned-tab.svg', 1) }}">
+<meta name="theme-color" content="#3572A5">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ title|striptags|e }} | libtmux-mcp">
+<meta name="twitter:image" content="{{ brand_twitter_image|e }}">
+<meta name="twitter:image:alt" content="libtmux for Python MCP">
+{% endblock %}
+
 {% block logo_prefetch_links %}
 {%- if logo_url -%}
 <link rel="preload" href="{{ logo_url }}" as="image" fetchpriority="high">

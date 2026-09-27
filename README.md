@@ -3,8 +3,8 @@
 <!-- libtmux-logo -->
 <p align="center">
   <picture>
-    <source srcset="assets/logo.svg" type="image/svg+xml">
-    <img src="https://raw.githubusercontent.com/tmux-python/libtmux-mcp/main/assets/logo.png" width="128" height="128" alt="libtmux for Python MCP">
+    <source srcset="docs/_static/img/libtmux.svg" type="image/svg+xml">
+    <img src="https://raw.githubusercontent.com/tmux-python/libtmux-mcp/main/docs/_static/img/libtmux.png" width="128" height="128" alt="libtmux for Python MCP">
   </picture>
 </p>
 <!-- /libtmux-logo -->
