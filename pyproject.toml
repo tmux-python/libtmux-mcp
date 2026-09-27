@@ -33,6 +33,7 @@ packages = [
   { include = "*", from = "src" },
 ]
 include = [
+  { path = "assets", format = "sdist" },
   { path = "CHANGES", format = "sdist" },
   { path = "tests", format = "sdist" },
   { path = "docs", format = "sdist" },
