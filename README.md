@@ -1,3 +1,5 @@
+<div align="center">
+
 # libtmux-mcp
 
 <!-- libtmux-logo -->
@@ -14,6 +16,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [tmux](ht
 [![Python Version](https://img.shields.io/pypi/pyversions/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
 [![PyPI Version](https://img.shields.io/pypi/v/libtmux-mcp.svg)](https://pypi.org/project/libtmux-mcp/)
 [![License](https://img.shields.io/github/license/tmux-python/libtmux-mcp.svg)](https://github.com/tmux-python/libtmux-mcp/blob/main/LICENSE)
+
+</div>
 
 > [!WARNING]
 > **Alpha.** Releases carry an `-alpha` prerelease tag. The API is not settled,
