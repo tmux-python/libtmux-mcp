@@ -67,6 +67,7 @@ EXPECTED_TOOLS_BY_TOOLSET = {
             "signal_channel",
             "swap_pane",
             "wait_for_channel",
+            "wait_for_pane_exit",
         }
     ),
     TOOLSET_EXECUTE: frozenset(

@@ -829,9 +829,10 @@ _TMUX_QUALIFIED_TOOLS = frozenset(
         "paste_buffer",
         "show_buffer",
         "delete_buffer",
-        # 2 wait_for channel
+        # 2 wait_for channel, 1 pane exit wait
         "wait_for_channel",
         "signal_channel",
+        "wait_for_pane_exit",
         # 1 pre-qualified pane tool — see docstring above
         "display_message",
     ]

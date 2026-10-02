@@ -28,6 +28,7 @@ leave socket selection inside each nested tool's arguments. See
 - {tool}`run-command` — one call to run a shell command, wait for completion, capture output, and return exit status
 - {tool}`send-keys` / {tool}`send-keys-batch` — raw interactive input for TUIs, control keys, and persistent shell state
 - {tool}`wait-for-channel` — low-level custom completion when `run-command` does not fit the shell composition
+- {tool}`wait-for-pane-exit` — exit status of a one-shot job started with `split-window` or `respawn-pane` `shell=`
 - For output the agent does not author (third-party logs, daemon prompts), use {tool}`wait-for-text` or {tool}`capture-since`
 - Pasting multi-line text? → {tool}`paste-text`
 
@@ -309,6 +310,12 @@ Stage multi-line text into an MCP-namespaced tmux buffer.
 :link: wait-for-channel
 :link-type: ref
 Block until a tmux ``wait-for`` channel is signalled.
+:::
+
+:::{grid-item-card} wait_for_pane_exit
+:link: wait-for-pane-exit
+:link-type: ref
+Block until a pane's process exits and report its exit status.
 :::
 
 :::{grid-item-card} signal_channel

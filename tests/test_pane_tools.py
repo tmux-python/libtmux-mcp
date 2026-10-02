@@ -5740,3 +5740,120 @@ def test_send_keys_batch_sends_dash_and_semicolon_text_verbatim(
         )
     finally:
         echo_pane.kill()
+
+
+# ---------------------------------------------------------------------------
+# wait_for_pane_exit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("shell", "status", "preset"),
+    [
+        pytest.param("exit 3", 3, True, id="already-dead"),
+        # Exits after the first 0.5 s slice, so the status must survive
+        # the hand-over between slices.
+        pytest.param("sleep 0.8; exit 4", 4, False, id="between-slices"),
+    ],
+)
+def test_wait_for_pane_exit_reports_status(
+    mcp_server: Server, mcp_pane: Pane, shell: str, status: int, preset: bool
+) -> None:
+    """The pane's own process status comes back, and the pane survives dead."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import wait_for_pane_exit
+
+    # A process that can exit before the call needs remain-on-exit already
+    # on, or tmux closes the pane and takes the status with it.
+    if preset:
+        mcp_pane.window.set_option("remain-on-exit", "on")
+    job = mcp_pane.window.split(attach=False, shell=shell)
+    assert job.pane_id is not None
+
+    result = asyncio.run(
+        wait_for_pane_exit(
+            pane_id=job.pane_id,
+            timeout=10.0,
+            socket_name=mcp_server.socket_name,
+        )
+    )
+
+    assert result.exited is True
+    assert result.exit_status == status
+    assert result.timed_out is False
+    job.refresh()
+    assert job.pane_dead == "1"
+    job.kill()
+
+
+def test_wait_for_pane_exit_times_out_and_restores_option(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A running process is a ``timed_out`` result; remain-on-exit is put back."""
+    import asyncio
+
+    from libtmux_mcp.tools.pane_tools import wait_for_pane_exit
+
+    job = mcp_pane.window.split(attach=False, shell="sleep 30")
+    assert job.pane_id is not None
+    try:
+        result = asyncio.run(
+            wait_for_pane_exit(
+                pane_id=job.pane_id,
+                timeout=0.6,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        assert result.timed_out is True
+        assert result.exited is False
+        assert result.exit_status is None
+        assert job.cmd("show-options", "-pqv", "remain-on-exit").stdout == []
+    finally:
+        job.kill()
+
+
+def test_wait_for_pane_exit_cancel_leaves_no_work_running(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A cancelled wait returns within one slice and restores the option.
+
+    ``Pane.wait`` polls in a thread that cannot be interrupted, so the tool
+    waits in short slices: after the cancel nothing keeps polling for the
+    rest of a 30 s budget.
+    """
+    import asyncio
+    import threading
+
+    from libtmux_mcp.tools.pane_tools import wait_for_pane_exit
+
+    job = mcp_pane.window.split(attach=False, shell="sleep 30")
+    assert job.pane_id is not None
+
+    async def _drive() -> float:
+        task = asyncio.create_task(
+            wait_for_pane_exit(
+                pane_id=job.pane_id,
+                timeout=30.0,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+        await asyncio.sleep(0.4)
+        started = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return time.monotonic() - started
+
+    try:
+        elapsed = asyncio.run(_drive())
+        assert elapsed < 2.0
+        assert job.cmd("show-options", "-pqv", "remain-on-exit").stdout == []
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and any(
+            "asyncio_" in th.name for th in threading.enumerate()
+        ):
+            time.sleep(0.05)
+        assert not [th for th in threading.enumerate() if "asyncio_" in th.name]
+    finally:
+        job.kill()

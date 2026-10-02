@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 import typing as t
+
+from libtmux import exc
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -16,10 +21,21 @@ from libtmux_mcp._utils import (
     _resolve_window,
     _serialize_pane,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
+from libtmux_mcp._wait_policy import _wait_ceiling_seconds
 from libtmux_mcp.models import (
+    PaneExitResult,
     PaneInfo,
 )
+
+if t.TYPE_CHECKING:
+    from libtmux.pane import Pane
+
+#: Longest single ``Pane.wait`` call. ``Pane.wait`` polls in a worker thread
+#: that cannot be interrupted, so the tool waits in slices this long and a
+#: cancelled call leaves a thread running for at most one of them.
+_EXIT_WAIT_SLICE_SECONDS = 0.5
 
 #: The four window corners ``find_pane_by_position`` accepts.
 PaneCorner = t.Literal["top-left", "top-right", "bottom-left", "bottom-right"]
@@ -347,3 +363,135 @@ def find_pane_by_position(
 
     matches.sort(key=_innermost_score, reverse=True)
     return _serialize_pane(matches[0])
+
+
+def _pane_option_state(pane: Pane) -> list[str]:
+    """Return the pane's own ``remain-on-exit`` value, empty when unset."""
+    return list(pane.cmd("show-options", "-pqv", "remain-on-exit").stdout)
+
+
+def _restore_remain_on_exit(pane: Pane, previous: list[str]) -> None:
+    """Put a pane's ``remain-on-exit`` back as :func:`_pane_option_state` saw it."""
+    if previous:
+        pane.cmd("set-option", "-p", "remain-on-exit", previous[0])
+    else:
+        pane.cmd("set-option", "-p", "-u", "remain-on-exit")
+
+
+def _wait_slice(pane: Pane, seconds: float, finished: threading.Event) -> t.Any:
+    """Run one ``Pane.wait`` slice and flag its end, for the caller's cleanup.
+
+    ``Pane.wait`` restores ``remain-on-exit`` as it found it when it
+    returns; a cancelled caller must let that finish before restoring the
+    option itself, or the slice's restore lands last and wins.
+    """
+    finished.clear()
+    try:
+        return pane.wait(timeout=seconds)
+    finally:
+        finished.set()
+
+
+@handle_tool_errors_async
+async def wait_for_pane_exit(
+    pane_id: str | None = None,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    window_id: str | None = None,
+    timeout: float = 30.0,
+    socket_name: str | None = None,
+) -> PaneExitResult:
+    """Wait for the process tmux started in a pane to exit; report how it ended.
+
+    Use after ``split_window(shell=...)`` or ``respawn_pane(shell=...)`` to
+    learn a one-shot job's exit status or terminating signal without a
+    prompt or a marker. It waits for the pane's own process, not for a
+    command typed into a shell: for that use ``run_command``.
+
+    The pane stays on screen as a dead pane afterwards so its output can be
+    read with ``capture_pane``; remove it with ``kill_pane``. A pane that
+    closed before this call is gone and cannot be waited on, so start
+    short-lived jobs in a pane created with ``remain-on-exit`` already on.
+
+    Parameters
+    ----------
+    pane_id : str, optional
+        Pane ID (e.g. '%1').
+    session_name : str, optional
+        Session name for pane resolution.
+    session_id : str, optional
+        Session ID (e.g. '$1') for pane resolution.
+    window_id : str, optional
+        Window ID for pane resolution.
+    timeout : float
+        Maximum seconds to wait. Capped by the same server wait ceiling as
+        ``wait_for_text``; the value enforced is reported as
+        ``effective_timeout``. A pane still running at expiry is a result
+        with ``timed_out=true``, not an error.
+    socket_name : str, optional
+        tmux socket name.
+
+    Returns
+    -------
+    PaneExitResult
+        Exit status and signal, or ``timed_out=true`` when the process is
+        still running.
+    """
+    if timeout <= 0:
+        msg = "timeout must be positive"
+        raise ExpectedToolError(msg)
+    effective_timeout = min(timeout, _wait_ceiling_seconds())
+
+    server = _get_server(socket_name=socket_name)
+    pane = _resolve_pane(
+        server,
+        pane_id=pane_id,
+        session_name=session_name,
+        session_id=session_id,
+        window_id=window_id,
+    )
+    target_pane_id = pane.pane_id
+    if target_pane_id is None:
+        msg = "resolved pane has no pane_id"
+        raise ExpectedToolError(msg)
+
+    started = time.monotonic()
+    deadline = started + effective_timeout
+
+    # Hold remain-on-exit across the slices: ``Pane.wait`` restores the
+    # option on every return, and a process that exits between two slices
+    # would otherwise close the pane and take its exit status with it.
+    finished = threading.Event()
+    finished.set()
+    previous = await asyncio.to_thread(_pane_option_state, pane)
+    await asyncio.to_thread(pane.cmd, "set-option", "-p", "remain-on-exit", "on")
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            slice_seconds = max(min(_EXIT_WAIT_SLICE_SECONDS, remaining), 0.01)
+            try:
+                result = await asyncio.to_thread(
+                    _wait_slice, pane, slice_seconds, finished
+                )
+            except exc.WaitTimeout:
+                if time.monotonic() >= deadline:
+                    return PaneExitResult(
+                        pane_id=target_pane_id,
+                        exited=False,
+                        timed_out=True,
+                        elapsed_seconds=round(time.monotonic() - started, 3),
+                        effective_timeout=effective_timeout,
+                    )
+                continue
+            return PaneExitResult(
+                pane_id=target_pane_id,
+                exited=True,
+                exit_status=result.status,
+                signal=result.signal,
+                timed_out=False,
+                elapsed_seconds=round(time.monotonic() - started, 3),
+                effective_timeout=effective_timeout,
+            )
+    finally:
+        await asyncio.to_thread(finished.wait, _EXIT_WAIT_SLICE_SECONDS + 1.0)
+        await asyncio.to_thread(_restore_remain_on_exit, pane, previous)

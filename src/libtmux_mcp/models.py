@@ -357,6 +357,32 @@ class CaptureSinceResult(BaseModel):
     )
 
 
+class PaneExitResult(BaseModel):
+    """How the process tmux started in a pane ended, or that it has not."""
+
+    pane_id: str = Field(description="Pane ID that was waited on")
+    exited: bool = Field(description="True when the pane's process ended")
+    exit_status: int | None = Field(
+        default=None,
+        description=(
+            "Exit status of the pane's process. None when it is still running, "
+            "or when a signal ended it (see ``signal``)"
+        ),
+    )
+    signal: int | None = Field(
+        default=None,
+        description=(
+            "Signal number that ended the process. None when it exited "
+            "normally, is still running, or tmux 3.2a, which does not report it"
+        ),
+    )
+    timed_out: bool = Field(description="True when the wait expired first")
+    elapsed_seconds: float = Field(description="Time spent waiting in seconds")
+    effective_timeout: float = Field(
+        description="Timeout enforced after the server wait ceiling, in seconds"
+    )
+
+
 class RunCommandResult(BaseModel):
     """Result of running a shell command in a pane."""
 

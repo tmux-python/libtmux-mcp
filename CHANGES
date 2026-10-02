@@ -6,6 +6,17 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**`wait_for_pane_exit` reports how a pane's process ended**
+
+`wait_for_pane_exit` blocks until the process tmux started in a pane exits and
+returns its exit status or terminating signal, so a job started with
+`split_window(shell=...)` or `respawn_pane(shell=...)` needs no prompt or output
+marker to be read. A process still running at the timeout comes back with
+`timed_out=true`. The pane stays on screen, dead, so `capture_pane` can read its
+output.
+
 ### Fixes
 
 **`capture_since` reports a flood that scrolls the cursor out of a full history**

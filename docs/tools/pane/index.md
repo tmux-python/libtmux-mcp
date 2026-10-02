@@ -89,6 +89,10 @@ Block until new output matches (or any new output appears).
 Block until a tmux wait-for channel is signalled.
 :::
 
+:::{grid-item-card} {tooliconl}`wait-for-pane-exit`
+Block until a pane's process exits and report its exit status.
+:::
+
 :::{grid-item-card} {tooliconl}`signal-channel`
 Signal a waiting channel.
 :::
@@ -128,6 +132,7 @@ enter-copy-mode
 exit-copy-mode
 wait-for-text
 wait-for-channel
+wait-for-pane-exit
 signal-channel
 respawn-pane
 kill-pane

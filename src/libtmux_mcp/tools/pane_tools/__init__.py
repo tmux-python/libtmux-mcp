@@ -41,6 +41,7 @@ from libtmux_mcp.tools.pane_tools.lifecycle import (
     kill_pane,
     respawn_pane,
     set_pane_title,
+    wait_for_pane_exit,
 )
 from libtmux_mcp.tools.pane_tools.meta import display_message, snapshot_pane
 from libtmux_mcp.tools.pane_tools.pipe import pipe_pane
@@ -73,6 +74,7 @@ __all__ = [
     "set_pane_title",
     "snapshot_pane",
     "swap_pane",
+    "wait_for_pane_exit",
     "wait_for_text",
 ]
 
@@ -123,6 +125,13 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(respawn_pane)
+    # Like the other waits, bounded by the server wait ceiling, so it stays
+    # out of the batch wrappers.
+    mcp.tool(
+        title="Wait For tmux Pane Exit",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_MANAGE, TAG_SELF_BOUNDED},
+    )(wait_for_pane_exit)
     mcp.tool(
         title="Set Pane Title",
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
