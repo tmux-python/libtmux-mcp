@@ -6,6 +6,15 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Fixes
+
+**Timeouts, a dead server and a failed listing arrive as typed tool errors**
+
+A tmux command that outlives its bound, a wait that ends because the server
+exited, and a listing tmux could not answer now return an error with a next
+step instead of `Unexpected error`. A listing failure says the server is
+unreachable rather than empty.
+
 ## libtmux-mcp 0.1.0a22 (2026-09-06)
 
 libtmux-mcp 0.1.0a22 runs on FastMCP 4, which brings MCP Python SDK v2 with

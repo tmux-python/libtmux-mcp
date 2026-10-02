@@ -15,9 +15,11 @@ from libtmux_mcp._utils import (
     TOOLSET_MANAGE,
     TOOLSET_TEARDOWN,
     VALID_TOOLSETS,
+    ExpectedToolError,
     _apply_filters,
     _get_server,
     _invalidate_server,
+    _map_exception_to_tool_error,
     _resolve_pane,
     _resolve_session,
     _resolve_window,
@@ -927,3 +929,76 @@ def test_map_exception_suggestion_policy(
     else:
         assert suggestion is not None
         assert expected_suggestion_fragment in suggestion
+
+
+class MapsToExpectedFixture(t.NamedTuple):
+    """One libtmux exception and the hint the agent must receive."""
+
+    test_id: str
+    error: BaseException
+    message_part: str
+    suggestion_part: str
+
+
+MAPS_TO_EXPECTED_FIXTURES: list[MapsToExpectedFixture] = [
+    MapsToExpectedFixture(
+        "tmux_timeout",
+        exc.TmuxTimeout(cmd=["tmux", "wait-for", "c"], timeout=1.5),
+        "timed out after 1.5s",
+        "get_server_info",
+    ),
+    MapsToExpectedFixture(
+        "pane_run_timeout_started",
+        exc.PaneRunTimeout("sleep 30", 1.0, [], cmd=["tmux", "wait-for", "c"]),
+        "pane command timed out",
+        "capture_since",
+    ),
+    MapsToExpectedFixture(
+        "pane_run_timeout_not_started",
+        exc.PaneRunTimeout("ls", 1.0, [], cmd=["tmux", "wait-for", "c"], started=False),
+        "did not start",
+        "snapshot_pane",
+    ),
+    MapsToExpectedFixture(
+        "server_gone",
+        exc.TmuxServerGone("build-done"),
+        "tmux server is gone",
+        "get_server_info",
+    ),
+    MapsToExpectedFixture(
+        "list_failed",
+        exc.ListCommandFailed("no server running", list_cmd="list-sessions"),
+        "could not list",
+        "not an empty one",
+    ),
+    MapsToExpectedFixture(
+        "wait_timeout",
+        exc.WaitTimeout("pane never exited"),
+        "Wait timed out",
+        "Raise timeout",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    list(MapsToExpectedFixture._fields),
+    MAPS_TO_EXPECTED_FIXTURES,
+    ids=[f.test_id for f in MAPS_TO_EXPECTED_FIXTURES],
+)
+def test_map_exception_gives_typed_error_with_hint(
+    test_id: str,
+    error: BaseException,
+    message_part: str,
+    suggestion_part: str,
+) -> None:
+    """New libtmux errors reach the agent as expected failures with a next step.
+
+    ``TmuxTimeout`` is outside ``LibTmuxException`` by design, so without an
+    explicit mapping it fell through to the "Unexpected error" ERROR path.
+    """
+    mapped = _map_exception_to_tool_error("probe", error)
+
+    assert isinstance(mapped, ExpectedToolError)
+    assert message_part in str(mapped)
+    assert mapped.suggestion is not None
+    assert suggestion_part in mapped.suggestion

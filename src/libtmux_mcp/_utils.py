@@ -1111,6 +1111,54 @@ def _map_exception_to_tool_error(fn_name: str, e: BaseException) -> ToolError:
             f"Pane not found: {e}",
             suggestion="Call list_panes to discover valid pane ids.",
         )
+    if isinstance(e, exc.PaneRunTimeout):
+        if not e.started:
+            return ExpectedToolError(
+                str(e),
+                suggestion=(
+                    "The pane is not at a shell prompt or its shell cannot reach "
+                    "this tmux server. Use send_keys for raw input, or "
+                    "snapshot_pane to see what it is showing."
+                ),
+            )
+        return ExpectedToolError(
+            str(e),
+            suggestion=(
+                "The command is still running in the pane. Use capture_since "
+                "to follow its output, or raise timeout."
+            ),
+        )
+    if isinstance(e, exc.TmuxTimeout):
+        return ExpectedToolError(
+            str(e),
+            suggestion=(
+                "The tmux client was killed but the command may have taken "
+                "effect. Call get_server_info to check the server answers."
+            ),
+        )
+    if isinstance(e, exc.TmuxServerGone):
+        return ExpectedToolError(
+            str(e),
+            suggestion=(
+                "Nothing was confirmed. Call get_server_info; recreate the "
+                "session with create_session if the server is gone."
+            ),
+        )
+    if isinstance(e, exc.ListCommandFailed):
+        return ExpectedToolError(
+            f"tmux could not list objects: {e}",
+            suggestion=(
+                "This is an unreachable server, not an empty one. Call "
+                "get_server_info or create_session to start one."
+            ),
+        )
+    if isinstance(e, exc.WaitTimeout):
+        return ExpectedToolError(
+            f"Wait timed out: {e}",
+            suggestion="The condition was not met. Raise timeout or re-check.",
+        )
+    if isinstance(e, exc.DeprecatedError):
+        return ExpectedToolError(f"Deprecated libtmux API: {e}")
     if isinstance(e, exc.LibTmuxException):
         return ExpectedToolError(f"tmux error: {e}")
     logger.exception("unexpected error in MCP tool %s", fn_name)
