@@ -32,6 +32,12 @@ scrollback of the new session's panes before a long job starts.
 
 ### Fixes
 
+**Server instructions and wait errors name the right next tool**
+
+The server instructions route a pane's own process to `wait_for_pane_exit`,
+`split_window` points to `split_window_many`, and a `wait_for_channel` timeout
+or lost server says what to call next.
+
 **A socket tmux cannot open is an error, not an empty list**
 
 `list_sessions`, `list_windows` and `list_panes` used to answer `[]` when tmux

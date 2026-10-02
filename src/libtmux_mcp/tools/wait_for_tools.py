@@ -223,7 +223,13 @@ async def wait_for_channel(
             f"wait-for timeout: channel {cname!r} was not signalled within "
             f"{effective_timeout}s"
         )
-        raise ExpectedToolError(msg) from e
+        raise ExpectedToolError(
+            msg,
+            suggestion=(
+                "The channel is still usable. Check the command that should "
+                "signal it with capture_since, then wait again or raise timeout."
+            ),
+        ) from e
     if returncode != 0:
         detail = stderr.decode(errors="replace").strip()
         msg = f"wait-for failed for channel {cname!r}: {detail or f'exit {returncode}'}"
@@ -253,7 +259,10 @@ async def wait_for_channel(
             "no longer running, so the channel was probably never signalled "
             "— tmux exits 0 for both. Re-check the work you were waiting on."
         )
-        raise ExpectedToolError(msg)
+        raise ExpectedToolError(
+            msg,
+            suggestion="Call get_server_info; create_session starts a new server.",
+        )
     return f"Channel {cname!r} was signalled (timeout {effective_timeout}s)"
 
 

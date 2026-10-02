@@ -172,6 +172,7 @@ def split_window(
 
     Creates a new pane by splitting an existing one. Use direction to choose
     above/below/left/right. Returns the new pane's info including its pane_id.
+    To add several panes at once under one layout, use split_window_many.
 
     Parameters
     ----------

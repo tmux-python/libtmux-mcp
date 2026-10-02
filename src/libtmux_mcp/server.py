@@ -90,16 +90,18 @@ _INSTR_METADATA_VS_CONTENT = (
 
 _INSTR_READ_TOOLS = (
     "Prefer snapshot_pane over capture_pane + get_pane_info; capture_since "
-    "for repeated observation/tailing; display_message for tmux variables."
+    "for tailing; display_message for tmux variables."
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: run_command for authored commands needing "
-    "status; wait_for_channel for custom tmux wait-for; capture_since "
+    "WAIT, DON'T POLL: run_command for authored commands (status); "
+    "wait_for_pane_exit for shell= jobs; "
+    "wait_for_channel for custom wait-for; capture_since "
     "for tailing; wait_for_text for output you don't author "
     "(patterns=null=any output; stop=[] bails); "
     "send_keys_batch for raw input."
 )
+
 
 #: Gap-explainer: write-hook tools are intentionally absent. See module
 #: comment above for when to add another ``_GAP`` segment vs. push the

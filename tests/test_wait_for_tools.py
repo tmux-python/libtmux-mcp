@@ -544,3 +544,23 @@ def test_wait_for_channel_leaves_channel_reusable(mcp_server: Server, how: str) 
 
     assert "was signalled" in result
     assert time.monotonic() - started < 1.9
+
+
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_for_channel_timeout_error_carries_a_next_step(
+    mcp_server: Server,
+) -> None:
+    """A timed-out wait tells the agent the channel is reusable and what to read."""
+    from libtmux_mcp._utils import ExpectedToolError
+
+    with pytest.raises(ExpectedToolError) as excinfo:
+        asyncio.run(
+            wait_for_channel(
+                channel="wf_hint_test",
+                timeout=0.3,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+    assert "still usable" in (excinfo.value.suggestion or "")
+    assert "capture_since" in (excinfo.value.suggestion or "")

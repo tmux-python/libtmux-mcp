@@ -413,6 +413,7 @@ def test_base_instructions_prefer_typed_completion_over_polling() -> None:
     """_BASE_INSTRUCTIONS names typed completion and observation primitives."""
     assert "run_command" in _BASE_INSTRUCTIONS
     assert "wait_for_channel" in _BASE_INSTRUCTIONS
+    assert "wait_for_pane_exit" in _BASE_INSTRUCTIONS
     assert "capture_since" in _BASE_INSTRUCTIONS
     assert "wait_for_text" in _BASE_INSTRUCTIONS
     # The catch-all form replaced the separate wait_for_content_change
