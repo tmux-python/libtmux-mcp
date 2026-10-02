@@ -458,11 +458,9 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
     child alive another 13 s; through a real agent TUI with the ceiling
     raised to 120 s and a 90 s timeout, ~61 s past the user's Esc.
 
-    Note the harm is the live process itself, not a stolen signal —
-    tmux keeps the server-side waiter registered even after the client
-    dies (verified against ``tmux wait-for``), so ``wait-for -S`` is
-    swallowed either way. Only the process is observable, so that is
-    what this asserts.
+    The channel itself is checked by
+    ``test_wait_for_channel_leaves_channel_reusable``; this one asserts the
+    process is gone.
     """
     channel = "wf_cancel_reap_test"
     socket_name = mcp_server.socket_name
@@ -502,3 +500,47 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
         f"cancelled wait_for_channel orphaned tmux child(ren) {survivors}; "
         "the child outlives the cancellation for the rest of its timeout"
     )
+
+
+@pytest.mark.parametrize("how", ["timeout", "cancel"])
+@pytest.mark.usefixtures("mcp_session")
+def test_wait_for_channel_leaves_channel_reusable(mcp_server: Server, how: str) -> None:
+    """An abandoned wait must not leave a ghost waiter on the channel.
+
+    tmux remembers a signal only while nobody waits, and a killed client
+    stays queued as a waiter, so the next signal was spent on the dead
+    client: a later wait on the same channel then timed out although the
+    channel had been signalled first. Releasing the waiter by signalling
+    it while alive dequeues it, so signal-then-wait returns at once.
+    """
+    channel = f"wf_ghost_{how}"
+    socket_name = mcp_server.socket_name
+    assert socket_name is not None
+
+    async def _abandon() -> None:
+        if how == "timeout":
+            with pytest.raises(ToolError, match="timeout"):
+                await wait_for_channel(
+                    channel=channel, timeout=0.3, socket_name=socket_name
+                )
+            return
+        task = asyncio.create_task(
+            wait_for_channel(channel=channel, timeout=8.0, socket_name=socket_name)
+        )
+        await asyncio.sleep(0.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    async def _drive() -> str:
+        await _abandon()
+        await signal_channel(channel=channel, socket_name=socket_name)
+        return await wait_for_channel(
+            channel=channel, timeout=2.0, socket_name=socket_name
+        )
+
+    started = time.monotonic()
+    result = asyncio.run(_drive())
+
+    assert "was signalled" in result
+    assert time.monotonic() - started < 1.9

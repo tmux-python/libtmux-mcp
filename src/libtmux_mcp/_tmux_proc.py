@@ -31,6 +31,10 @@ import typing as t
 #: loop's child watcher reaps the pid whether or not we wait.
 _TMUX_REAP_SECONDS = 0.5
 
+#: Bound on each half of a waiter release: the ``wait-for -S`` that frees
+#: the channel, then the waiter's own exit.
+_RELEASE_GRACE_SECONDS = 1.0
+
 
 async def _kill_and_reap(
     proc: asyncio.subprocess.Process, task: asyncio.Future[t.Any]
@@ -62,8 +66,63 @@ async def _kill_and_reap(
         await asyncio.wait_for(proc.wait(), timeout=_TMUX_REAP_SECONDS)
 
 
+async def _release_waiter(
+    proc: asyncio.subprocess.Process,
+    task: asyncio.Future[t.Any],
+    release_argv: list[str],
+) -> None:
+    """End a ``wait-for`` client without leaving a ghost waiter.
+
+    tmux keeps a killed waiter queued on its channel and only remembers a
+    signal while nobody waits, so the channel's next signal would be spent
+    on the dead client. Signalling while the client is still alive makes
+    tmux dequeue it, leaving the channel clean. The client is killed only
+    when it does not exit, which is when the server is not answering.
+    Mirrors ``libtmux.common._release_waiter``.
+
+    Parameters
+    ----------
+    proc : asyncio.subprocess.Process
+        The ``tmux wait-for`` client.
+    task : asyncio.Future
+        The in-flight ``proc.communicate()`` future.
+    release_argv : list of str
+        Full command line that signals the waiter's channel.
+    """
+    with contextlib.suppress(OSError, TimeoutError):
+        releaser = await asyncio.create_subprocess_exec(
+            *release_argv,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(releaser.wait(), timeout=_RELEASE_GRACE_SECONDS)
+        except BaseException:
+            with contextlib.suppress(ProcessLookupError):
+                releaser.kill()
+            raise
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(asyncio.shield(task), timeout=_RELEASE_GRACE_SECONDS)
+    await _kill_and_reap(proc, task)
+
+
+async def _end_child(
+    proc: asyncio.subprocess.Process,
+    task: asyncio.Future[t.Any],
+    release_argv: list[str] | None,
+) -> None:
+    """Release a ``wait-for`` waiter, or kill any other child."""
+    if release_argv is None:
+        await _kill_and_reap(proc, task)
+    else:
+        await _release_waiter(proc, task, release_argv)
+
+
 async def _run_tmux_bounded(
-    argv: list[str], *, timeout: float
+    argv: list[str],
+    *,
+    timeout: float,
+    release_argv: list[str] | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run one tmux argv under a hard bound, killing it on cancellation.
 
@@ -75,6 +134,10 @@ async def _run_tmux_bounded(
     timeout : float
         Wall-clock bound in seconds. On expiry the child is killed and
         reaped before ``TimeoutError`` is raised.
+    release_argv : list of str, optional
+        For a ``wait-for`` client: the command that signals its channel.
+        When given, expiry and cancellation release the waiter through
+        :func:`_release_waiter` instead of killing it outright.
 
     Returns
     -------
@@ -105,7 +168,7 @@ async def _run_tmux_bounded(
     try:
         done, _pending = await asyncio.wait({task}, timeout=timeout)
         if not done:
-            await _kill_and_reap(proc, task)
+            await _end_child(proc, task, release_argv)
             raise TimeoutError
         stdout, stderr = task.result()
     except asyncio.CancelledError:
@@ -115,7 +178,7 @@ async def _run_tmux_bounded(
         # above just as often as on ``task.result()``, so the guard
         # must span both — otherwise a cancel while waiting orphans the
         # child.
-        await _kill_and_reap(proc, task)
+        await _end_child(proc, task, release_argv)
         raise
     assert proc.returncode is not None
     return proc.returncode, stdout, stderr

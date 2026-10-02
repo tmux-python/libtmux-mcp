@@ -204,6 +204,7 @@ async def wait_for_channel(
     cname = _validate_channel_name(channel)
     effective_timeout = min(timeout, _wait_ceiling_seconds())
     argv = _tmux_argv(server, "wait-for", cname)
+    release_argv = _tmux_argv(server, "wait-for", "-S", cname)
     # FastMCP direct-awaits async tools on its event loop, and ``tmux
     # wait-for`` blocks for the full timeout, so the child must not run
     # on the loop. It must not run on a worker thread either:
@@ -215,7 +216,7 @@ async def wait_for_channel(
     # :func:`~libtmux_mcp.tools.pane_tools.wait.wait_for_text` uses.
     try:
         returncode, _stdout, stderr = await _run_tmux_bounded(
-            argv, timeout=effective_timeout
+            argv, timeout=effective_timeout, release_argv=release_argv
         )
     except TimeoutError as e:
         msg = (

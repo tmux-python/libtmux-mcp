@@ -8,6 +8,13 @@ _Notes on upcoming releases will be added here_
 
 ### Fixes
 
+**A timed-out or cancelled wait no longer swallows the channel's next signal**
+
+`wait_for_channel` and `run_command` used to kill the waiting tmux client when
+they gave up, which left it queued on the channel and spent the next signal on
+it. They now release the waiter first, so signalling the channel and waiting
+again succeeds.
+
 **`send_keys_batch`, `paste_text` and the buffer tools use libtmux's safe commands**
 
 Text that starts with `-` or ends with `;` reaches the pane verbatim in a timed

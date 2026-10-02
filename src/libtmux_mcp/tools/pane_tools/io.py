@@ -428,7 +428,9 @@ async def run_command(
     stderr_bytes = b""
     try:
         returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
-            wait_argv, timeout=effective_timeout
+            wait_argv,
+            timeout=effective_timeout,
+            release_argv=_tmux_argv(server, "wait-for", "-S", channel),
         )
     except TimeoutError:
         timed_out = True
