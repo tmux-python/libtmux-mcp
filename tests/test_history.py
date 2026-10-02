@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import types
 import typing as t
 
 import pytest
@@ -684,8 +685,9 @@ def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(
         pane_id = "%1"
         server = FakeServer()
 
-        def cmd(self, *args: str) -> None:
+        def cmd(self, *args: str) -> t.Any:
             calls.append(("cmd", args))
+            return types.SimpleNamespace(stderr=[])
 
         def enter(self) -> None:
             calls.append(("enter", ()))
@@ -721,11 +723,11 @@ def test_global_history_default_leaves_raw_send_keys_bytes_and_boundaries(
     asyncio.run(_exercise())
 
     assert calls == [
-        ("cmd", ("send-keys", "C-c")),
-        ("cmd", ("send-keys", "-l", "partial-TUI")),
-        ("cmd", ("send-keys", "/needle")),
+        ("cmd", ("send-keys", "--", "C-c")),
+        ("cmd", ("send-keys", "-l", "--", "partial-TUI")),
+        ("cmd", ("send-keys", "--", "/needle")),
         ("enter", ()),
-        ("cmd", ("send-keys", "-l", " explicit-secret")),
+        ("cmd", ("send-keys", "-l", "--", " explicit-secret")),
         ("enter", ()),
     ]
 
@@ -753,8 +755,9 @@ def test_global_history_default_leaves_untimed_batch_operations_explicit_only(
         pane_id = "%1"
         server = FakeServer()
 
-        def cmd(self, *args: str) -> None:
+        def cmd(self, *args: str) -> t.Any:
             calls.append(("cmd", args))
+            return types.SimpleNamespace(stderr=[])
 
         def enter(self) -> None:
             calls.append(("enter", ()))
@@ -793,10 +796,10 @@ def test_global_history_default_leaves_untimed_batch_operations_explicit_only(
     asyncio.run(_exercise())
 
     assert calls == [
-        ("cmd", ("send-keys", "C-c")),
-        ("cmd", ("send-keys", "-l", "TUI_BATCH_DEFAULT")),
+        ("cmd", ("send-keys", "--", "C-c")),
+        ("cmd", ("send-keys", "-l", "--", "TUI_BATCH_DEFAULT")),
         ("enter", ()),
-        ("cmd", ("send-keys", "-l", " batch-secret")),
+        ("cmd", ("send-keys", "-l", "--", " batch-secret")),
         ("enter", ()),
     ]
 
