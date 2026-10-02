@@ -658,9 +658,9 @@ def test_failed_inspect_call_is_not_retried(
         nonlocal calls
         calls += 1
         msg = "forced failure"
-        raise libtmux_exc.LibTmuxException(msg)
+        raise libtmux_exc.ListCommandFailed(msg, list_cmd="list-sessions")
 
-    monkeypatch.setattr(Server, "sessions", property(_fail))
+    monkeypatch.setattr(Server, "fetch_sessions", _fail)
 
     async def _call() -> t.Any:
         async with Client(build_mcp_server()) as client:

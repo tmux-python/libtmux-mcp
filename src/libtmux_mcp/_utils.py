@@ -18,7 +18,7 @@ import typing as t
 
 from fastmcp.exceptions import ToolError
 from libtmux import exc
-from libtmux._internal.query_list import LOOKUP_NAME_MAP
+from libtmux._internal.query_list import LOOKUP_NAME_MAP, QueryList
 from libtmux.server import Server
 
 if t.TYPE_CHECKING:
@@ -923,6 +923,37 @@ def _coerce_dict_arg(
             raise ExpectedToolError(msg) from None
         return decoded
     return value
+
+
+#: Fragments of a ``list-*`` failure that mean "no server is running here".
+#: That is a normal, empty state for a socket nobody started; any other
+#: failure (permission denied, a server that died mid-call) is not.
+_NO_SERVER_MARKERS = (
+    "no server running",
+    "No such file or directory",
+    "Connection refused",
+)
+
+
+def _list_objects(fetch: t.Callable[[], list[t.Any]]) -> QueryList[t.Any]:
+    """Run one of libtmux's strict ``fetch_*`` listings as a ``QueryList``.
+
+    ``Server.sessions`` and friends return an empty list when tmux cannot be
+    asked, so a socket the user may not open looks like a server with
+    nothing on it. A socket with no server behind it is still empty here;
+    every other failure raises.
+
+    Raises
+    ------
+    libtmux.exc.ListCommandFailed
+        When tmux fails for a reason other than "no server is running".
+    """
+    try:
+        return QueryList(fetch())
+    except exc.ListCommandFailed as e:
+        if any(marker in str(e) for marker in _NO_SERVER_MARKERS):
+            return QueryList([])
+        raise
 
 
 def _apply_filters(

@@ -32,6 +32,14 @@ scrollback of the new session's panes before a long job starts.
 
 ### Fixes
 
+**A socket tmux cannot open is an error, not an empty list**
+
+`list_sessions`, `list_windows` and `list_panes` used to answer `[]` when tmux
+could not be asked at all, such as a socket without read permission, so an
+agent concluded there was nothing to attach to. They now fail with the tmux
+message and a hint, and keep returning `[]` for a socket with no server behind
+it.
+
 **`capture_since` reports a flood that scrolls the cursor out of a full history**
 
 When a burst of output fills the scrollback and discards the row the cursor

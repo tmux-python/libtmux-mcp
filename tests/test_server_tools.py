@@ -505,3 +505,44 @@ def test_create_session_history_limit_reaches_the_pane(mcp_server: Server) -> No
     pane = session.active_pane
     assert pane is not None
     assert pane.display_message("#{history_limit}", get_text=True) == ["123"]
+
+
+def test_list_tools_treat_a_socket_without_a_server_as_empty() -> None:
+    """A socket nobody started lists nothing instead of failing."""
+    from libtmux_mcp.tools.server_tools import list_sessions
+    from libtmux_mcp.tools.session_tools import list_windows
+    from libtmux_mcp.tools.window_tools import list_panes
+
+    socket_name = "libtmux_mcp_never_started"
+    assert list_sessions(socket_name=socket_name) == []
+    assert list_windows(socket_name=socket_name) == []
+    assert list_panes(socket_name=socket_name) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_list_sessions_reports_a_socket_it_cannot_open(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable socket is an error, not an empty server.
+
+    ``Server.sessions`` answers ``[]`` here, so an agent would conclude there
+    is nothing to attach to and create a duplicate workspace.
+    """
+    from fastmcp.exceptions import ToolError
+
+    from libtmux_mcp._utils import _server_cache
+    from libtmux_mcp.tools.server_tools import list_sessions
+
+    socket_dir = tmp_path / f"tmux-{os.geteuid()}"
+    socket_dir.mkdir()
+    (socket_dir / "locked").touch()
+    socket_dir.chmod(0o000)
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
+    _server_cache.clear()
+    try:
+        with pytest.raises(ToolError, match="Permission denied") as excinfo:
+            list_sessions(socket_name="locked")
+        assert "unreachable" in (getattr(excinfo.value, "suggestion", None) or "")
+    finally:
+        socket_dir.chmod(0o700)
+        _server_cache.clear()

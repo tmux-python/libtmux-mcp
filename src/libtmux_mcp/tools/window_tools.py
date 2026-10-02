@@ -20,6 +20,7 @@ from libtmux_mcp._utils import (
     _escape_tmux_format,
     _get_caller_identity,
     _get_server,
+    _list_objects,
     _prepare_start_directory,
     _resolve_pane,
     _resolve_session,
@@ -97,7 +98,7 @@ def list_panes(
         )
         panes = session.panes
     else:
-        panes = server.panes
+        panes = _list_objects(server.fetch_panes)
     return _apply_filters(panes, filters, _serialize_pane)
 
 

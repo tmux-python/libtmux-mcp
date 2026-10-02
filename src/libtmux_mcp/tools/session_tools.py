@@ -20,6 +20,7 @@ from libtmux_mcp._utils import (
     _escape_tmux_format,
     _get_caller_identity,
     _get_server,
+    _list_objects,
     _prepare_start_directory,
     _resolve_session,
     _serialize_session,
@@ -71,7 +72,7 @@ def list_windows(
         )
         windows = session.windows
     else:
-        windows = server.windows
+        windows = _list_objects(server.fetch_windows)
     return _apply_filters(windows, filters, _serialize_window)
 
 

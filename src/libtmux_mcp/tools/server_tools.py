@@ -24,6 +24,7 @@ from libtmux_mcp._utils import (
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _list_objects,
     _prepare_start_directory,
     _serialize_session,
     handle_tool_errors,
@@ -62,7 +63,7 @@ def list_sessions(
         List of session objects.
     """
     server = _get_server(socket_name=socket_name)
-    sessions = server.sessions
+    sessions = _list_objects(server.fetch_sessions)
     return _apply_filters(sessions, filters, _serialize_session)
 
 
