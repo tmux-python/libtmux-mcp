@@ -39,7 +39,7 @@ def test_spawn_tool_signatures_preserve_positional_slots() -> None:
                 "environment",
                 "socket_name",
             ),
-            ("suppress_persistent_history",),
+            ("suppress_persistent_history", "if_exists", "history_limit"),
         ),
         create_window: (
             (

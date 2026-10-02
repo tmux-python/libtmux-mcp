@@ -6,8 +6,11 @@
 **Use when** you need a new isolated workspace. Sessions are the top-level
 container — create one before creating windows or panes.
 
-**Avoid when** a session with the target name already exists — check with
-{tooliconl}`list-sessions` first, or the command will fail.
+**Avoid when** a session with the target name may already exist and you do
+not want an error. Pass `if_exists="reuse"` to get that session back instead of
+checking {tooliconl}`list-sessions` first; the name is matched exactly and the
+check cannot race another client. A reused session ignores every other
+creation option.
 
 **Side effects:** Creates a new tmux session with one window and one pane.
 

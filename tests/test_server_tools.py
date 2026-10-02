@@ -459,3 +459,49 @@ def test_list_servers_extra_socket_paths_skips_nonexistent(
         extra_socket_paths=[str(bogus), str(regular_file)],
     )
     assert results == []
+
+
+def test_create_session_reuse_returns_the_existing_session(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """``if_exists="reuse"`` is get-or-create on the exact name."""
+    name = mcp_session.session_name
+    assert name is not None
+
+    again = create_session(
+        session_name=name,
+        if_exists="reuse",
+        socket_name=mcp_server.socket_name,
+    )
+    assert again.session_id == mcp_session.session_id
+
+    # A prefix of an existing name is a different session.
+    prefix = create_session(
+        session_name=name[:-1],
+        if_exists="reuse",
+        socket_name=mcp_server.socket_name,
+    )
+    assert prefix.session_id != mcp_session.session_id
+    assert prefix.session_name == name[:-1]
+
+
+def test_create_session_reuse_requires_a_name(mcp_server: Server) -> None:
+    """Reuse without a name has nothing to match, so it is refused."""
+    from fastmcp.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="requires session_name"):
+        create_session(if_exists="reuse", socket_name=mcp_server.socket_name)
+
+
+def test_create_session_history_limit_reaches_the_pane(mcp_server: Server) -> None:
+    """``history_limit`` sets the scrollback of the new session's pane."""
+    info = create_session(
+        session_name="mcp_history_limit",
+        history_limit=123,
+        socket_name=mcp_server.socket_name,
+    )
+    session = mcp_server.sessions.get(session_id=info.session_id)
+    assert session is not None
+    pane = session.active_pane
+    assert pane is not None
+    assert pane.display_message("#{history_limit}", get_text=True) == ["123"]

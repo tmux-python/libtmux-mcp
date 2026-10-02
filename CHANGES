@@ -17,6 +17,13 @@ marker to be read. A process still running at the timeout comes back with
 `timed_out=true`. The pane stays on screen, dead, so `capture_pane` can read its
 output.
 
+**`create_session` can reuse a session and set its scrollback**
+
+`create_session(session_name=..., if_exists="reuse")` returns the session of
+that exact name when it exists and creates it otherwise, so an agent no longer
+lists sessions first and races another client. `history_limit` sets the
+scrollback of the new session's panes before a long job starts.
+
 ### Fixes
 
 **`capture_since` reports a flood that scrolls the cursor out of a full history**

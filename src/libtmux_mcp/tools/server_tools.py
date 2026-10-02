@@ -77,12 +77,18 @@ def create_session(
     socket_name: str | None = None,
     *,
     suppress_persistent_history: bool = False,
+    if_exists: t.Literal["error", "reuse"] = "error",
+    history_limit: int | None = None,
 ) -> SessionInfo:
-    """Create a new tmux session.
+    """Create a new tmux session, or reuse one of the same name.
 
-    Check list_sessions first to avoid name conflicts. A new session
-    starts with one window and one pane. Values in ``environment`` are stored
-    in the tmux session environment, so future panes inherit them too.
+    A new session starts with one window and one pane. Pass
+    ``if_exists="reuse"`` with a ``session_name`` to get that session
+    back when it already exists, instead of an error. The name is matched
+    exactly (``dev`` never returns ``dev2``) and the check is race-free.
+    A reused session is returned as it is: every other creation option is
+    ignored. Values in ``environment`` are stored in the tmux session
+    environment, so future panes inherit them too.
 
     Parameters
     ----------
@@ -115,11 +121,19 @@ def create_session(
         to False for MCP and direct Python calls. This per-call option does not
         inherit LIBTMUX_SUPPRESS_HISTORY. Startup files may override these
         controls.
+    if_exists : {"error", "reuse"}
+        What to do when ``session_name`` is already taken. ``"error"``
+        (default) fails; ``"reuse"`` returns the existing session and
+        requires ``session_name``, without ``#`` in it.
+    history_limit : int, optional
+        Scrollback lines for the panes of the new session. Raise it before
+        starting a long job whose output ``capture_since`` must keep up
+        with; a flood past the limit reports ``lines_missed``.
 
     Returns
     -------
     SessionInfo
-        The created session.
+        The created (or reused) session.
     """
     spawn_environment = _prepare_spawn_environment(
         environment,
@@ -140,6 +154,23 @@ def create_session(
         kwargs["y"] = y
     if spawn_environment is not None:
         kwargs["environment"] = spawn_environment
+    if history_limit is not None:
+        if history_limit < 0:
+            msg = "history_limit must not be negative"
+            raise ExpectedToolError(msg)
+        kwargs["history_limit"] = history_limit
+    if if_exists == "reuse":
+        if session_name is None:
+            msg = "if_exists='reuse' requires session_name"
+            raise ExpectedToolError(msg)
+        if "#" in session_name:
+            msg = "if_exists='reuse' does not support '#' in session_name"
+            raise ExpectedToolError(msg)
+        kwargs.pop("session_name")
+        return _serialize_session(server.ensure_session(session_name, **kwargs))
+    if if_exists != "error":
+        msg = "if_exists must be 'error' or 'reuse'"
+        raise ExpectedToolError(msg)
     session = server.new_session(**kwargs)
     return _serialize_session(session)
 
