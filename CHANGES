@@ -17,6 +17,12 @@ marker to be read. A process still running at the timeout comes back with
 `timed_out=true`. The pane stays on screen, dead, so `capture_pane` can read its
 output.
 
+**`split_window_many` adds several panes and keeps the layout**
+
+`split_window_many` adds `count` panes (1 to 64) to a window and re-applies a
+layout after each split, so a fan-out of workers no longer stops at "no space
+for new pane" in a small window.
+
 **`create_session` can reuse a session and set its scrollback**
 
 `create_session(session_name=..., if_exists="reuse")` returns the session of

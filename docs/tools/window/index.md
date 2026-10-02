@@ -17,6 +17,10 @@ Read metadata for one window.
 Split a window into a new pane.
 :::
 
+:::{grid-item-card} {tooliconl}`split-window-many`
+Add several panes at once, keeping a layout applied.
+:::
+
 :::{grid-item-card} {tooliconl}`rename-window`
 Rename an existing window.
 :::
@@ -46,6 +50,7 @@ Terminate a window. Not reversible.
 list-panes
 get-window-info
 split-window
+split-window-many
 rename-window
 select-layout
 resize-window

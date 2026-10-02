@@ -806,10 +806,11 @@ _TMUX_QUALIFIED_TOOLS = frozenset(
         "rename_session",
         "kill_session",
         "select_window",
-        # 8 window-level
+        # 9 window-level
         "list_panes",
         "get_window_info",
         "split_window",
+        "split_window_many",
         "rename_window",
         "kill_window",
         "select_layout",

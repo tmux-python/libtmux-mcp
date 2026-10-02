@@ -84,6 +84,7 @@ EXPECTED_TOOLS_BY_TOOLSET = {
             "set_environment",
             "set_option",
             "split_window",
+            "split_window_many",
         }
     ),
     TOOLSET_TEARDOWN: frozenset(

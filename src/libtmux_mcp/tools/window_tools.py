@@ -256,6 +256,100 @@ def split_window(
     return _serialize_pane(new_pane)
 
 
+#: Most panes one ``split_window_many`` call adds. A window that cannot hold
+#: them fails at tmux's own limit; this stops a typo from asking for thousands.
+_SPLIT_MANY_MAX_COUNT = 64
+
+
+@handle_tool_errors
+def split_window_many(
+    count: int,
+    session_name: str | None = None,
+    session_id: str | None = None,
+    window_id: str | None = None,
+    window_index: str | None = None,
+    layout: str = "tiled",
+    start_directory: str | None = None,
+    shell: str | None = None,
+    socket_name: str | None = None,
+    *,
+    environment: dict[str, str] | str | None = None,
+    suppress_persistent_history: bool = False,
+) -> list[PaneInfo]:
+    """Add ``count`` panes to a window, keeping a layout applied throughout.
+
+    Use to fan work out across several panes at once, for example one
+    worker per pane. Splitting halves a pane, so a window runs out of room
+    after a few ``split_window`` calls with "no space for new pane"; this
+    re-applies ``layout`` after every split so the window keeps room.
+    Returns the new panes in creation order.
+
+    Parameters
+    ----------
+    count : int
+        Number of panes to add, 1 to 64.
+    session_name : str, optional
+        Session name.
+    session_id : str, optional
+        Session ID (e.g. '$1').
+    window_id : str, optional
+        Window ID (e.g. '@1').
+    window_index : str, optional
+        Window index within the session.
+    layout : str
+        Layout kept applied: ``tiled`` (default), ``even-horizontal``,
+        ``even-vertical``, ``main-horizontal`` or ``main-vertical``.
+    start_directory : str, optional
+        Existing directory to start every new pane in. ``~`` expands; a
+        relative path resolves against the MCP server process's directory.
+    shell : str, optional
+        Shell command to run in every new pane.
+    socket_name : str, optional
+        tmux socket name.
+    environment : dict or str, optional
+        Per-process environment for every new pane, as a mapping or JSON
+        object string. Values may be visible to host process inspection in
+        the tmux client argv during launch and in the child environment
+        afterward; MCP audit redaction does not hide either surface. Pass
+        credential references, not literal credentials.
+    suppress_persistent_history : bool
+        Whether to suppress persistent history for the spawned shells.
+        Defaults to False. This per-call option does not inherit
+        LIBTMUX_SUPPRESS_HISTORY.
+
+    Returns
+    -------
+    list[PaneInfo]
+        The new panes, in creation order.
+    """
+    if not 1 <= count <= _SPLIT_MANY_MAX_COUNT:
+        msg = f"count must be between 1 and {_SPLIT_MANY_MAX_COUNT} (received {count})"
+        raise ExpectedToolError(msg)
+    spawn_environment = _prepare_spawn_environment(
+        environment,
+        suppress_persistent_history=suppress_persistent_history,
+    )
+    server = _get_server(socket_name=socket_name)
+    window = _resolve_window(
+        server,
+        window_id=window_id,
+        window_index=window_index,
+        session_name=session_name,
+        session_id=session_id,
+    )
+    try:
+        panes = window.split_many(
+            count,
+            layout=layout,
+            start_directory=_prepare_start_directory(start_directory),
+            shell=shell,
+            environment=spawn_environment,
+        )
+    except ValueError as e:
+        raise ExpectedToolError(str(e)) from e
+    return [_serialize_pane(pane) for pane in panes]
+
+
 @handle_tool_errors
 def rename_window(
     new_name: str,
@@ -514,6 +608,11 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_EXECUTE},
     )(split_window)
+    mcp.tool(
+        title="Split tmux Window Many",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_EXECUTE},
+    )(split_window_many)
     mcp.tool(
         title="Rename tmux Window",
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,

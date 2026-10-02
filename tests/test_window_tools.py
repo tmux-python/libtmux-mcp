@@ -18,6 +18,7 @@ from libtmux_mcp.tools.window_tools import (
     resize_window,
     select_layout,
     split_window,
+    split_window_many,
 )
 
 if t.TYPE_CHECKING:
@@ -381,3 +382,43 @@ def test_kill_window(mcp_server: Server, mcp_session: Session) -> None:
         socket_name=mcp_server.socket_name,
     )
     assert "killed" in result.lower()
+
+
+def test_split_window_many_adds_panes_in_a_small_window(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """Six splits fit in a window that rejects them without a layout in between."""
+    window = mcp_session.active_window
+    window.resize(height=24, width=80)
+
+    result = split_window_many(
+        count=6,
+        window_id=window.window_id,
+        socket_name=mcp_server.socket_name,
+    )
+
+    assert len(result) == 6
+    assert len({pane.pane_id for pane in result}) == 6
+    window.refresh()
+    assert len(window.panes) == 7
+    assert window.window_layout is not None
+
+
+def test_split_window_many_refuses_bad_count_and_layout(
+    mcp_server: Server, mcp_session: Session
+) -> None:
+    """A count out of range and an unknown layout are agent-correctable errors."""
+    from fastmcp.exceptions import ToolError
+
+    window_id = mcp_session.active_window.window_id
+    with pytest.raises(ToolError, match="count must be between"):
+        split_window_many(
+            count=0, window_id=window_id, socket_name=mcp_server.socket_name
+        )
+    with pytest.raises(ToolError):
+        split_window_many(
+            count=2,
+            window_id=window_id,
+            layout="not-a-layout",
+            socket_name=mcp_server.socket_name,
+        )

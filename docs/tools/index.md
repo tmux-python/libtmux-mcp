@@ -36,6 +36,7 @@ leave socket selection inside each nested tool's arguments. See
 - New session → {tool}`create-session`
 - New window → {tool}`create-window`
 - New pane → {tool}`split-window`
+- Several panes at once (one per worker) → {tool}`split-window-many`
 
 **Navigating?**
 - Switch pane → {tool}`select-pane` (by ID or direction)
@@ -350,6 +351,12 @@ Add a window to a session.
 :link: split-window
 :link-type: ref
 Split a window into panes.
+:::
+
+:::{grid-item-card} split_window_many
+:link: split-window-many
+:link-type: ref
+Add several panes at once, keeping a layout applied.
 :::
 
 :::{grid-item-card} send_keys
