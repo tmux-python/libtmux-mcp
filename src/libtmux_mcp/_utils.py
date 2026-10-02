@@ -515,12 +515,10 @@ def _prepare_start_directory(start_directory: str | None) -> str | None:
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
     """Build a full tmux argv list honouring ``socket_name`` and ``socket_path``.
 
-    Internal helper shared by every module that has to invoke the tmux
-    binary directly via :func:`subprocess.run` (the buffer, wait-for,
-    and paste_text tools). libtmux's own :meth:`libtmux.Server.cmd` wraps the
-    same logic but does not expose a timeout, so tools that need
-    bounded blocking have to shell out themselves — and when they do
-    they must honour the caller's socket.
+    Only for the calls ``Server.cmd`` cannot make: killable async children
+    (the waits, :mod:`libtmux_mcp._tmux_proc`) and ``show-buffer``, whose
+    exact bytes libtmux's line-split result drops. Everything else goes
+    through :func:`_tmux_call`.
 
     Parameters
     ----------
@@ -558,6 +556,50 @@ def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
         argv.extend(["-S", str(server.socket_path)])
     argv.extend(tmux_args)
     return argv
+
+
+def _tmux_call(
+    server: Server,
+    *args: str,
+    label: str,
+    subject: str,
+    timeout: float = 5.0,
+    input: str | None = None,  # noqa: A002
+) -> list[str]:
+    """Run one bounded tmux command and return its stdout lines.
+
+    libtmux kills the client when ``timeout`` expires, so an unresponsive
+    server cannot pin the caller. A non-empty stderr is an error.
+
+    Parameters
+    ----------
+    server : libtmux.server.Server
+        The resolved server.
+    *args : str
+        tmux subcommand and its arguments.
+    label : str
+        Command name for error text, e.g. ``"load-buffer"``.
+    subject : str
+        What the command acted on, appended to the timeout message.
+    timeout : float
+        Seconds before the tmux client is killed.
+    input : str, optional
+        Text sent on the client's standard input.
+
+    Raises
+    ------
+    ExpectedToolError
+        On timeout or when tmux reports an error.
+    """
+    try:
+        proc = server.cmd(*args, timeout=timeout, input=input)
+    except exc.TmuxTimeout as e:
+        msg = f"{label} timeout after {timeout:g}s for {subject}"
+        raise ExpectedToolError(msg) from e
+    if proc.stderr:
+        msg = f"{label} failed for {subject}: {' '.join(proc.stderr).strip()}"
+        raise ExpectedToolError(msg)
+    return list(proc.stdout)
 
 
 _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}

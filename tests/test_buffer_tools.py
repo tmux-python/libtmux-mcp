@@ -229,27 +229,33 @@ def test_show_buffer_no_truncation_under_cap(mcp_server: Server) -> None:
     ],
 )
 @pytest.mark.usefixtures("mcp_session")
-def test_buffer_subprocess_timeout_surfaces_as_tool_error(
+def test_buffer_timeout_surfaces_as_tool_error(
     mcp_server: Server,
     monkeypatch: pytest.MonkeyPatch,
     tool_name: str,
     match_text: str,
 ) -> None:
-    """Hung tmux raises ``TimeoutExpired`` → clear ``ToolError``.
+    """Hung tmux raises ``TmuxTimeout`` → clear ``ToolError``.
 
-    Regression guard: previously each buffer tool caught only
-    ``CalledProcessError``, so a ``subprocess.TimeoutExpired`` from the
-    5-second cap would escape through ``handle_tool_errors`` and
-    surface as a generic ``"Unexpected error: TimeoutExpired"``. The
-    new per-tool handler reports the operation name, the 5-second
-    cap, and the target buffer name.
+    The error names the operation, the 5-second cap, and the target buffer
+    rather than surfacing as ``"Unexpected error"``.
     """
     import subprocess
 
-    def _hang(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+    from libtmux import Server as LibtmuxServer, exc as libtmux_exc
+
+    def _hang(*args: object, **kwargs: object) -> t.NoReturn:
+        raise libtmux_exc.TmuxTimeout(cmd=["tmux"], timeout=5.0)
+
+    def _hang_subprocess(*args: object, **kwargs: object) -> t.NoReturn:
         raise subprocess.TimeoutExpired(cmd="tmux", timeout=5.0)
 
-    monkeypatch.setattr("libtmux_mcp.tools.buffer_tools.subprocess.run", _hang)
+    monkeypatch.setattr(LibtmuxServer, "cmd", _hang)
+    # show_buffer reads raw bytes, which libtmux's line-split result cannot
+    # carry, so it still runs tmux directly.
+    monkeypatch.setattr(
+        "libtmux_mcp.tools.buffer_tools.subprocess.run", _hang_subprocess
+    )
 
     tools: dict[str, t.Callable[..., t.Any]] = {
         "load_buffer": load_buffer,

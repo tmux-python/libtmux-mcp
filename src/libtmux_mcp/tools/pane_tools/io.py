@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import pathlib
 import re
 import shlex
-import subprocess
-import tempfile
 import time
 import typing as t
 import uuid
 
 from fastmcp.exceptions import ToolError
+from libtmux import exc
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
 from libtmux_mcp._utils import (
@@ -50,28 +48,6 @@ def _remaining_timeout(deadline: float, timeout: float) -> float:
     return remaining
 
 
-def _run_timed_send_keys_argv(
-    argv: list[str],
-    *,
-    deadline: float,
-    timeout: float,
-) -> None:
-    """Run one ``tmux send-keys`` argv within the batch deadline."""
-    try:
-        subprocess.run(
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=_remaining_timeout(deadline, timeout),
-        )
-    except subprocess.TimeoutExpired as e:
-        raise ExpectedToolError(_batch_timeout_error(timeout)) from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"send-keys failed: {stderr or e}"
-        raise ExpectedToolError(msg) from e
-
-
 def _run_timed_send_keys(
     pane: Pane,
     operation: SendKeysOperation,
@@ -79,23 +55,33 @@ def _run_timed_send_keys(
     deadline: float,
     timeout: float,
 ) -> None:
-    """Run ``tmux send-keys`` for one operation within the batch deadline."""
+    """Run ``tmux send-keys`` for one operation within the batch deadline.
+
+    ``Pane.send_keys`` takes no ``timeout``, so this builds the same argv
+    (``--`` before the text, a trailing ``;`` escaped) and bounds each
+    command through ``Pane.cmd(timeout=)``.
+    """
     pane_id = pane.pane_id
     if pane_id is None:
         msg = "resolved pane has no pane_id"
         raise ExpectedToolError(msg)
 
-    tmux_args = ["send-keys", "-t", pane_id]
-    if operation.literal:
-        tmux_args.append("-l")
-    tmux_args.append((" " if operation.suppress_history else "") + operation.keys)
-
-    send_argvs = [_tmux_argv(pane.server, *tmux_args)]
+    text = (" " if operation.suppress_history else "") + operation.keys
+    if text.endswith(";"):
+        text = f"{text[:-1]}\\;"
+    flags = ["-l"] if operation.literal else []
+    commands = [("send-keys", *flags, "--", text)]
     if operation.enter:
-        send_argvs.append(_tmux_argv(pane.server, "send-keys", "-t", pane_id, "Enter"))
+        commands.append(("send-keys", "Enter"))
 
-    for argv in send_argvs:
-        _run_timed_send_keys_argv(argv, deadline=deadline, timeout=timeout)
+    for args in commands:
+        try:
+            proc = pane.cmd(*args, timeout=_remaining_timeout(deadline, timeout))
+        except exc.TmuxTimeout as e:
+            raise ExpectedToolError(_batch_timeout_error(timeout)) from e
+        if proc.stderr:
+            msg = f"send-keys failed: {' '.join(proc.stderr).strip()}"
+            raise ExpectedToolError(msg)
 
 
 @handle_tool_errors
@@ -767,45 +753,5 @@ def paste_text(
         window_id=window_id,
     )
 
-    # Use a unique named tmux buffer so we don't clobber the user's
-    # unnamed paste buffer, and so we can reliably clean up on error
-    # paths (paste-buffer -b NAME -d deletes the named buffer). The
-    # shape matches ``buffer_tools._BUFFER_NAME_RE`` exactly —
-    # ``libtmux_mcp_<32-hex>_<logical>`` — so a future operator-facing
-    # listing of MCP-owned buffers sees paste-through buffers and
-    # ``load_buffer`` buffers uniformly under one regex.
-    buffer_name = f"libtmux_mcp_{uuid.uuid4().hex}_paste"
-    tmppath: str | None = None
-    try:
-        # Write text to a temp file and load into tmux buffer
-        # (libtmux's cmd() doesn't support stdin).
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            tmppath = f.name  # bind first so cleanup works even if write fails
-            f.write(text)
-
-        load_args = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
-
-        try:
-            subprocess.run(load_args, check=True, capture_output=True, timeout=5.0)
-        except subprocess.TimeoutExpired as e:
-            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
-            raise ExpectedToolError(msg) from e
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-            msg = f"load-buffer failed: {stderr or e}"
-            raise ExpectedToolError(msg) from e
-
-        # Paste from the named buffer. ``delete_after=True`` (``-d``)
-        # deletes only that named buffer, leaving any unnamed user
-        # buffer intact.
-        pane.paste_buffer(buffer_name=buffer_name, bracket=bracket, delete_after=True)
-    finally:
-        if tmppath is not None:
-            pathlib.Path(tmppath).unlink(missing_ok=True)
-        # Defensive: the buffer should already be gone (paste-buffer -d
-        # deletes it), but if paste-buffer failed before -d took effect
-        # we leak an entry in the tmux server. Best-effort delete.
-        with contextlib.suppress(Exception):
-            server.delete_buffer(buffer_name=buffer_name)
-
+    pane.paste_text(text, bracket=bracket)
     return f"Text pasted to pane {pane.pane_id}"

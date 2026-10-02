@@ -809,12 +809,13 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
 ) -> None:
     """Timed batches preserve raw bytes and send Enter separately.
 
-    Timed batches bypass ``Pane.send_keys``, so subprocess interception at the
-    pre-PTY argv boundary is required to expose prefixes and Enter coalescing.
+    Timed batches bypass ``Pane.send_keys``, so interception at ``Pane.cmd``
+    (the pre-PTY boundary) is required to expose prefixes and Enter
+    coalescing.
     """
     from libtmux_mcp.tools.pane_tools import io
 
-    calls: list[list[str]] = []
+    calls: list[tuple[str, ...]] = []
 
     class FakeServer:
         tmux_bin = "tmux"
@@ -825,14 +826,14 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
         pane_id = "%1"
         server = FakeServer()
 
-    def _run(argv: list[str], **kwargs: t.Any) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0)
+        def cmd(self, *args: str, timeout: float | None = None) -> t.Any:
+            assert timeout is not None
+            calls.append(args)
+            return types.SimpleNamespace(stderr=[])
 
     pane = FakePane()
     monkeypatch.setattr(io, "_get_server", lambda **kwargs: FakeServer())
     monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", _run)
 
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
@@ -862,11 +863,11 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
     asyncio.run(_exercise())
 
     assert calls == [
-        ["tmux", "send-keys", "-t", "%1", "C-c"],
-        ["tmux", "send-keys", "-t", "%1", "-l", "TUI_BATCH_DEFAULT"],
-        ["tmux", "send-keys", "-t", "%1", "Enter"],
-        ["tmux", "send-keys", "-t", "%1", "-l", " batch-secret"],
-        ["tmux", "send-keys", "-t", "%1", "Enter"],
+        ("send-keys", "--", "C-c"),
+        ("send-keys", "-l", "--", "TUI_BATCH_DEFAULT"),
+        ("send-keys", "Enter"),
+        ("send-keys", "-l", "--", " batch-secret"),
+        ("send-keys", "Enter"),
     ]
 
 
@@ -875,13 +876,13 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
 ) -> None:
     """Paste tools preserve exact text and their existing buffer semantics.
 
-    Subprocess and fake-pane interception observe the staged payload and paste
-    call at the pre-PTY boundary, before tmux can obscure an inherited prefix.
+    Fake-pane interception observes the pasted payload and paste call at the
+    pre-PTY boundary, before tmux can obscure an inherited prefix.
     """
     from libtmux_mcp.tools import buffer_tools
     from libtmux_mcp.tools.pane_tools import io
 
-    loaded_text: list[str] = []
+    pasted_text_calls: list[tuple[str, bool]] = []
     paste_calls: list[tuple[str, bool, bool]] = []
 
     class FakeServer:
@@ -895,6 +896,9 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
     class FakePane:
         pane_id = "%1"
 
+        def paste_text(self, text: str, *, bracket: bool = True) -> None:
+            pasted_text_calls.append((text, bracket))
+
         def paste_buffer(
             self,
             *,
@@ -904,16 +908,10 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
         ) -> None:
             paste_calls.append((buffer_name, bracket, delete_after))
 
-    def _run(argv: list[str], **kwargs: t.Any) -> subprocess.CompletedProcess[str]:
-        if "load-buffer" in argv:
-            loaded_text.append(pathlib.Path(argv[-1]).read_text())
-        return subprocess.CompletedProcess(argv, 0)
-
     server = FakeServer()
     pane = FakePane()
     monkeypatch.setattr(io, "_get_server", lambda **kwargs: server)
     monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", _run)
     monkeypatch.setattr(buffer_tools, "_get_server", lambda **kwargs: server)
     monkeypatch.setattr(buffer_tools, "_resolve_pane", lambda *args, **kwargs: pane)
 
@@ -937,10 +935,8 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
 
     asyncio.run(_exercise())
 
-    assert loaded_text == [raw_text]
-    assert len(paste_calls) == 2
-    assert paste_calls[0][1:] == (False, True)
-    assert paste_calls[1] == (existing_buffer, True, False)
+    assert pasted_text_calls == [(raw_text, False)]
+    assert paste_calls == [(existing_buffer, True, False)]
 
 
 @pytest.mark.parametrize(

@@ -27,10 +27,8 @@ agent. Callers track the buffers they own via the
 
 from __future__ import annotations
 
-import pathlib
 import re
 import subprocess
-import tempfile
 import typing as t
 import uuid
 
@@ -44,6 +42,7 @@ from libtmux_mcp._utils import (
     _get_server,
     _resolve_pane,
     _tmux_argv,
+    _tmux_call,
     handle_tool_errors,
 )
 from libtmux_mcp.models import BufferContent, BufferRef
@@ -210,24 +209,16 @@ def load_buffer(
     """
     server = _get_server(socket_name=socket_name)
     buffer_name = _allocate_buffer_name(logical_name)
-    tmppath: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            tmppath = f.name
-            f.write(content)
-        argv = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
-        try:
-            subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
-        except subprocess.TimeoutExpired as e:
-            msg = f"load-buffer timeout after 5s for {buffer_name!r}"
-            raise ExpectedToolError(msg) from e
-        except subprocess.CalledProcessError as e:
-            stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-            msg = f"load-buffer failed: {stderr or e}"
-            raise ExpectedToolError(msg) from e
-    finally:
-        if tmppath is not None:
-            pathlib.Path(tmppath).unlink(missing_ok=True)
+    _tmux_call(
+        server,
+        "load-buffer",
+        "-b",
+        buffer_name,
+        "-",
+        input=content,
+        label="load-buffer",
+        subject=repr(buffer_name),
+    )
     return BufferRef(buffer_name=buffer_name, logical_name=logical_name)
 
 
@@ -364,16 +355,14 @@ def delete_buffer(
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_buffer_name(buffer_name)
-    argv = _tmux_argv(server, "delete-buffer", "-b", cname)
-    try:
-        subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
-    except subprocess.TimeoutExpired as e:
-        msg = f"delete-buffer timeout after 5s for {cname!r}"
-        raise ExpectedToolError(msg) from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"delete-buffer failed for {cname!r}: {stderr or e}"
-        raise ExpectedToolError(msg) from e
+    _tmux_call(
+        server,
+        "delete-buffer",
+        "-b",
+        cname,
+        label="delete-buffer",
+        subject=repr(cname),
+    )
     return f"Buffer {cname!r} deleted"
 
 

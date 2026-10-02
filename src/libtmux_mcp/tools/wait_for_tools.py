@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import subprocess
 import typing as t
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
@@ -48,6 +47,7 @@ from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
     _tmux_argv,
+    _tmux_call,
     handle_tool_errors_async,
 )
 from libtmux_mcp._wait_policy import _wait_ceiling_seconds
@@ -281,33 +281,19 @@ async def signal_channel(
     """
     server = _get_server(socket_name=socket_name)
     cname = _validate_channel_name(channel)
-    argv = _tmux_argv(server, "wait-for", "-S", cname)
-    # Deliberately still a worker thread, unlike every other tmux call
-    # in this package. The orphan-on-cancel defect that pushed the
-    # waits onto ``_run_tmux_bounded`` needs a child that blocks for a
-    # caller-chosen duration; ``wait-for -S`` does not block, so the
-    # worst case here is a 5 s child
-    # against an already-wedged tmux — and that bound is ours, not the
-    # caller's. Converting it would buy nothing and change this tool's
-    # error messages.
-    try:
-        await asyncio.to_thread(
-            subprocess.run,
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=_SIGNAL_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as e:
-        msg = (
-            f"signal-channel timeout after {_SIGNAL_TIMEOUT_SECONDS}s: "
-            f"channel {cname!r}"
-        )
-        raise ExpectedToolError(msg) from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"signal-channel failed for channel {cname!r}: {stderr or e}"
-        raise ExpectedToolError(msg) from e
+    # A worker thread is safe here, unlike for the waits: ``wait-for -S``
+    # does not block, and libtmux kills the client when the 5 s bound
+    # expires, so a cancelled call leaves no child behind.
+    await asyncio.to_thread(
+        _tmux_call,
+        server,
+        "wait-for",
+        "-S",
+        cname,
+        label="signal-channel",
+        subject=f"channel {cname!r}",
+        timeout=_SIGNAL_TIMEOUT_SECONDS,
+    )
     return f"Channel {cname!r} signalled"
 
 

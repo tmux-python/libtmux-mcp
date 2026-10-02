@@ -6,8 +6,8 @@ import contextlib
 import os
 import pathlib
 import shlex
-import subprocess
 import time
+import types
 import typing as t
 
 import pydantic
@@ -392,24 +392,21 @@ def test_send_keys_batch_timeout(
 ) -> None:
     """send_keys_batch aborts if execution exceeds timeout."""
     assert test_id
+    from libtmux import Pane as LibtmuxPane, exc as libtmux_exc
+
     from libtmux_mcp.models import SendKeysOperation
     from libtmux_mcp.tools.pane_tools import send_keys_batch
 
     call_count = 0
 
-    def timed_send_keys(
-        *args: t.Any, **kwargs: t.Any
-    ) -> subprocess.CompletedProcess[str]:
+    def timed_cmd(*args: t.Any, **kwargs: t.Any) -> t.Any:
         nonlocal call_count
         call_count += 1
         if call_count == 3:
-            raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0)
+            raise libtmux_exc.TmuxTimeout(cmd=["tmux", "send-keys"], timeout=timeout)
+        return types.SimpleNamespace(stderr=[])
 
-    monkeypatch.setattr(
-        "libtmux_mcp.tools.pane_tools.io.subprocess.run",
-        timed_send_keys,
-    )
+    monkeypatch.setattr(LibtmuxPane, "cmd", timed_cmd)
 
     op_models = []
     for op in operations:
@@ -444,19 +441,16 @@ def test_send_keys_batch_timeout_bounds_in_progress_send(
 ) -> None:
     """send_keys_batch fails a send that blocks past the batch timeout."""
     assert test_id
-    from libtmux import Pane
+    from libtmux import Pane, exc as libtmux_exc
 
     from libtmux_mcp.models import SendKeysOperation
     from libtmux_mcp.tools.pane_tools import send_keys_batch
 
-    def stalled_send_keys(*args: t.Any, **kwargs: t.Any) -> None:
+    def timed_out_cmd(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
         time.sleep(blocked_seconds)
+        raise libtmux_exc.TmuxTimeout(cmd=["tmux", "send-keys"], timeout=timeout)
 
-    def timed_out_run(*args: t.Any, **kwargs: t.Any) -> t.NoReturn:
-        raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
-
-    monkeypatch.setattr(Pane, "send_keys", stalled_send_keys)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", timed_out_run)
+    monkeypatch.setattr(Pane, "cmd", timed_out_cmd)
 
     result = send_keys_batch(
         operations=[
@@ -5659,3 +5653,45 @@ def test_wait_for_text_survives_a_context_with_no_session(
 
     assert result.found is False
     assert result.outcome == "timeout"
+
+
+@pytest.mark.parametrize("timeout", [None, 5.0], ids=["untimed", "timed"])
+def test_send_keys_batch_sends_dash_and_semicolon_text_verbatim(
+    mcp_server: Server,
+    mcp_pane: Pane,
+    timeout: float | None,
+) -> None:
+    """Text that starts with ``-`` or ends with ``;`` reaches the pane intact.
+
+    tmux reads a leading ``-`` as a flag and drops a trailing ``;``. The
+    untimed path gets the fix from ``Pane.send_keys``; the timed path builds
+    its own argv and must apply the same ``--`` and escape.
+    """
+    from libtmux_mcp.models import SendKeysOperation
+    from libtmux_mcp.tools.pane_tools import send_keys_batch
+
+    # ``cat`` echoes through the tty, so the text shows even before a shell
+    # would have finished drawing its prompt.
+    echo_pane = mcp_pane.window.split(attach=False, shell="cat")
+    try:
+        result = send_keys_batch(
+            operations=[
+                SendKeysOperation(
+                    keys="-DASH_LEAD_marker;",
+                    pane_id=echo_pane.pane_id,
+                    enter=False,
+                    literal=True,
+                )
+            ],
+            timeout=timeout,
+            socket_name=mcp_server.socket_name,
+        )
+
+        assert result.succeeded == 1
+        retry_until(
+            lambda: "-DASH_LEAD_marker;" in "\n".join(echo_pane.capture_pane()),
+            10,
+            raises=True,
+        )
+    finally:
+        echo_pane.kill()

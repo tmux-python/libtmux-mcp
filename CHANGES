@@ -8,6 +8,14 @@ _Notes on upcoming releases will be added here_
 
 ### Fixes
 
+**`send_keys_batch`, `paste_text` and the buffer tools use libtmux's safe commands**
+
+Text that starts with `-` or ends with `;` reaches the pane verbatim in a timed
+`send_keys_batch`, as it already did untimed. `paste_text` and `load_buffer`
+send text over standard input instead of a temporary file, so the size of the
+text is no longer bounded by tmux's command length. `signal_channel` and the
+buffer tools bound each tmux call and report a hung server by name.
+
 **Timeouts, a dead server and a failed listing arrive as typed tool errors**
 
 A tmux command that outlives its bound, a wait that ends because the server
