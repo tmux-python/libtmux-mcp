@@ -1402,7 +1402,7 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.62.0"
-source = { git = "https://github.com/tmux-python/libtmux?branch=downstream-wins#c354d84f5c06a1a184fc40679334d210145a94f9" }
+source = { git = "https://github.com/tmux-python/libtmux?branch=downstream-wins#6e2a06d843ceca74227e83946b7a5e1c0afed95f" }
 
 [[package]]
 name = "libtmux-mcp"
