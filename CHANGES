@@ -8,6 +8,15 @@ _Notes on upcoming releases will be added here_
 
 ### Fixes
 
+**`capture_since` reports a flood that scrolls the cursor out of a full history**
+
+When a burst of output fills the scrollback and discards the row the cursor
+pointed at, `capture_since` now returns `lines_missed=true` and the visible
+screen instead of an empty delta. On tmux 3.8 it reads tmux's own trim
+counters; on earlier versions it falls back to matching the eight rows above
+the cursor. Cursors from earlier versions (`capture-since-v1:`) are refused
+with a message to start a new one.
+
 **A timed-out or cancelled wait no longer swallows the channel's next signal**
 
 `wait_for_channel` and `run_command` used to kill the waiting tmux client when

@@ -1396,6 +1396,49 @@ def test_capture_since_marks_lines_missed_after_history_limit_trim(
         fresh_pane.kill()
 
 
+def test_capture_since_reports_flood_that_scrolls_anchor_out_of_history(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A flood that trims the anchor from a full history is not an empty delta.
+
+    Once the old rows are gone, the bare prompt at the bottom looks like a
+    surviving anchor; the previous engine returned ``lines=[]`` with
+    ``lines_missed=False``, so an agent read silence for a burst of output.
+    """
+    import asyncio
+
+    mcp_pane.session.cmd("set-option", "-g", "history-limit", "100")
+    fresh_pane = mcp_pane.window.split()
+    assert fresh_pane.pane_id is not None
+
+    def _hlimit_locked() -> bool:
+        raw = fresh_pane.display_message("#{history_limit}", get_text=True)
+        return bool(raw) and int(raw[0]) == 100
+
+    try:
+        retry_until(_hlimit_locked, 5, raises=True)
+        _signal_after_shell_payload(mcp_server, fresh_pane, "seq 1 150")
+        first = asyncio.run(
+            capture_since(
+                pane_id=fresh_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        _signal_after_shell_payload(mcp_server, fresh_pane, "seq 1000 3000")
+        second = asyncio.run(
+            capture_since(
+                cursor=first.cursor,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+        assert second.lines_missed is True
+        assert second.lines
+    finally:
+        fresh_pane.kill()
+
+
 def test_capture_since_reports_same_row_rewrite(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
@@ -1656,11 +1699,13 @@ def test_capture_since_does_not_block_event_loop(
 
     from libtmux.pane import Pane as _LibtmuxPane
 
-    def _slow_capture(self: _LibtmuxPane, *_a: object, **_kw: object) -> list[str]:
-        _time.sleep(0.15)
-        return []
+    original = _LibtmuxPane.capture_since
 
-    monkeypatch.setattr(_LibtmuxPane, "capture_pane", _slow_capture)
+    def _slow_capture(self: _LibtmuxPane, *a: t.Any, **kw: t.Any) -> t.Any:
+        _time.sleep(0.15)
+        return original(self, *a, **kw)
+
+    monkeypatch.setattr(_LibtmuxPane, "capture_since", _slow_capture)
 
     async def _drive() -> int:
         ticks = 0
