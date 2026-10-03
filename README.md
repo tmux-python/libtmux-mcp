@@ -196,6 +196,19 @@ docstrings, and MCP tool descriptions.
 - [tmuxp](https://tmuxp.git-pull.com) — tmux session manager
 - [The Tao of tmux](https://leanpub.com/the-tao-of-tmux) — the book
 
+## Attribution
+
+Please use the following BibTeX template to cite libtmux-mcp in scientific discourse:
+
+```bibtex
+@misc{libtmux-mcp,
+   author = {Tony Narlock},
+   year = {2026},
+   note = {https://libtmux-mcp.git-pull.com},
+   title = {libtmux-mcp: MCP server for tmux}
+}
+```
+
 ## License
 
 MIT
