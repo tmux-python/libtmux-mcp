@@ -759,12 +759,14 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
     catches a missed bound within that configured high-volume set.
 
     Error results keep their ``is_error`` flag through truncation.
-    The stock truncation path rebuilds the result without it, which
-    turns an oversized error (e.g. a validation message echoing a
-    huge argument) into an apparent success — MCP clients then
-    validate the truncated text against the tool's output schema and
-    fail with a transport-level error instead of delivering the tool
-    error. ``meta`` (``error_type`` / ``expected`` / ``suggestion``)
+    FastMCP 4.1.0 forwards the flag to ``_truncate_to_result`` itself
+    (PrefectHQ/fastmcp#5309); earlier releases rebuild the result
+    without it, which turns an oversized error (e.g. a validation
+    message echoing a huge argument) into an apparent success — MCP
+    clients then validate the truncated text against the tool's output
+    schema and fail with a transport-level error instead of delivering
+    the tool error. ``on_call_tool`` restores the flag for those
+    releases. ``meta`` (``error_type`` / ``expected`` / ``suggestion``)
     already survives via the base class, and tail-preservation keeps
     the suggestion line, which sits at the end of the text.
     """
@@ -801,6 +803,7 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
         self,
         text: str,
         meta: dict[str, t.Any] | None = None,
+        is_error: bool = False,
     ) -> ToolResult:
         """Keep the last ``max_size`` bytes of ``text`` and prefix a header.
 
@@ -813,6 +816,7 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
             return ToolResult(
                 content=[TextContent(type="text", text=text)],
                 meta=meta if meta is not None else {},
+                is_error=is_error,
             )
 
         # Reserve space for the truncation header. The header length
@@ -828,6 +832,7 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
             return ToolResult(
                 content=[TextContent(type="text", text=header.rstrip("\n"))],
                 meta=meta if meta is not None else {},
+                is_error=is_error,
             )
 
         # Take the LAST ``target_size`` bytes. Decode with errors=ignore
@@ -840,4 +845,5 @@ class TailPreservingResponseLimitingMiddleware(ResponseLimitingMiddleware):
         return ToolResult(
             content=[TextContent(type="text", text=truncated)],
             meta=meta if meta is not None else {},
+            is_error=is_error,
         )
