@@ -222,6 +222,24 @@ def _live_version(stderr: bytes, returncode: int, marker: str) -> str:
     return reports[0]
 
 
+#: Admitted release per live endpoint. The ``if-shell -F`` fence in every
+#: dispatched command catches a replaced daemon, so a release only needs a new
+#: probe after a refusal or when the daemon is gone. Absent endpoints are never
+#: cached.
+_ADMITTED: dict[tuple[str, tuple[str, ...], str, str], str] = {}
+
+
+def _endpoint_key(
+    binary: str, selectors: list[str]
+) -> tuple[str, tuple[str, ...], str, str]:
+    env = os.environ
+    return (binary, tuple(selectors), env.get("TMUX_TMPDIR", ""), env.get("TMUX", ""))
+
+
+def _forget(binary: str, selectors: list[str]) -> None:
+    _ADMITTED.pop(_endpoint_key(binary, selectors), None)
+
+
 def _remaining(deadline: float) -> float:
     result = deadline - time.monotonic()
     if result <= 0:
@@ -255,11 +273,15 @@ async def _prepare_bounded(
 ) -> tuple[list[str], str | None]:
     _backend()
     selectors, _commands = _parts(argv)
+    cached = _ADMITTED.get(_endpoint_key(argv[0], selectors))
+    if cached is not None:
+        return _fence(argv, cached, True)
     probe, marker = _probe(argv[0], selectors)
     code, output, error = await _run_tmux_unchecked(probe, timeout=_remaining(deadline))
     live = not _absent(code, error)
     if live:
         version = _live_version(error, code, marker)
+        _ADMITTED[_endpoint_key(argv[0], selectors)] = version
     else:
         code, output, error = await _run_tmux_unchecked(
             [argv[0], "-V"], timeout=_remaining(deadline)
@@ -273,9 +295,23 @@ async def _run_tmux_bounded(
 ) -> tuple[int, bytes, bytes]:
     """Admit and dispatch within one cancellable process budget."""
     deadline = time.monotonic() + timeout
-    prepared, marker = await _prepare_bounded(argv, deadline)
-    result = await _run_tmux_unchecked(prepared, timeout=_remaining(deadline))
-    _backend().check_fence(result[2].decode("utf-8", errors="backslashreplace"), marker)
+    selectors, _ = _parts(argv)
+    for attempt in (0, 1):
+        prepared, marker = await _prepare_bounded(argv, deadline)
+        result = await _run_tmux_unchecked(prepared, timeout=_remaining(deadline))
+        stderr = result[2]
+        if attempt == 0 and _absent(result[0], stderr):
+            # The cached daemon vanished; nothing ran, so admit afresh.
+            _forget(argv[0], selectors)
+            continue
+        try:
+            _backend().check_fence(
+                stderr.decode("utf-8", errors="backslashreplace"), marker
+            )
+        except exc.VersionTooLow:
+            _forget(argv[0], selectors)
+            raise
+        break
     return result
 
 
@@ -293,17 +329,39 @@ def _run_tmux_sync_bounded(
             raise subprocess.TimeoutExpired(argv, timeout)
         return subprocess.run(command, capture_output=True, timeout=budget, check=False)
 
-    command, probe_marker = _probe(argv[0], selectors)
-    probe = run(command)
-    live = not _absent(probe.returncode, probe.stderr)
-    if live:
-        version = _live_version(probe.stderr, probe.returncode, probe_marker)
-    else:
-        probe = run([argv[0], "-V"])
-        version = _version(probe.stdout, probe.stderr, probe.returncode, binary=argv[0])
-    prepared, marker = _fence(argv, version, live)
-    result = run(prepared)
-    policy.check_fence(result.stderr.decode("utf-8", errors="backslashreplace"), marker)
+    for attempt in (0, 1):
+        cached = _ADMITTED.get(_endpoint_key(argv[0], selectors))
+        if cached is not None:
+            version, live = cached, True
+        else:
+            command, probe_marker = _probe(argv[0], selectors)
+            probe = run(command)
+            live = not _absent(probe.returncode, probe.stderr)
+            if live:
+                version = _live_version(probe.stderr, probe.returncode, probe_marker)
+                _ADMITTED[_endpoint_key(argv[0], selectors)] = version
+            else:
+                probe = run([argv[0], "-V"])
+                version = _version(
+                    probe.stdout, probe.stderr, probe.returncode, binary=argv[0]
+                )
+        prepared, marker = _fence(argv, version, live)
+        result = run(prepared)
+        if (
+            attempt == 0
+            and cached is not None
+            and _absent(result.returncode, result.stderr)
+        ):
+            _forget(argv[0], selectors)
+            continue
+        try:
+            policy.check_fence(
+                result.stderr.decode("utf-8", errors="backslashreplace"), marker
+            )
+        except exc.VersionTooLow:
+            _forget(argv[0], selectors)
+            raise
+        break
     if check:
         result.check_returncode()
     return result
