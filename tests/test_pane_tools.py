@@ -536,6 +536,48 @@ def test_run_command_reports_exit_status(
     assert any(expected_output in line for line in result.output)
 
 
+def test_run_command_surfaces_a_fence_refusal_as_version_too_low(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused typed fence reads as a version error, not as a timeout."""
+    import asyncio
+
+    from libtmux_mcp._tmux_proc import _prepare_bounded as prepare
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    async def refused(argv: list[str], deadline: float) -> tuple[list[str], str | None]:
+        prepared, marker = await prepare(argv, deadline)
+        # Make the typed command fail its version condition, as a replaced
+        # daemon would.
+        return [
+            item.replace("#{==:#{version},", "#{==:#{version},replaced-")
+            for item in prepared
+        ], marker
+
+    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io._prepare_bounded", refused)
+    with pytest.raises(ToolError, match="changed before run_command"):
+        asyncio.run(
+            run_command(
+                command="true",
+                pane_id=mcp_pane.pane_id,
+                timeout=1.5,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_fenced_refusal_lines_raise_version_too_low() -> None:
+    """Only the private markers of this call's fenced commands count."""
+    from libtmux import exc
+
+    from libtmux_mcp.tools.pane_tools.io import _raise_if_fenced_refusal
+
+    marker = "libtmux-mcp-version-abc"
+    _raise_if_fenced_refusal(["unknown command: other", "$"], [marker])
+    with pytest.raises(exc.VersionTooLow, match="changed before run_command"):
+        _raise_if_fenced_refusal(["$ ", f"unknown command: {marker} "], [marker])
+
+
 def test_run_command_timeout_reports_without_killing_shell(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
