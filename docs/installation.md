@@ -6,7 +6,7 @@
 
 - Python 3.10+
 - tmux >= 3.3a, including the patch letter
-- The coordinated libtmux admission backend described in {ref}`compatibility`
+- libtmux 0.63.0 or newer, described in {ref}`compatibility`
 - [uv](https://github.com/astral-sh/uv) ([install](https://docs.astral.sh/uv/getting-started/installation/)) or [pipx](https://github.com/pypa/pipx) ([install](https://pipx.pypa.io/stable/installation/)) — for running without a persistent install
 
 ## Run without installing
@@ -59,9 +59,9 @@ $ uv sync --all-extras --dev
 
 Code changes take effect immediately — no reinstall needed.
 
-This branch pins the coordinated libtmux source revision in `uv.lock`.
-Its package release is pending. Ordinary package installers do not use uv's
-source override; an older backend is refused before tool effects.
+This branch requires libtmux 0.63.0 or newer and pins a development revision
+in `uv.lock` until that release exists. Ordinary package installers do not use
+uv's source override and select the released package.
 
 ## Running the server
 

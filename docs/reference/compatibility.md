@@ -39,16 +39,19 @@ the core minimum. Baseline polling does not require control mode.
 
 | Package | Required version |
 |---------|-----------------|
-| [libtmux](https://libtmux.git-pull.com/) | >= 0.62.0, < 1.0 |
+| [libtmux](https://libtmux.git-pull.com/) | >= 0.63.0, < 1.0 |
 | [FastMCP](https://github.com/jlowin/fastmcp) | >= 4.0.2, < 5.0.0 |
 | [regex](https://github.com/mrabarnett/mrab-regex) | >= 2024.11.6 |
 
-The libtmux backend must provide the coordinated 3.3a admission contract.
-This branch's uv source override pins the exact implementation from
-[Python core PR779](https://github.com/tmux-python/libtmux/pull/779), pending a
-package release. The numeric dependency range alone does not identify that
-contract. Startup and tool dispatch refuse an incompatible backend before
-effects. Use `uv sync --all-extras --dev` for the coordinated development pair.
+The libtmux backend must publish `libtmux._internal.support`, which first ships in
+libtmux 0.63.0; the dependency range names that release, so an installer never
+selects the 0.62 series. Until libtmux 0.63.0 is released, this branch's uv
+source override pins the implementation from
+[Python core PR779](https://github.com/tmux-python/libtmux/pull/779) for
+development; ordinary package installers ignore that override. Startup and tool
+dispatch refuse a backend without that module. Release libtmux first,
+then drop the source override and merge this change. Use
+`uv sync --all-extras --dev` for the development pair.
 
 ## MCP clients
 

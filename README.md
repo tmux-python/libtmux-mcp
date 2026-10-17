@@ -43,8 +43,8 @@ commands, read output, orchestrate panes.
 
 ## Quickstart
 
-**Requirements:** Python 3.10+, tmux >= 3.3a on `$PATH`, and the coordinated
-libtmux admission backend described in [compatibility](docs/reference/compatibility.md).
+**Requirements:** Python 3.10+, tmux >= 3.3a on `$PATH`, and libtmux 0.63.0 or newer, as described in
+[compatibility](docs/reference/compatibility.md).
 
 The distribution is `libtmux-mcp`, the import is `libtmux_mcp`, and the
 installed executable is `libtmux-mcp`.
