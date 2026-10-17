@@ -35,6 +35,29 @@ semantics; this does not make those threads interruptible.
 Higher requirements for individual features are documented separately from
 the core minimum. Baseline polling does not require control mode.
 
+## Optional operations
+
+Ordinary input, pane capture, output polling, completion channels and
+`run_command` retain the 3.3a core floor. The selected daemon determines
+eligibility for each operation.
+
+| Operation | Requirement |
+| --- | --- |
+| Named buffer deletion or rename | tmux 3.4+, before dispatch |
+| Nonempty `paste_text` | tmux 3.4+, before loading its temporary buffer; failure cleanup needs exact named deletion |
+| Empty `paste_text`, `load_buffer`, `show_buffer` and direct `paste_buffer` | Retain 3.3a |
+| Literal `select-layout` on 3.3a | Validate the preset or serialized header before dispatch; ordinary valid layouts remain available |
+
+The backend must provide `libtmux.admission.require_commands`.
+Startup and tools reject an older or invalid policy marker before work. Owned
+subprocess helpers also enforce the parent's literal command policy; a package
+source pin by itself cannot cover commands that bypass that dispatcher.
+
+`run_command` sends an authored command to a pane and observes completion. It
+keeps 3.3a support independently of the parent library's captured foreground
+`run-shell` output, which requires 3.5. Polling tools do not acquire control.
+These optional refusals do not raise the whole MCP server's minimum.
+
 ## Dependencies
 
 | Package | Required version |
@@ -43,15 +66,16 @@ the core minimum. Baseline polling does not require control mode.
 | [FastMCP](https://github.com/jlowin/fastmcp) | >= 4.0.2, < 5.0.0 |
 | [regex](https://github.com/mrabarnett/mrab-regex) | >= 2024.11.6 |
 
-The libtmux backend must publish `libtmux.admission`, which first ships in
-libtmux 0.63.0; the dependency range names that release, so an installer never
-selects the 0.62 series. Until libtmux 0.63.0 is released, this branch's uv
-source override pins the implementation from
-[Python core PR779](https://github.com/tmux-python/libtmux/pull/779) for
+The libtmux backend must publish `libtmux.admission`, including
+`require_commands`, which first ships in libtmux 0.63.0; the dependency range
+names that release, so an installer never selects the 0.62 series. Until
+libtmux 0.63.0 is released, this branch's uv source override pins the
+implementation from
+[Python feature PR780](https://github.com/tmux-python/libtmux/pull/780) for
 development; ordinary package installers ignore that override. Startup and tool
-dispatch refuse a backend without the admission module. Release libtmux first,
-then drop the source override and merge this change. Use
-`uv sync --all-extras --dev` for the development pair.
+dispatch refuse a backend without those names. Release libtmux first, then drop
+the source override and merge this change. Use `uv sync --all-extras --dev` for
+the development pair.
 
 ## MCP clients
 
