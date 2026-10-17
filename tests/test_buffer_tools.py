@@ -6,6 +6,7 @@ import typing as t
 
 import pytest
 from fastmcp.exceptions import ToolError
+from libtmux import admission
 
 from libtmux_mcp.middleware import _SENSITIVE_ARG_NAMES
 from libtmux_mcp.models import BufferContent, BufferRef
@@ -21,6 +22,17 @@ from libtmux_mcp.tools.buffer_tools import (
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.server import Server
+
+
+def _require_named_buffers(server: Server) -> None:
+    """Skip workflows that stage a named buffer a 3.3a daemon cannot delete."""
+    if not admission.is_at_least(server._get_version(), "3.4"):
+        pytest.skip("load_buffer stages a named buffer and needs tmux 3.4 to delete it")
+
+
+def _assert_delete_policy(server: Server, name: str) -> None:
+    """Delete an agent buffer exactly."""
+    delete_buffer(name, socket_name=server.socket_name)
 
 
 @pytest.mark.parametrize("name", ["my-buffer", "clipboard.v2", "a", "x" * 64])
@@ -63,6 +75,7 @@ def test_load_buffer_allocates_unique_name(mcp_server: Server) -> None:
     The UUID nonce in the allocated name prevents collisions even when
     the caller reuses the same logical name.
     """
+    _require_named_buffers(mcp_server)
     a = load_buffer(
         content="first",
         logical_name="clipboard",
@@ -81,13 +94,14 @@ def test_load_buffer_allocates_unique_name(mcp_server: Server) -> None:
 
     # Clean up — buffers are server-global; leaking them would pollute
     # the test run even though the libtmux Server fixture is torn down.
-    delete_buffer(a.buffer_name, socket_name=mcp_server.socket_name)
-    delete_buffer(b.buffer_name, socket_name=mcp_server.socket_name)
+    _assert_delete_policy(mcp_server, a.buffer_name)
+    _assert_delete_policy(mcp_server, b.buffer_name)
 
 
 @pytest.mark.usefixtures("mcp_session")
 def test_buffer_round_trip(mcp_server: Server) -> None:
     """Load -> show -> delete round-trip preserves content exactly."""
+    _require_named_buffers(mcp_server)
     payload = "line1\nline2\nline3"
     ref = load_buffer(
         content=payload,
@@ -122,6 +136,7 @@ def test_paste_buffer_requires_mcp_namespace(
 
 def test_paste_buffer_into_pane(mcp_server: Server, mcp_pane: Pane) -> None:
     """``paste_buffer`` pastes an MCP buffer into the target pane."""
+    _require_named_buffers(mcp_server)
     ref = load_buffer(
         content="echo PASTE_BUFFER_MARKER",
         logical_name="smoke",
@@ -135,7 +150,7 @@ def test_paste_buffer_into_pane(mcp_server: Server, mcp_pane: Pane) -> None:
         )
         assert ref.buffer_name in result
     finally:
-        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+        _assert_delete_policy(mcp_server, ref.buffer_name)
 
 
 def test_content_is_in_sensitive_args() -> None:
@@ -155,6 +170,7 @@ def test_show_buffer_tail_preserves_on_truncation(mcp_server: Server) -> None:
     ``True``, and ``content_truncated_lines`` reports how many were
     dropped so the caller can re-request with ``max_lines=None``.
     """
+    _require_named_buffers(mcp_server)
     payload = "\n".join(f"line-{i}" for i in range(20))
     ref = load_buffer(
         content=payload,
@@ -173,12 +189,13 @@ def test_show_buffer_tail_preserves_on_truncation(mcp_server: Server) -> None:
         kept = seen.content.splitlines()
         assert kept == [f"line-{i}" for i in range(15, 20)]
     finally:
-        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+        _assert_delete_policy(mcp_server, ref.buffer_name)
 
 
 @pytest.mark.usefixtures("mcp_session")
 def test_show_buffer_full_read_when_max_lines_none(mcp_server: Server) -> None:
     """``max_lines=None`` disables truncation for full-buffer recovery."""
+    _require_named_buffers(mcp_server)
     payload = "\n".join(f"line-{i}" for i in range(50))
     ref = load_buffer(
         content=payload,
@@ -195,12 +212,13 @@ def test_show_buffer_full_read_when_max_lines_none(mcp_server: Server) -> None:
         assert seen.content_truncated_lines == 0
         assert seen.content.rstrip("\n") == payload
     finally:
-        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+        _assert_delete_policy(mcp_server, ref.buffer_name)
 
 
 @pytest.mark.usefixtures("mcp_session")
 def test_show_buffer_no_truncation_under_cap(mcp_server: Server) -> None:
     """Small buffers are returned verbatim with truncation flags off."""
+    _require_named_buffers(mcp_server)
     payload = "one\ntwo\nthree"
     ref = load_buffer(
         content=payload,
@@ -217,7 +235,7 @@ def test_show_buffer_no_truncation_under_cap(mcp_server: Server) -> None:
         assert seen.content_truncated_lines == 0
         assert seen.content.rstrip("\n") == payload
     finally:
-        delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+        _assert_delete_policy(mcp_server, ref.buffer_name)
 
 
 @pytest.mark.parametrize(

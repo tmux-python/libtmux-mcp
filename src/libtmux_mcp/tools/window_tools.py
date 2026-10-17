@@ -357,13 +357,16 @@ def select_layout(
     Choose from: even-horizontal, even-vertical, main-horizontal,
     main-vertical, or tiled. Rearranges all panes in the window.
 
+    On tmux 3.3a, unknown names and malformed serialized headers are
+    refused before dispatch. Valid layouts retain the core minimum.
+
     Parameters
     ----------
     layout : str
         Layout name or custom layout string. Built-in layouts:
         'even-horizontal', 'even-vertical', 'main-horizontal',
         'main-horizontal-mirrored', 'main-vertical',
-        'main-vertical-mirrored', 'tiled'.
+        'main-vertical-mirrored', 'tiled'. Mirrored layouts require tmux 3.5.
     window_id : str, optional
         Window ID (e.g. '@1').
     window_index : str, optional
