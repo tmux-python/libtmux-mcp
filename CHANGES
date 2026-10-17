@@ -8,13 +8,15 @@ _Notes on upcoming releases will be added here_
 
 ### Compatibility
 
-Core operations require tmux 3.3a and the coordinated libtmux admission backend.
+Core operations require tmux 3.3a and libtmux 0.63.0 or newer.
 Connected daemons, cold startup, owned subprocesses and generated completion
 helpers are checked before requested effects. Subprocess admission shares the
 operation deadline and cancellation reaps the owned child. The version probe
-runs no user hooks. CI retains 3.3a and
-tests rejection of native 3.2a and unpatched 3.3. The development backend source
-pin remains in place until its package release.
+runs no user hooks, and a failed probe or backend check is an expected tool
+error. An unsupported default endpoint no longer stops startup: each tool
+checks the endpoint it uses. CI retains 3.3a and tests rejection of native 3.2a
+and unpatched 3.3. The development backend source pin remains in place until
+libtmux 0.63.0 is released.
 
 ## libtmux-mcp 0.1.0a22 (2026-09-06)
 
