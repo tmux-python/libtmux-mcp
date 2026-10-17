@@ -18,6 +18,12 @@ from libtmux import exc
 from libtmux_mcp import _tmux_proc
 
 
+@pytest.fixture(autouse=True)
+def _fresh_version_cache() -> None:
+    """Start each test without a remembered release."""
+    _tmux_proc._VERSION_CACHE.clear()
+
+
 def _binary(variable: str, expected: str) -> str:
     value = os.environ.get(variable)
     if value is None:
@@ -283,3 +289,54 @@ def test_version_check_budget_and_cancellation_reap_child(
             os.kill(pid, 0)
 
     asyncio.run(drive())
+
+
+def test_checked_release_is_probed_once_per_endpoint(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Later calls reuse the release; a refusal or a gone daemon probes again."""
+    binary = _binary("LIBTMUX_TEST_MINIMUM_TMUX", "3.3a")
+    socket = tmp_path / "s"
+    _start(binary, socket)
+    probes: list[list[str]] = []
+    real = subprocess.run
+
+    def counted(argv: list[str], *args: object, **kwargs: object) -> object:
+        if "run-shell" in argv and "-C" in argv:
+            probes.append(argv)
+        return real(argv, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "run", counted)
+    argv = [binary, "-S", str(socket), "list-sessions"]
+    try:
+        for _ in range(3):
+            _tmux_proc._run_tmux_sync_bounded(argv, timeout=3)
+        assert asyncio.run(_tmux_proc._run_tmux_bounded(argv, timeout=3))[0] == 0
+        assert len(probes) == 1
+        _native(binary, socket, "kill-server")
+        # The cached daemon is gone: the call checks the version again instead
+        # of failing with a stale release, and the endpoint is not cached while
+        # absent.
+        result = _tmux_proc._run_tmux_sync_bounded(argv, timeout=3, check=False)
+        assert result.returncode != 0
+        assert not _tmux_proc._VERSION_CACHE
+    finally:
+        _native(binary, socket, "kill-server")
+
+
+def test_stale_cached_release_is_refused_and_forgotten(tmp_path: pathlib.Path) -> None:
+    """A cached release that no longer matches the daemon fails the fence."""
+    binary = _binary("LIBTMUX_TEST_MINIMUM_TMUX", "3.3a")
+    socket = tmp_path / "s"
+    _start(binary, socket)
+    argv = [binary, "-S", str(socket), "set-option", "-g", "@stale", "ran"]
+    try:
+        _tmux_proc._VERSION_CACHE[
+            _tmux_proc._endpoint_key(binary, ["-S", str(socket)])
+        ] = "3.99"
+        with pytest.raises(exc.VersionTooLow):
+            _tmux_proc._run_tmux_sync_bounded(argv, timeout=3)
+        assert not _tmux_proc._VERSION_CACHE
+        assert _native(binary, socket, "show-options", "-gqv", "@stale").stdout == b""
+    finally:
+        _native(binary, socket, "kill-server")
