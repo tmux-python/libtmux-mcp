@@ -43,15 +43,15 @@ eligibility for each operation.
 
 | Operation | Requirement |
 | --- | --- |
-| Named buffer deletion or rename | tmux 3.4+, before dispatch |
+| `load_buffer`, which stages a named buffer, and named buffer deletion or rename | tmux 3.4+, before dispatch; a 3.3a daemon creates no buffer |
 | Nonempty `paste_text` | tmux 3.4+, before loading its temporary buffer; failure cleanup needs exact named deletion |
-| Empty `paste_text`, `load_buffer`, `show_buffer` and direct `paste_buffer` | Retain 3.3a |
+| Empty `paste_text`, `show_buffer` of an existing buffer and direct `paste_buffer` | Retain 3.3a |
 | Literal `select-layout` on 3.3a | Validate the preset or serialized header before dispatch; ordinary valid layouts remain available |
 
-The backend must provide `libtmux.admission.require_commands`.
-Startup and tools reject an older or invalid policy marker before work. Owned
-subprocess helpers also enforce the parent's literal command policy; a package
-source pin by itself cannot cover commands that bypass that dispatcher.
+The backend must provide `libtmux.admission.require_commands`; startup and
+tools refuse a libtmux without it before work. Owned subprocess helpers also
+enforce the parent's literal command policy, which a package pin by itself
+cannot cover for commands that bypass libtmux's dispatcher.
 
 `run_command` sends an authored command to a pane and observes completion. It
 keeps 3.3a support independently of the parent library's captured foreground
