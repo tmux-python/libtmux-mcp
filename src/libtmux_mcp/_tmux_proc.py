@@ -34,6 +34,8 @@ import types
 import typing as t
 import uuid
 
+from libtmux import exc
+
 #: Bound on the post-kill reap. Short because it is best effort: the
 #: loop's child watcher reaps the pid whether or not we wait.
 _TMUX_REAP_SECONDS = 0.5
@@ -135,23 +137,23 @@ _MINIMUM_TMUX = "3.3a"
 
 
 def _backend() -> types.ModuleType:
-    """Require the coordinated libtmux admission contract before dispatch."""
+    """Require a libtmux that publishes the daemon-first admission surface."""
     try:
-        policy = importlib.import_module("libtmux._internal.support")
+        admission = importlib.import_module("libtmux.admission")
     except ImportError as error:
         msg = (
-            "Unsupported libtmux backend: install the coordinated "
-            "tmux 3.3a support change"
+            "Unsupported libtmux backend: libtmux 0.63 or newer is required "
+            "for tmux 3.3a admission"
         )
-        raise RuntimeError(msg) from error
+        raise exc.LibTmuxException(msg) from error
     if not all(
-        callable(getattr(policy, name, None))
-        for name in ("require_version", "prepare", "check_result")
-    ):
+        callable(getattr(admission, name, None))
+        for name in ("require_version", "check_fence")
+    ) or not isinstance(getattr(admission, "MINIMUM", None), str):
         msg = "Unsupported libtmux backend: tmux admission is unavailable"
-        raise RuntimeError(msg)
-    policy.require_version(policy.MINIMUM, minimum=_MINIMUM_TMUX)
-    return policy
+        raise exc.LibTmuxException(msg)
+    admission.require_version(admission.MINIMUM, minimum=_MINIMUM_TMUX)
+    return admission
 
 
 def _parts(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -194,7 +196,7 @@ def _version(
     if returncode or not report:
         detail = stderr.decode("utf-8", errors="backslashreplace").strip()
         msg = f"tmux admission failed: {detail or 'no version report'}"
-        raise RuntimeError(msg)
+        raise exc.LibTmuxException(msg)
     return report.strip()
 
 
@@ -216,7 +218,7 @@ def _live_version(stderr: bytes, returncode: int, marker: str) -> str:
     ]
     if returncode != 1 or len(reports) != 1:
         msg = f"tmux admission failed: {detail.strip() or 'no version report'}"
-        raise RuntimeError(msg)
+        raise exc.LibTmuxException(msg)
     return reports[0]
 
 
@@ -273,9 +275,7 @@ async def _run_tmux_bounded(
     deadline = time.monotonic() + timeout
     prepared, marker = await _prepare_bounded(argv, deadline)
     result = await _run_tmux_unchecked(prepared, timeout=_remaining(deadline))
-    _backend().check_result(
-        result[2].decode("utf-8", errors="backslashreplace"), marker
-    )
+    _backend().check_fence(result[2].decode("utf-8", errors="backslashreplace"), marker)
     return result
 
 
@@ -303,9 +303,7 @@ def _run_tmux_sync_bounded(
         version = _version(probe.stdout, probe.stderr, probe.returncode, binary=argv[0])
     prepared, marker = _fence(argv, version, live)
     result = run(prepared)
-    policy.check_result(
-        result.stderr.decode("utf-8", errors="backslashreplace"), marker
-    )
+    policy.check_fence(result.stderr.decode("utf-8", errors="backslashreplace"), marker)
     if check:
         result.check_returncode()
     return result
