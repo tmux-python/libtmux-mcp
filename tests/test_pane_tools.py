@@ -5581,6 +5581,15 @@ def test_paste_text(mcp_server: Server, mcp_pane: Pane) -> None:
     trailing newline forces execution, exercising the full
     paste->execute->output round-trip.
     """
+    if mcp_server._get_version() == "3.3a":
+        with pytest.raises(ToolError, match=r"3\.4"):
+            paste_text(
+                text="echo PASTE_TEST_marker_xyz\n",
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        assert not mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
+        return
     result = paste_text(
         text="echo PASTE_TEST_marker_xyz\n",
         pane_id=mcp_pane.pane_id,
@@ -5618,9 +5627,18 @@ def test_paste_text_does_not_leak_named_buffer(
     ``list-buffers`` on that prefix sees every MCP-owned buffer.
 
     The check is portable across every tmux version the CI matrix
-    tests (3.2a through master): ``list-buffers`` with a format string
+    tests (3.3a through master): ``list-buffers`` with a format string
     returns buffer names without any version-specific behavior.
     """
+    if mcp_server._get_version() == "3.3a":
+        with pytest.raises(ToolError, match=r"3\.4"):
+            paste_text(
+                text="echo BUFFER_ISOLATION_test",
+                pane_id=mcp_pane.pane_id,
+                socket_name=mcp_server.socket_name,
+            )
+        assert not mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
+        return
     paste_text(
         text="echo BUFFER_ISOLATION_test",
         pane_id=mcp_pane.pane_id,
