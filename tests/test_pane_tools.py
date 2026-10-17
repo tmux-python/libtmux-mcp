@@ -407,7 +407,7 @@ def test_send_keys_batch_timeout(
         return subprocess.CompletedProcess(args=["tmux"], returncode=0)
 
     monkeypatch.setattr(
-        "libtmux_mcp.tools.pane_tools.io.subprocess.run",
+        "libtmux_mcp.tools.pane_tools.io._run_tmux_sync_bounded",
         timed_send_keys,
     )
 
@@ -456,7 +456,9 @@ def test_send_keys_batch_timeout_bounds_in_progress_send(
         raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
 
     monkeypatch.setattr(Pane, "send_keys", stalled_send_keys)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", timed_out_run)
+    monkeypatch.setattr(
+        "libtmux_mcp.tools.pane_tools.io._run_tmux_sync_bounded", timed_out_run
+    )
 
     result = send_keys_batch(
         operations=[
@@ -532,6 +534,48 @@ def test_run_command_reports_exit_status(
     assert result.exit_status == expected_status
     assert result.timed_out is False
     assert any(expected_output in line for line in result.output)
+
+
+def test_run_command_surfaces_a_fence_refusal_as_version_too_low(
+    mcp_server: Server, mcp_pane: Pane, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused typed fence reads as a version error, not as a timeout."""
+    import asyncio
+
+    from libtmux_mcp._tmux_proc import _prepare_bounded as prepare
+    from libtmux_mcp.tools.pane_tools import run_command
+
+    async def refused(argv: list[str], deadline: float) -> tuple[list[str], str | None]:
+        prepared, marker = await prepare(argv, deadline)
+        # Make the typed command fail its version condition, as a replaced
+        # daemon would.
+        return [
+            item.replace("#{==:#{version},", "#{==:#{version},replaced-")
+            for item in prepared
+        ], marker
+
+    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io._prepare_bounded", refused)
+    with pytest.raises(ToolError, match="changed before run_command"):
+        asyncio.run(
+            run_command(
+                command="true",
+                pane_id=mcp_pane.pane_id,
+                timeout=1.5,
+                socket_name=mcp_server.socket_name,
+            )
+        )
+
+
+def test_fenced_refusal_lines_raise_version_too_low() -> None:
+    """Only the private markers of this call's fenced commands count."""
+    from libtmux import exc
+
+    from libtmux_mcp.tools.pane_tools.io import _raise_if_fenced_refusal
+
+    marker = "libtmux-mcp-version-abc"
+    _raise_if_fenced_refusal(["unknown command: other", "$"], [marker])
+    with pytest.raises(exc.VersionTooLow, match="changed before run_command"):
+        _raise_if_fenced_refusal(["$ ", f"unknown command: {marker} "], [marker])
 
 
 def test_run_command_timeout_reports_without_killing_shell(
@@ -624,8 +668,8 @@ def _run_command_wait_pids(socket_name: str) -> list[int]:
     mints a random ``r_<hex>`` channel per call, hence the prefix match
     rather than an exact name.
 
-    The argv must be the whole five-token vector and ``/proc/<pid>/exe``
-    must resolve to tmux, so a shell (or pytest) whose command line
+    The argv must select this socket and end in its wait command;
+    ``/proc/<pid>/exe`` must resolve to tmux, so a shell whose command line
     merely mentions the socket cannot register as a hit; this process
     is skipped outright for the same reason. Reaped children are gone
     from ``/proc`` and zombies have an empty ``cmdline``, so neither
@@ -645,9 +689,13 @@ def _run_command_wait_pids(socket_name: str) -> list[int]:
         except OSError:
             continue  # process exited, or not ours to inspect
         argv = [chunk.decode(errors="replace") for chunk in raw.split(b"\0") if chunk]
-        if len(argv) != 5 or argv[1:4] != ["-L", socket_name, "wait-for"]:
+        if len(argv) < 5 or argv[1:3] != ["-L", socket_name]:
             continue
-        if not argv[4].startswith("r_") or exe.name != "tmux":
+        if (
+            argv[-2] != "wait-for"
+            or not argv[-1].startswith("r_")
+            or exe.name != "tmux"
+        ):
             continue
         pids.append(pid)
     return pids
@@ -1948,12 +1996,12 @@ def test_respawn_pane_preserves_pane_id_and_refreshes_pid(
 def test_respawn_pane_replaces_shell(mcp_server: Server, mcp_session: Session) -> None:
     """respawn_pane with ``shell`` relaunches with the new command."""
     window = mcp_session.active_window
-    new_pane = window.split(shell="sleep 3600")
+    new_pane = window.split(shell="exec sleep 3600")
     assert new_pane.pane_id is not None
 
     result = respawn_pane(
         pane_id=new_pane.pane_id,
-        shell="sleep 7200",
+        shell="exec sleep 7200",
         socket_name=mcp_server.socket_name,
     )
     assert result.pane_id == new_pane.pane_id
@@ -3020,7 +3068,7 @@ WAIT_FOR_TEXT_FIXTURES: list[WaitForTextFixture] = [
     # Regression for #45: pre-existing scrollback must NOT match.
     WaitForTextFixture(
         test_id="stale_scrollback_does_not_match",
-        pre_command="echo WAIT_MARKER_stale",
+        pre_command=r"printf '\nWAIT_MARKER_stale\n'",
         patterns=["WAIT_MARKER_stale"],
         timeout=0.5,
         expected_found=False,
@@ -4973,7 +5021,16 @@ def test_run_tmux_lines_happy_path_returns_without_kill(
     from libtmux_mcp.tools.pane_tools import wait as wait_mod
 
     stub = tmp_path / "tmux"
-    stub.write_text("#!/bin/sh\nprintf 'alpha\\nbeta\\n'\n")
+    stub.write_text(
+        "#!/bin/sh\n"
+        "for argument do\n"
+        "    case \"$argument\" in *'#{version}')\n"
+        "        printf 'unknown command: %s3.7d\\n' \"${argument%'#{version}'}\" >&2\n"
+        "        exit 1;;\n"
+        "    esac\n"
+        "done\n"
+        "printf 'alpha\\nbeta\\n'\n"
+    )
     stub.chmod(0o755)
 
     class _StubServer:

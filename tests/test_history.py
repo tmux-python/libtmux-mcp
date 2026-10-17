@@ -829,7 +829,7 @@ def test_global_history_default_leaves_timed_batch_operations_explicit_only(
     pane = FakePane()
     monkeypatch.setattr(io, "_get_server", lambda **kwargs: FakeServer())
     monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", _run)
+    monkeypatch.setattr(io, "_run_tmux_sync_bounded", _run)
 
     async def _exercise() -> None:
         async with Client(_history_server("1")) as client:
@@ -910,9 +910,10 @@ def test_global_history_default_leaves_paste_payloads_and_calls_unchanged(
     pane = FakePane()
     monkeypatch.setattr(io, "_get_server", lambda **kwargs: server)
     monkeypatch.setattr(io, "_resolve_pane", lambda *args, **kwargs: pane)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", _run)
+    monkeypatch.setattr(io, "_run_tmux_sync_bounded", _run)
     monkeypatch.setattr(buffer_tools, "_get_server", lambda **kwargs: server)
     monkeypatch.setattr(buffer_tools, "_resolve_pane", lambda *args, **kwargs: pane)
+    monkeypatch.setattr(buffer_tools, "_run_tmux_sync_bounded", _run)
 
     raw_text = "C-c\npartial TUI text\n"
     existing_buffer = f"libtmux_mcp_{'a' * 32}_buf"

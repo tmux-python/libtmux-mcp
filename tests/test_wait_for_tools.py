@@ -428,9 +428,8 @@ def _tmux_wait_pids(socket_name: str, channel: str) -> list[int]:
     produce a false positive. Reaped children are absent from ``ps``
     and zombies render as ``[tmux] <defunct>``, which does not match.
     """
-    want = ["tmux", "-L", socket_name, "wait-for", channel]
     listing = subprocess.run(
-        ["ps", "-eo", "pid=,args="],
+        ["ps", "-eww", "-o", "pid=,args="],
         capture_output=True,
         text=True,
         check=True,
@@ -441,13 +440,21 @@ def _tmux_wait_pids(socket_name: str, channel: str) -> list[int]:
         pid_field, _, args = line.strip().partition(" ")
         if not pid_field.isdigit() or int(pid_field) == me:
             continue
-        if args.split() == want:
+        argv = args.split()
+        if (
+            len(argv) >= 5
+            and pathlib.Path(argv[0]).name == "tmux"
+            and argv[1:3] == ["-L", socket_name]
+            and argv[-2:] == ["wait-for", channel]
+        ):
             pids.append(int(pid_field))
     return pids
 
 
 @pytest.mark.usefixtures("mcp_session")
-def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None:
+def test_wait_for_channel_kills_tmux_child_on_cancel(
+    mcp_server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A cancelled wait must not leave its ``tmux wait-for`` child running.
 
     ``asyncio.to_thread(subprocess.run, ...)`` is uninterruptible: the
@@ -465,6 +472,7 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
     what this asserts.
     """
     channel = "wf_cancel_reap_test"
+    monkeypatch.setenv("COLUMNS", "80")
     socket_name = mcp_server.socket_name
     assert socket_name is not None
 
@@ -476,7 +484,9 @@ def test_wait_for_channel_kills_tmux_child_on_cancel(mcp_server: Server) -> None
                 socket_name=socket_name,
             )
         )
-        await asyncio.sleep(0.5)
+        deadline = time.monotonic() + 4.0
+        while time.monotonic() < deadline and not _tmux_wait_pids(socket_name, channel):
+            await asyncio.sleep(0.01)
         assert _tmux_wait_pids(socket_name, channel), (
             "no tmux wait-for child observed before the cancel — the probe "
             "is broken, so a later 'no survivors' result would be vacuous"
