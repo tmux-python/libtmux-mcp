@@ -8,11 +8,12 @@ _Notes on upcoming releases will be added here_
 
 ### Optional feature requirements
 
-Nonempty `paste_text` and exact named-buffer deletion require tmux 3.4 before
-native effects. Ordinary input, capture, polling, completion channels and
-inert buffer staging retain 3.3a. Owned subprocesses enforce the coordinated
-backend's optional feature policy version 2, including the older layout
-error boundary. Startup and tool dispatch refuse an unqualified backend.
+`load_buffer`, nonempty `paste_text` and exact named-buffer deletion require
+tmux 3.4 before native effects, because a named buffer a 3.3a daemon cannot
+delete would accumulate there. Ordinary input, capture, polling and completion
+channels retain 3.3a. Owned subprocesses enforce libtmux's literal command
+policy, including the older layout error boundary. Startup and tool dispatch
+refuse a libtmux without `libtmux.admission.require_commands`.
 
 ### Compatibility
 
