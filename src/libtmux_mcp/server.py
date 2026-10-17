@@ -6,6 +6,7 @@ Creates and configures the MCP server with all tools and resources.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import shutil
 import time
@@ -13,6 +14,7 @@ import typing as t
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware.timing import TimingMiddleware
+from libtmux import exc
 
 from libtmux_mcp.__about__ import __version__
 from libtmux_mcp._history import (
@@ -139,6 +141,8 @@ _INSTRUCTIONS_MAX_BYTES = 2048
 DEFAULT_TOOLSETS: frozenset[str] = frozenset(
     {TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_EXECUTE}
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _build_instructions(
@@ -350,8 +354,9 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
     Validates named tool includes and exclusions against the transformed
     catalog, then checks the coordinated libtmux backend and selected tmux
     endpoint. The connected daemon, or the executable at an unused endpoint,
-    must report at least tmux 3.3a before tool traffic arrives. This bounded
-    probe starts no daemon; each later operation repeats admission.
+    should report at least tmux 3.3a before tool traffic arrives. This bounded
+    probe starts no daemon. An unsupported default endpoint only logs a
+    warning: tools take their own socket and admit it on every call.
 
     Shutdown
     --------
@@ -381,9 +386,19 @@ async def _lifespan(_app: FastMCP) -> t.AsyncIterator[None]:
         msg = f"tmux binary not found: {binary}"
         raise RuntimeError(msg)
     try:
-        await _prepare_bounded(
-            _tmux_argv(_get_server(), "list-sessions"), time.monotonic() + 5.0
-        )
+        try:
+            await _prepare_bounded(
+                _tmux_argv(_get_server(), "list-sessions"), time.monotonic() + 5.0
+            )
+        except (exc.LibTmuxException, TimeoutError, OSError) as error:
+            # Every tool takes its own socket and admits it per call, so one
+            # unsupported or unreachable default endpoint must not stop the
+            # server from serving the others.
+            logger.warning(
+                "default tmux endpoint is not usable; tools admit each endpoint "
+                "on use: %s",
+                error,
+            )
         yield
     finally:
         _server_cache.clear()
