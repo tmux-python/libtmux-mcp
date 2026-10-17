@@ -40,7 +40,7 @@ include = [
 ]
 
 dependencies = [
-  "libtmux>=0.62.0,<1.0",
+  "libtmux>=0.63.0,<1.0",
   "fastmcp>=4.0.2,<5.0.0",
   "regex>=2024.11.6",
 ]
@@ -117,7 +117,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 # Coordinated admission backend, pending its package release.
-libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "6d1be6344786c790df9ff87bad30cd46c1756e1d" }
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "73f82c71600a64c8e286c43c77bd30c07bcd724a" }
 
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
