@@ -21,6 +21,8 @@ from libtmux import exc
 from libtmux._internal.query_list import LOOKUP_NAME_MAP
 from libtmux.server import Server
 
+from libtmux_mcp._tmux_proc import _backend
+
 if t.TYPE_CHECKING:
     from libtmux.pane import Pane
     from libtmux.session import Session
@@ -582,6 +584,7 @@ def _get_server(
     Server
         A cached libtmux Server instance.
     """
+    _backend()
     if socket_name is None:
         socket_name = os.environ.get("LIBTMUX_SOCKET")
     if socket_path is None:
@@ -591,11 +594,7 @@ def _get_server(
 
     cache_key = (socket_name, socket_path, tmux_bin)
     with _server_cache_lock:
-        if cache_key in _server_cache:
-            cached = _server_cache[cache_key]
-            if not cached.is_alive():
-                del _server_cache[cache_key]
-
+        # Cache configuration only; every operation checks the current daemon's version.
         if cache_key not in _server_cache:
             kwargs: dict[str, t.Any] = {}
             if socket_name is not None:
@@ -1139,6 +1138,7 @@ def handle_tool_errors(
     @functools.wraps(fn)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
+            _backend()
             return fn(*args, **kwargs)
         except ToolError:
             raise
@@ -1168,6 +1168,7 @@ def handle_tool_errors_async(
     @functools.wraps(fn)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
+            _backend()
             return await fn(*args, **kwargs)
         except ToolError:
             raise

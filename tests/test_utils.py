@@ -45,8 +45,7 @@ def test_get_server_caches(monkeypatch: pytest.MonkeyPatch) -> None:
     """_get_server returns the same instance for the same socket."""
     _server_cache.clear()
     s1 = _get_server(socket_name="test_cache")
-    # Simulate a live server so the cache is not evicted
-    monkeypatch.setattr(s1, "is_alive", lambda: True)
+    monkeypatch.setattr(s1, "is_alive", lambda: pytest.fail("cache lookup probed tmux"))
     s2 = _get_server(socket_name="test_cache")
     assert s1 is s2
     # Verify 3-tuple cache key includes tmux_bin
@@ -143,14 +142,15 @@ def test_serialize_pane(mcp_pane: Pane) -> None:
     assert data.session_id is not None
 
 
-def test_get_server_evicts_dead(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_get_server evicts cached server when is_alive returns False."""
+def test_get_server_retains_configuration_without_liveness_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cached configuration stays pure; dispatch owns the endpoint version check."""
     _server_cache.clear()
     s1 = _get_server(socket_name="test_evict")
-    # Patch is_alive to return False to simulate a dead server
-    monkeypatch.setattr(s1, "is_alive", lambda: False)
+    monkeypatch.setattr(s1, "is_alive", lambda: pytest.fail("cache lookup probed tmux"))
     s2 = _get_server(socket_name="test_evict")
-    assert s1 is not s2
+    assert s1 is s2
 
 
 def test_invalidate_server() -> None:

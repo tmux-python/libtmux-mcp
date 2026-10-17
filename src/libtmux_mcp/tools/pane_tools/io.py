@@ -15,7 +15,12 @@ import uuid
 
 from fastmcp.exceptions import ToolError
 
-from libtmux_mcp._tmux_proc import _run_tmux_bounded
+from libtmux_mcp._tmux_proc import (
+    _prepare_bounded,
+    _remaining,
+    _run_tmux_bounded,
+    _run_tmux_sync_bounded,
+)
 from libtmux_mcp._utils import (
     ExpectedToolError,
     _get_server,
@@ -58,12 +63,7 @@ def _run_timed_send_keys_argv(
 ) -> None:
     """Run one ``tmux send-keys`` argv within the batch deadline."""
     try:
-        subprocess.run(
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=_remaining_timeout(deadline, timeout),
-        )
+        _run_tmux_sync_bounded(argv, timeout=_remaining_timeout(deadline, timeout))
     except subprocess.TimeoutExpired as e:
         raise ExpectedToolError(_batch_timeout_error(timeout)) from e
     except subprocess.CalledProcessError as e:
@@ -395,6 +395,8 @@ async def run_command(
         msg = "timeout must be positive"
         raise ExpectedToolError(msg)
     effective_timeout = min(timeout, _wait_ceiling_seconds())
+    started = time.monotonic()
+    deadline = started + effective_timeout
 
     server = _get_server(socket_name=socket_name)
     pane = _resolve_pane(
@@ -411,10 +413,16 @@ async def run_command(
     if target_pane_id is None:
         msg = "resolved pane has no pane_id"
         raise ExpectedToolError(msg)
-    status_cmd = shlex.join(
-        _tmux_argv(server, "set-option", "-p", "-t", target_pane_id, status_option)
+    # These are library-owned child commands, so they carry admission too.
+    status_argv, _ = await _prepare_bounded(
+        _tmux_argv(server, "set-option", "-p", "-t", target_pane_id, status_option),
+        deadline,
     )
-    signal_cmd = shlex.join(_tmux_argv(server, "wait-for", "-S", channel))
+    signal_argv, _ = await _prepare_bounded(
+        _tmux_argv(server, "wait-for", "-S", channel), deadline
+    )
+    status_cmd = shlex.join(status_argv)
+    signal_cmd = shlex.join(signal_argv)
     history_prefix = " " if suppress_history else ""
     payload = "\n".join(
         (
@@ -424,7 +432,7 @@ async def run_command(
         )
     )
 
-    started = time.monotonic()
+    _remaining(deadline)
     await asyncio.to_thread(pane.send_keys, payload, enter=True, literal=True)
 
     timed_out = False
@@ -442,7 +450,7 @@ async def run_command(
     stderr_bytes = b""
     try:
         returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
-            wait_argv, timeout=effective_timeout
+            wait_argv, timeout=_remaining(deadline)
         )
     except TimeoutError:
         timed_out = True
@@ -786,7 +794,7 @@ def paste_text(
         load_args = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
 
         try:
-            subprocess.run(load_args, check=True, capture_output=True, timeout=5.0)
+            _run_tmux_sync_bounded(load_args, timeout=5.0)
         except subprocess.TimeoutExpired as e:
             msg = f"load-buffer timeout after 5s for {buffer_name!r}"
             raise ExpectedToolError(msg) from e

@@ -34,6 +34,7 @@ import tempfile
 import typing as t
 import uuid
 
+from libtmux_mcp._tmux_proc import _run_tmux_sync_bounded
 from libtmux_mcp._utils import (
     ANNOTATIONS_AMBIENT_UNKNOWN,
     TOOLSET_EXECUTE,
@@ -217,7 +218,7 @@ def load_buffer(
             f.write(content)
         argv = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
         try:
-            subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+            _run_tmux_sync_bounded(argv, timeout=5.0)
         except subprocess.TimeoutExpired as e:
             msg = f"load-buffer timeout after 5s for {buffer_name!r}"
             raise ExpectedToolError(msg) from e
@@ -315,12 +316,7 @@ def show_buffer(
     cname = _validate_buffer_name(buffer_name)
     argv = _tmux_argv(server, "show-buffer", "-b", cname)
     try:
-        completed = subprocess.run(
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=5.0,
-        )
+        completed = _run_tmux_sync_bounded(argv, timeout=5.0)
     except subprocess.TimeoutExpired as e:
         msg = f"show-buffer timeout after 5s for {cname!r}"
         raise ExpectedToolError(msg) from e
@@ -366,7 +362,7 @@ def delete_buffer(
     cname = _validate_buffer_name(buffer_name)
     argv = _tmux_argv(server, "delete-buffer", "-b", cname)
     try:
-        subprocess.run(argv, check=True, capture_output=True, timeout=5.0)
+        _run_tmux_sync_bounded(argv, timeout=5.0)
     except subprocess.TimeoutExpired as e:
         msg = f"delete-buffer timeout after 5s for {cname!r}"
         raise ExpectedToolError(msg) from e

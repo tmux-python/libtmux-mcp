@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 import typing as t
 
@@ -421,12 +420,10 @@ def test_list_servers_extra_socket_paths_surfaces_custom_path(
     """
     from libtmux_mcp.models import ServerInfo
 
-    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
-    fixture_socket = (
-        pathlib.Path("/tmp")
-        / f"tmux-{os.geteuid()}"
-        / (mcp_server.socket_name or "default")
+    fixture_socket = pathlib.Path(
+        mcp_server.cmd("display-message", "-p", "#{socket_path}").stdout[0]
     )
+    monkeypatch.setenv("TMUX_TMPDIR", str(tmp_path))
     assert fixture_socket.is_socket(), "fixture socket must exist for the test"
 
     results = list_servers(extra_socket_paths=[str(fixture_socket)])
