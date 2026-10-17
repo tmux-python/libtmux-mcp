@@ -115,6 +115,10 @@ lint = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv.sources]
+# Coordinated admission backend, pending its package release.
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "82b40d3afb7c1ce7bba7c774046fcc96ac4ffe2d" }
+
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
 # fresh release blocking on the 3-day cooldown blocks every
