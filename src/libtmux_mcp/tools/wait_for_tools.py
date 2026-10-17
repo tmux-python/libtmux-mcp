@@ -35,9 +35,7 @@ command-specific success markers.
 
 from __future__ import annotations
 
-import asyncio
 import re
-import subprocess
 import typing as t
 
 from libtmux_mcp._tmux_proc import _run_tmux_bounded
@@ -282,32 +280,21 @@ async def signal_channel(
     server = _get_server(socket_name=socket_name)
     cname = _validate_channel_name(channel)
     argv = _tmux_argv(server, "wait-for", "-S", cname)
-    # Deliberately still a worker thread, unlike every other tmux call
-    # in this package. The orphan-on-cancel defect that pushed the
-    # waits onto ``_run_tmux_bounded`` needs a child that blocks for a
-    # caller-chosen duration; ``wait-for -S`` does not block, so the
-    # worst case here is a 5 s child
-    # against an already-wedged tmux — and that bound is ours, not the
-    # caller's. Converting it would buy nothing and change this tool's
-    # error messages.
     try:
-        await asyncio.to_thread(
-            subprocess.run,
-            argv,
-            check=True,
-            capture_output=True,
-            timeout=_SIGNAL_TIMEOUT_SECONDS,
+        returncode, _stdout, stderr_bytes = await _run_tmux_bounded(
+            argv, timeout=_SIGNAL_TIMEOUT_SECONDS
         )
-    except subprocess.TimeoutExpired as e:
+    except TimeoutError as e:
         msg = (
             f"signal-channel timeout after {_SIGNAL_TIMEOUT_SECONDS}s: "
             f"channel {cname!r}"
         )
         raise ExpectedToolError(msg) from e
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode(errors="replace").strip() if e.stderr else ""
-        msg = f"signal-channel failed for channel {cname!r}: {stderr or e}"
-        raise ExpectedToolError(msg) from e
+    if returncode != 0:
+        stderr = stderr_bytes.decode(errors="replace").strip()
+        detail = stderr or f"exit {returncode}"
+        msg = f"signal-channel failed for channel {cname!r}: {detail}"
+        raise ExpectedToolError(msg)
     return f"Channel {cname!r} signalled"
 
 

@@ -25,7 +25,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import getopt
+import importlib
+import os
+import subprocess
+import time
+import types
 import typing as t
+import uuid
 
 #: Bound on the post-kill reap. Short because it is best effort: the
 #: loop's child watcher reaps the pid whether or not we wait.
@@ -62,7 +69,7 @@ async def _kill_and_reap(
         await asyncio.wait_for(proc.wait(), timeout=_TMUX_REAP_SECONDS)
 
 
-async def _run_tmux_bounded(
+async def _run_tmux_unchecked(
     argv: list[str], *, timeout: float
 ) -> tuple[int, bytes, bytes]:
     """Run one tmux argv under a hard bound, killing it on cancellation.
@@ -89,6 +96,7 @@ async def _run_tmux_bounded(
         Re-raised after the child has been killed and reaped, so a
         cancelled call never orphans tmux.
     """
+    deadline = time.monotonic() + timeout
     proc = await asyncio.create_subprocess_exec(
         *argv,
         stdout=asyncio.subprocess.PIPE,
@@ -103,7 +111,9 @@ async def _run_tmux_bounded(
     # when cancelling it can actually succeed.
     task = asyncio.ensure_future(proc.communicate())
     try:
-        done, _pending = await asyncio.wait({task}, timeout=timeout)
+        done, _pending = await asyncio.wait(
+            {task}, timeout=max(0, deadline - time.monotonic())
+        )
         if not done:
             await _kill_and_reap(proc, task)
             raise TimeoutError
@@ -119,3 +129,162 @@ async def _run_tmux_bounded(
         raise
     assert proc.returncode is not None
     return proc.returncode, stdout, stderr
+
+
+_MINIMUM_TMUX = "3.3a"
+
+
+def _backend() -> types.ModuleType:
+    """Require the coordinated libtmux admission contract before dispatch."""
+    try:
+        policy = importlib.import_module("libtmux._internal.support")
+    except ImportError as error:
+        msg = (
+            "Unsupported libtmux backend: install the coordinated "
+            "tmux 3.3a support change"
+        )
+        raise RuntimeError(msg) from error
+    if not all(
+        callable(getattr(policy, name, None))
+        for name in ("require_version", "prepare", "check_result")
+    ):
+        msg = "Unsupported libtmux backend: tmux admission is unavailable"
+        raise RuntimeError(msg)
+    policy.require_version(policy.MINIMUM, minimum=_MINIMUM_TMUX)
+    return policy
+
+
+def _parts(argv: list[str]) -> tuple[list[str], list[str]]:
+    options, commands = getopt.getopt(argv[1:], "L:S:uN")
+    selectors: list[str] = []
+    for flag, value in options:
+        if flag in {"-L", "-S"}:
+            selectors.extend((flag, value))
+    return selectors, commands
+
+
+def _absent(returncode: int, stderr: bytes) -> bool:
+    if returncode == 0:
+        return False
+    detail = stderr.decode("utf-8", errors="backslashreplace")
+    return "no server running" in detail or (
+        "error connecting to" in detail
+        and any(
+            reason in detail
+            for reason in ("No such file or directory", "Connection refused")
+        )
+    )
+
+
+def _version(
+    stdout: bytes, stderr: bytes, returncode: int, *, binary: str | None
+) -> str:
+    report = stdout.decode("utf-8", errors="backslashreplace")
+    if binary is not None:
+        name = (
+            os.fsencode(binary)
+            .rsplit(b"/", 1)[-1]
+            .decode("utf-8", errors="backslashreplace")
+        )
+        prefix = next(
+            (item for item in (name + " ", "tmux ") if report.startswith(item)),
+            None,
+        )
+        report = report[len(prefix) :] if prefix is not None else ""
+    if returncode or not report:
+        detail = stderr.decode("utf-8", errors="backslashreplace").strip()
+        msg = f"tmux admission failed: {detail or 'no version report'}"
+        raise RuntimeError(msg)
+    return report.strip()
+
+
+def _remaining(deadline: float) -> float:
+    result = deadline - time.monotonic()
+    if result <= 0:
+        raise TimeoutError
+    return result
+
+
+def _fence(argv: list[str], version: str, live: bool) -> tuple[list[str], str | None]:
+    _backend().require_version(version, minimum=_MINIMUM_TMUX)
+    _, commands = _parts(argv)
+    prefix = argv[: len(argv) - len(commands)] if commands else argv
+    marker = "libtmux-mcp-version-" + uuid.uuid4().hex
+    # These callers select one native command; preserve literal terminal text.
+    literal = [item[:-1] + "\\;" if item.endswith(";") else item for item in commands]
+    return [
+        *prefix,
+        "-u",
+        *(["-N"] if live else []),
+        "if-shell",
+        "-F",
+        "#{==:#{version}," + version + "}",
+        "",
+        marker,
+        ";",
+        *literal,
+    ], marker
+
+
+async def _prepare_bounded(
+    argv: list[str], deadline: float
+) -> tuple[list[str], str | None]:
+    _backend()
+    selectors, _commands = _parts(argv)
+    code, output, error = await _run_tmux_unchecked(
+        [argv[0], *selectors, "-N", "display-message", "-p", "#{version}"],
+        timeout=_remaining(deadline),
+    )
+    live = not _absent(code, error)
+    if live:
+        version = _version(output, error, code, binary=None)
+    else:
+        code, output, error = await _run_tmux_unchecked(
+            [argv[0], "-V"], timeout=_remaining(deadline)
+        )
+        version = _version(output, error, code, binary=argv[0])
+    return _fence(argv, version, live)
+
+
+async def _run_tmux_bounded(
+    argv: list[str], *, timeout: float
+) -> tuple[int, bytes, bytes]:
+    """Admit and dispatch within one cancellable process budget."""
+    deadline = time.monotonic() + timeout
+    prepared, marker = await _prepare_bounded(argv, deadline)
+    result = await _run_tmux_unchecked(prepared, timeout=_remaining(deadline))
+    _backend().check_result(
+        result[2].decode("utf-8", errors="backslashreplace"), marker
+    )
+    return result
+
+
+def _run_tmux_sync_bounded(
+    argv: list[str], *, timeout: float, check: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    """Admit and run a synchronous child within one remaining budget."""
+    policy = _backend()
+    deadline = time.monotonic() + timeout
+    selectors, _commands = _parts(argv)
+
+    def run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return subprocess.run(command, capture_output=True, timeout=budget, check=False)
+
+    probe = run([argv[0], *selectors, "-N", "display-message", "-p", "#{version}"])
+    live = not _absent(probe.returncode, probe.stderr)
+    if not live:
+        probe = run([argv[0], "-V"])
+    version = _version(
+        probe.stdout, probe.stderr, probe.returncode, binary=None if live else argv[0]
+    )
+    prepared, marker = _fence(argv, version, live)
+    result = run(prepared)
+    policy.check_result(
+        result.stderr.decode("utf-8", errors="backslashreplace"), marker
+    )
+    if check:
+        result.check_returncode()
+    return result

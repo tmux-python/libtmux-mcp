@@ -407,7 +407,7 @@ def test_send_keys_batch_timeout(
         return subprocess.CompletedProcess(args=["tmux"], returncode=0)
 
     monkeypatch.setattr(
-        "libtmux_mcp.tools.pane_tools.io.subprocess.run",
+        "libtmux_mcp.tools.pane_tools.io._run_tmux_sync_bounded",
         timed_send_keys,
     )
 
@@ -456,7 +456,9 @@ def test_send_keys_batch_timeout_bounds_in_progress_send(
         raise subprocess.TimeoutExpired(cmd="tmux", timeout=timeout)
 
     monkeypatch.setattr(Pane, "send_keys", stalled_send_keys)
-    monkeypatch.setattr("libtmux_mcp.tools.pane_tools.io.subprocess.run", timed_out_run)
+    monkeypatch.setattr(
+        "libtmux_mcp.tools.pane_tools.io._run_tmux_sync_bounded", timed_out_run
+    )
 
     result = send_keys_batch(
         operations=[
@@ -624,8 +626,8 @@ def _run_command_wait_pids(socket_name: str) -> list[int]:
     mints a random ``r_<hex>`` channel per call, hence the prefix match
     rather than an exact name.
 
-    The argv must be the whole five-token vector and ``/proc/<pid>/exe``
-    must resolve to tmux, so a shell (or pytest) whose command line
+    The argv must select this socket and end in its wait command;
+    ``/proc/<pid>/exe`` must resolve to tmux, so a shell whose command line
     merely mentions the socket cannot register as a hit; this process
     is skipped outright for the same reason. Reaped children are gone
     from ``/proc`` and zombies have an empty ``cmdline``, so neither
@@ -645,9 +647,13 @@ def _run_command_wait_pids(socket_name: str) -> list[int]:
         except OSError:
             continue  # process exited, or not ours to inspect
         argv = [chunk.decode(errors="replace") for chunk in raw.split(b"\0") if chunk]
-        if len(argv) != 5 or argv[1:4] != ["-L", socket_name, "wait-for"]:
+        if len(argv) < 5 or argv[1:3] != ["-L", socket_name]:
             continue
-        if not argv[4].startswith("r_") or exe.name != "tmux":
+        if (
+            argv[-2] != "wait-for"
+            or not argv[-1].startswith("r_")
+            or exe.name != "tmux"
+        ):
             continue
         pids.append(pid)
     return pids
@@ -1948,12 +1954,12 @@ def test_respawn_pane_preserves_pane_id_and_refreshes_pid(
 def test_respawn_pane_replaces_shell(mcp_server: Server, mcp_session: Session) -> None:
     """respawn_pane with ``shell`` relaunches with the new command."""
     window = mcp_session.active_window
-    new_pane = window.split(shell="sleep 3600")
+    new_pane = window.split(shell="exec sleep 3600")
     assert new_pane.pane_id is not None
 
     result = respawn_pane(
         pane_id=new_pane.pane_id,
-        shell="sleep 7200",
+        shell="exec sleep 7200",
         socket_name=mcp_server.socket_name,
     )
     assert result.pane_id == new_pane.pane_id
@@ -3020,7 +3026,7 @@ WAIT_FOR_TEXT_FIXTURES: list[WaitForTextFixture] = [
     # Regression for #45: pre-existing scrollback must NOT match.
     WaitForTextFixture(
         test_id="stale_scrollback_does_not_match",
-        pre_command="echo WAIT_MARKER_stale",
+        pre_command=r"printf '\nWAIT_MARKER_stale\n'",
         patterns=["WAIT_MARKER_stale"],
         timeout=0.5,
         expected_found=False,
@@ -4973,7 +4979,13 @@ def test_run_tmux_lines_happy_path_returns_without_kill(
     from libtmux_mcp.tools.pane_tools import wait as wait_mod
 
     stub = tmp_path / "tmux"
-    stub.write_text("#!/bin/sh\nprintf 'alpha\\nbeta\\n'\n")
+    stub.write_text(
+        "#!/bin/sh\n"
+        "for argument do\n"
+        "    if [ \"$argument\" = '#{version}' ]; then printf '3.7d\\n'; exit 0; fi\n"
+        "done\n"
+        "printf 'alpha\\nbeta\\n'\n"
+    )
     stub.chmod(0o755)
 
     class _StubServer:
