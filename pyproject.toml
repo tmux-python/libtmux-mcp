@@ -116,8 +116,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-# Coordinated admission backend, pending its package release.
-libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "73f82c71600a64c8e286c43c77bd30c07bcd724a" }
+# Coordinated version-check backend, pending its package release.
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "f6e4630a15f342382487a60e1e1477abcd52294d" }
 
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
