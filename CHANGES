@@ -11,7 +11,8 @@ _Notes on upcoming releases will be added here_
 Core operations require tmux 3.3a and the coordinated libtmux admission backend.
 Connected daemons, cold startup, owned subprocesses and generated completion
 helpers are checked before requested effects. Subprocess admission shares the
-operation deadline and cancellation reaps the owned child. CI retains 3.3a and
+operation deadline and cancellation reaps the owned child. The version probe
+runs no user hooks. CI retains 3.3a and
 tests rejection of native 3.2a and unpatched 3.3. The development backend source
 pin remains in place until its package release.
 
