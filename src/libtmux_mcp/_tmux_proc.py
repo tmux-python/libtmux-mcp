@@ -198,6 +198,28 @@ def _version(
     return report.strip()
 
 
+def _probe(binary: str, selectors: list[str]) -> tuple[list[str], str]:
+    """Build the hook-free live version probe and its private marker.
+
+    ``run-shell`` has no after-hook, and with ``-C`` it fails while parsing its
+    own output, so neither ``after-*`` nor ``command-error`` hooks fire.
+    """
+    marker = "libtmux-mcp-version-" + uuid.uuid4().hex + "-"
+    return [binary, *selectors, "-N", "run-shell", "-C", marker + "#{version}"], marker
+
+
+def _live_version(stderr: bytes, returncode: int, marker: str) -> str:
+    detail = stderr.decode("utf-8", errors="backslashreplace")
+    prefix = f"unknown command: {marker}"
+    reports = [
+        line[len(prefix) :] for line in detail.splitlines() if line.startswith(prefix)
+    ]
+    if returncode != 1 or len(reports) != 1:
+        msg = f"tmux admission failed: {detail.strip() or 'no version report'}"
+        raise RuntimeError(msg)
+    return reports[0]
+
+
 def _remaining(deadline: float) -> float:
     result = deadline - time.monotonic()
     if result <= 0:
@@ -231,13 +253,11 @@ async def _prepare_bounded(
 ) -> tuple[list[str], str | None]:
     _backend()
     selectors, _commands = _parts(argv)
-    code, output, error = await _run_tmux_unchecked(
-        [argv[0], *selectors, "-N", "display-message", "-p", "#{version}"],
-        timeout=_remaining(deadline),
-    )
+    probe, marker = _probe(argv[0], selectors)
+    code, output, error = await _run_tmux_unchecked(probe, timeout=_remaining(deadline))
     live = not _absent(code, error)
     if live:
-        version = _version(output, error, code, binary=None)
+        version = _live_version(error, code, marker)
     else:
         code, output, error = await _run_tmux_unchecked(
             [argv[0], "-V"], timeout=_remaining(deadline)
@@ -273,13 +293,14 @@ def _run_tmux_sync_bounded(
             raise subprocess.TimeoutExpired(argv, timeout)
         return subprocess.run(command, capture_output=True, timeout=budget, check=False)
 
-    probe = run([argv[0], *selectors, "-N", "display-message", "-p", "#{version}"])
+    command, probe_marker = _probe(argv[0], selectors)
+    probe = run(command)
     live = not _absent(probe.returncode, probe.stderr)
-    if not live:
+    if live:
+        version = _live_version(probe.stderr, probe.returncode, probe_marker)
+    else:
         probe = run([argv[0], "-V"])
-    version = _version(
-        probe.stdout, probe.stderr, probe.returncode, binary=None if live else argv[0]
-    )
+        version = _version(probe.stdout, probe.stderr, probe.returncode, binary=argv[0])
     prepared, marker = _fence(argv, version, live)
     result = run(prepared)
     policy.check_result(
