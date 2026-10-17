@@ -117,7 +117,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 # Coordinated admission backend, pending its package release.
-libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "73f82c71600a64c8e286c43c77bd30c07bcd724a" }
+libtmux = { git = "https://github.com/tmux-python/libtmux.git", rev = "309fdfed338e6df7e25799e24b2639928c39993c" }
 
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
