@@ -8,7 +8,7 @@ import typing as t
 
 import pytest
 from fastmcp.exceptions import ToolError
-from libtmux import common, exc
+from libtmux import exc
 from libtmux._internal import support
 
 from libtmux_mcp import _tmux_proc
@@ -21,18 +21,17 @@ if t.TYPE_CHECKING:
     from libtmux import Pane, Server
 
 
-@pytest.mark.parametrize("policy", [None, False, True, 0, 1, "2", 2.0])
-def test_backend_requires_optional_policy_before_spawning(
-    monkeypatch: pytest.MonkeyPatch, policy: object
+def test_backend_requires_command_policy_before_spawning(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Matching package versions and truthy markers do not qualify a backend."""
-    monkeypatch.setattr(common, "TMUX_OPTIONAL_FEATURE_POLICY_VERSION", policy)
+    """A libtmux without the command policy cannot qualify the owned helpers."""
+    monkeypatch.delattr(support, "require_commands")
 
     def forbidden(*args: object, **kwargs: object) -> t.NoReturn:
         pytest.fail("an unqualified backend spawned a native child")
 
     monkeypatch.setattr(subprocess, "run", forbidden)
-    with pytest.raises(RuntimeError, match="optional feature policy version 2"):
+    with pytest.raises(exc.LibTmuxException, match="version check is unavailable"):
         _tmux_proc._run_tmux_sync_bounded(["tmux", "list-sessions"], timeout=1)
 
 
@@ -109,19 +108,33 @@ def test_managed_paste_checks_cleanup_before_staging(
     assert mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout == ["human"]
 
 
-def test_empty_paste_and_inert_buffer_load_retain_the_core_floor(
-    mcp_server: Server, mcp_pane: Pane
-) -> None:
-    """Empty paste has no buffer effect; staging and reading remain available."""
+def test_empty_paste_retains_the_core_floor(mcp_server: Server, mcp_pane: Pane) -> None:
+    """Empty paste has no buffer effect on any supported release."""
     assert "pasted" in paste_text(
         "", pane_id=mcp_pane.pane_id, socket_name=mcp_server.socket_name
     )
     assert not mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout
+
+
+def test_load_buffer_stages_only_where_it_can_be_deleted(
+    mcp_server: Server, mcp_pane: Pane
+) -> None:
+    """A 3.3a daemon creates no buffer; 3.4 stages one the caller can delete."""
+    mcp_server.set_buffer("retained", buffer_name="human")
+    if not support.is_at_least(mcp_server._get_version(), "3.4"):
+        with pytest.raises(ToolError, match=r"3\.4"):
+            load_buffer("never-staged", socket_name=mcp_server.socket_name)
+        assert mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout == [
+            "human"
+        ]
+        return
     ref = load_buffer("baseline-retained", socket_name=mcp_server.socket_name)
     assert (
         show_buffer(ref.buffer_name, socket_name=mcp_server.socket_name).content
         == "baseline-retained"
     )
+    delete_buffer(ref.buffer_name, socket_name=mcp_server.socket_name)
+    assert mcp_server.cmd("list-buffers", "-F", "#{buffer_name}").stdout == ["human"]
 
 
 def test_owned_layout_dispatch_refuses_only_the_older_unsafe_error_path(
