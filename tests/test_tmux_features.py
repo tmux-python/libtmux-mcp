@@ -166,3 +166,20 @@ def test_layout_tool_reports_invalid_layout_without_ending_the_daemon(
             socket_name=mcp_server.socket_name,
         )
     assert mcp_server.is_alive()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["new-window", "-n", "a.b"],
+        ["rename-window", "a:b"],
+        ["new-session", "-s", "a.b"],
+    ],
+)
+def test_owned_helpers_inherit_the_exact_37_name_guard(
+    monkeypatch: pytest.MonkeyPatch, command: list[str]
+) -> None:
+    """The owned fence runs libtmux's command policy, names included."""
+    with pytest.raises(exc.VersionTooLow, match="invalid window or session name"):
+        _tmux_proc._fence(["tmux", *command], "3.7", live=True)
+    _tmux_proc._fence(["tmux", *command], "3.7a", live=True)
