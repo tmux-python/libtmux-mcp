@@ -198,6 +198,26 @@ def test_incompatible_backend_refuses_before_spawning(
         asyncio.run(_tmux_proc._run_tmux_bounded(["tmux", "list-sessions"], timeout=1))
 
 
+def test_probe_failure_is_a_library_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed probe is an expected tool error, not an unexpected RuntimeError."""
+
+    async def failing(argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
+        return 1, b"", b"permission denied\n"
+
+    monkeypatch.setattr(_tmux_proc, "_run_tmux_unchecked", failing)
+    with pytest.raises(exc.LibTmuxException, match="permission denied"):
+        asyncio.run(_tmux_proc._run_tmux_bounded(["tmux", "list-sessions"], timeout=1))
+
+    def failing_sync(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(argv, 1, b"", b"permission denied\n")
+
+    monkeypatch.setattr(subprocess, "run", failing_sync)
+    with pytest.raises(exc.LibTmuxException, match="permission denied"):
+        _tmux_proc._run_tmux_sync_bounded(["tmux", "list-sessions"], timeout=1)
+
+
 def test_replacement_after_probe_preserves_state(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
