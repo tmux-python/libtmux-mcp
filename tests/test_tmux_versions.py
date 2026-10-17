@@ -192,9 +192,9 @@ def test_incompatible_backend_refuses_before_spawning(
 
     monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
-    with pytest.raises(RuntimeError, match="Unsupported libtmux backend"):
+    with pytest.raises(exc.LibTmuxException, match="Unsupported libtmux backend"):
         _tmux_proc._run_tmux_sync_bounded(["tmux", "list-sessions"], timeout=1)
-    with pytest.raises(RuntimeError, match="Unsupported libtmux backend"):
+    with pytest.raises(exc.LibTmuxException, match="Unsupported libtmux backend"):
         asyncio.run(_tmux_proc._run_tmux_bounded(["tmux", "list-sessions"], timeout=1))
 
 
