@@ -346,6 +346,9 @@ def delete_buffer(
 ) -> str:
     """Delete an MCP-owned buffer.
 
+    Requires tmux 3.4 for exact named-buffer deletion. Older daemons refuse
+    before modifying their buffer list.
+
     Parameters
     ----------
     buffer_name : str

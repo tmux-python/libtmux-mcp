@@ -148,7 +148,7 @@ def _backend() -> types.ModuleType:
         raise exc.LibTmuxException(msg) from error
     if not all(
         callable(getattr(admission, name, None))
-        for name in ("require_version", "check_fence")
+        for name in ("require_version", "check_fence", "require_commands")
     ) or not isinstance(getattr(admission, "MINIMUM", None), str):
         msg = "Unsupported libtmux backend: tmux admission is unavailable"
         raise exc.LibTmuxException(msg)
@@ -229,13 +229,17 @@ def _remaining(deadline: float) -> float:
     return result
 
 
-def _fence(argv: list[str], version: str, live: bool) -> tuple[list[str], str | None]:
-    _backend().require_version(version, minimum=_MINIMUM_TMUX)
+def _fence(
+    argv: list[str], version: str, live: bool, *, minimum: str = _MINIMUM_TMUX
+) -> tuple[list[str], str | None]:
+    policy = _backend()
+    policy.require_version(version, minimum=minimum)
     _, commands = _parts(argv)
     prefix = argv[: len(argv) - len(commands)] if commands else argv
     marker = "libtmux-mcp-version-" + uuid.uuid4().hex
     # These callers select one native command; preserve literal terminal text.
     literal = [item[:-1] + "\\;" if item.endswith(";") else item for item in commands]
+    policy.require_commands(version, literal, repaired_break=False)
     return [
         *prefix,
         "-u",
@@ -251,7 +255,7 @@ def _fence(argv: list[str], version: str, live: bool) -> tuple[list[str], str | 
 
 
 async def _prepare_bounded(
-    argv: list[str], deadline: float
+    argv: list[str], deadline: float, *, minimum: str = _MINIMUM_TMUX
 ) -> tuple[list[str], str | None]:
     _backend()
     selectors, _commands = _parts(argv)
@@ -265,22 +269,22 @@ async def _prepare_bounded(
             [argv[0], "-V"], timeout=_remaining(deadline)
         )
         version = _version(output, error, code, binary=argv[0])
-    return _fence(argv, version, live)
+    return _fence(argv, version, live, minimum=minimum)
 
 
 async def _run_tmux_bounded(
-    argv: list[str], *, timeout: float
+    argv: list[str], *, timeout: float, minimum: str = _MINIMUM_TMUX
 ) -> tuple[int, bytes, bytes]:
     """Admit and dispatch within one cancellable process budget."""
     deadline = time.monotonic() + timeout
-    prepared, marker = await _prepare_bounded(argv, deadline)
+    prepared, marker = await _prepare_bounded(argv, deadline, minimum=minimum)
     result = await _run_tmux_unchecked(prepared, timeout=_remaining(deadline))
     _backend().check_fence(result[2].decode("utf-8", errors="backslashreplace"), marker)
     return result
 
 
 def _run_tmux_sync_bounded(
-    argv: list[str], *, timeout: float, check: bool = True
+    argv: list[str], *, timeout: float, check: bool = True, minimum: str = _MINIMUM_TMUX
 ) -> subprocess.CompletedProcess[bytes]:
     """Admit and run a synchronous child within one remaining budget."""
     policy = _backend()
@@ -301,7 +305,7 @@ def _run_tmux_sync_bounded(
     else:
         probe = run([argv[0], "-V"])
         version = _version(probe.stdout, probe.stderr, probe.returncode, binary=argv[0])
-    prepared, marker = _fence(argv, version, live)
+    prepared, marker = _fence(argv, version, live, minimum=minimum)
     result = run(prepared)
     policy.check_fence(result.stderr.decode("utf-8", errors="backslashreplace"), marker)
     if check:

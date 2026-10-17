@@ -767,6 +767,9 @@ def paste_text(
     you need to stage content first, paste it into multiple panes, or
     inspect it with ``show_buffer`` before pasting.
 
+    Nonempty text requires tmux 3.4 for reliable named-buffer cleanup on
+    failure. Empty text has no input effect on every supported release.
+
     Parameters
     ----------
     text : str
@@ -800,6 +803,9 @@ def paste_text(
         window_id=window_id,
     )
 
+    if not text:
+        return f"Text pasted to pane {pane.pane_id}"
+
     # Use a unique named tmux buffer so we don't clobber the user's
     # unnamed paste buffer, and so we can reliably clean up on error
     # paths (paste-buffer -b NAME -d deletes the named buffer). The
@@ -819,7 +825,7 @@ def paste_text(
         load_args = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
 
         try:
-            _run_tmux_sync_bounded(load_args, timeout=5.0)
+            _run_tmux_sync_bounded(load_args, timeout=5.0, minimum="3.4")
         except subprocess.TimeoutExpired as e:
             msg = f"load-buffer timeout after 5s for {buffer_name!r}"
             raise ExpectedToolError(msg) from e
