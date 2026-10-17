@@ -4982,7 +4982,10 @@ def test_run_tmux_lines_happy_path_returns_without_kill(
     stub.write_text(
         "#!/bin/sh\n"
         "for argument do\n"
-        "    if [ \"$argument\" = '#{version}' ]; then printf '3.7d\\n'; exit 0; fi\n"
+        "    case \"$argument\" in *'#{version}')\n"
+        "        printf 'unknown command: %s3.7d\\n' \"${argument%'#{version}'}\" >&2\n"
+        "        exit 1;;\n"
+        "    esac\n"
         "done\n"
         "printf 'alpha\\nbeta\\n'\n"
     )

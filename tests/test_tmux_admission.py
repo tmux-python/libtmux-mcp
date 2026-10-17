@@ -6,6 +6,7 @@ import asyncio
 import os
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -80,6 +81,53 @@ def test_native_minimum_owned_subprocesses(tmp_path: pathlib.Path, name: str) ->
         )
     finally:
         _native(binary, socket, "kill-server")
+
+
+@pytest.mark.parametrize("source", ["minimum", "path"])
+def test_admission_fires_no_user_hooks(tmp_path: pathlib.Path, source: str) -> None:
+    """Neither owned lane lets the version probe run a user's hooks."""
+    if source == "minimum":
+        binary = os.environ.get("LIBTMUX_TEST_MINIMUM_TMUX")
+    else:
+        binary = shutil.which("tmux")
+    if binary is None:
+        pytest.skip(f"no tmux for the {source} lane")
+    socket = tmp_path / "s"
+    _start(binary, socket)
+
+    def native(*argv: str) -> subprocess.CompletedProcess[bytes]:
+        return _native(binary, socket, *argv)
+
+    try:
+        assert (
+            native("set-hook", "-g", "after-display-message", "set -ag @a x").returncode
+            == 0
+        )
+        # command-error only exists on 3.5+; older releases refuse the hook.
+        has_error = (
+            native("set-hook", "-g", "command-error", "set -ag @e y").returncode == 0
+        )
+        argv = [binary, "-S", str(socket), "list-sessions"]
+        _tmux_proc._run_tmux_sync_bounded(argv, timeout=3)
+        asyncio.run(_tmux_proc._run_tmux_bounded(argv, timeout=3))
+
+        # Hooks run in order, so a control fired after the probes shows that
+        # none of them left a mark: each sentinel holds exactly one letter.
+        native("display-message", "-p", "control")
+        if has_error:
+            assert native("kill-session", "-t", "=missing").returncode != 0
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            after = native("show-options", "-gqv", "@a").stdout.strip()
+            error = native("show-options", "-gqv", "@e").stdout.strip()
+            if after == b"x" and (error == b"y" or not has_error):
+                break
+            time.sleep(0.05)
+        assert native("show-options", "-gqv", "@a").stdout.strip() == b"x"
+        if has_error:
+            assert native("show-options", "-gqv", "@e").stdout.strip() == b"y"
+    finally:
+        native("kill-server")
 
 
 @pytest.mark.parametrize(
