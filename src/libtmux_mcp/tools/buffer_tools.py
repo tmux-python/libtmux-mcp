@@ -186,6 +186,10 @@ def load_buffer(
     :attr:`~libtmux_mcp.models.BufferRef.buffer_name` on
     subsequent paste/show/delete calls.
 
+    Requires tmux 3.4: the staged buffer is named, and exact named-buffer
+    deletion, the only way to remove it, needs 3.4. Older daemons refuse
+    before creating the buffer.
+
     **When to use this vs. paste_text:** ``load_buffer`` is the
     stage-then-fire path — you get a handle back and can inspect via
     ``show_buffer``, paste into multiple panes via ``paste_buffer``,
@@ -218,7 +222,7 @@ def load_buffer(
             f.write(content)
         argv = _tmux_argv(server, "load-buffer", "-b", buffer_name, tmppath)
         try:
-            _run_tmux_sync_bounded(argv, timeout=5.0)
+            _run_tmux_sync_bounded(argv, timeout=5.0, minimum="3.4")
         except subprocess.TimeoutExpired as e:
             msg = f"load-buffer timeout after 5s for {buffer_name!r}"
             raise ExpectedToolError(msg) from e
