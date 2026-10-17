@@ -1110,6 +1110,36 @@ def test_lifespan_missing_tmux_raises_runtime_error(
         asyncio.run(_enter())
 
 
+def test_lifespan_unsupported_default_endpoint_only_warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Tools check each endpoint per call, so startup must not stop the server."""
+    import asyncio
+
+    from libtmux import exc
+
+    from libtmux_mcp import server as server_module
+    from libtmux_mcp.server import _lifespan, mcp
+
+    async def unsupported(*args: object, **kwargs: object) -> t.NoReturn:
+        msg = "libtmux requires tmux 3.3a or newer; endpoint reports '3.2a'"
+        raise exc.VersionTooLow(msg)
+
+    monkeypatch.setattr(server_module, "_prepare_bounded", unsupported)
+    entered = False
+
+    async def run() -> None:
+        nonlocal entered
+        async with _lifespan(mcp):
+            entered = True
+
+    with caplog.at_level("WARNING", logger="libtmux_mcp.server"):
+        asyncio.run(run())
+    assert entered
+    assert "default tmux endpoint is not usable" in caplog.text
+    assert "3.2a" in caplog.text
+
+
 def test_lifespan_clears_server_cache_on_exit() -> None:
     """Clean lifespan exit drops cached clients without touching tmux."""
     import asyncio
