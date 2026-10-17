@@ -11,7 +11,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.14']
-        tmux-version: ['3.3a', '3.4', '3.5', '3.6', '3.7a', 'master']
+        tmux-version: ['3.3a', '3.4', '3.5', '3.6', '3.7a', '3.8', 'master']
     env:
       TMUX_TMPDIR: /tmp/libtmux-mcp-test
     steps:
