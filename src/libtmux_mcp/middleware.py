@@ -36,6 +36,7 @@ from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.server.transforms import Transform, Visibility
 from fastmcp.tools import ToolResult
+from fastmcp.tools.base import InputRequiredToolResult
 from mcp.types import CallToolRequestParams, TextContent
 from pydantic import ValidationError as PydanticValidationError
 
@@ -711,9 +712,14 @@ class AuditMiddleware(Middleware):
             raise
 
         duration_ms = (time.monotonic() - start) * 1000.0
+        # A 2026-07-28 confirmation round returns a question, not the effect.
+        outcome = (
+            "input_required" if isinstance(result, InputRequiredToolResult) else "ok"
+        )
         self._logger.info(
-            "tool=%s outcome=ok duration_ms=%.2f client_id=%s request_id=%s args=%s",
+            "tool=%s outcome=%s duration_ms=%.2f client_id=%s request_id=%s args=%s",
             tool_name,
+            outcome,
             duration_ms,
             client_id,
             request_id,
