@@ -6,6 +6,29 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**{tooliconl}`kill-session` asks the user first**
+
+When the client supports MCP elicitation, the server asks the user to confirm
+before killing a session, on both protocol eras. A decline returns an error
+and leaves the session in place. If a session with the same name replaces the
+target while the user is being asked, nothing is killed: tmux restarts session
+ids at `$0` with each server, so the check also compares the server's process
+id. Clients without elicitation kill without asking. The audit log records the
+question as `outcome=input_required`, apart from the kill.
+
+**{tooliconl}`snapshot-pane` opens in a live pane viewer**
+
+Hosts that render MCP Apps, such as Claude Desktop and VS Code, show the
+snapshot as a terminal screen with the cursor marked, refreshed every two
+seconds while visible. Other clients receive the same result as before. See
+{ref}`pane-viewer`.
+
+**Server icons**
+
+The server advertises its logo as SVG and PNG for hosts that display one.
+
 ### Documentation
 
 **The docs open with the libtmux.org top and documentation bars**
@@ -18,6 +41,12 @@ version and language selectors. The switch sets the theme this site already
 stores, so one choice covers every control.
 
 ### Development
+
+**The agent-facing tool surface is a snapshot**
+
+`tests/test_server.py` snapshots every tool's wire form and size, so a change
+to a description, schema, annotation or toolset tag fails until the snapshot is
+regenerated with `--snapshot-update`.
 
 **CI recovers from incompatible tmux caches**
 
