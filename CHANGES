@@ -6,6 +6,13 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Development
+
+**CI recovers from incompatible tmux caches**
+
+CI rebuilds incompatible cached tmux installations before running tests.
+Release downloads use checksum pins in `.github/tmux-releases.toml`.
+
 ## libtmux-mcp 0.1.0a22 (2026-09-06)
 
 libtmux-mcp 0.1.0a22 runs on FastMCP 4, which brings MCP Python SDK v2 with
