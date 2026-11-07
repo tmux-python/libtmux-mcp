@@ -368,7 +368,7 @@ def test_move_window_to_another_session_with_index(
 def test_kill_window_requires_window_id(mcp_server: Server) -> None:
     """kill_window requires window_id as a positional argument."""
     with pytest.raises(ToolError, match="missing 1 required positional argument"):
-        kill_window(socket_name=mcp_server.socket_name)  # type: ignore[call-arg]
+        asyncio.run(kill_window(socket_name=mcp_server.socket_name))  # type: ignore[call-arg]
 
 
 def test_kill_window(mcp_server: Server, mcp_session: Session) -> None:
@@ -376,8 +376,8 @@ def test_kill_window(mcp_server: Server, mcp_session: Session) -> None:
     new_window = mcp_session.new_window(window_name="mcp_kill_win")
     window_id = new_window.window_id
     assert window_id is not None
-    result = kill_window(
-        window_id=window_id,
-        socket_name=mcp_server.socket_name,
+    result = asyncio.run(
+        kill_window(window_id=window_id, socket_name=mcp_server.socket_name)
     )
+    assert isinstance(result, str)
     assert "killed" in result.lower()

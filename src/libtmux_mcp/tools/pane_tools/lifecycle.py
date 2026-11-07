@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp import Context
+from mcp.types import InputRequiredResult
+
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
     ExpectedToolError,
+    _ask_before_teardown,
     _caller_is_on_server,
     _escape_tmux_format,
     _get_caller_identity,
@@ -15,7 +19,9 @@ from libtmux_mcp._utils import (
     _resolve_pane,
     _resolve_window,
     _serialize_pane,
+    _tmux_identity,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
 from libtmux_mcp.models import (
     PaneInfo,
@@ -25,11 +31,12 @@ from libtmux_mcp.models import (
 PaneCorner = t.Literal["top-left", "top-right", "bottom-left", "bottom-right"]
 
 
-@handle_tool_errors
-def kill_pane(
+@handle_tool_errors_async
+async def kill_pane(
     pane_id: str,
     socket_name: str | None = None,
-) -> str:
+    ctx: Context | None = None,
+) -> str | InputRequiredResult:
     """Kill (close) a tmux pane. Requires exact pane_id (e.g. '%5').
 
     Use to clean up panes no longer needed. To remove an entire window
@@ -62,6 +69,14 @@ def kill_pane(
 
     pane = _resolve_pane(server, pane_id=pane_id)
     pid = pane.pane_id
+    question = await _ask_before_teardown(
+        ctx,
+        f"Kill tmux pane {pid} (running {pane.pane_current_command!r})?",
+        declined=f"Pane not killed: {pid} (the user declined).",
+        identity=lambda: _tmux_identity(pane, "#{pane_id}"),
+    )
+    if question is not None:
+        return question
     pane.kill()
     return f"Pane killed: {pid}"
 

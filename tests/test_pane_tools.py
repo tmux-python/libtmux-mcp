@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import pathlib
@@ -1894,7 +1895,7 @@ def test_resize_pane_zoom_mutual_exclusivity(
 def test_kill_pane_requires_pane_id(mcp_server: Server) -> None:
     """kill_pane requires pane_id as a positional argument."""
     with pytest.raises(ToolError, match="missing 1 required positional argument"):
-        kill_pane(socket_name=mcp_server.socket_name)  # type: ignore[call-arg]
+        asyncio.run(kill_pane(socket_name=mcp_server.socket_name))  # type: ignore[call-arg]
 
 
 def test_kill_pane(mcp_server: Server, mcp_session: Session) -> None:
@@ -1903,10 +1904,8 @@ def test_kill_pane(mcp_server: Server, mcp_session: Session) -> None:
     new_pane = window.split()
     pane_id = new_pane.pane_id
     assert pane_id is not None
-    result = kill_pane(
-        pane_id=pane_id,
-        socket_name=mcp_server.socket_name,
-    )
+    result = asyncio.run(kill_pane(pane_id=pane_id, socket_name=mcp_server.socket_name))
+    assert isinstance(result, str)
     assert "killed" in result.lower()
 
 

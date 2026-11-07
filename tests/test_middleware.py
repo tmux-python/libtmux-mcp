@@ -1406,3 +1406,24 @@ def test_client_label_reads_both_sdk_field_names(
     context = type("_MW", (), {"fastmcp_context": fastmcp_ctx})()
 
     assert _client_label(t.cast("t.Any", context)) == expected
+
+
+def test_response_limiter_passes_a_question_through() -> None:
+    """A size-limited tool's ``InputRequiredToolResult`` reaches the client.
+
+    Rebuilding it as a plain ``ToolResult`` would serialize the question
+    as content instead of asking it.
+    """
+    from fastmcp.tools.base import InputRequiredToolResult
+    from mcp.types import InputRequiredResult
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    mw = TailPreservingResponseLimitingMiddleware(max_size=200, tools=["asker"])
+    asking = InputRequiredToolResult(
+        InputRequiredResult(result_type="input_required", request_state="s")
+    )
+    ctx = _fake_context(name="asker")
+
+    result = asyncio.run(mw.on_call_tool(ctx, _RecordingCallNext(result=asking)))
+    assert result is asking
