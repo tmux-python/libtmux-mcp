@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp.apps import AppConfig
+
 from libtmux_mcp._utils import (
     ANNOTATIONS_AMBIENT_UNKNOWN,
     DISCOVERY_META,
@@ -20,6 +22,7 @@ from libtmux_mcp._utils import (
     TOOLSET_MANAGE,
     TOOLSET_TEARDOWN,
 )
+from libtmux_mcp.resources.viewer import PANE_VIEWER_URI
 from libtmux_mcp.tools.pane_tools.capture_since import capture_since
 from libtmux_mcp.tools.pane_tools.copy_mode import enter_copy_mode, exit_copy_mode
 from libtmux_mcp.tools.pane_tools.io import (
@@ -160,6 +163,7 @@ def register(mcp: FastMCP) -> None:
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
         meta=DISCOVERY_META,
+        app=AppConfig(resource_uri=PANE_VIEWER_URI),
     )(snapshot_pane)
     mcp.tool(
         title="Select Pane",

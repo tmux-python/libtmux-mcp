@@ -314,3 +314,20 @@ def test_completion_offers_live_tmux_identifiers(
     assert _run(_complete("session_name", session_name)) == [session_name]
     assert mcp_pane.pane_id in _run(_complete("pane_id", "%"))
     assert _run(_complete("not_a_parameter", "")) == []
+
+
+def test_pane_viewer_linked_from_snapshot_pane() -> None:
+    """snapshot_pane links the MCP Apps viewer page, served as an app resource."""
+    from libtmux_mcp.resources.viewer import PANE_VIEWER_URI
+
+    async def _probe() -> tuple[t.Any, t.Any]:
+        async with Client(mcp) as client:
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            page = (await client.read_resource(PANE_VIEWER_URI))[0]
+            return tools["snapshot_pane"].meta, page
+
+    meta, page = _run(_probe())
+    assert meta["ui"]["resourceUri"] == PANE_VIEWER_URI
+    assert page.mime_type == "text/html;profile=mcp-app"
+    assert page.meta["ui"]["csp"]["resourceDomains"] == ["https://unpkg.com"]
+    assert "callServerTool" in page.text
