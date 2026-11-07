@@ -113,9 +113,14 @@ command may still be running.
 
 Before creating tmux sessions, check list_sessions to avoid duplicates.
 Always use pane_id for targeting — it is globally unique. Never run
-deletions (kill_session, kill_server) without confirming
-the target with the user first.
+deletions (kill_session, kill_window, kill_pane, kill_server) without
+confirming the target with the user first.
 ```
+
+In clients that support MCP elicitation, each kill tool asks the user itself
+before acting, so the last sentence makes the user confirm twice there and can
+be dropped. Keep it for clients without elicitation, where the kill proceeds
+unconfirmed.
 
 ### For development workflows
 
