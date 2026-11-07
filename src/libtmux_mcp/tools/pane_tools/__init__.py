@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import typing as t
 
-from fastmcp.apps import AppConfig
+from fastmcp.apps import AppConfig, app_config_to_meta_dict
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_AMBIENT_UNKNOWN,
@@ -162,8 +162,12 @@ def register(mcp: FastMCP) -> None:
         title="Snapshot Pane",
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
         tags={TOOLSET_INSPECT},
-        meta=DISCOVERY_META,
-        app=AppConfig(resource_uri=PANE_VIEWER_URI),
+        # meta["ui"] is what app= writes; sphinx-autodoc-fastmcp's collector
+        # takes meta but not app, and would skip this module.
+        meta={
+            **DISCOVERY_META,
+            "ui": app_config_to_meta_dict(AppConfig(resource_uri=PANE_VIEWER_URI)),
+        },
     )(snapshot_pane)
     mcp.tool(
         title="Select Pane",
