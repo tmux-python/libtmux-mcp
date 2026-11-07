@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp import Context
 from libtmux.constants import WindowDirection
+from mcp.types import (
+    ElicitRequest,
+    ElicitRequestFormParams,
+    ElicitResult,
+    InputRequiredResult,
+)
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -25,11 +33,13 @@ from libtmux_mcp._utils import (
     _serialize_session,
     _serialize_window,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
 from libtmux_mcp.models import SessionInfo, WindowInfo
 
 if t.TYPE_CHECKING:
     from fastmcp import FastMCP
+    from libtmux.session import Session
 
 
 @handle_tool_errors
@@ -225,12 +235,78 @@ def rename_session(
     return _serialize_session(session)
 
 
-@handle_tool_errors
-def kill_session(
+#: Key of the confirmation request in a 2026-07-28 ``InputRequiredResult``.
+_CONFIRM_KEY = "confirm"
+
+
+def _session_identity(session: Session) -> str:
+    """Return an identity that survives a tmux server restart.
+
+    ``session_id`` alone does not: tmux numbers sessions from ``$0`` on
+    every server start, so killing the last session and creating one
+    reuses the id. ``start_time`` has one-second resolution; ``pid``
+    tells two servers started in the same second apart.
+    """
+    proc = session.cmd("display-message", "-p", "#{pid}:#{start_time}:#{session_id}")
+    return proc.stdout[0] if proc.stdout else ""
+
+
+async def _confirm_teardown(
+    ctx: Context | None,
+    message: str,
+    target_id: str,
+) -> bool | InputRequiredResult | None:
+    """Ask the user to confirm a teardown, on either protocol era.
+
+    Returns the answer, an ``InputRequiredResult`` to return on a
+    2026-07-28 first round, or ``None`` when the client cannot ask.
+    ``target_id`` rides ``request_state`` so the second round refuses a
+    name that now resolves to a different object.
+    """
+    if ctx is None:
+        return None
+    capabilities = ctx.session.client_capabilities
+    if capabilities is None or capabilities.elicitation is None:
+        return None
+    request = ctx.request_context
+    if request is None or request.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+        result = await ctx.elicit(message, response_type=bool)
+        return result.action == "accept" and bool(result.data)
+
+    responses = ctx.input_responses
+    if responses is None:
+        params = ElicitRequestFormParams(
+            message=message,
+            requested_schema={
+                "type": "object",
+                "properties": {"value": {"type": "boolean", "title": "Confirm"}},
+                "required": ["value"],
+            },
+        )
+        return InputRequiredResult(
+            result_type="input_required",
+            input_requests={
+                _CONFIRM_KEY: ElicitRequest(method="elicitation/create", params=params)
+            },
+            request_state=target_id,
+        )
+    if ctx.request_state != target_id:
+        msg = "Target changed between confirmation rounds; nothing was killed."
+        raise ExpectedToolError(msg)
+    answer = responses.get(_CONFIRM_KEY)
+    if not isinstance(answer, ElicitResult) or answer.action != "accept":
+        return False
+    content = answer.content if isinstance(answer.content, dict) else {}
+    return bool(content.get("value"))
+
+
+@handle_tool_errors_async
+async def kill_session(
     session_name: str | None = None,
     session_id: str | None = None,
     socket_name: str | None = None,
-) -> str:
+    ctx: Context | None = None,
+) -> str | InputRequiredResult:
     """Kill a tmux session.
 
     Destroys the session and all its windows and panes. Use kill_window
@@ -272,6 +348,22 @@ def kill_session(
             raise ExpectedToolError(msg)
 
     name = session.session_name or session.session_id
+    identity = _session_identity(session)
+    confirmed = await _confirm_teardown(
+        ctx,
+        f"Kill tmux session {name!r} and every process in its panes?",
+        target_id=identity,
+    )
+    if isinstance(confirmed, InputRequiredResult):
+        return confirmed
+    if confirmed is False:
+        msg = f"Session not killed: {name} (the user declined)."
+        raise ExpectedToolError(msg)
+    # The handshake path held ``session`` across the await; recheck it.
+    if confirmed and _session_identity(session) != identity:
+        msg = "Target changed between confirmation rounds; nothing was killed."
+        raise ExpectedToolError(msg)
+    # A client that cannot ask (None) gets no confirmation; the kill proceeds.
     session.kill()
     return f"Session killed: {name}"
 
