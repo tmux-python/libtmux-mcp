@@ -20,8 +20,16 @@ from fastmcp.exceptions import ToolError
 from libtmux import exc
 from libtmux._internal.query_list import LOOKUP_NAME_MAP
 from libtmux.server import Server
+from mcp.types import (
+    ElicitRequest,
+    ElicitRequestFormParams,
+    ElicitResult,
+    InputRequiredResult,
+)
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 if t.TYPE_CHECKING:
+    from fastmcp import Context
     from libtmux.pane import Pane
     from libtmux.session import Session
     from libtmux.window import Window
@@ -1175,3 +1183,102 @@ def handle_tool_errors_async(
             raise _map_exception_to_tool_error(fn.__name__, e) from e
 
     return wrapper
+
+
+#: Key of the confirmation request in a 2026-07-28 ``InputRequiredResult``.
+_CONFIRM_KEY = "confirm"
+
+
+def _tmux_identity(
+    target: Server | Session | Window | Pane,
+    id_format: str = "",
+) -> str:
+    """Return an identity for ``target`` that survives a tmux server restart.
+
+    tmux numbers sessions, windows and panes from zero in every server
+    process, so an id alone can name a new object once the last session
+    is killed and another created. ``start_time`` has one-second
+    resolution; ``pid`` tells two servers started in the same second
+    apart. ``id_format`` is the object's id format, e.g. ``#{pane_id}``;
+    leave it empty for the server itself.
+    """
+    proc = target.cmd("display-message", "-p", f"#{{pid}}:#{{start_time}}:{id_format}")
+    return proc.stdout[0] if proc.stdout else ""
+
+
+async def _confirm_teardown(
+    ctx: Context | None,
+    message: str,
+    target_id: str,
+) -> bool | InputRequiredResult | None:
+    """Ask the user to confirm a teardown, on either protocol era.
+
+    Returns the answer, an ``InputRequiredResult`` to return on a
+    2026-07-28 first round, or ``None`` when the client cannot ask.
+    ``target_id`` rides ``request_state`` so the second round refuses a
+    name that now resolves to a different object.
+    """
+    if ctx is None:
+        return None
+    capabilities = ctx.session.client_capabilities
+    if capabilities is None or capabilities.elicitation is None:
+        return None
+    request = ctx.request_context
+    if request is None or request.protocol_version not in MODERN_PROTOCOL_VERSIONS:
+        result = await ctx.elicit(message, response_type=bool)
+        return result.action == "accept" and bool(result.data)
+
+    responses = ctx.input_responses
+    if responses is None:
+        params = ElicitRequestFormParams(
+            message=message,
+            requested_schema={
+                "type": "object",
+                "properties": {"value": {"type": "boolean", "title": "Confirm"}},
+                "required": ["value"],
+            },
+        )
+        return InputRequiredResult(
+            result_type="input_required",
+            input_requests={
+                _CONFIRM_KEY: ElicitRequest(method="elicitation/create", params=params)
+            },
+            request_state=target_id,
+        )
+    if ctx.request_state != target_id:
+        msg = "Target changed between confirmation rounds; nothing was killed."
+        raise ExpectedToolError(msg)
+    answer = responses.get(_CONFIRM_KEY)
+    if not isinstance(answer, ElicitResult) or answer.action != "accept":
+        return False
+    content = answer.content if isinstance(answer.content, dict) else {}
+    return bool(content.get("value"))
+
+
+async def _ask_before_teardown(
+    ctx: Context | None,
+    question: str,
+    *,
+    declined: str,
+    identity: t.Callable[[], str],
+) -> InputRequiredResult | None:
+    """Confirm a teardown with the user before the tool performs it.
+
+    Returns an ``InputRequiredResult`` for the tool to return on a
+    2026-07-28 first round, or ``None`` when the teardown may proceed:
+    the user accepted, or the client declares no elicitation capability
+    and the kill goes ahead unconfirmed. Raises
+    :class:`ExpectedToolError` with ``declined`` when the user declines,
+    and when ``identity()`` changed while they were asked.
+    """
+    before = identity()
+    confirmed = await _confirm_teardown(ctx, question, target_id=before)
+    if isinstance(confirmed, InputRequiredResult):
+        return confirmed
+    if confirmed is False:
+        raise ExpectedToolError(declined)
+    # The handshake path held the target across the await; recheck it.
+    if confirmed and identity() != before:
+        msg = "Target changed between confirmation rounds; nothing was killed."
+        raise ExpectedToolError(msg)
+    return None
