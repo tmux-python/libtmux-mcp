@@ -7,6 +7,7 @@ import json
 import typing as t
 
 import pytest
+from mcp.types import InputRequiredResult
 
 from libtmux_mcp._utils import (
     ANNOTATIONS_AMBIENT_UNKNOWN,
@@ -430,3 +431,34 @@ def test_call_tools_batch_rejects_self_invocation() -> None:
     [operation] = result.structured_content["results"]
     assert operation["success"] is False
     assert "cannot call batch tools recursively" in operation["error"]
+
+
+def test_batch_refuses_a_tool_that_asks_for_input() -> None:
+    """A nested tool returning ``InputRequiredResult`` fails its row.
+
+    Flattened into a row, the question would vanish and the row would
+    report success with empty content.
+    """
+    from fastmcp import Client, FastMCP
+
+    from libtmux_mcp.tools import batch_tools
+
+    probe = FastMCP("batch-asks")
+
+    @probe.tool(tags={TOOLSET_INSPECT})
+    async def asker() -> InputRequiredResult:
+        return InputRequiredResult(result_type="input_required", request_state="s")
+
+    batch_tools.register(probe)
+
+    async def _call() -> t.Any:
+        async with Client(probe) as client:
+            return await client.call_tool(
+                "call_read_tools_batch",
+                {"operations": [{"tool": "asker", "arguments": {}}]},
+                raise_on_error=False,
+            )
+
+    row = asyncio.run(_call()).structured_content["results"][0]
+    assert row["success"] is False
+    assert "asked for user input" in row["error"]
