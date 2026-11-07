@@ -254,8 +254,8 @@ def setup(app: Sphinx) -> None:
     app.add_css_file("css/project-admonitions.css")
     app.add_css_file("css/project-badges.css")
     app.add_css_file("css/project-cards.css")
-    app.add_css_file("css/site-header.css")
-    app.add_js_file("js/site-header.js", loading_method="defer")
+    app.add_css_file("css/site-bars.css")
+    app.add_js_file("js/site-bars.js", loading_method="defer")
 
 
 globals().update(conf)
