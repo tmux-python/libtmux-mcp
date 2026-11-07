@@ -12,6 +12,9 @@ import typing as t
 
 import pytest
 
+if t.TYPE_CHECKING:
+    from syrupy.assertion import SnapshotAssertion
+
 from libtmux_mcp._utils import TOOLSET_INSPECT, TOOLSET_MANAGE, TOOLSET_TEARDOWN
 from libtmux_mcp.server import (
     _BASE_INSTRUCTIONS,
@@ -1143,3 +1146,60 @@ def test_server_constructed_with_lifespan() -> None:
     from libtmux_mcp.server import _lifespan, mcp
 
     assert mcp._lifespan is _lifespan
+
+
+_TOOL_SURFACE_CODE = textwrap.dedent(
+    """
+    import asyncio
+    import hashlib
+    import json
+
+    from fastmcp import FastMCP
+
+    from libtmux_mcp.server import build_mcp_server
+
+
+    async def main():
+        server = build_mcp_server()
+        surface = {}
+        # Disabled tools included: a hidden teardown tool is still surface.
+        for tool in await super(FastMCP, server).list_tools():
+            wire = tool.to_mcp_tool().model_dump(
+                mode="json", by_alias=True, exclude_none=True
+            )
+            canonical = json.dumps(
+                {"key": tool.key, **wire}, sort_keys=True, separators=(",", ":")
+            )
+            surface[tool.name] = {
+                "sha256": hashlib.sha256(canonical.encode()).hexdigest()[:16],
+                "bytes": len(canonical),
+            }
+        print(json.dumps(surface, sort_keys=True))
+
+
+    asyncio.run(main())
+    """
+)
+
+
+def test_tool_surface_matches_snapshot(snapshot: SnapshotAssertion) -> None:
+    """Any change to what clients see of a tool must update the snapshot.
+
+    Covers name, title, description, input and output schema, annotations,
+    and ``_meta`` (toolset tags included), with each tool's wire size so a
+    snapshot diff shows growth. ``LIBTMUX_*`` variables are scrubbed
+    because several of them reshape schemas at import. Regenerate after
+    review with ``uv run pytest tests/test_server.py -k tool_surface
+    --snapshot-update``.
+    """
+    from syrupy.extensions.json import JSONSnapshotExtension
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LIBTMUX_")}
+    proc = subprocess.run(
+        [sys.executable, "-c", _TOOL_SURFACE_CODE],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert json.loads(proc.stdout) == snapshot(extension_class=JSONSnapshotExtension)
