@@ -927,3 +927,69 @@ def test_map_exception_suggestion_policy(
     else:
         assert suggestion is not None
         assert expected_suggestion_fragment in suggestion
+
+
+@pytest.mark.parametrize("mode", ["modern", "legacy"])
+@pytest.mark.parametrize("answer", ["accept", "decline", None])
+@pytest.mark.parametrize("tool", ["kill_window", "kill_pane", "kill_server"])
+def test_kill_tools_ask_before_killing(
+    mcp_server: Server,
+    mcp_session: Session,
+    tool: str,
+    answer: str | None,
+    mode: str,
+) -> None:
+    """Each kill tool asks first; ``None`` is a client that cannot ask."""
+    import asyncio
+
+    from fastmcp import Client, FastMCP
+    from fastmcp.client.elicitation import ElicitResult
+
+    from libtmux_mcp.tools.pane_tools import kill_pane
+    from libtmux_mcp.tools.server_tools import kill_server
+    from libtmux_mcp.tools.window_tools import kill_window
+
+    arguments: dict[str, t.Any] = {"socket_name": mcp_server.socket_name}
+    if tool == "kill_window":
+        window_id = mcp_session.new_window().window_id
+        arguments["window_id"] = window_id
+
+        def alive() -> bool:
+            return mcp_server.windows.get(window_id=window_id, default=None) is not None
+
+    elif tool == "kill_pane":
+        pane_id = mcp_session.active_window.split().pane_id
+        arguments["pane_id"] = pane_id
+
+        def alive() -> bool:
+            return mcp_server.panes.get(pane_id=pane_id, default=None) is not None
+
+    else:
+
+        def alive() -> bool:
+            return mcp_server.is_alive()
+
+    asked: list[str] = []
+
+    async def handler(message: str, *_: t.Any) -> t.Any:
+        asked.append(message)
+        return (
+            ElicitResult(action="decline") if answer == "decline" else {"value": True}
+        )
+
+    probe = FastMCP("kill-confirm")
+    probe.tool()(
+        {"kill_window": kill_window, "kill_pane": kill_pane}.get(tool, kill_server)
+    )
+    kwargs: dict[str, t.Any] = {} if mode == "modern" else {"mode": "legacy"}
+    if answer is not None:
+        kwargs["elicitation_handler"] = handler
+
+    async def _call() -> t.Any:
+        async with Client(probe, **kwargs) as client:
+            return await client.call_tool(tool, arguments, raise_on_error=False)
+
+    result = asyncio.run(_call())
+    assert len(asked) == (0 if answer is None else 1)
+    assert result.is_error is (answer == "decline")
+    assert alive() is (answer == "decline")

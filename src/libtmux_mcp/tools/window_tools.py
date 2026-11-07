@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp import Context
 from libtmux.constants import PaneDirection
+from mcp.types import InputRequiredResult
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -16,6 +18,7 @@ from libtmux_mcp._utils import (
     TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
+    _ask_before_teardown,
     _caller_is_on_server,
     _escape_tmux_format,
     _get_caller_identity,
@@ -26,7 +29,9 @@ from libtmux_mcp._utils import (
     _resolve_window,
     _serialize_pane,
     _serialize_window,
+    _tmux_identity,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
 from libtmux_mcp.models import PaneInfo, WindowInfo
 
@@ -302,11 +307,12 @@ def rename_window(
     return _serialize_window(window)
 
 
-@handle_tool_errors
-def kill_window(
+@handle_tool_errors_async
+async def kill_window(
     window_id: str,
     socket_name: str | None = None,
-) -> str:
+    ctx: Context | None = None,
+) -> str | InputRequiredResult:
     """Kill (close) a tmux window. Requires exact window_id (e.g. '@3').
 
     Destroys the window and all its panes. Use kill_pane to remove a single
@@ -339,6 +345,15 @@ def kill_window(
             raise ExpectedToolError(msg)
 
     wid = window.window_id
+    question = await _ask_before_teardown(
+        ctx,
+        f"Kill tmux window {window.window_name!r} ({wid}) and every process "
+        "in its panes?",
+        declined=f"Window not killed: {wid} (the user declined).",
+        identity=lambda: _tmux_identity(window, "#{window_id}"),
+    )
+    if question is not None:
+        return question
     window.kill()
     return f"Window killed: {wid}"
 
