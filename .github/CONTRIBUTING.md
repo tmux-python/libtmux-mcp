@@ -114,7 +114,7 @@ Doctests run on every pass already, because `--doctest-modules` is in
 
 The test workflow builds the versions in its existing matrix. Stable
 versions use the official release archives and SHA256 pins in
-`.github/tmux-releases.toml`. The selected release's
+`.github/tmux-releases.toml`, including tmux 3.8. The selected release's
 checksum is part of its cache identity. `master` resolves once to a commit and
 fetches that exact commit. The build follows tmux's
 [release and source-checkout instructions](https://github.com/tmux/tmux/blob/3.8/README#L23-L37).
