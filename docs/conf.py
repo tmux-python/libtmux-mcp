@@ -114,6 +114,8 @@ conf = merge_sphinx_config(
         # other critical fonts and bold inline code transiently
         # renders at fallback weight before swap.
         ("IBM Plex Mono", 700, "normal"),
+        # The top bar sets its wordmark in IBM Plex Mono 600.
+        ("IBM Plex Mono", 600, "normal"),
     ],
 )
 
@@ -252,6 +254,8 @@ def setup(app: Sphinx) -> None:
     app.add_css_file("css/project-admonitions.css")
     app.add_css_file("css/project-badges.css")
     app.add_css_file("css/project-cards.css")
+    app.add_css_file("css/site-header.css")
+    app.add_js_file("js/site-header.js", loading_method="defer")
 
 
 globals().update(conf)
