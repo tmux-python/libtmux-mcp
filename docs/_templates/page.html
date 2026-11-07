@@ -9,6 +9,11 @@
 #}
 {% extends "!page.html" %}
 
+{%- block body %}
+  {%- include "site-header.html" %}
+  {{- super() }}
+{%- endblock body %}
+
 {% block extrahead %}
 {{ super() }}
 <link rel="manifest" href="{{ pathto('manifest.json', 1) }}">
