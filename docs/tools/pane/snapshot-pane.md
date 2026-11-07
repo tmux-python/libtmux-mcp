@@ -11,6 +11,9 @@ terminal mode.
 
 **Avoid when** you only need raw text — {tooliconl}`capture-pane` is lighter.
 
+**In MCP Apps hosts** the result opens in the {ref}`pane viewer <pane-viewer>`,
+which keeps refreshing the screen while it is visible.
+
 **Side effects:** The built-in request reads data only. A configured alias or
 hook can add effects; see {ref}`trust`.
 

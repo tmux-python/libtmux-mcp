@@ -518,6 +518,28 @@ def test_audit_middleware_logs_success(
     assert any("client_id=None" in m for m in messages)
 
 
+def test_audit_middleware_marks_input_required(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A confirmation round is recorded as a question, not as the effect."""
+    from fastmcp.tools.base import InputRequiredToolResult
+    from mcp.types import InputRequiredResult
+
+    mw = AuditMiddleware()
+    ctx = _fake_context(name="kill_session", arguments={"session_name": "s"})
+    asking = InputRequiredToolResult(
+        InputRequiredResult(result_type="input_required", request_state="s")
+    )
+    call_next = _RecordingCallNext(result=asking)
+
+    with caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"):
+        asyncio.run(mw.on_call_tool(ctx, call_next))
+
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any("outcome=input_required" in m for m in messages)
+    assert not any("outcome=ok" in m for m in messages)
+
+
 def test_audit_middleware_logs_error_and_reraises(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
