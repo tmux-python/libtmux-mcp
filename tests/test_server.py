@@ -1148,6 +1148,26 @@ def test_server_constructed_with_lifespan() -> None:
     assert mcp._lifespan is _lifespan
 
 
+@pytest.mark.parametrize("mode", ["modern", "legacy"])
+def test_server_icons_reach_client(mode: str) -> None:
+    """Both protocol eras advertise a PNG and an SVG server icon."""
+    import asyncio
+
+    from fastmcp import Client
+
+    from libtmux_mcp.server import build_mcp_server
+
+    async def _icons() -> list[str | None]:
+        kwargs: dict[str, t.Any] = {} if mode == "modern" else {"mode": "legacy"}
+        async with Client(build_mcp_server(), **kwargs) as client:
+            return [icon.mime_type for icon in client.server_info.icons or []]
+
+    assert sorted(t.cast("list[str]", asyncio.run(_icons()))) == [
+        "image/png",
+        "image/svg+xml",
+    ]
+
+
 _TOOL_SURFACE_CODE = textwrap.dedent(
     """
     import asyncio

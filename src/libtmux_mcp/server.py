@@ -12,6 +12,7 @@ import typing as t
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware.timing import TimingMiddleware
+from mcp.types import Icon
 
 from libtmux_mcp.__about__ import __version__
 from libtmux_mcp._history import (
@@ -128,6 +129,19 @@ _BASE_INSTRUCTIONS = (
 )
 
 _INSTRUCTIONS_MAX_BYTES = 2048
+
+#: Server icons, hosted on the docs site so the wheel carries no image
+#: data. Clients must render PNG and should render SVG, so both are
+#: declared. One mark serves both themes, as in the docs sidebar.
+_ICONS_BASE = "https://libtmux-mcp.git-pull.com/_static/img/"
+_SERVER_ICONS: list[Icon] = [
+    Icon(src=f"{_ICONS_BASE}libtmux.svg", mime_type="image/svg+xml", sizes=["any"]),
+    Icon(
+        src=f"{_ICONS_BASE}icons/icon-192x192.png",
+        mime_type="image/png",
+        sizes=["192x192"],
+    ),
+]
 
 #: Enabled when ``LIBTMUX_TOOLSETS`` is unset. ``teardown`` is not in it:
 #: this server still reaches whichever tmux server the environment points
@@ -388,6 +402,7 @@ mcp = FastMCP(
         suppress_history=_suppress_history,
     ),
     website_url="https://libtmux-mcp.git-pull.com/",
+    icons=_SERVER_ICONS,
     lifespan=_lifespan,
     # Middleware runs outermost-first. Order rationale:
     #   1. TimingMiddleware — neutral observer; start clock as early
