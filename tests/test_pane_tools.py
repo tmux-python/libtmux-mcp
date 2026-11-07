@@ -1183,19 +1183,20 @@ def test_capture_pane_truncates_tail_preserving(
 ) -> None:
     """Long captures are truncated head-first; tail is preserved.
 
-    Prime the pane with >20 echo lines and confirm the last one is
-    visible, then capture the visible pane with a tight ``max_lines=5``
-    ceiling. The capture must (a) start with a single
+    Print 20 lines and wait for the shell to finish, then capture the
+    visible pane with a tight ``max_lines=5`` ceiling. The capture
+    must (a) start with a single
     ``[... truncated K lines ...]`` header, (b) have exactly 6 lines
     total (the header + 5 kept lines), and (c) preserve the most
     recent ``scrollback_line_19`` line at the tail.
     """
-    for i in range(20):
-        mcp_pane.send_keys(f"echo scrollback_line_{i}", enter=True)
-    retry_until(
-        lambda: "scrollback_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
-        raises=True,
+    # Wait for the shell to finish, not for the text to appear: the
+    # terminal echoes typed input, so ``scrollback_line_19`` shows up on
+    # screen before the shell has run any of the commands.
+    _signal_after_shell_payload(
+        mcp_server,
+        mcp_pane,
+        "for i in $(seq 0 19); do echo scrollback_line_$i; done",
     )
 
     result = capture_pane(
@@ -1207,21 +1208,19 @@ def test_capture_pane_truncates_tail_preserving(
     assert lines[0].startswith("[... truncated ")
     assert lines[0].endswith(" lines ...]")
     assert len(lines) == 6  # header + exactly 5 preserved tail lines
-    assert "scrollback_line_19" in lines[-1] or any(
-        "scrollback_line_19" in line for line in lines[1:]
-    )
+    # Exact match: the typed command line also contains the marker, only
+    # the executed output line is exactly ``scrollback_line_19``.
+    assert "scrollback_line_19" in lines[1:]
 
 
 def test_capture_pane_max_lines_none_disables_truncation(
     mcp_server: Server, mcp_pane: Pane
 ) -> None:
     """``max_lines=None`` opts out of truncation entirely."""
-    for i in range(20):
-        mcp_pane.send_keys(f"echo untrunc_line_{i}", enter=True)
-    retry_until(
-        lambda: "untrunc_line_19" in "\n".join(mcp_pane.capture_pane()),
-        2,
-        raises=True,
+    _signal_after_shell_payload(
+        mcp_server,
+        mcp_pane,
+        "for i in $(seq 0 19); do echo untrunc_line_$i; done",
     )
 
     result = capture_pane(
