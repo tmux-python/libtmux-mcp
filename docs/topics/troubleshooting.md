@@ -102,7 +102,7 @@ what you expect.
    $ python -c "import fastmcp; print(fastmcp.__version__)"
    ```
 
-2. Python version — requires 3.10+:
+2. Python version — requires 3.11+:
 
    ```console
    $ python --version

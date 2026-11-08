@@ -43,7 +43,7 @@ commands, read output, orchestrate panes.
 
 ## Quickstart
 
-**Requirements:** Python 3.10+, tmux >= 3.2a on `$PATH`.
+**Requirements:** Python 3.11+, tmux >= 3.2a on `$PATH`.
 
 The distribution is `libtmux-mcp`, the import is `libtmux_mcp`, and the
 installed executable is `libtmux-mcp`.

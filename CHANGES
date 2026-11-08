@@ -6,6 +6,13 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### Breaking changes
+
+**Python 3.11 is the minimum**
+
+`libtmux-mcp` requires Python 3.11 or newer. Python 3.10 reached end of life
+in October 2026.
+
 ### What's new
 
 **Kill tools ask the user first**
