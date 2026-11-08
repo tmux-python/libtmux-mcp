@@ -6,7 +6,6 @@
 
 | Python | Status |
 |--------|--------|
-| 3.10 | Supported |
 | 3.11 | Supported |
 | 3.12 | Supported |
 | 3.13 | Supported |

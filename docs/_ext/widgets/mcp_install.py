@@ -307,9 +307,7 @@ def default_cooldown_date(days: int) -> str:
     """
     import datetime as _datetime
 
-    cutoff = _datetime.datetime.now(_datetime.timezone.utc) - _datetime.timedelta(
-        days=days
-    )
+    cutoff = _datetime.datetime.now(_datetime.UTC) - _datetime.timedelta(days=days)
     return cutoff.date().isoformat()
 
 
