@@ -8,6 +8,7 @@ import typing as t
 
 from fastmcp import Context
 from fastmcp.tools import ToolResult
+from fastmcp.tools.base import InputRequiredToolResult
 from pydantic import BaseModel
 
 from libtmux_mcp._utils import (
@@ -104,6 +105,13 @@ async def _check_operation_allowed(
 
 def _ensure_tool_result(tool_name: str, result: t.Any) -> ToolResult:
     """Return ``result`` as a ``ToolResult`` or raise a row-level error."""
+    if isinstance(result, InputRequiredToolResult):
+        # A row has no way to carry the question back to the user.
+        msg = (
+            f"Tool {tool_name!r} asked for user input, which a batch cannot "
+            "relay. Call it directly."
+        )
+        raise ExpectedToolError(msg)
     if isinstance(result, ToolResult):
         return result
     msg = f"Tool {tool_name!r} returned an unsupported result."

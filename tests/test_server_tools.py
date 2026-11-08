@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pathlib
 import typing as t
@@ -319,7 +320,8 @@ def test_kill_server(
     """kill_server kills the tmux server."""
     # Remove TMUX_PANE to bypass self-kill guard (test server is separate)
     monkeypatch.delenv("TMUX_PANE", raising=False)
-    result = kill_server(socket_name=mcp_server.socket_name)
+    result = asyncio.run(kill_server(socket_name=mcp_server.socket_name))
+    assert isinstance(result, str)
     assert "killed" in result.lower()
 
 
@@ -335,7 +337,7 @@ def test_kill_server_self_kill_guard(
     monkeypatch.setenv("TMUX", f"{socket_path},12345,$0")
     monkeypatch.setenv("TMUX_PANE", "%99")
     with pytest.raises(ToolError, match="Refusing to kill"):
-        kill_server(socket_name=mcp_server.socket_name)
+        asyncio.run(kill_server(socket_name=mcp_server.socket_name))
 
 
 def test_kill_server_allows_cross_socket(
@@ -344,7 +346,8 @@ def test_kill_server_allows_cross_socket(
     """kill_server is allowed when the caller is on a different socket."""
     monkeypatch.setenv("TMUX", "/tmp/tmux-99999/unrelated-socket,12345,$0")
     monkeypatch.setenv("TMUX_PANE", "%99")
-    result = kill_server(socket_name=mcp_server.socket_name)
+    result = asyncio.run(kill_server(socket_name=mcp_server.socket_name))
+    assert isinstance(result, str)
     assert "killed" in result.lower()
 
 

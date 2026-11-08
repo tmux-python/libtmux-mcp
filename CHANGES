@@ -6,6 +6,56 @@
 _Notes on upcoming releases will be added here_
 <!-- END PLACEHOLDER - ADD NEW CHANGELOG ENTRIES BELOW THIS LINE -->
 
+### What's new
+
+**Kill tools ask the user first**
+
+When the client supports MCP elicitation, {tooliconl}`kill-session`,
+{tooliconl}`kill-window`, {tooliconl}`kill-pane` and {tooliconl}`kill-server`
+ask the user to confirm before killing, on both protocol eras. The question
+names what would be lost: the window's name, the pane's running command, the
+server's session count. A decline returns an error and leaves the target in
+place. If an object with the same id replaces the target while the user is
+being asked, nothing is killed: tmux numbers sessions, windows and panes from
+zero with each server, so the check also compares the server's process id.
+Clients without elicitation kill without asking. The audit log records the
+question as `outcome=input_required`, apart from the kill.
+
+**{tooliconl}`snapshot-pane` opens in a live pane viewer**
+
+Hosts that render MCP Apps, such as Claude Desktop and VS Code, show the
+snapshot as a terminal screen with the cursor marked, refreshed every two
+seconds while visible. Other clients receive the same result as before. See
+{ref}`pane-viewer`.
+
+**Server icons**
+
+The server advertises its logo as SVG and PNG for hosts that display one.
+
+### Documentation
+
+**The docs open with the libtmux.org top and documentation bars**
+
+Every page of this site now opens with the two bars libtmux.org uses. The top
+bar holds the `libtmux` wordmark, the port picker, GitHub and PyPI links, the
+Packages menu, search, and an Auto, Light, or Dark switch. The documentation bar
+under it holds the documentation picker for this site's product, with the
+version and language selectors. The switch sets the theme this site already
+stores, so one choice covers every control.
+
+### Development
+
+**The agent-facing tool surface is a snapshot**
+
+`tests/test_server.py` snapshots every tool's wire form and size, so a change
+to a description, schema, annotation or toolset tag fails until the snapshot is
+regenerated with `--snapshot-update`.
+
+**CI recovers from incompatible tmux caches**
+
+CI rebuilds incompatible cached tmux installations before running tests.
+Release downloads use checksum pins in `.github/tmux-releases.toml`.
+
 ## libtmux-mcp 0.1.0a22 (2026-09-06)
 
 libtmux-mcp 0.1.0a22 runs on FastMCP 4, which brings MCP Python SDK v2 with

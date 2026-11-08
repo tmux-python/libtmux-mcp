@@ -518,6 +518,28 @@ def test_audit_middleware_logs_success(
     assert any("client_id=None" in m for m in messages)
 
 
+def test_audit_middleware_marks_input_required(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A confirmation round is recorded as a question, not as the effect."""
+    from fastmcp.tools.base import InputRequiredToolResult
+    from mcp.types import InputRequiredResult
+
+    mw = AuditMiddleware()
+    ctx = _fake_context(name="kill_session", arguments={"session_name": "s"})
+    asking = InputRequiredToolResult(
+        InputRequiredResult(result_type="input_required", request_state="s")
+    )
+    call_next = _RecordingCallNext(result=asking)
+
+    with caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"):
+        asyncio.run(mw.on_call_tool(ctx, call_next))
+
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any("outcome=input_required" in m for m in messages)
+    assert not any("outcome=ok" in m for m in messages)
+
+
 def test_audit_middleware_logs_error_and_reraises(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1384,3 +1406,24 @@ def test_client_label_reads_both_sdk_field_names(
     context = type("_MW", (), {"fastmcp_context": fastmcp_ctx})()
 
     assert _client_label(t.cast("t.Any", context)) == expected
+
+
+def test_response_limiter_passes_a_question_through() -> None:
+    """A size-limited tool's ``InputRequiredToolResult`` reaches the client.
+
+    Rebuilding it as a plain ``ToolResult`` would serialize the question
+    as content instead of asking it.
+    """
+    from fastmcp.tools.base import InputRequiredToolResult
+    from mcp.types import InputRequiredResult
+
+    from libtmux_mcp.middleware import TailPreservingResponseLimitingMiddleware
+
+    mw = TailPreservingResponseLimitingMiddleware(max_size=200, tools=["asker"])
+    asking = InputRequiredToolResult(
+        InputRequiredResult(result_type="input_required", request_state="s")
+    )
+    ctx = _fake_context(name="asker")
+
+    result = asyncio.run(mw.on_call_tool(ctx, _RecordingCallNext(result=asking)))
+    assert result is asking

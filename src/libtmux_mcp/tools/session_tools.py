@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import typing as t
 
+from fastmcp import Context
 from libtmux.constants import WindowDirection
+from mcp.types import InputRequiredResult
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -16,6 +18,7 @@ from libtmux_mcp._utils import (
     TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
+    _ask_before_teardown,
     _caller_is_on_server,
     _escape_tmux_format,
     _get_caller_identity,
@@ -24,7 +27,9 @@ from libtmux_mcp._utils import (
     _resolve_session,
     _serialize_session,
     _serialize_window,
+    _tmux_identity,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
 from libtmux_mcp.models import SessionInfo, WindowInfo
 
@@ -225,12 +230,13 @@ def rename_session(
     return _serialize_session(session)
 
 
-@handle_tool_errors
-def kill_session(
+@handle_tool_errors_async
+async def kill_session(
     session_name: str | None = None,
     session_id: str | None = None,
     socket_name: str | None = None,
-) -> str:
+    ctx: Context | None = None,
+) -> str | InputRequiredResult:
     """Kill a tmux session.
 
     Destroys the session and all its windows and panes. Use kill_window
@@ -272,6 +278,14 @@ def kill_session(
             raise ExpectedToolError(msg)
 
     name = session.session_name or session.session_id
+    question = await _ask_before_teardown(
+        ctx,
+        f"Kill tmux session {name!r} and every process in its panes?",
+        declined=f"Session not killed: {name} (the user declined).",
+        identity=lambda: _tmux_identity(session, "#{session_id}"),
+    )
+    if question is not None:
+        return question
     session.kill()
     return f"Session killed: {name}"
 

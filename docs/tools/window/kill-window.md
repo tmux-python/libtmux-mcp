@@ -9,6 +9,11 @@
 
 **Side effects:** Destroys the window and all its panes. Not reversible.
 
+**Confirmation:** When the client supports MCP elicitation, the server asks
+the user before killing. A decline returns an error and leaves the window in
+place. If the window is replaced while the user is being asked, nothing is
+killed. Clients without elicitation kill without asking.
+
 **Example:**
 
 ```json

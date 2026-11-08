@@ -9,7 +9,9 @@ import pathlib
 import socket
 import typing as t
 
+from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from mcp.types import InputRequiredResult
 
 from libtmux_mcp._history import _prepare_spawn_environment
 from libtmux_mcp._utils import (
@@ -19,6 +21,7 @@ from libtmux_mcp._utils import (
     TOOLSET_TEARDOWN,
     ExpectedToolError,
     _apply_filters,
+    _ask_before_teardown,
     _caller_is_on_server,
     _escape_tmux_format,
     _get_caller_identity,
@@ -26,7 +29,9 @@ from libtmux_mcp._utils import (
     _invalidate_server,
     _prepare_start_directory,
     _serialize_session,
+    _tmux_identity,
     handle_tool_errors,
+    handle_tool_errors_async,
 )
 from libtmux_mcp.models import ServerInfo, SessionInfo
 
@@ -144,8 +149,11 @@ def create_session(
     return _serialize_session(session)
 
 
-@handle_tool_errors
-def kill_server(socket_name: str | None = None) -> str:
+@handle_tool_errors_async
+async def kill_server(
+    socket_name: str | None = None,
+    ctx: Context | None = None,
+) -> str | InputRequiredResult:
     """Kill the tmux server and all its sessions.
 
     Destroys ALL sessions, windows, and panes on this server. Use kill_session
@@ -172,6 +180,16 @@ def kill_server(socket_name: str | None = None) -> str:
         )
         raise ExpectedToolError(msg)
 
+    label = server.socket_name or server.socket_path or "default"
+    question = await _ask_before_teardown(
+        ctx,
+        f"Kill the tmux server on socket {label!r} and all "
+        f"{len(server.sessions)} of its sessions?",
+        declined="Server not killed (the user declined).",
+        identity=lambda: _tmux_identity(server),
+    )
+    if question is not None:
+        return question
     server.kill()
     _invalidate_server(socket_name=socket_name)
     return "Server killed successfully"

@@ -1,0 +1,218 @@
+{
+  "call_read_tools_batch": {
+    "bytes": 3522,
+    "sha256": "58b419f1862ec4cb"
+  },
+  "capture_pane": {
+    "bytes": 2267,
+    "sha256": "60e8115dcf2c4db8"
+  },
+  "capture_since": {
+    "bytes": 3624,
+    "sha256": "1ef50ddb5d67b1ef"
+  },
+  "clear_pane": {
+    "bytes": 1200,
+    "sha256": "1f8bd6ce014ff564"
+  },
+  "create_session": {
+    "bytes": 3471,
+    "sha256": "49a1847ce82435ec"
+  },
+  "create_window": {
+    "bytes": 3510,
+    "sha256": "11c8fc5c23c8aed0"
+  },
+  "delete_buffer": {
+    "bytes": 698,
+    "sha256": "35b50020d7044c11"
+  },
+  "display_message": {
+    "bytes": 1884,
+    "sha256": "f4c96ee32ef32aa8"
+  },
+  "enter_copy_mode": {
+    "bytes": 4335,
+    "sha256": "1fe7edf77393de9c"
+  },
+  "exit_copy_mode": {
+    "bytes": 4109,
+    "sha256": "2ad1ddd73db11c65"
+  },
+  "find_pane_by_position": {
+    "bytes": 4534,
+    "sha256": "7ed0eddad8b15803"
+  },
+  "get_pane_info": {
+    "bytes": 4196,
+    "sha256": "c6120a0d78ce6bef"
+  },
+  "get_server_info": {
+    "bytes": 1217,
+    "sha256": "257a0887a6a895ea"
+  },
+  "get_session_info": {
+    "bytes": 1847,
+    "sha256": "b81252c5bcc5a98d"
+  },
+  "get_window_info": {
+    "bytes": 2517,
+    "sha256": "3c88ab393209319f"
+  },
+  "kill_pane": {
+    "bytes": 842,
+    "sha256": "8032961b27e56e56"
+  },
+  "kill_server": {
+    "bytes": 818,
+    "sha256": "cd81ab12bd31883f"
+  },
+  "kill_session": {
+    "bytes": 1037,
+    "sha256": "a36a4f2e0e4c4dda"
+  },
+  "kill_window": {
+    "bytes": 917,
+    "sha256": "6d36548e98131d4b"
+  },
+  "list_panes": {
+    "bytes": 4999,
+    "sha256": "aece89d3b1e85f40"
+  },
+  "list_servers": {
+    "bytes": 2266,
+    "sha256": "e344d9e06b50686d"
+  },
+  "list_sessions": {
+    "bytes": 2199,
+    "sha256": "fde43d7110982bf9"
+  },
+  "list_windows": {
+    "bytes": 2848,
+    "sha256": "37a19cdfb5f8a457"
+  },
+  "load_buffer": {
+    "bytes": 2363,
+    "sha256": "9effe9df79cce1f2"
+  },
+  "move_window": {
+    "bytes": 2548,
+    "sha256": "dadfce362467fe78"
+  },
+  "paste_buffer": {
+    "bytes": 1423,
+    "sha256": "daca0f35a9c5327d"
+  },
+  "paste_text": {
+    "bytes": 1906,
+    "sha256": "6e9f17a5ae2bae74"
+  },
+  "pipe_pane": {
+    "bytes": 2178,
+    "sha256": "ca7649a8ff5d815b"
+  },
+  "rename_session": {
+    "bytes": 1904,
+    "sha256": "c4175869d5de26d0"
+  },
+  "rename_window": {
+    "bytes": 2363,
+    "sha256": "efdb31dca74c95b3"
+  },
+  "resize_pane": {
+    "bytes": 4448,
+    "sha256": "80d749dba7248359"
+  },
+  "resize_window": {
+    "bytes": 2459,
+    "sha256": "40f5d5607cb78b33"
+  },
+  "respawn_pane": {
+    "bytes": 6922,
+    "sha256": "b334f2b8e42d3da1"
+  },
+  "run_command": {
+    "bytes": 3788,
+    "sha256": "c6d6a536635729bd"
+  },
+  "search_panes": {
+    "bytes": 6449,
+    "sha256": "b30a2e2651af1449"
+  },
+  "select_layout": {
+    "bytes": 2557,
+    "sha256": "c0adf571ea523e82"
+  },
+  "select_pane": {
+    "bytes": 4586,
+    "sha256": "1397b34415c17974"
+  },
+  "select_window": {
+    "bytes": 2554,
+    "sha256": "5042c95f0a92502f"
+  },
+  "send_keys": {
+    "bytes": 2297,
+    "sha256": "78378f5520a9ab49"
+  },
+  "send_keys_batch": {
+    "bytes": 4295,
+    "sha256": "8a7b811c843006d0"
+  },
+  "set_environment": {
+    "bytes": 2220,
+    "sha256": "f1f25b689f83e41e"
+  },
+  "set_option": {
+    "bytes": 1931,
+    "sha256": "f75ccfc426d17774"
+  },
+  "set_pane_title": {
+    "bytes": 4205,
+    "sha256": "9397a11c42d1b510"
+  },
+  "show_buffer": {
+    "bytes": 1893,
+    "sha256": "87db779f810bd216"
+  },
+  "show_environment": {
+    "bytes": 1072,
+    "sha256": "c9797d5c3ebc8a53"
+  },
+  "show_hook": {
+    "bytes": 2415,
+    "sha256": "b65bb7ab768a374c"
+  },
+  "show_hooks": {
+    "bytes": 2769,
+    "sha256": "86e27f28d18b6c37"
+  },
+  "show_option": {
+    "bytes": 1359,
+    "sha256": "631bfb4441bf5dd9"
+  },
+  "signal_channel": {
+    "bytes": 928,
+    "sha256": "336b1e6f80763d3a"
+  },
+  "snapshot_pane": {
+    "bytes": 6010,
+    "sha256": "c4e8a482bf198faf"
+  },
+  "split_window": {
+    "bytes": 5864,
+    "sha256": "dfeb9dad7ae4bb38"
+  },
+  "swap_pane": {
+    "bytes": 3895,
+    "sha256": "e61c0d5d0bfec592"
+  },
+  "wait_for_channel": {
+    "bytes": 2111,
+    "sha256": "a7800a2f2bd4b1ac"
+  },
+  "wait_for_text": {
+    "bytes": 6723,
+    "sha256": "08f5f86f896ae66c"
+  }
+}

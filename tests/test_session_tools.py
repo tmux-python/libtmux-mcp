@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import typing as t
 
 import pytest
@@ -304,15 +305,92 @@ def test_select_window_last_on_single_window_session_raises(
 def test_kill_session_requires_target(mcp_server: Server) -> None:
     """kill_session refuses to kill without an explicit target."""
     with pytest.raises(ToolError, match="Refusing to kill"):
-        kill_session(socket_name=mcp_server.socket_name)
+        asyncio.run(kill_session(socket_name=mcp_server.socket_name))
 
 
 def test_kill_session(mcp_server: Server) -> None:
     """kill_session kills a session."""
     mcp_server.new_session(session_name="mcp_kill_me")
-    result = kill_session(
-        session_name="mcp_kill_me",
-        socket_name=mcp_server.socket_name,
+    result = asyncio.run(
+        kill_session(
+            session_name="mcp_kill_me",
+            socket_name=mcp_server.socket_name,
+        )
     )
+    assert isinstance(result, str)
     assert "killed" in result.lower()
     assert not mcp_server.has_session("mcp_kill_me")
+
+
+class KillConfirmFixture(t.NamedTuple):
+    """One kill_session confirmation scenario."""
+
+    test_id: str
+    answer: t.Literal["accept", "decline", "swap"] | None
+    expect_asked: bool
+    expect_error: bool
+    expect_alive: bool
+
+
+KILL_CONFIRM_FIXTURES: list[KillConfirmFixture] = [
+    KillConfirmFixture("accept", "accept", True, False, False),
+    KillConfirmFixture("decline", "decline", True, True, True),
+    KillConfirmFixture("client_cannot_ask", None, False, False, False),
+    KillConfirmFixture("target_recreated_while_asking", "swap", True, True, True),
+]
+
+
+@pytest.mark.parametrize("mode", ["modern", "legacy"])
+@pytest.mark.parametrize(
+    KillConfirmFixture._fields,
+    KILL_CONFIRM_FIXTURES,
+    ids=[f.test_id for f in KILL_CONFIRM_FIXTURES],
+)
+def test_kill_session_confirmation(
+    mcp_server: Server,
+    mode: str,
+    test_id: str,
+    answer: str | None,
+    expect_asked: bool,
+    expect_error: bool,
+    expect_alive: bool,
+) -> None:
+    """kill_session asks before killing on both protocol eras.
+
+    A target recreated under the same name while the user is asked must
+    survive: the user confirmed a different session.
+    """
+    from fastmcp import Client, FastMCP
+    from fastmcp.client.elicitation import ElicitResult
+
+    name = f"mcp_confirm_{test_id}"
+    mcp_server.new_session(session_name=name)
+    asked: list[str] = []
+
+    async def handler(*_: t.Any) -> t.Any:
+        asked.append(name)
+        if answer == "decline":
+            return ElicitResult(action="decline")
+        if answer == "swap":
+            mcp_server.kill_session(name)
+            mcp_server.new_session(session_name=name)
+        return {"value": True}
+
+    probe = FastMCP("kill-confirm")
+    probe.tool()(kill_session)
+    kwargs: dict[str, t.Any] = {} if mode == "modern" else {"mode": "legacy"}
+    if answer is not None:
+        kwargs["elicitation_handler"] = handler
+
+    async def _call() -> t.Any:
+        async with Client(probe, **kwargs) as client:
+            return await client.call_tool(
+                "kill_session",
+                {"session_name": name, "socket_name": mcp_server.socket_name},
+                raise_on_error=False,
+            )
+
+    result = asyncio.run(_call())
+    assert bool(asked) is expect_asked
+    assert result.is_error is expect_error
+    assert mcp_server.has_session(name) is expect_alive
