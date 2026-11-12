@@ -50,6 +50,9 @@ under it holds the documentation picker for this site's product, with the
 version and language selectors. The switch sets the theme this site already
 stores, so one choice covers every control.
 
+The port picker lists every libtmux.org port and links each one to its home
+page.
+
 ### Development
 
 **The agent-facing tool surface is a snapshot**
