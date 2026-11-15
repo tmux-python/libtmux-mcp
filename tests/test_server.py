@@ -962,7 +962,9 @@ def test_fastmcp_json_loads_registered_server() -> None:
     server = asyncio.run(config.source.load_server())
     info = asyncio.run(inspect_fastmcp(server))
 
-    assert config.source.path == "src/libtmux_mcp/server.py"
+    assert pathlib.Path(config.source.path).resolve() == (
+        config_path.resolve().parent / "src/libtmux_mcp/server.py"
+    )
     assert config.source.entrypoint == "build_mcp_server"
     assert config.deployment.transport == "stdio"
     assert {tool.name for tool in info.tools} >= {"list_sessions", "snapshot_pane"}
