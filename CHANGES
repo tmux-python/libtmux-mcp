@@ -13,7 +13,32 @@ _Notes on upcoming releases will be added here_
 `libtmux-mcp` requires Python 3.11 or newer. Python 3.10 reached end of life
 in October 2026.
 
+### Dependencies
+
+**Program tools require the core development source**
+
+The dependency is pinned to the reviewed source of
+[libtmux core PR #833](https://github.com/tmux-python/libtmux/pull/833).
+Release remains held until that API is published and the pin is replaced
+with its release. AnyIO is an explicit runtime dependency for cooperative
+worker execution.
+
 ### What's new
+
+**Run a program and recover its cleanup**
+
+{tooliconl}`run-program` starts literal argv in an owned terminal, waits for its
+exit and returns status or signal plus a bounded screen. The borrowed session
+survives. It requires a connected tmux 3.8+ daemon; use
+{tooliconl}`get-server-capabilities` to inspect the library's feature decisions.
+Cancellation joins the worker before the request settles.
+
+{tooliconl}`list-program-runs` pages through running and unresolved owners.
+{tooliconl}`get-program-run` reads one owner's bounded error and prior output;
+{tooliconl}`cleanup-program` retries cleanup using that retained owner. Records
+remain in the MCP process until cleanup succeeds. Terminal ownership does not
+confine filesystem, network or privileges, and removing a pane does not prove
+that every descendant exited. See {doc}`tools/program/index`.
 
 **Kill tools ask the user first**
 
