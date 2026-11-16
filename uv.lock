@@ -1220,7 +1220,7 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.62.0"
-source = { git = "https://github.com/tmux-python/libtmux.git?rev=1d8fb61dc2eef798b16730ec50f0a88de7f94e3c#1d8fb61dc2eef798b16730ec50f0a88de7f94e3c" }
+source = { git = "https://github.com/tmux-python/libtmux.git?rev=ff7a6552de1ae2f87a11584df4aa48b0547af95b#ff7a6552de1ae2f87a11584df4aa48b0547af95b" }
 
 [[package]]
 name = "libtmux-mcp"
@@ -1281,7 +1281,7 @@ testing = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=4.0.2,<5.0.0" },
-    { name = "libtmux", git = "https://github.com/tmux-python/libtmux.git?rev=1d8fb61dc2eef798b16730ec50f0a88de7f94e3c" },
+    { name = "libtmux", git = "https://github.com/tmux-python/libtmux.git?rev=ff7a6552de1ae2f87a11584df4aa48b0547af95b" },
     { name = "regex", specifier = ">=2024.11.6" },
 ]
 

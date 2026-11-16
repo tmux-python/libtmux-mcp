@@ -39,7 +39,7 @@ include = [
 ]
 
 dependencies = [
-  "libtmux @ git+https://github.com/tmux-python/libtmux.git@1d8fb61dc2eef798b16730ec50f0a88de7f94e3c",
+  "libtmux @ git+https://github.com/tmux-python/libtmux.git@ff7a6552de1ae2f87a11584df4aa48b0547af95b",
   "fastmcp>=4.0.2,<5.0.0",
   "regex>=2024.11.6",
 ]
