@@ -7,6 +7,98 @@ import typing as t
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ProgramRunResult(BaseModel):
+    """Exit evidence and bounded rendered output after owned pane cleanup."""
+
+    pane_id: str
+    exit_status: int | None
+    exit_signal: str | None
+    screen_text: str = Field(
+        description="Rendered terminal tail; stdout and stderr share the PTY"
+    )
+    screen_truncated: bool = Field(
+        description="The MCP byte limit removed older captured text"
+    )
+    history_complete: None = Field(
+        default=None, description="Complete program output is not established"
+    )
+    pane_removed: t.Literal[True] = True
+    effective_timeout: float
+
+
+class ProgramObservation(BaseModel):
+    """Evidence retained before a failed program operation, when available."""
+
+    exit_status: int | None
+    exit_signal: str | None
+    screen_text: str | None
+    screen_truncated: bool
+    history_complete: None = None
+
+
+class _ProgramRunState(BaseModel):
+    """Target and cleanup disposition shared by summaries and details."""
+
+    run_id: str
+    operation: t.Literal["run", "capabilities"]
+    session_id: str | None
+    socket_name: str | None
+    socket_path: str | None
+    status: t.Literal["running", "cleanup_required", "cleanup_in_progress"]
+    pane_id: str | None
+    pane_state: (
+        t.Literal["not-submitted", "unverified", "receipt-recorded", "removed"] | None
+    )
+    cleanup_pending: bool | None
+
+
+class ProgramRunSummary(_ProgramRunState):
+    """One recovery record with a 256-byte error preview."""
+
+    error_preview: str | None
+
+
+class ProgramRunPage(BaseModel):
+    """Current recovery summaries in creation order, with optional continuation."""
+
+    items: list[ProgramRunSummary]
+    next_cursor: str | None
+
+
+class ProgramRunInfo(_ProgramRunState):
+    """One owner with bounded errors and any previously captured result."""
+
+    error: str | None
+    cleanup_errors: list[str]
+    last_observation: ProgramObservation | None
+
+
+class ProgramCleanupResult(BaseModel):
+    """Verified cleanup of the retained owner identified by run_id."""
+
+    run_id: str
+    pane_id: str | None
+    cleanup_pending: t.Literal[False] = False
+
+
+class LibraryFeatureInfo(BaseModel):
+    """One feature decision from the connected daemon's core registry."""
+
+    name: str
+    since: str
+    status: t.Literal["supported", "unsupported", "unknown"]
+    reason: str
+
+
+class ServerCapabilityInfo(BaseModel):
+    """Fresh daemon identity and advisory library feature decisions."""
+
+    pid: int
+    start_time: int
+    version: str
+    features: list[LibraryFeatureInfo]
+
+
 class SessionInfo(BaseModel):
     """Serialized tmux session."""
 

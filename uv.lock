@@ -1227,6 +1227,7 @@ name = "libtmux-mcp"
 version = "0.1.0a22"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "fastmcp" },
     { name = "libtmux" },
     { name = "regex" },
@@ -1280,6 +1281,7 @@ testing = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.16.0,<5.0" },
     { name = "fastmcp", specifier = ">=4.0.2,<5.0.0" },
     { name = "libtmux", git = "https://github.com/tmux-python/libtmux.git?rev=ff7a6552de1ae2f87a11584df4aa48b0547af95b" },
     { name = "regex", specifier = ">=2024.11.6" },

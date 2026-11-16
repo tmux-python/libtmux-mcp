@@ -389,6 +389,15 @@ def _error_tool_result(
     if suggestion:
         meta["suggestion"] = suggestion
         text = f"{text}\n{suggestion}"
+    recovery_id = getattr(error, "program_recovery_id", None)
+    if recovery_id is not None:
+        meta["program_recovery_id"] = recovery_id
+    cleanup_errors = getattr(error, "program_cleanup_errors", ())
+    if cleanup_errors:
+        meta["program_cleanup_errors"] = list(cleanup_errors)
+    observation = getattr(error, "program_observation", None)
+    if observation is not None:
+        meta["program_observation"] = observation.model_dump(mode="json")
     return ToolResult(
         content=[TextContent(type="text", text=text)],
         meta=meta,
