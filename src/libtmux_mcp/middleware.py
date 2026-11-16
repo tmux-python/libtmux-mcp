@@ -622,6 +622,7 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     ``respawn_pane``) have each *value* digested while keys remain
     visible — env-var-name-like keys are operator-debug-useful and
     rarely sensitive, while their values usually are.
+    The whole argv value is digested, including malformed payload shapes.
     Known nested operation lists are summarized recursively so batched
     tool calls keep target metadata while redacting inner payloads.
 
@@ -647,7 +648,9 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     """
     summary: dict[str, t.Any] = {}
     for key, value in args.items():
-        if key in _SENSITIVE_ARG_NAMES and isinstance(value, str):
+        if key == "argv":
+            summary[key] = _redact_digest(str(value))
+        elif key in _SENSITIVE_ARG_NAMES and isinstance(value, str):
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}

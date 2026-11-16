@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import contextlib
 import json
+import logging
 import os
 import pathlib
 import sys
@@ -22,6 +23,7 @@ from mcp.types import CancelledNotification, CancelledNotificationParams
 
 from libtmux_mcp import _programs
 from libtmux_mcp.middleware import ToolErrorResultMiddleware
+from libtmux_mcp.server import build_mcp_server
 from libtmux_mcp.tools import program_tools, register_tools
 
 
@@ -78,6 +80,53 @@ def test_program_run_returns_exit_output_and_preserves_parent(
 
     asyncio.run(exercise())
     assert mcp_session.cmd("list-panes", "-s", "-F", "#{pane_id}").stdout == before
+
+
+@pytest.mark.skipif(
+    not has_gte_version("3.8"), reason="owned programs require tmux 3.8"
+)
+@pytest.mark.parametrize("malformed", [False, True])
+def test_program_audit_redacts_argv_before_validation(
+    mcp_session: Session, caplog: pytest.LogCaptureFixture, malformed: bool
+) -> None:
+    """Public calls redact both accepted argv and rejected payload shapes."""
+    secret = "PROGRAM_ARG_PAYLOAD_72be"
+    environment_secret = "PROGRAM_ENV_PAYLOAD_d628"
+    argv: t.Any = (
+        {secret: "invalid list"}
+        if malformed
+        else [sys.executable, "-c", "raise SystemExit(7)", secret]
+    )
+
+    async def exercise() -> None:
+        async with Client(build_mcp_server()) as client:
+            result = await client.call_tool(
+                "run_program",
+                {
+                    "session_id": mcp_session.session_id,
+                    "socket_name": mcp_session.server.socket_name,
+                    "argv": argv,
+                    "environment": {"PROGRAM_VALUE": environment_secret},
+                },
+                raise_on_error=False,
+            )
+            assert result.is_error is malformed
+            if not malformed:
+                assert result.structured_content is not None
+                assert result.structured_content["exit_status"] == 7
+
+    with caplog.at_level(logging.INFO, logger="libtmux_mcp.audit"):
+        asyncio.run(exercise())
+    messages = [record.getMessage() for record in caplog.records]
+    audit = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "libtmux_mcp.audit"
+    ]
+    assert any("tool=run_program" in message for message in audit)
+    assert any("sha256_prefix" in message for message in audit)
+    assert all(secret not in message for message in messages)
+    assert all(environment_secret not in message for message in messages)
 
 
 def test_program_capabilities_report_the_connected_daemon(mcp_session: Session) -> None:
