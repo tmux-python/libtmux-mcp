@@ -64,9 +64,10 @@ install_fastmcp_validation_log_filter()
 _INSTR_HIERARCHY = (
     "libtmux MCP server for tmux. "
     "tmux hierarchy: Server > Session > Window > Pane. "
-    "Prefer pane_id (e.g. '%1') for targeting. "
+    "Prefer pane_id ('%1'). "
     "Targeted tmux tools accept socket_name (defaults to LIBTMUX_SOCKET); "
-    "list_servers discovers sockets via TMUX_TMPDIR plus extra_socket_paths."
+    "list_servers scans TMUX_TMPDIR and extra_socket_paths. "
+    "Program records keep their original socket."
 )
 
 #: Activation rule. Names positive triggers and explicit anti-triggers
@@ -95,9 +96,9 @@ _INSTR_READ_TOOLS = (
 )
 
 _INSTR_WAIT_NOT_POLL = (
-    "WAIT, DON'T POLL: run_command for authored commands needing "
-    "status; wait_for_channel for custom tmux wait-for; capture_since "
-    "for tailing; wait_for_text for output you don't author "
+    "WAIT, DON'T POLL: run_program for owned argv; run_command for shell status; "
+    "wait_for_channel for signals; capture_since for tailing; "
+    "wait_for_text for other output "
     "(patterns=null=any output; stop=[] bails); "
     "send_keys_batch for raw input."
 )

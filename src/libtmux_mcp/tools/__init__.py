@@ -17,6 +17,7 @@ def register_tools(mcp: FastMCP) -> None:
         hook_tools,
         option_tools,
         pane_tools,
+        program_tools,
         server_tools,
         session_tools,
         wait_for_tools,
@@ -28,6 +29,7 @@ def register_tools(mcp: FastMCP) -> None:
     session_tools.register(mcp)
     window_tools.register(mcp)
     pane_tools.register(mcp)
+    program_tools.register(mcp)
     option_tools.register(mcp)
     env_tools.register(mcp)
     wait_for_tools.register(mcp)
