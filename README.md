@@ -36,6 +36,7 @@ commands, read output, orchestrate panes.
 | **Session** | `list_windows`, `get_session_info`, `create_window`, `rename_session`, `select_window`, `kill_session` |
 | **Window** | `list_panes`, `get_window_info`, `split_window`, `rename_window`, `select_layout`, `resize_window`, `move_window`, `kill_window` |
 | **Pane** | `run_command`, `send_keys`, `send_keys_batch`, `paste_text`, `capture_pane`, `capture_since`, `snapshot_pane`, `search_panes`, `find_pane_by_position`, `get_pane_info`, `wait_for_text`, `wait_for_channel`, `signal_channel`, `display_message`, `select_pane`, `swap_pane`, `resize_pane`, `set_pane_title`, `clear_pane`, `pipe_pane`, `enter_copy_mode`, `exit_copy_mode`, `respawn_pane`, `kill_pane` |
+| **Owned program** | `run_program`, `list_program_runs`, `get_program_run`, `cleanup_program`, `get_server_capabilities` |
 | **Options** | `show_option`, `set_option` |
 | **Environment** | `show_environment`, `set_environment` |
 | **Buffers** | `load_buffer`, `paste_buffer`, `show_buffer`, `delete_buffer` |
@@ -44,6 +45,11 @@ commands, read output, orchestrate panes.
 ## Quickstart
 
 **Requirements:** Python 3.11+, tmux >= 3.2a on `$PATH`.
+
+Owned program tools require a connected tmux 3.8+ daemon. This development
+branch pins [libtmux core PR #833](https://github.com/tmux-python/libtmux/pull/833)
+as a source dependency. From this checkout, run `uv sync --all-extras --dev`
+and `uv run libtmux-mcp`. Publication is held until the core API is released.
 
 The distribution is `libtmux-mcp`, the import is `libtmux_mcp`, and the
 installed executable is `libtmux-mcp`.
@@ -110,6 +116,13 @@ port, a deploy log settling. The difference then is not more access
 to tmux, but a better place to put the control loop.
 
 The server-side moves are:
+
+**Owned programs.** `run_program` launches literal argv in a fresh PTY, returns
+exit evidence and a bounded rendered tail, and cleans up its pane. The borrowed
+session survives. `get_server_capabilities` reports live feature decisions;
+`list_program_runs`, `get_program_run` and `cleanup_program` expose unresolved cleanup after
+failure or cancellation. See the [owned-program guide](docs/tools/program/index.md)
+for the output, descendant and process-restart limits.
 
 **Running.** [`run_command`](https://libtmux-mcp.git-pull.com/tools/pane/run-command/)
 sends an authored shell command, waits for deterministic completion,

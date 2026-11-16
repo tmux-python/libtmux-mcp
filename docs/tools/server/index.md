@@ -17,6 +17,10 @@ Discover tmux daemons on the system.
 Query server process identity and version.
 :::
 
+:::{grid-item-card} {tooliconl}`get-server-capabilities`
+Read connected daemon feature requirements and availability.
+:::
+
 :::{grid-item-card} {tooliconl}`create-session`
 Create a new tmux session.
 :::
@@ -50,6 +54,7 @@ Set an environment variable on the server.
 list-sessions
 list-servers
 get-server-info
+get-server-capabilities
 create-session
 kill-server
 show-option

@@ -5,7 +5,8 @@
 Targeted tmux tools accept an optional `socket_name` parameter for
 multi-server support. It defaults to the {envvar}`LIBTMUX_SOCKET` env
 var. {toolref}`list-servers` discovers sockets itself, and batch tools
-leave socket selection inside each nested tool's arguments. See
+leave socket selection inside each nested tool's arguments. Program recovery
+records keep their original socket; listing and cleanup use their local IDs. See
 {ref}`configuration`.
 
 ## Which tool do I want?
@@ -25,6 +26,9 @@ leave socket selection inside each nested tool's arguments. See
 - Already know the `pane_id` → use it directly
 
 **Running a command?**
+- {tool}`run-program` — literal argv in a fresh owned PTY, exact exit evidence and cleanup on tmux 3.8+
+- {tool}`get-server-capabilities` — connected daemon requirements and feature decisions
+- {tool}`list-program-runs` / {tool}`get-program-run` / {tool}`cleanup-program` — page through, inspect and retry unresolved cleanup
 - {tool}`run-command` — one call to run a shell command, wait for completion, capture output, and return exit status
 - {tool}`send-keys` / {tool}`send-keys-batch` — raw interactive input for TUIs, control keys, and persistent shell state
 - {tool}`wait-for-channel` — low-level custom completion when `run-command` does not fit the shell composition
@@ -153,6 +157,24 @@ Search text across panes.
 :link: wait-for-text
 :link-type: ref
 Wait for text to appear in a pane.
+:::
+
+:::{grid-item-card} get_server_capabilities
+:link: get-server-capabilities
+:link-type: ref
+Read the connected daemon's library feature decisions.
+:::
+
+:::{grid-item-card} get_program_run
+:link: get-program-run
+:link-type: ref
+Read one owner's bounded error and prior-output evidence.
+:::
+
+:::{grid-item-card} list_program_runs
+:link: list-program-runs
+:link-type: ref
+Inspect active programs and unresolved cleanup records.
 :::
 
 :::{grid-item-card} get_server_info
@@ -357,6 +379,18 @@ Send raw keystrokes to a pane.
 Send several ordered raw-input operations.
 :::
 
+:::{grid-item-card} run_program
+:link: run-program
+:link-type: ref
+Run literal argv in a fresh PTY and remove its owned pane.
+:::
+
+:::{grid-item-card} cleanup_program
+:link: cleanup-program
+:link-type: ref
+Retry cleanup using the original retained program owner.
+:::
+
 :::{grid-item-card} run_command
 :link: run-command
 :link-type: ref
@@ -455,6 +489,7 @@ batch/index
 session/index
 window/index
 pane/index
+program/index
 buffer/index
 hook/index
 ```
