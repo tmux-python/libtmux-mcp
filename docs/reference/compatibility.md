@@ -30,7 +30,7 @@ this checkout; publication remains held until that core API is released.
 
 | Package | Required version |
 |---------|-----------------|
-| [libtmux](https://libtmux.git-pull.com/) | @ git+https://github.com/tmux-python/libtmux.git@ff7a6552de1ae2f87a11584df4aa48b0547af95b |
+| [libtmux](https://libtmux.git-pull.com/) | @ git+https://github.com/tmux-python/libtmux.git@4cdc8da33dbb93bc5b4c45292e2d44501b08c6a6 |
 | [AnyIO](https://anyio.readthedocs.io/) | >= 4.16.0, < 5.0 |
 | [FastMCP](https://github.com/jlowin/fastmcp) | >= 4.0.2, < 5.0.0 |
 | [regex](https://github.com/mrabarnett/mrab-regex) | >= 2024.11.6 |
