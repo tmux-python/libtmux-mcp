@@ -129,6 +129,113 @@ def test_program_audit_redacts_argv_before_validation(
     assert all(environment_secret not in message for message in messages)
 
 
+@pytest.mark.skipif(
+    not has_gte_version("3.8"), reason="owned programs require tmux 3.8"
+)
+def test_program_rejected_launch_recovers_after_verified_removal(
+    mcp_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Native errors hide payloads and absent-pane cleanup survives lost observation."""
+    store = _programs._ProgramRuns()
+    monkeypatch.setattr(program_tools, "_program_runs", store)
+    native = program._Client.__init__
+    argument = "PROGRAM_RECOVERY_ARG_ba71"
+    environment = "PROGRAM_RECOVERY_ENV_c329"
+    before = mcp_session.cmd("list-panes", "-s", "-F", "#{pane_id}").stdout
+
+    def reject_launch(
+        client: program._Client, command: tuple[str, ...], *args: t.Any
+    ) -> None:
+        changed = tuple(
+            value.replace("respawn-pane ", "program-test-invalid-command ", 1)
+            for value in command
+        )
+        native(client, changed, *args)
+
+    def retain_owner(*args: t.Any, **kwargs: t.Any) -> None:
+        msg = "Controlled initial removal failure"
+        raise OSError(msg)
+
+    async def exercise() -> None:
+        async with Client(build_mcp_server()) as client:
+            run_id = None
+            try:
+                with monkeypatch.context() as patch:
+                    patch.setattr(program._Client, "__init__", reject_launch)
+                    patch.setattr(program.Program, "_remove", retain_owner)
+                    result = await client.call_tool(
+                        "run_program",
+                        {
+                            "session_id": mcp_session.session_id,
+                            "socket_name": mcp_session.server.socket_name,
+                            "argv": [
+                                sys.executable,
+                                "-c",
+                                "raise SystemExit(7)",
+                                argument,
+                            ],
+                            "environment": {"PROGRAM_VALUE": environment},
+                        },
+                        raise_on_error=False,
+                    )
+                assert result.is_error
+                run_id = (result.meta or {})["program_recovery_id"]
+                detail = await client.call_tool("get_program_run", {"run_id": run_id})
+                page = await client.call_tool("list_program_runs", {})
+                evidence = repr((result, detail, page))
+                assert argument not in evidence and environment not in evidence
+                records = repr([record.__dict__ for record in caplog.records])
+                assert argument not in records and environment not in records
+                refused = await client.call_tool(
+                    "cleanup_program", {"run_id": run_id}, raise_on_error=False
+                )
+                assert refused.is_error
+                assert (refused.meta or {})["program_recovery_id"] == run_id
+                cleanup_errors = (refused.meta or {})["program_cleanup_errors"]
+                assert "submitted program lifetime is unknown" in cleanup_errors[-2]
+                assert (
+                    "program lifetime observation is unavailable" in cleanup_errors[-1]
+                )
+                owner = store._runs[run_id].owner
+                assert owner is not None and owner.recovery.cleanup_pending
+                pane_id = owner.recovery.pane_id
+                assert pane_id is not None
+                assert (
+                    pane_id
+                    in mcp_session.cmd("list-panes", "-s", "-F", "#{pane_id}").stdout
+                )
+                mcp_session.cmd("kill-pane", "-t", pane_id)
+                cleaned = await client.call_tool(
+                    "cleanup_program", {"run_id": run_id}, raise_on_error=False
+                )
+                assert not cleaned.is_error
+                assert cleaned.structured_content is not None
+                assert not cleaned.structured_content["cleanup_pending"]
+                assert (
+                    await client.call_tool("list_program_runs", {})
+                ).data.items == []
+            finally:
+                if run_id is not None and run_id in store._runs:
+                    retained = store._runs[run_id]
+                    assert retained.owner is not None
+                    owner = retained.owner
+                    panes = mcp_session.cmd(
+                        "list-panes", "-s", "-F", "#{pane_id}"
+                    ).stdout
+                    pane_id = owner.recovery.pane_id
+                    if pane_id is not None and pane_id in panes:
+                        mcp_session.cmd("kill-pane", "-t", pane_id)
+                    owner.cleanup(timeout=0.5)
+                    assert not owner.recovery.cleanup_pending
+                    store.retire(retained)
+
+    with caplog.at_level(logging.DEBUG, logger="libtmux.program"):
+        asyncio.run(exercise())
+    assert mcp_session.cmd("list-panes", "-s", "-F", "#{pane_id}").stdout == before
+
+
 def test_program_capabilities_report_the_connected_daemon(mcp_session: Session) -> None:
     """Discovery serializes core decisions without a second version table."""
     expected = mcp_session.server.capabilities()

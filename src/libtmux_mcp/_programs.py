@@ -262,31 +262,43 @@ class _ProgramRuns:
 
         def work(cancel: threading.Event) -> str | None:
             entered.set()
+            termination_error: BaseException | None = None
             try:
                 if cancel.is_set():
                     msg = "Program cleanup was cancelled before admission"
                     raise _ProgramRunError(msg, run_id)  # noqa: TRY301 - retain retry state.
                 if owner.recovery.pane_state == "receipt-recorded":
-                    owner.terminate(timeout=0.5)
+                    try:
+                        owner.terminate(timeout=0.5)
+                    except BaseException as error:  # noqa: BLE001 - cleanup may verify an absent pane without its observer.
+                        termination_error = error
                 owner.cleanup(timeout=0.5)
                 if owner.recovery.cleanup_pending:
                     msg = "Program cleanup remains unverified"
                     raise _ProgramRunError(msg, run_id)  # noqa: TRY301 - retain retry state.
             except BaseException as error:
+                errors = (
+                    (error,)
+                    if termination_error is None
+                    else (termination_error, error)
+                )
+                failures: list[str] = []
+                for cause in errors:
+                    failures.extend(
+                        _error_text(item)
+                        for item in getattr(cause, "cleanup_errors", ())
+                    )
+                    failures.append(_error_text(cause))
                 with self._lock:
-                    run.error = _error_text(error)
+                    run.error = _error_text(errors[0])
                     run.cleanup_errors = (
                         *run.cleanup_errors,
-                        *(
-                            _error_text(item)
-                            for item in getattr(error, "cleanup_errors", ())
-                        ),
-                        _error_text(error),
+                        *failures,
                     )[-8:]
                     run.recovery = owner.recovery
                     run.status = "cleanup_required"
                 raise _ProgramRunError(
-                    str(error), run_id, run.cleanup_errors, run.last_observation
+                    str(errors[0]), run_id, run.cleanup_errors, run.last_observation
                 ) from error
             self.retire(run)
             return owner.recovery.pane_id
