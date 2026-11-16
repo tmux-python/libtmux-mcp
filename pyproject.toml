@@ -39,7 +39,7 @@ include = [
 ]
 
 dependencies = [
-  "libtmux>=0.62.0,<1.0",
+  "libtmux @ git+https://github.com/tmux-python/libtmux.git@1d8fb61dc2eef798b16730ec50f0a88de7f94e3c",
   "fastmcp>=4.0.2,<5.0.0",
   "regex>=2024.11.6",
 ]
@@ -110,6 +110,9 @@ lint = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.uv.exclude-newer-package]
 # git-pull packages release in lockstep with their workspaces, so a
