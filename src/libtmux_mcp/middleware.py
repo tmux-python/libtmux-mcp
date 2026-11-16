@@ -389,6 +389,15 @@ def _error_tool_result(
     if suggestion:
         meta["suggestion"] = suggestion
         text = f"{text}\n{suggestion}"
+    recovery_id = getattr(error, "program_recovery_id", None)
+    if recovery_id is not None:
+        meta["program_recovery_id"] = recovery_id
+    cleanup_errors = getattr(error, "program_cleanup_errors", ())
+    if cleanup_errors:
+        meta["program_cleanup_errors"] = list(cleanup_errors)
+    observation = getattr(error, "program_observation", None)
+    if observation is not None:
+        meta["program_observation"] = observation.model_dump(mode="json")
     return ToolResult(
         content=[TextContent(type="text", text=text)],
         meta=meta,
@@ -613,6 +622,7 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     ``respawn_pane``) have each *value* digested while keys remain
     visible — env-var-name-like keys are operator-debug-useful and
     rarely sensitive, while their values usually are.
+    The whole argv value is digested, including malformed payload shapes.
     Known nested operation lists are summarized recursively so batched
     tool calls keep target metadata while redacting inner payloads.
 
@@ -638,7 +648,9 @@ def _summarize_args(args: dict[str, t.Any]) -> dict[str, t.Any]:
     """
     summary: dict[str, t.Any] = {}
     for key, value in args.items():
-        if key in _SENSITIVE_ARG_NAMES and isinstance(value, str):
+        if key == "argv":
+            summary[key] = _redact_digest(str(value))
+        elif key in _SENSITIVE_ARG_NAMES and isinstance(value, str):
             summary[key] = _redact_digest(value)
         elif key in _SENSITIVE_ARG_NAMES and isinstance(value, dict):
             summary[key] = {k: _redact_digest(str(v)) for k, v in value.items()}

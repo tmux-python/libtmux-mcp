@@ -1,7 +1,7 @@
 """Duration policy for the pane wait tools.
 
-A wait tool is the only MCP tool in this server that blocks for a
-caller-chosen duration. The ceiling bounds the AGENT'S TURN, not the
+Wait tools and owned program runs share a ceiling on caller-chosen
+duration. The ceiling bounds the AGENT'S TURN, not the
 transport: the wait tools await throughout, so a long wait does not
 stall the connection. Measured on fastmcp 3.4.4 over stdio, a tool
 awaiting for 6 s served 58 interleaved calls at a 3.4 ms median, while

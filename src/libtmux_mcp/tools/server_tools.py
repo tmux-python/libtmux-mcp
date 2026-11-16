@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
 import os
 import pathlib
 import socket
+import threading
 import typing as t
 
 from fastmcp import Context
@@ -14,8 +16,10 @@ from fastmcp.exceptions import ToolError
 from mcp.types import InputRequiredResult
 
 from libtmux_mcp._history import _prepare_spawn_environment
+from libtmux_mcp._programs import _program_runs
 from libtmux_mcp._utils import (
     ANNOTATIONS_AMBIENT_UNKNOWN,
+    TAG_SELF_BOUNDED,
     TOOLSET_EXECUTE,
     TOOLSET_INSPECT,
     TOOLSET_TEARDOWN,
@@ -27,13 +31,19 @@ from libtmux_mcp._utils import (
     _get_caller_identity,
     _get_server,
     _invalidate_server,
+    _new_server,
     _prepare_start_directory,
     _serialize_session,
     _tmux_identity,
     handle_tool_errors,
     handle_tool_errors_async,
 )
-from libtmux_mcp.models import ServerInfo, SessionInfo
+from libtmux_mcp.models import (
+    LibraryFeatureInfo,
+    ServerCapabilityInfo,
+    ServerInfo,
+    SessionInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +244,47 @@ def get_server_info(socket_name: str | None = None) -> ServerInfo:
     )
 
 
+@handle_tool_errors_async
+async def get_server_capabilities(
+    socket_name: str | None = None, socket_path: str | None = None
+) -> ServerCapabilityInfo:
+    """Read fresh daemon identity and library feature decisions before choosing a tool.
+
+    This does not start a daemon. Unknown versions remain unknown; client binary
+    versions do not substitute for the connected daemon. Decisions are advisory:
+    each operation checks its own requirements. Toolset policy still determines
+    which tools are enabled. A failed native-client cleanup remains discoverable
+    through list_program_runs and cleanup_program.
+
+    Parameters
+    ----------
+    socket_name : str, optional
+        Socket name; defaults to LIBTMUX_SOCKET.
+    socket_path : str, optional
+        Socket path; defaults to LIBTMUX_SOCKET_PATH and takes precedence.
+
+    Returns
+    -------
+    ServerCapabilityInfo
+        Observed daemon identity, version, feature states and reasons.
+    """
+    server = _new_server(socket_name, socket_path)
+
+    def work(cancel: threading.Event) -> ServerCapabilityInfo:
+        report = server.capabilities(timeout=5, cancel_event=cancel)
+        return ServerCapabilityInfo(
+            pid=report.pid,
+            start_time=report.start_time,
+            version=report.version,
+            features=[
+                LibraryFeatureInfo(**dataclasses.asdict(item))
+                for item in report.features
+            ],
+        )
+
+    return await _program_runs.execute(work, "capabilities", server)
+
+
 def _is_tmux_socket_live(path: pathlib.Path) -> bool:
     """Return True if a tmux socket has a listener accepting connections.
 
@@ -301,14 +352,21 @@ def _probe_server_by_path(socket_path: pathlib.Path) -> ServerInfo | None:
 
 #: Tools that intentionally do NOT accept ``socket_name`` because they
 #: either discover sockets themselves or coordinate nested tools whose
-#: arguments carry their own targeting. Read by
+#: arguments carry their own targeting, or operate on process-local program
+#: records bound to their original socket. Read by
 #: ``test_registered_tools_accept_socket_name`` to enforce the
 #: agent-facing contract advertised in
 #: :data:`libtmux_mcp.server._BASE_INSTRUCTIONS`. When you add a new
 #: discovery-style tool, append it here AND update the prose in
 #: ``_BASE_INSTRUCTIONS`` so the two stay in lockstep.
 SOCKET_NAME_EXEMPT: frozenset[str] = frozenset(
-    {"call_read_tools_batch", "list_servers"}
+    {
+        "call_read_tools_batch",
+        "list_servers",
+        "list_program_runs",
+        "get_program_run",
+        "cleanup_program",
+    }
 )
 
 
@@ -377,6 +435,11 @@ def list_servers(
 
 def register(mcp: FastMCP) -> None:
     """Register server-level tools with the MCP instance."""
+    mcp.tool(
+        title="Get Server Capabilities",
+        annotations=ANNOTATIONS_AMBIENT_UNKNOWN,
+        tags={TOOLSET_INSPECT, TAG_SELF_BOUNDED},
+    )(get_server_capabilities)
     mcp.tool(
         title="List tmux Sessions",
         annotations=ANNOTATIONS_AMBIENT_UNKNOWN,

@@ -1,12 +1,12 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <4.0"
 resolution-markers = [
     "python_full_version >= '3.15'",
     "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten'",
-    "(python_full_version >= '3.11.5' and python_full_version < '3.12') or (python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten')",
+    "(python_full_version >= '3.11.5' and python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version >= '3.11.5' and python_full_version < '3.12' and sys_platform == 'emscripten')",
     "python_full_version < '3.11.5'",
 ]
 
@@ -15,26 +15,26 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
-fastmcp = false
-fastmcp-slim = false
-gp-furo-theme = false
-gp-libs = false
-gp-sphinx = false
 libtmux = false
+gp-sphinx = false
+sphinx-autodoc-sphinx = false
 sphinx-autodoc-api-style = false
-sphinx-autodoc-argparse = false
-sphinx-autodoc-docutils = false
 sphinx-autodoc-fastmcp = false
 sphinx-autodoc-pytest-fixtures = false
-sphinx-autodoc-sphinx = false
-sphinx-autodoc-typehints-gp = false
-sphinx-fonts = false
 sphinx-gp-llms = false
-sphinx-gp-opengraph = false
-sphinx-gp-sitemap = false
-sphinx-gp-theme = false
+sphinx-autodoc-argparse = false
 sphinx-ux-autodoc-layout = false
 sphinx-ux-badges = false
+fastmcp = false
+gp-libs = false
+fastmcp-slim = false
+sphinx-autodoc-docutils = false
+gp-furo-theme = false
+sphinx-gp-sitemap = false
+sphinx-fonts = false
+sphinx-autodoc-typehints-gp = false
+sphinx-gp-opengraph = false
+sphinx-gp-theme = false
 
 [[package]]
 name = "accessible-pygments"
@@ -1220,17 +1220,14 @@ wheels = [
 [[package]]
 name = "libtmux"
 version = "0.62.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0c/b8/0410c8487f7673926d141a5aaaf60133984a564b3c90eb4f3f99e92e7740/libtmux-0.62.0.tar.gz", hash = "sha256:41e9e80602b2656fd119b13253b27bad46af5cfef32099be53cdd391e2936b61", size = 571757, upload-time = "2026-07-12T21:48:02.781Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/96/471ac01844ee157fe794446e17568e9bf219d323575c2acc7957a9a2d8c9/libtmux-0.62.0-py3-none-any.whl", hash = "sha256:626aa6fae45e3a423e1acc81604efafa63b7262b1d67b2c7a8778b1ad691456b", size = 127700, upload-time = "2026-07-12T21:48:01.52Z" },
-]
+source = { git = "https://github.com/tmux-python/libtmux.git?rev=4cdc8da33dbb93bc5b4c45292e2d44501b08c6a6#4cdc8da33dbb93bc5b4c45292e2d44501b08c6a6" }
 
 [[package]]
 name = "libtmux-mcp"
 version = "0.1.0a22"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "fastmcp" },
     { name = "libtmux" },
     { name = "regex" },
@@ -1284,8 +1281,9 @@ testing = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.16.0,<5.0" },
     { name = "fastmcp", specifier = ">=4.0.2,<5.0.0" },
-    { name = "libtmux", specifier = ">=0.62.0,<1.0" },
+    { name = "libtmux", git = "https://github.com/tmux-python/libtmux.git?rev=4cdc8da33dbb93bc5b4c45292e2d44501b08c6a6" },
     { name = "regex", specifier = ">=2024.11.6" },
 ]
 
@@ -2494,7 +2492,7 @@ resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten'",
-    "(python_full_version >= '3.11.5' and python_full_version < '3.12') or (python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten')",
+    "(python_full_version >= '3.11.5' and python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version >= '3.11.5' and python_full_version < '3.12' and sys_platform == 'emscripten')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/95/48/21a393ff731b8f928fa4f8176f9a7ceba2252ee60a5149f25b45c292aa5c/soupsieve-4.1.tar.gz", hash = "sha256:ca9abf7126667010d8f6e9b39bfc1bc3b23c8aed9bcb0f54a754dde969bb8aab", size = 161955, upload-time = "2026-11-10T01:59:50.399Z" }
 wheels = [

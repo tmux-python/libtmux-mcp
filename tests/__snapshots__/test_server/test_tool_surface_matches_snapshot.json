@@ -11,6 +11,10 @@
     "bytes": 3624,
     "sha256": "1ef50ddb5d67b1ef"
   },
+  "cleanup_program": {
+    "bytes": 1134,
+    "sha256": "3c75cc23e2450ebf"
+  },
   "clear_pane": {
     "bytes": 1200,
     "sha256": "1f8bd6ce014ff564"
@@ -47,6 +51,14 @@
     "bytes": 4196,
     "sha256": "c6120a0d78ce6bef"
   },
+  "get_program_run": {
+    "bytes": 2520,
+    "sha256": "9259f144f3b5578c"
+  },
+  "get_server_capabilities": {
+    "bytes": 1768,
+    "sha256": "fabff18f71a68b41"
+  },
   "get_server_info": {
     "bytes": 1217,
     "sha256": "257a0887a6a895ea"
@@ -78,6 +90,10 @@
   "list_panes": {
     "bytes": 4999,
     "sha256": "aece89d3b1e85f40"
+  },
+  "list_program_runs": {
+    "bytes": 2461,
+    "sha256": "f4107d591b62d583"
   },
   "list_servers": {
     "bytes": 2266,
@@ -134,6 +150,10 @@
   "run_command": {
     "bytes": 3788,
     "sha256": "c6d6a536635729bd"
+  },
+  "run_program": {
+    "bytes": 3429,
+    "sha256": "4ed86d8b2d825c74"
   },
   "search_panes": {
     "bytes": 6449,

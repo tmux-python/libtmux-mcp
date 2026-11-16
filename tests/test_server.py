@@ -414,6 +414,7 @@ def test_base_instructions_surface_flagship_read_tools() -> None:
 
 def test_base_instructions_prefer_typed_completion_over_polling() -> None:
     """_BASE_INSTRUCTIONS names typed completion and observation primitives."""
+    assert "run_program" in _BASE_INSTRUCTIONS
     assert "run_command" in _BASE_INSTRUCTIONS
     assert "wait_for_channel" in _BASE_INSTRUCTIONS
     assert "capture_since" in _BASE_INSTRUCTIONS

@@ -572,6 +572,24 @@ _server_cache: dict[tuple[str | None, str | None, str | None], Server] = {}
 _server_cache_lock = threading.Lock()
 
 
+def _new_server(
+    socket_name: str | None = None,
+    socket_path: str | None = None,
+) -> Server:
+    """Construct the configured route without issuing an unbounded liveness query."""
+    return Server(
+        socket_name=(
+            socket_name if socket_name is not None else os.environ.get("LIBTMUX_SOCKET")
+        ),
+        socket_path=(
+            socket_path
+            if socket_path is not None
+            else os.environ.get("LIBTMUX_SOCKET_PATH")
+        ),
+        tmux_bin=os.environ.get("LIBTMUX_TMUX_BIN"),
+    )
+
+
 def _get_server(
     socket_name: str | None = None,
     socket_path: str | None = None,
