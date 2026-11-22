@@ -16,8 +16,8 @@
 
 | tmux | Status |
 |------|--------|
-| >= 3.2a | Supported |
-| < 3.2a | Not supported (libtmux requirement) |
+| >= 3.3a | Supported |
+| < 3.3a | Not supported (libtmux requirement) |
 
 ## Dependencies
 
