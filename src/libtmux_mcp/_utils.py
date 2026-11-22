@@ -482,11 +482,11 @@ def _escape_tmux_format(value: str) -> str:
 def _prepare_start_directory(start_directory: str | None) -> str | None:
     """Resolve a caller path to the directory tmux will actually use.
 
-    tmux expands ``-c`` as a format before using it as a working
-    directory, then silently falls back to ``$HOME``, or ``/``, when the
-    result cannot be entered — so an unresolvable path starts the pane
-    somewhere else instead of failing. Resolving here leaves no format for
-    tmux to run and turns a bad path into an error the caller can correct.
+    tmux silently falls back to ``$HOME``, or ``/``, when a ``-c`` working
+    directory cannot be entered — so an unresolvable path starts the pane
+    somewhere else instead of failing. Resolving here turns a bad path into
+    an error the caller can correct. libtmux passes the path to tmux as
+    literal text, so a ``#`` in it needs no escaping.
 
     Parameters
     ----------
@@ -496,7 +496,7 @@ def _prepare_start_directory(start_directory: str | None) -> str | None:
     Returns
     -------
     str or None
-        Absolute path escaped for tmux, or ``None`` when none was given.
+        Absolute path, or ``None`` when none was given.
 
     Raises
     ------
@@ -517,7 +517,7 @@ def _prepare_start_directory(start_directory: str | None) -> str | None:
     if not resolved.is_dir():
         msg = f"start_directory is not an existing directory: {str(resolved)!r}"
         raise ExpectedToolError(msg)
-    return _escape_tmux_format(str(resolved))
+    return str(resolved)
 
 
 def _tmux_argv(server: Server, *tmux_args: str) -> list[str]:
