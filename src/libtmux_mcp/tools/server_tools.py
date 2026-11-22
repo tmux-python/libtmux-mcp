@@ -23,7 +23,6 @@ from libtmux_mcp._utils import (
     _apply_filters,
     _ask_before_teardown,
     _caller_is_on_server,
-    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
     _invalidate_server,
@@ -133,9 +132,9 @@ def create_session(
     server = _get_server(socket_name=socket_name)
     kwargs: dict[str, t.Any] = {}
     if session_name is not None:
-        kwargs["session_name"] = _escape_tmux_format(session_name)
+        kwargs["session_name"] = session_name
     if window_name is not None:
-        kwargs["window_name"] = _escape_tmux_format(window_name)
+        kwargs["window_name"] = window_name
     prepared_start_directory = _prepare_start_directory(start_directory)
     if prepared_start_directory is not None:
         kwargs["start_directory"] = prepared_start_directory

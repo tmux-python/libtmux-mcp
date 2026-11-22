@@ -20,7 +20,6 @@ from libtmux_mcp._utils import (
     _apply_filters,
     _ask_before_teardown,
     _caller_is_on_server,
-    _escape_tmux_format,
     _get_caller_identity,
     _get_server,
     _prepare_start_directory,
@@ -303,7 +302,7 @@ def rename_window(
         session_name=session_name,
         session_id=session_id,
     )
-    window.rename_window(_escape_tmux_format(new_name))
+    window.rename_window(new_name)
     return _serialize_window(window)
 
 
