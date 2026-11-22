@@ -23,7 +23,7 @@
 
 | Package | Required version |
 |---------|-----------------|
-| [libtmux](https://libtmux.git-pull.com/) | >= 0.62.0, < 1.0 |
+| [libtmux](https://libtmux.git-pull.com/) | >= 0.67.0, < 1.0 |
 | [FastMCP](https://github.com/jlowin/fastmcp) | >= 4.0.2, < 5.0.0 |
 | [regex](https://github.com/mrabarnett/mrab-regex) | >= 2024.11.6 |
 
